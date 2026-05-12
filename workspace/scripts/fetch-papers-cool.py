@@ -8,7 +8,12 @@ import re
 from datetime import datetime, timezone
 
 FEEDS = [
-    ("全部 CS", "https://papers.cool/arxiv/cs/feed"),
+    ("人工智能", "https://papers.cool/arxiv/cs.AI/feed"),
+    ("机器学习", "https://papers.cool/arxiv/cs.LG/feed"),
+    ("计算机视觉", "https://papers.cool/arxiv/cs.CV/feed"),
+    ("自然语言处理", "https://papers.cool/arxiv/cs.CL/feed"),
+    ("机器人", "https://papers.cool/arxiv/cs.RO/feed"),
+    ("神经计算", "https://papers.cool/arxiv/cs.NE/feed"),
 ]
 
 def fetch_feed(name, url, max_entries=15):
@@ -80,7 +85,8 @@ def main():
         output.append(result)
 
     output.append("---\n")
-    output.append("📎 RSS订阅: https://papers.cool/arxiv/cs/feed")
+    output.append("📎 RSS订阅: https://papers.cool/arxiv/cs/feed\n")
+    output.append("分类: cs.AI, cs.LG, cs.CV, cs.CL, cs.RO, cs.NE")
 
     print("".join(output))
 
