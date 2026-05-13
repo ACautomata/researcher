@@ -29,6 +29,8 @@ All changes are made via SSH to the remote server. Local clone is at `/Users/jun
 
 - Feishu channel: `streaming` must be boolean, not string. No `tools` property at channel level.
 - Config validation errors appear in gateway logs on startup.
+- `plugins.installs.*.installPath` is the resolved install directory; keep managed installs as absolute paths.
+- QMD `paths[].path` entries resolve relative to the agent workspace directory; use `.` for the workspace root.
 - External tools (Context7, WebReader) have weekly rate limits — use Playwright to read docs.openclaw.ai as fallback.
 - `.env` uses `export VAR="value"` format (shell export syntax).
 
