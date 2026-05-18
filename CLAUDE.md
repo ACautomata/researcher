@@ -10,10 +10,13 @@ All changes are made via SSH to the remote server. Local clone is at `/Users/jun
 
 ## Architecture
 
+This repo follows OpenClaw's hub-and-spoke multi-agent pattern. The main agent (颖姗) is bound to messaging channels and delegates specialized tasks to sub-agents via `sessions_spawn`.
+
 - **openclaw.json** — Main gateway configuration. All secrets use `${ENV_VAR}` references resolved from `.env` (which is gitignored).
 - **agents/main/agent/models.json** — Custom model provider definitions (currently MiniMax Anthropic-compatible endpoints).
 - **canvas/index.html** — OpenClaw Canvas web UI.
-- **workspace/** — Agent working directory. Contains SOUL.md, AGENTS.md, USER.md, memory/ logs, and skills/. See [docs](https://docs.openclaw.ai/concepts/agent-workspace).
+- **workspace/** — Main agent (颖姗) working directory. Contains SOUL.md, AGENTS.md, IDENTITY.md, USER.md, TOOLS.md, MEMORY.md, HEARTBEAT.md, DREAMS.md. See [docs](https://docs.openclaw.ai/concepts/agent-workspace).
+- **agents/autoresearch/workspace/** — Sub-agent workspace for the Autoresearch agent. Contains SOUL.md, AGENTS.md (the research paper wiki operating manual), and IDENTITY.md. This agent is spawned by 颖姗 for paper ingest, literature queries, cross-paper comparison, and wiki quality auditing.
 
 ## Key Configuration Details
 

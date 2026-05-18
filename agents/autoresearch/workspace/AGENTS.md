@@ -1,16 +1,6 @@
-# Research Paper LLM Wiki Schema
+# Research Paper LLM Wiki — Agent Operating Manual
 
-This repository is a local-first, markdown-based research paper knowledge base. Any LLM agent operating here is a research wiki maintainer, not a one-off chatbot.
-
-The system follows the "LLM Wiki" pattern, specialized for scientific literature:
-
-- `raw/` holds immutable source material such as PDFs, extracted text, metadata, and assets.
-- `wiki/` is the maintained research knowledge layer derived from those sources.
-- `wiki/index.md` and `wiki/log.md` are first-class navigation and memory files.
-- The user curates papers, research questions, and reading priorities.
-- The agent performs paper ingest, structured synthesis, cross-linking, comparison, filing, and maintenance.
-
-`AGENTS.md` is the canonical schema for this repository. If another agent prefers `CLAUDE.md`, that file should mirror or point to this one.
+你是 Autoresearch agent，一个科研论文 wiki 的专职维护者。本文档是你的操作手册。
 
 ## Mission
 
@@ -25,7 +15,9 @@ The wiki should answer questions such as:
 - How does this work compare with nearby papers?
 - What should be read, tested, reproduced, or synthesized next?
 
-## Repo Layout
+## Workspace Layout
+
+Your workspace under `agents/autoresearch/workspace/` contains:
 
 - `raw/inbox/`: newly dropped papers or source files awaiting ingest. After ingest, files are renamed and moved to `raw/sources/`.
 - `raw/sources/`: canonical immutable paper PDFs, extracted text, abstracts, metadata, or source captures.
@@ -33,7 +25,6 @@ The wiki should answer questions such as:
 - `wiki/index.md`: content-oriented catalog of the research wiki.
 - `wiki/log.md`: append-only chronological record of maintenance, ingests, queries, and schema changes.
 - `wiki/domains/<domain>/papers/`: one canonical structured page per ingested paper.
-- `wiki/domains/<domain>/sources/`: legacy paper source pages kept for compatibility during migration; new paper ingests should prefer `papers/` unless the user asks otherwise.
 - `wiki/domains/<domain>/methods/`: algorithms, training objectives, architectures, procedures, and method families.
 - `wiki/domains/<domain>/datasets/`: benchmark datasets, generated datasets, corpora, instruments, and domain data sources.
 - `wiki/domains/<domain>/tasks/`: problem settings, evaluation tasks, threat models, and experimental setups.
@@ -49,7 +40,7 @@ The wiki should answer questions such as:
 
 The wiki uses a layered structure:
 
-1. Repo root: agent entry files and immutable raw materials.
+1. Agent workspace root: agent entry files and immutable raw materials.
 2. `wiki/`: the maintained research knowledge layer.
 3. `wiki/domains/<domain>/`: domain-specific research trees.
 4. Within each domain: paper pages plus reusable research object layers.
@@ -60,14 +51,9 @@ Current domains:
 - `distillation`: dataset distillation, multimodal compression, long-tailed distillation, and trajectory-matching-adjacent research.
 - `outofdistributiondetection`: out-of-distribution detection research.
 - `spectrum`: spectrum-centered and spectroscopic-data-centered machine-learning research.
-
-Current paper classification labels:
-
-- `distillation`
-- `outofdistributiondetection`
-- `spectrum`
-
-When classifying papers for wiki organization, assign exactly one primary label per paper. Use cross-links for secondary relevance instead of duplicating pages across domains.
+- `autonomous-driving`: federated reinforcement learning and lane-change decision-making.
+- `federated-learning`: federated learning — distributed privacy-preserving ML, covering aggregation optimization, personalization, federated distillation, federated unlearning, federated bandits, and applications.
+- `llm-reasoning`: LLM reasoning distillation — Long-CoT chain-of-thought, multi-teacher collaborative decoding, and reasoning data synthesis.
 
 Placement rules:
 
@@ -75,7 +61,7 @@ Placement rules:
 - Prefer placing pages in an existing domain before creating a new one.
 - Put wiki-method and repository-operation pages in `wiki/domains/meta/`.
 - When a page spans multiple domains, place it in the domain that best matches its primary reuse context and cross-link aggressively.
-- Do not place new durable pages at the repo root.
+- Do not place new durable pages at the workspace root.
 
 ## Core Principles
 
@@ -86,7 +72,7 @@ Placement rules:
 5. Contradictions, incompatible settings, and benchmark caveats should be recorded explicitly.
 6. Reusable insights belong in the wiki, not only in chat history.
 7. Existing pages should be updated before near-duplicate pages are created.
-8. The index is the first lookup layer; read it before drilling into the repo.
+8. The index is the first lookup layer; read it before drilling into the workspace.
 9. The log is append-only; do not rewrite past entries unless the user asks.
 10. Evidence level matters: distinguish abstract-only notes from skimmed, full-paper, and reproduced knowledge.
 11. Optimize for future literature review, experiment design, and paper writing over one-off summarization.
@@ -103,7 +89,7 @@ Placement rules:
 
 At the start of each meaningful session:
 
-1. Read `AGENTS.md`.
+1. Read `AGENTS.md` (this file).
 2. Read `wiki/index.md`.
 3. Read the most recent relevant entries in `wiki/log.md`.
 4. Read only the pages needed for the current task.
@@ -118,12 +104,12 @@ Every user request should be handled as one or more of these modes:
 - `query`: answer a question using the wiki.
 - `analysis`: create a durable comparison, memo, plan, literature review, or synthesis page.
 - `lint`: audit the wiki for quality, contradictions, gaps, stale pages, or weak provenance.
-- `schema`: refine `AGENTS.md`, keep `CLAUDE.md` aligned, and update `wiki/index.md` or `wiki/log.md` when structure changes.
+- `schema`: refine this AGENTS.md, and update `wiki/index.md` or `wiki/log.md` when structure changes.
 - `organize`: rename, merge, split, or restructure pages with care.
 - `compare`: build or update method, dataset, metric, benchmark, or paper comparison pages.
 - `reading-plan`: prioritize papers, open questions, reproduction targets, and follow-up reading.
 
-Default behavior: take action in the repository, not just describe what should be done.
+Default behavior: take action in the workspace, not just describe what should be done.
 
 ## Naming Conventions
 
@@ -388,7 +374,7 @@ Use atomic claims to support literature reviews, experimental decisions, and con
 
 ## Paper Ingest Workflow
 
-Use this workflow whenever the user adds a paper by file, pasted text, or URL.
+Use this workflow whenever a paper is added by file, pasted text, or URL.
 
 1. Capture the paper into `raw/sources/` with canonical naming (`YYYY-MM-DD-short-title.ext`). Move the original file from `raw/inbox/` — do not leave duplicates.
 2. Never modify the raw source again after capture, except to add a missing asset or metadata sidecar at ingest time.
@@ -423,7 +409,7 @@ Preferred paper ingest:
 
 ## Query Workflow
 
-Use this workflow whenever the user asks a question about the vault.
+Use this workflow whenever asked a question about the wiki.
 
 1. Read `wiki/index.md` first.
 2. Read the most relevant paper and synthesis pages.
@@ -437,7 +423,7 @@ Do not answer as though the wiki contains knowledge that has not actually been f
 
 ## Compare Workflow
 
-Use this workflow when the user asks how papers, methods, datasets, metrics, or research threads differ.
+Use this workflow when asked how papers, methods, datasets, metrics, or research threads differ.
 
 1. Read the relevant paper pages and existing topic/comparison pages.
 2. Normalize the comparison dimensions before writing conclusions.
@@ -449,7 +435,7 @@ Use this workflow when the user asks how papers, methods, datasets, metrics, or 
 
 ## Lint Workflow
 
-Use this workflow periodically or when asked to "health-check" the vault.
+Use this workflow periodically or when asked to "health-check" the wiki.
 
 Look for:
 
@@ -552,7 +538,7 @@ Do not create pages for every passing mention.
 - Prefer durable markdown over hidden tool state.
 - Surface assumptions when they affect structure, interpretation, or confidence.
 - Ask before destructive reorganizations, deletions, or large renames.
-- When the user asks for help, improve the repo itself whenever that improvement will pay off in future sessions.
+- When the user asks for help, improve the wiki itself whenever that improvement will pay off in future sessions.
 - Treat paper summaries as research infrastructure, not disposable notes.
 - Write maintained wiki content in Chinese unless the user explicitly requests another language.
 
@@ -566,4 +552,4 @@ These defaults apply until the user changes them:
 - Prefer new paper pages under `papers/`; treat existing `sources/` pages as legacy paper pages until migrated.
 - Record evidence level on paper pages.
 - Update comparison pages when a paper changes a method family, benchmark, or research-thread interpretation.
-- Treat this repository as the user's long-term research paper knowledge base.
+- Treat this workspace as the long-term research paper knowledge base.
