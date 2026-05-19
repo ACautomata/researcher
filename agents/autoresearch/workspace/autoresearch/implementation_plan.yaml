@@ -1,0 +1,184 @@
+project:
+  name: rgb_ir_attention_test
+  task_type: rgb_ir_reid
+  source_type: manual
+  primary_metric: mAP
+  optimization_direction: maximize
+template:
+  selected: rgb_ir_reid
+  fallback: general_pytorch
+  reason: RTS baseline.template is explicitly provided.
+  warnings: []
+files_to_create:
+- path: models/modality_attention.py
+  purpose: Implement modality_attention.
+  module_type: model_component
+- path: models/shared_embedding.py
+  purpose: Implement shared_embedding.
+  module_type: model_component
+- path: losses/center_constraint.py
+  purpose: feature compactness constraint
+  module_type: loss
+files_to_modify:
+- path: configs/config.yaml
+  purpose: Add project, model, dataset, training, and evaluation settings.
+  module_type: configs
+- path: train.py
+  purpose: Expose a clean training entry for adapter execution.
+  module_type: train.py
+- path: models/build.py
+  purpose: Register generated modules for config-based construction.
+  module_type: models
+- path: losses/build.py
+  purpose: Register generated modules for config-based construction.
+  module_type: losses
+- path: evaluators/reid_evaluator.py
+  purpose: Implement or update task-specific evaluation.
+  module_type: evaluators
+- path: datasets/reid_dataset.py
+  purpose: Implement or update task-specific dataset loading.
+  module_type: datasets
+- path: datasets/rgb_ir_dataset.py
+  purpose: Implement or update task-specific dataset loading.
+  module_type: datasets
+- path: models/two_stream_baseline.py
+  purpose: Implement or update task-specific model baseline.
+  module_type: models
+model_components:
+- name: modality_attention
+  type: channel_spatial_attention
+  purpose: Not specified
+  input: Not specified
+  output: Not specified
+  params: {}
+- name: shared_embedding
+  type: Not specified
+  purpose: Not specified
+  input: Not specified
+  output: Not specified
+  params:
+    dimension: 512
+losses:
+- name: cross_entropy
+  weight: 1.0
+  params: &id001 {}
+  implementation_file: built_in_or_template
+  expected_role: identity classification or class supervision
+- name: triplet
+  weight: 1.0
+  params: &id002
+    margin: 0.3
+  implementation_file: built_in_or_template
+  expected_role: metric learning supervision
+- name: center_constraint
+  weight: 0.01
+  params: &id003 {}
+  implementation_file: losses/center_constraint.py
+  expected_role: feature compactness constraint
+config_requirements:
+  project:
+    name: rgb_ir_attention_test
+    task_type: rgb_ir_reid
+  model:
+    backbone:
+      name: resnet50
+      pretrained: true
+    components:
+    - name: modality_attention
+      type: channel_spatial_attention
+    - name: shared_embedding
+      dimension: 512
+    heads:
+    - name: identity_classifier
+      type: linear
+    - name: embedding_head
+      type: projection
+  losses:
+  - name: cross_entropy
+    weight: 1.0
+    params: *id001
+  - name: triplet
+    weight: 1.0
+    params: *id002
+  - name: center_constraint
+    weight: 0.01
+    params: *id003
+  training:
+    optimizer: adam
+    scheduler: cosine
+    batch_size: 64
+    epochs: 80
+    lr: 0.0003
+    weight_decay: 0.0005
+    mixed_precision: true
+  dataset:
+    use_dummy: true
+    modalities:
+    - RGB
+    - IR
+    datasets:
+    - name: SYSU-MM01
+      path: data/sysu-mm01
+      split: standard
+      notes: Placeholder path; update before training.
+  evaluation:
+    primary_metric: mAP
+    secondary_metrics:
+    - rank1
+    - rank5
+search_space:
+  lr: &id005
+    type: float
+    low: 1.0e-05
+    high: 0.001
+    log: true
+  batch_size: &id006
+    type: categorical
+    choices:
+    - 32
+    - 64
+  center_loss_weight: &id007
+    type: float
+    low: 0.001
+    high: 0.1
+    log: true
+validation_checks:
+- import_check
+- dummy_forward
+- loss_backward
+- one_batch_train
+- config_load
+- checkpoint_save_load
+adapter_requirements: &id004
+  adapter_type: pytorch_yaml
+  train_entry: train.py
+  config_path: configs/config.yaml
+  output_dir_arg: Not specified
+  fixed_args: []
+  param_arg_map: {}
+task_card_requirements:
+  task_name: rgb_ir_attention_test
+  adapter: *id004
+  search_space:
+    lr: *id005
+    batch_size: *id006
+    center_loss_weight: *id007
+  objective:
+    metric: mAP
+    direction: maximize
+  evaluator:
+    type: json_or_log_parser
+    metrics:
+    - mAP
+    - rank1
+    - rank5
+    - rank10
+manual_review_items:
+- confirm real dataset path
+- confirm whether selected template matches the research idea
+- confirm metric implementation
+- confirm search space ranges
+- confirm generated custom modules match the paper or idea
+- confirm RGB/IR pairing strategy and evaluation protocol
+warnings:
+- RGB-IR task may require modality fusion component.

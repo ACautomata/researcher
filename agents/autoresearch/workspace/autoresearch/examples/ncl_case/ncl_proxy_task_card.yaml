@@ -1,0 +1,91 @@
+task_name: ncl_cifar100_lt_case
+
+adapter:
+  type: subprocess
+  output_root: outputs/ncl_case_validation
+  command_template:
+  - python
+  - examples/ncl_case/ncl_proxy_train.py
+  - --dataset
+  - cifar100_lt
+  - --imbalance-factor
+  - "100"
+  - --num-experts
+  - "{num_experts}"
+  - --base-lr
+  - "{base_lr}"
+  - --weight-decay
+  - "{weight_decay}"
+  - --batch-size
+  - "{batch_size}"
+  - --diversity-factor
+  - "{diversity_factor}"
+  - --hcm-ratio
+  - "{hcm_ratio}"
+  - --contrastive-ratio
+  - "{contrastive_ratio}"
+  - --epochs
+  - "12"
+  - --output-dir
+  - "{trial_dir}"
+  - --trial-id
+  - "{trial_id}"
+
+search_space:
+  num_experts:
+    type: categorical
+    choices: [2, 3, 4]
+  base_lr:
+    type: float
+    low: 0.025
+    high: 0.2
+    log: true
+  weight_decay:
+    type: float
+    low: 0.0001
+    high: 0.001
+    log: true
+  batch_size:
+    type: categorical
+    choices: [64, 128]
+  diversity_factor:
+    type: float
+    low: 0.2
+    high: 1.0
+  hcm_ratio:
+    type: float
+    low: 0.4
+    high: 1.4
+  contrastive_ratio:
+    type: categorical
+    choices: [0.0, 0.4, 1.0]
+
+score:
+  primary_metric: accuracy
+  secondary_metrics:
+    few_acc: 0.15
+    medium_acc: 0.05
+  penalties:
+    loss: 0.5
+  invalid_score: -1000000000
+
+objective_policy:
+  type: weighted_sum
+  direction: maximize
+  primary_metric: accuracy
+  metrics:
+    accuracy: 1.0
+    few_acc: 0.15
+    medium_acc: 0.05
+    loss: -0.5
+  constraints:
+    min_metrics:
+      accuracy: 45.0
+      few_acc: 40.0
+
+constraints:
+  timeout: 30
+  max_trials: 12
+
+safety:
+  allow_commands: ["python", "python3"]

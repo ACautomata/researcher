@@ -1,0 +1,47 @@
+task_name: dummy_hpo
+
+adapter:
+  type: subprocess
+  output_root: outputs
+  command_template:
+    - python
+    - examples/dummy_train.py
+    - --lr
+    - "{lr}"
+    - --batch-size
+    - "{batch_size}"
+    - --output-dir
+    - "{trial_dir}"
+    - --epochs
+    - "{epochs}"
+    - --trial-id
+    - "{trial_id}"
+    - --output-root
+    - "{output_root}"
+
+search_space:
+  lr:
+    type: float
+    low: 1e-5
+    high: 1e-3
+    log: true
+  batch_size:
+    type: categorical
+    choices: [32, 64]
+  epochs:
+    type: int
+    low: 6
+    high: 18
+    step: 2
+
+score:
+  primary_metric: mAP
+  secondary_metrics:
+    rank1: 0.2
+  penalties:
+    loss: 0.5
+  invalid_score: -1000000000
+
+constraints:
+  timeout: 300
+  max_trials: 5

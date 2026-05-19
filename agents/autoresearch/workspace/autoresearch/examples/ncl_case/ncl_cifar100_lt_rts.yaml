@@ -1,0 +1,179 @@
+meta:
+  project_name: ncl_cifar100_lt_case
+  source_type: paper
+  source_path: C:/Users/Administrator/Desktop/wenxian/[2022 CVPR]Nested Collaborative Learning for Long-Tailed Visual Recognition.pdf
+  description: NCL case study based on CIFAR100-LT long-tailed visual recognition with imbalance factor 100.
+task:
+  type: image_classification
+  research_problem: Validate AutoResearch open modules using the NCL long-tailed visual recognition experiment setting on CIFAR100-LT with imbalance factor 100.
+  learning_paradigm: supervised
+goal:
+  primary_metric: accuracy
+  optimization_direction: maximize
+  secondary_metrics:
+  - many_acc
+  - medium_acc
+  - few_acc
+input:
+  modalities:
+  - RGB
+  data_format: image_folders_long_tailed
+  input_shape:
+  - 3
+  - 32
+  - 32
+output:
+  type: class_logits
+  dimension: 100
+  description: Class logits for CIFAR100-LT long-tailed image classification.
+baseline:
+  template: general_pytorch
+  name: NCL-style multi-expert long-tailed classifier
+  source: Nested Collaborative Learning for Long-Tailed Visual Recognition, CVPR 2022
+  description: Multi-expert collaborative learning with NIL, NBOD, HCM, and optional self-supervised feature enhancement.
+model:
+  backbone:
+    name: res32_cifar
+    pretrained: false
+  components:
+  - name: multi_expert_ensemble
+    type: multi_network
+    purpose: Train multiple experts collaboratively to reduce long-tailed uncertainty.
+  - name: hard_category_mining
+    type: sampling_or_loss_focus
+    purpose: Select confusing negative classes as hard categories for partial-perspective learning.
+  heads:
+  - name: classification_head
+    type: linear
+losses:
+- name: cross_entropy
+  weight: 1.0
+  params: {}
+- name: nil_loss
+  weight: 1.0
+  params:
+    full_perspective: true
+    partial_perspective: true
+- name: nbod_loss
+  weight: 0.6
+  params:
+    online_distillation: true
+- name: contrastive
+  weight: 0.4
+  params:
+    self_supervision: true
+training:
+  optimizer: SGD
+  scheduler: warmup_step
+  batch_size: 64
+  epochs: 200
+  lr: 0.1
+  weight_decay: 0.0005
+  mixed_precision: false
+datasets:
+- name: CIFAR100-LT
+  path: data/cifar100_lt
+  split: train/valid/test
+  notes: Use imbalance factor 100; proxy validation does not require the real dataset.
+metrics:
+- accuracy
+- many_acc
+- medium_acc
+- few_acc
+- loss
+search_space:
+  num_experts:
+    type: categorical
+    choices:
+    - 2
+    - 3
+    - 4
+  base_lr:
+    type: float
+    low: 0.025
+    high: 0.2
+    log: true
+  weight_decay:
+    type: float
+    low: 0.0001
+    high: 0.001
+    log: true
+  batch_size:
+    type: categorical
+    choices:
+    - 64
+    - 128
+  diversity_factor:
+    type: float
+    low: 0.2
+    high: 1.0
+  hcm_ratio:
+    type: float
+    low: 0.4
+    high: 1.4
+  contrastive_ratio:
+    type: categorical
+    choices:
+    - 0.0
+    - 0.4
+    - 1.0
+objective_policy:
+  type: weighted_sum
+  direction: maximize
+  primary_metric: accuracy
+  metrics:
+    accuracy: 1.0
+    few_acc: 0.15
+    medium_acc: 0.05
+    loss: -0.5
+  constraints:
+    min_metrics:
+      accuracy: 45.0
+      few_acc: 40.0
+ablation:
+- name: without_hcm
+  description: Set hcm_ratio to 0 or disable hard-category mining.
+  config_overrides:
+    hcm_ratio: 0
+- name: without_contrastive
+  description: Set contrastive_ratio to 0.
+  config_overrides:
+    contrastive_ratio: 0
+implementation:
+  required_files:
+  - train.py
+  - configs/config.yaml
+  expected_modules:
+  - models
+  - datasets
+  - losses
+  - trainers
+  - evaluators
+  notes: Use proxy trainer for AutoResearch validation; real NCL reproduction requires PyTorch and long-tailed datasets.
+validation:
+  required_checks:
+  - import_check
+  - config_load
+  - one_batch_train
+  - metrics_json_valid
+adapter:
+  type: subprocess
+  train_entry: examples/ncl_case/ncl_proxy_train.py
+  config_path: null
+  output_dir_arg: --output-dir
+  fixed_args: []
+  param_arg_map: {}
+  notes: Proxy experiment uses subprocess adapter and writes metrics.json.
+risks:
+- Proxy metrics validate AutoResearch behavior, not paper accuracy.
+- Real NCL training requires PyTorch, CUDA-capable hardware, and CIFAR100-LT preparation.
+extra:
+  paper_case:
+    method: Nested Collaborative Learning
+    dataset: CIFAR100-LT
+    imbalance_factor: 100
+    components:
+    - Nested Individual Learning
+    - Nested Balanced Online Distillation
+    - Hard Category Mining
+    - self-supervised feature enhancement

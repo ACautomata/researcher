@@ -1,5 +1,7 @@
 # === Sensitive: tokens & credentials ===
 .env
+.env.*
+!.env.example
 secrets.json
 agents/*/agent/auth-profiles.json
 agents/*/agent/models.json
@@ -10,6 +12,7 @@ agents/*/agent/auth-state.json
 
 # === Runtime data ===
 logs/
+*.log
 tasks/
 *.sqlite
 *.sqlite-shm
@@ -43,6 +46,26 @@ openclaw.json.last-good
 # === Workspace runtime ===
 workspace/.openclaw/
 workspace-paper-review/.openclaw/
+agents/*/workspace/**/.venv/
+agents/*/workspace/**/venv/
+agents/*/workspace/**/env/
+agents/*/workspace/**/.pytest_cache/
+agents/*/workspace/**/.pytest_tmp/
+agents/*/workspace/**/.tmp/
+agents/*/workspace/**/.mypy_cache/
+agents/*/workspace/**/.ruff_cache/
+agents/*/workspace/**/outputs/
+agents/*/workspace/**/logs/
+agents/*/workspace/**/artifacts/
+agents/*/workspace/**/generated_projects/
+
+# === Python caches ===
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.coverage
+htmlcov/
 
 # === OS / editor ===
 .DS_Store
