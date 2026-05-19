@@ -1,0 +1,40 @@
+project:
+  name: rgb_ir_reid_project
+  task_type: rgb_ir_reid
+dataset:
+  use_dummy: true
+  modalities: [RGB, IR]
+model:
+  backbone:
+    name: tiny_two_stream
+  components: []
+  heads: []
+losses:
+  - name: cross_entropy
+    weight: 1.0
+    params: {}
+  - name: triplet
+    weight: 1.0
+    params: {}
+  - name: center_constraint
+    weight: 0.01
+    params: {}
+training:
+  optimizer: AdamW
+  scheduler: cosine
+  batch_size: 32
+  epochs: 1
+  lr: 1.0e-4
+  weight_decay: 5.0e-4
+  mixed_precision: false
+  device: auto
+evaluation:
+  primary_metric: mAP
+  secondary_metrics: [Rank-1, mINP]
+output:
+  dir: outputs
+search_space: {}
+adapter:
+  type: pytorch_yaml
+  train_entry: train.py
+  config_path: configs/config.yaml

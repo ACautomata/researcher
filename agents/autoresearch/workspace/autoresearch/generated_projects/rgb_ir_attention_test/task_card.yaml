@@ -1,0 +1,55 @@
+task_name: rgb_ir_attention_test
+adapter:
+  type: pytorch_yaml
+  train_entry: S:\auto_research\generated_projects\rgb_ir_attention_test\train.py
+  base_config_path: S:\auto_research\generated_projects\rgb_ir_attention_test\configs\config.yaml
+  config_arg_name: --config
+  output_dir_key: output.dir
+  fixed_args: []
+  param_key_map:
+    lr: training.lr
+    batch_size: training.batch_size
+    epochs: training.epochs
+    weight_decay: training.weight_decay
+  output_root: S:\auto_research\generated_projects\rgb_ir_attention_test\autoresearch_outputs
+  metrics_filenames:
+  - metrics.json
+search_space:
+  lr:
+    type: float
+    low: 1.0e-05
+    high: 0.001
+    log: true
+  batch_size:
+    type: categorical
+    choices:
+    - 32
+    - 64
+  center_loss_weight:
+    type: float
+    low: 0.001
+    high: 0.1
+    log: true
+score:
+  primary_metric: mAP
+  invalid_score: -1000000000
+  secondary_metrics:
+    rank1: 0.0
+    rank5: 0.0
+    rank10: 0.0
+constraints:
+  timeout: 300
+  max_trials: 5
+safety:
+  allow_commands:
+  - python
+  - python3
+objective:
+  metric: mAP
+  direction: maximize
+evaluator:
+  type: json
+  metrics_path: S:\auto_research\generated_projects\rgb_ir_attention_test\outputs\metrics.json
+run:
+  project_dir: S:\auto_research\generated_projects\rgb_ir_attention_test
+  output_dir: S:\auto_research\generated_projects\rgb_ir_attention_test\outputs

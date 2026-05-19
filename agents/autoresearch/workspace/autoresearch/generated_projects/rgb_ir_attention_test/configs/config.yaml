@@ -1,0 +1,71 @@
+project:
+  name: rgb_ir_attention_test
+  task_type: rgb_ir_reid
+dataset:
+  use_dummy: true
+  modalities:
+  - RGB
+  - IR
+model:
+  backbone:
+    name: resnet50
+    pretrained: true
+  components:
+  - name: modality_attention
+    type: channel_spatial_attention
+  - name: shared_embedding
+    dimension: 512
+  heads:
+  - name: identity_classifier
+    type: linear
+  - name: embedding_head
+    type: projection
+losses:
+- name: cross_entropy
+  weight: 1.0
+  params: {}
+- name: triplet
+  weight: 1.0
+  params:
+    margin: 0.3
+- name: center_constraint
+  weight: 0.01
+  params: {}
+training:
+  optimizer: adam
+  scheduler: cosine
+  batch_size: 64
+  epochs: 80
+  lr: 0.0003
+  weight_decay: 0.0005
+  mixed_precision: true
+  device: auto
+evaluation:
+  primary_metric: mAP
+  secondary_metrics:
+  - rank1
+  - rank5
+output:
+  dir: outputs
+search_space:
+  lr:
+    type: float
+    low: 1.0e-05
+    high: 0.001
+    log: true
+  batch_size:
+    type: categorical
+    choices:
+    - 32
+    - 64
+  center_loss_weight:
+    type: float
+    low: 0.001
+    high: 0.1
+    log: true
+adapter:
+  type: pytorch_yaml
+  train_entry: train.py
+  config_path: configs/config.yaml
+generation:
+  project_dir: generated_projects\rgb_ir_attention_test

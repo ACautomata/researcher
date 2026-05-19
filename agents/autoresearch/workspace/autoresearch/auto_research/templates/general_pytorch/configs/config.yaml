@@ -1,0 +1,34 @@
+project:
+  name: general_pytorch_project
+  task_type: general_pytorch
+dataset:
+  use_dummy: true
+  modalities: [Tensor]
+model:
+  backbone:
+    name: mlp
+  components: []
+  heads: []
+losses:
+  - name: cross_entropy
+    weight: 1.0
+    params: {}
+training:
+  optimizer: AdamW
+  scheduler: cosine
+  batch_size: 32
+  epochs: 1
+  lr: 1.0e-4
+  weight_decay: 5.0e-4
+  mixed_precision: false
+  device: auto
+evaluation:
+  primary_metric: accuracy
+  secondary_metrics: []
+output:
+  dir: outputs
+search_space: {}
+adapter:
+  type: pytorch_yaml
+  train_entry: train.py
+  config_path: configs/config.yaml

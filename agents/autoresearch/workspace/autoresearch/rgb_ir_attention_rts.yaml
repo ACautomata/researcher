@@ -1,0 +1,130 @@
+meta:
+  project_name: rgb_ir_attention_test
+  source_type: idea
+  source_path: null
+  created_at: '2026-05-12T16:17:21.624437+00:00'
+  description: 设计一个用于RGB-IR跨模态行人重识别的双流网络，加入跨模态注意力融合模块和中心约束损失。
+task:
+  type: rgb_ir_reid
+  research_problem: 设计一个用于RGB-IR跨模态行人重识别的双流网络，加入跨模态注意力融合模块和中心约束损失。
+  learning_paradigm: supervised
+goal:
+  primary_metric: mAP
+  optimization_direction: maximize
+  secondary_metrics:
+  - Rank-1
+  - mINP
+input:
+  modalities:
+  - RGB
+  - IR
+  data_format: paired_image_folders
+  input_shape:
+  - 3
+  - 256
+  - 128
+output:
+  type: embedding
+  dimension: 512
+  description: Cross-modal person embedding.
+baseline:
+  template: rgb_ir_reid
+  name: rgb_ir_reid baseline
+  source: null
+  description: Heuristic baseline selected from idea text.
+model:
+  backbone:
+    name: resnet50
+    pretrained: true
+  components:
+  - name: cross_modal_attention
+    type: attention
+    purpose: Fuse or refine features based on idea text.
+    input: features
+    output: refined_features
+  - name: feature_fusion
+    type: fusion
+    purpose: Fuse multi-source features.
+    input: multi_modal_features
+    output: fused_features
+  heads:
+  - name: identity_classifier
+    type: linear
+losses:
+- name: cross_entropy
+  weight: 1.0
+  params: {}
+- name: triplet
+  weight: 1.0
+  params: {}
+- name: center_constraint
+  weight: 0.01
+  params: {}
+training:
+  optimizer: AdamW
+  scheduler: cosine
+  batch_size: 32
+  epochs: 1
+  lr: 0.0001
+  weight_decay: 0.0005
+  mixed_precision: false
+datasets: []
+metrics:
+- mAP
+- Rank-1
+- mINP
+- loss
+search_space:
+  lr:
+    type: float
+    low: 1.0e-05
+    high: 0.001
+    log: true
+  batch_size:
+    type: categorical
+    choices:
+    - 32
+    - 64
+  weight_decay:
+    type: float
+    low: 1.0e-06
+    high: 0.001
+    log: true
+objective_policy:
+  type: single_metric
+  primary_metric: mAP
+  direction: maximize
+  metrics: {}
+  constraints: {}
+ablation: []
+implementation:
+  required_files:
+  - train.py
+  - configs/config.yaml
+  expected_modules:
+  - models
+  - datasets
+  - losses
+  - trainers
+  - evaluators
+  notes: Generated from idea text using heuristic rules.
+validation:
+  required_checks:
+  - import_check
+  - dummy_forward
+  - loss_backward
+  - one_batch_train
+  - config_load
+  - checkpoint_save_load
+adapter:
+  type: pytorch_yaml
+  train_entry: train.py
+  config_path: configs/config.yaml
+  output_dir_arg: null
+  fixed_args: []
+  param_arg_map: {}
+  notes: null
+risks: []
+extra:
+  idea_text: 设计一个用于RGB-IR跨模态行人重识别的双流网络，加入跨模态注意力融合模块和中心约束损失。
+  conversion_method: heuristic

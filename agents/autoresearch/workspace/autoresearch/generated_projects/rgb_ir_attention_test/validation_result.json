@@ -1,0 +1,121 @@
+{
+  "passed": true,
+  "project_dir": "generated_projects\\rgb_ir_attention_test",
+  "config_path": "generated_projects\\rgb_ir_attention_test\\configs\\config.yaml",
+  "checks": [
+    {
+      "name": "required_files_exist",
+      "passed": true,
+      "details": "All required files exist."
+    },
+    {
+      "name": "config_exists",
+      "passed": true,
+      "details": "Config exists: generated_projects\\rgb_ir_attention_test\\configs\\config.yaml"
+    },
+    {
+      "name": "py_compile",
+      "passed": true,
+      "command": [
+        "S:\\anaconda\\python.exe",
+        "-m",
+        "py_compile",
+        "train.py",
+        "test.py"
+      ],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "duration": 0.05021010001655668,
+      "timed_out": false,
+      "details": "Command completed successfully."
+    },
+    {
+      "name": "import_check",
+      "passed": true,
+      "command": [
+        "S:\\anaconda\\python.exe",
+        "-c",
+        "import models; import losses; import datasets; import trainers; import evaluators"
+      ],
+      "returncode": 0,
+      "stdout": "",
+      "stderr": "",
+      "duration": 0.03963279991876334,
+      "timed_out": false,
+      "details": "Command completed successfully."
+    },
+    {
+      "name": "config_load",
+      "passed": true,
+      "command": [
+        "S:\\anaconda\\python.exe",
+        "train.py",
+        "--config",
+        "configs\\config.yaml",
+        "--dry-run"
+      ],
+      "returncode": 0,
+      "stdout": "dry-run ok\n",
+      "stderr": "",
+      "duration": 1.6077426000265405,
+      "timed_out": false,
+      "details": "Command completed successfully."
+    },
+    {
+      "name": "dummy_forward",
+      "passed": true,
+      "command": [
+        "S:\\anaconda\\python.exe",
+        "test.py",
+        "--config",
+        "configs\\config.yaml",
+        "--mode",
+        "dummy-forward"
+      ],
+      "returncode": 0,
+      "stdout": "{'dummy_forward': True, 'embedding_shape': [2, 128], 'logits_shape': [2, 4]}\n",
+      "stderr": "",
+      "duration": 1.5789730999385938,
+      "timed_out": false,
+      "details": "Command completed successfully."
+    },
+    {
+      "name": "one_batch_train",
+      "passed": true,
+      "command": [
+        "S:\\anaconda\\python.exe",
+        "train.py",
+        "--config",
+        "configs\\config.yaml",
+        "--max-steps",
+        "1"
+      ],
+      "returncode": 0,
+      "stdout": "{'loss': 1.3936680555343628, 'mAP': 0.12, 'Rank-1': 0.18, 'mINP': 0.08}\n",
+      "stderr": "",
+      "duration": 2.221334300003946,
+      "timed_out": false,
+      "details": "Command completed successfully."
+    },
+    {
+      "name": "checkpoint_exists",
+      "passed": true,
+      "details": "File exists: generated_projects\\rgb_ir_attention_test\\outputs\\checkpoint.pt"
+    },
+    {
+      "name": "metrics_json_exists",
+      "passed": true,
+      "details": "File exists: generated_projects\\rgb_ir_attention_test\\outputs\\metrics.json"
+    },
+    {
+      "name": "metrics_json_valid",
+      "passed": true,
+      "details": "metrics.json is valid."
+    }
+  ],
+  "errors": [],
+  "warnings": [],
+  "validation_result_path": "generated_projects\\rgb_ir_attention_test\\validation_result.json",
+  "validation_report_path": "generated_projects\\rgb_ir_attention_test\\validation_report.md"
+}

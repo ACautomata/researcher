@@ -1,0 +1,129 @@
+meta:
+  project_name: rgb_ir_attention_test
+  source_type: manual
+  source_path: null
+  created_at: '2026-05-12T11:51:00.002842+00:00'
+  description: RGB-IR cross-modal person re-identification attention baseline.
+task:
+  type: rgb_ir_reid
+  research_problem: Learn discriminative cross-modal embeddings that align RGB and
+    IR person images for retrieval.
+  learning_paradigm: supervised
+goal:
+  primary_metric: mAP
+  optimization_direction: maximize
+  secondary_metrics:
+  - rank1
+  - rank5
+input:
+  modalities:
+  - RGB
+  - IR
+  data_format: paired_image_folders
+  input_shape:
+  - 3
+  - 256
+  - 128
+output:
+  type: embedding
+  dimension: 512
+  description: Person identity embedding for cross-modal retrieval.
+baseline:
+  template: rgb_ir_reid
+  name: RGB-IR attention baseline
+  source: null
+  description: Dual-modality baseline with identity and metric learning losses.
+model:
+  backbone:
+    name: resnet50
+    pretrained: true
+  components:
+  - name: modality_attention
+    type: channel_spatial_attention
+  - name: shared_embedding
+    dimension: 512
+  heads:
+  - name: identity_classifier
+    type: linear
+  - name: embedding_head
+    type: projection
+losses:
+- name: cross_entropy
+  weight: 1.0
+  params: {}
+- name: triplet
+  weight: 1.0
+  params:
+    margin: 0.3
+- name: center_constraint
+  weight: 0.01
+  params: {}
+training:
+  optimizer: adam
+  scheduler: cosine
+  batch_size: 64
+  epochs: 80
+  lr: 0.0003
+  weight_decay: 0.0005
+  mixed_precision: true
+datasets:
+- name: SYSU-MM01
+  path: data/sysu-mm01
+  split: standard
+  notes: Placeholder path; update before training.
+metrics:
+- mAP
+- rank1
+- rank5
+- rank10
+search_space:
+  lr:
+    type: float
+    low: 1.0e-05
+    high: 0.001
+    log: true
+  batch_size:
+    type: categorical
+    choices:
+    - 32
+    - 64
+  center_loss_weight:
+    type: float
+    low: 0.001
+    high: 0.1
+    log: true
+ablation:
+- name: without_modality_attention
+  description: Disable cross-modal attention module.
+  config_overrides:
+    model.components.modality_attention.enabled: false
+implementation:
+  required_files:
+  - train.py
+  - configs/config.yaml
+  - models/model.py
+  - losses.py
+  expected_modules:
+  - models
+  - datasets
+  - losses
+  - metrics
+  notes: Generated project should expose a YAML-driven training entry.
+validation:
+  required_checks:
+  - import_check
+  - dummy_forward
+  - loss_backward
+  - one_batch_train
+  - config_load
+  - checkpoint_save_load
+adapter:
+  type: pytorch_yaml
+  train_entry: train.py
+  config_path: configs/config.yaml
+  output_dir_arg: null
+  fixed_args: []
+  param_arg_map: {}
+  notes: null
+risks: []
+extra: {}
