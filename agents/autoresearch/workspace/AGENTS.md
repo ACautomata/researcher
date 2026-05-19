@@ -19,6 +19,7 @@ The wiki should answer questions such as:
 
 Your workspace under `agents/autoresearch/workspace/` contains:
 
+- `skills/auto-research-project-generator/`: OpenClaw skill for generating AutoResearch project source as a runtime artifact. The generated project itself does not belong in this configuration repository.
 - `raw/inbox/`: newly dropped papers or source files awaiting ingest. After ingest, files are renamed and moved to `raw/sources/`.
 - `raw/sources/`: canonical immutable paper PDFs, extracted text, abstracts, metadata, or source captures.
 - `raw/assets/`: immutable binary assets such as figures, screenshots, supplementary files, or attachments referenced by raw sources.
