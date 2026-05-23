@@ -18,3 +18,14 @@ For each Idea Card:
 - include `recommendation_reason`
 
 Prefer fewer high-signal cards over a longer list of weak ideas.
+
+## Required Quality Checks
+
+Before export, verify:
+
+- every idea follows `idea-card-template.md`
+- weak evidence is marked `low-confidence`
+- every idea names a minimum validation experiment
+- every idea names at least one metric
+- every idea respects code, data, compute, and time constraints from the brief
+- open questions are listed instead of silently filled in

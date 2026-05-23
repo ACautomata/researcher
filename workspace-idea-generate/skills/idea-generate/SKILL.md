@@ -11,6 +11,16 @@ Generate candidate research ideas from evidence. The demo path assumes the user 
 
 Do not produce unconstrained brainstorming. Produce ideas that are grounded in paper evidence, comparable side by side, and ready for human review or downstream evaluation.
 
+## Requirement Alignment
+
+This skill is part of the `workspace-idea-generate` sub-agent. Keep it aligned with the workspace-level requirement documents:
+
+- `docs/task-requirements.md`: four required deliverables from the task brief.
+- `docs/design-paradigm.md`: mixed checklist plus harness design.
+- `docs/io-spec.md`: stage-by-stage input/output contract.
+- `docs/skill-split.md`: current and future skill/module boundaries.
+- `benchmarks/seed-qa.md`: seed benchmark cases for self-test.
+
 ## OpenClaw Compatibility
 
 This is an OpenClaw workspace skill. It should live at:
@@ -40,26 +50,28 @@ If an optional dependency is missing, the extractor records an unavailable-extra
 
 Use this workflow for the minimum runnable demo:
 
-1. Locate the paper folder. Default to `<repo>/paper`.
-2. Create a run directory under `idea-runs/YYYYMMDD-HHMMSS-<topic-slug>/`.
-3. Run `scripts/build_paper_context_pack.py` to extract paper text and limitation/future-work snippets.
-4. Read the generated `paper-context.md` and `paper-context.json`.
-5. As the agent, write `paper-analysis.md` with:
+1. Normalize the user request into the checklist fields in `references/brief-template.md`; mark missing fields as assumptions.
+2. Locate the paper folder. Default to `<workspace>/paper`.
+3. Create a run directory under `idea-runs/YYYYMMDD-HHMMSS-<topic-slug>/`.
+4. Run `scripts/build_paper_context_pack.py` to extract paper text and limitation/future-work snippets.
+5. Read the generated `paper-context.md` and `paper-context.json`.
+6. As the agent, write `paper-analysis.md` with:
    - paper-by-paper summary
    - cross-paper common findings
    - limitations, gaps, and future-work signals
    - transferable insights from one paper to another
-6. As the agent, write `draft-ideas.json` with 5-10 candidate Idea Cards based on:
+   - constraints from code, data, compute, metrics, and failed experiments when provided
+7. As the agent, write `draft-ideas.json` with 5-10 candidate Idea Cards based on:
    - paper limitations
    - future work
    - contradictions or gaps across papers
    - transferable insights from one paper to another
    - simple, testable modifications
-7. Run `scripts/idea_dedup.py`.
-8. Run `scripts/validate_idea_cards.py`.
-9. Fix any validation errors in the JSON.
-10. Run `scripts/write_idea_markdown.py`.
-11. Return the final `recommended-ideas.md` path and a short summary.
+8. Run `scripts/idea_dedup.py`.
+9. Run `scripts/validate_idea_cards.py`.
+10. Fix any validation errors in the JSON.
+11. Run `scripts/write_idea_markdown.py`.
+12. Return the final `recommended-ideas.md` path and a short summary.
 
 Example commands:
 
@@ -91,6 +103,8 @@ If some fields are missing, infer conservatively from local context and mark the
 
 For the demo, only `research_topic` is strictly required. If the user does not provide it, infer from filenames and paper snippets, then mark it as an assumption.
 
+Use the checklist policy in `docs/design-paradigm.md`: continue with explicit assumptions when possible, and ask a follow-up only when there is no research topic, no evidence material, or an explicit hard constraint cannot be resolved.
+
 ## Read Order
 
 Read only the files needed for the current request, in this order:
@@ -109,23 +123,24 @@ Do not bulk-load the entire wiki.
 
 1. Build the `Idea Generation Brief`
 2. Build paper context from `paper/`
-3. Group evidence into candidate opportunity buckets:
+3. Write `paper-analysis.md` before drafting ideas
+4. Group evidence into candidate opportunity buckets:
    - literature gaps
    - contradictory findings
    - transferable methods
    - historical failures
    - metric weaknesses
    - engineering constraints
-4. Write `paper-analysis.md`: summarize each paper's method, contribution, limitation, and possible insight
 5. Generate candidate ideas using `references/generation-strategies.md`
 6. Deduplicate and cluster similar ideas
-7. Score ideas lightly for:
+7. Validate every idea against `references/idea-card-template.md`
+8. Score ideas lightly for:
    - evidence strength
    - testability
    - feasibility
    - novelty
    - expected impact
-8. Output recommended Idea Cards using `references/idea-card-template.md`
+9. Output recommended Idea Cards using `references/idea-card-template.md`
 
 Use `references/paper-demo-output-spec.md` for the runnable demo output contract.
 
@@ -150,6 +165,16 @@ For the final user reply, keep it short and include:
 4. number of recommended ideas
 
 The main artifact is the Markdown file, not the chat response. Each Idea Card should follow `references/idea-card-template.md`. Overall output expectations are defined in `references/output-spec.md` and `references/paper-demo-output-spec.md`.
+
+## Benchmark and Self-Test
+
+When this skill changes materially, update or run the benchmark docs:
+
+1. Extend `benchmarks/seed-qa.md` if the change adds a new behavior class.
+2. Use `benchmarks/benchmark-spec.md` to build or expand QA cases.
+3. Run self-test cases in clean sessions.
+4. Record results with `benchmarks/self-test-report-template.md`.
+5. Mention pass/fail status in the PR.
 
 ## Quality Bar
 

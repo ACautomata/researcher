@@ -9,8 +9,9 @@ Before doing substantial work:
 1. Read `SOUL.md`.
 2. Read `USER.md`.
 3. Read `MEMORY.md`.
-4. Read `skills/idea-generate/SKILL.md`.
-5. Read only the additional references or local context required by the current task.
+4. Read `docs/task-requirements.md`.
+5. Read `skills/idea-generate/SKILL.md`.
+6. Read only the additional references or local context required by the current task.
 
 Do not bulk-load unrelated papers or wiki pages. Build the smallest context pack that can support the requested idea generation task.
 
@@ -29,6 +30,8 @@ The agent should answer questions such as:
 ## Workspace Layout
 
 - `skills/idea-generate/`: primary OpenClaw skill for idea generation.
+- `docs/`: requirement details for benchmark, design paradigm, input/output contract, and skill split.
+- `benchmarks/`: seed QA, benchmark construction rules, and self-test report template.
 - `idea-runs/`: generated runtime artifacts for individual idea generation runs. This should stay runtime data unless the user explicitly asks to keep an artifact.
 - `paper/`: optional local drop folder for papers used by the demo workflow.
 - `MEMORY.md`: durable lessons about idea quality, user preferences, and recurring constraints.
@@ -50,15 +53,26 @@ Default behavior: create durable run artifacts when the task is substantial, the
 
 ## Core Workflow
 
-1. Build or infer an Idea Generation Brief.
-2. Extract paper context with `scripts/build_paper_context_pack.py` when papers are available.
-3. Write `paper-analysis.md` with paper-by-paper and cross-paper evidence.
-4. Draft 5-10 candidate idea cards in JSON.
-5. Run `scripts/idea_dedup.py`.
-6. Run `scripts/validate_idea_cards.py`.
-7. Fix validation errors instead of ignoring them.
-8. Run `scripts/write_idea_markdown.py`.
-9. Report the run directory, final Markdown path, processed paper count, and recommended idea count.
+1. Apply the mixed design paradigm in `docs/design-paradigm.md`.
+2. Build or infer an Idea Generation Brief.
+3. Extract paper context with `scripts/build_paper_context_pack.py` when papers are available.
+4. Write `paper-analysis.md` with paper-by-paper and cross-paper evidence.
+5. Draft 5-10 candidate idea cards in JSON.
+6. Run `scripts/idea_dedup.py`.
+7. Run `scripts/validate_idea_cards.py`.
+8. Fix validation errors instead of ignoring them.
+9. Run `scripts/write_idea_markdown.py`.
+10. Report the run directory, final Markdown path, processed paper count, and recommended idea count.
+
+## Development Deliverables
+
+For PRs that change this agent, keep these four deliverables current:
+
+- Progress report: `docs/progress-report.md`.
+- Benchmark and self-test: `benchmarks/seed-qa.md`, `benchmarks/benchmark-spec.md`, `benchmarks/self-test-report-template.md`.
+- Design paradigm: `docs/design-paradigm.md`.
+- Full input/output contract: `docs/io-spec.md`.
+- Skill split plan: `docs/skill-split.md`.
 
 ## Quality Rules
 
@@ -77,4 +91,3 @@ Default behavior: create durable run artifacts when the task is substantial, the
 - Do not modify external repositories from this workspace without explicit instruction.
 - Do not store secrets, private keys, raw logs, or chat transcripts in generated artifacts.
 - Runtime outputs belong under `idea-runs/` or a user-provided output directory, not in the configuration root.
-
