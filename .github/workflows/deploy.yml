@@ -1,0 +1,48 @@
+name: Deploy to Server
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install SSH key
+        env:
+          DEPLOY_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "$DEPLOY_KEY" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+
+      - name: Rsync to server
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+        run: |
+          rsync -avz --delete \
+            --exclude='.git/' \
+            --exclude='.github/' \
+            --exclude='.env' \
+            --exclude='secrets.json' \
+            --exclude='logs/' \
+            --exclude='tasks/' \
+            --exclude='*.sqlite' \
+            --exclude='*.sqlite-shm' \
+            --exclude='*.sqlite-wal' \
+            --exclude='*.db' \
+            --exclude='qmd/' \
+            --exclude='credentials/' \
+            --exclude='cron/' \
+            --exclude='devices/' \
+            --exclude='identity/' \
+            --exclude='feishu/' \
+            --exclude='extensions/' \
+            --exclude='qqbot/' \
+            --exclude='.openclaw/' \
+            --exclude='.dreams/' \
+            --exclude='dreaming/' \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
+            ./ "root@$DEPLOY_HOST:~/.openclaw/"
