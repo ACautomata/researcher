@@ -15,6 +15,7 @@ The file should contain:
 5. Main limitations or gaps extracted from the papers
 6. Recommended ideas ranked by priority
 7. Open questions or assumptions
+8. Human feedback prompt for the next iteration
 
 Each recommended idea must include:
 

@@ -61,6 +61,26 @@ def collect_open_questions(ideas: list[dict], context: dict | None) -> list[str]
     return deduped
 
 
+def feedback_prompt(ideas: list[dict]) -> list[str]:
+    if not ideas:
+        return []
+    idea_labels = []
+    for idea in ideas:
+        idea_id = idea.get("idea_id", "idea")
+        title = idea.get("title", "Untitled Idea")
+        idea_labels.append(f"- {idea_id}: {title}")
+    return [
+        "## Human Feedback Prompt",
+        "",
+        "For the next iteration, reply with any ideas to keep, reject, revise, or expand. Useful feedback includes preferred risk level, new constraints, selected idea IDs, rejected idea IDs with reasons, and any experiment results to fold back into the next pass.",
+        "",
+        "Current idea IDs:",
+        "",
+        *idea_labels,
+        "",
+    ]
+
+
 def render(ideas: list[dict], context: dict | None, analysis: str, top_n: int) -> str:
     topic = context.get("topic", "") if context else ""
     selected = sort_ideas(ideas)[:top_n]
@@ -112,6 +132,7 @@ def render(ideas: list[dict], context: dict | None, analysis: str, top_n: int) -
     open_questions = collect_open_questions(selected, context)
     if open_questions:
         lines.extend(["## Open Questions", "", *[f"- {item}" for item in open_questions], ""])
+    lines.extend(feedback_prompt(selected))
     return "\n".join(lines)
 
 
