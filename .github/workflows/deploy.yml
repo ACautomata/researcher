@@ -46,3 +46,13 @@ jobs:
             --exclude='dreaming/' \
             -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
             ./ "root@$DEPLOY_HOST:~/.openclaw/"
+
+      - name: Restart OpenClaw compose services
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_COMPOSE_DIR: ${{ secrets.DEPLOY_COMPOSE_DIR }}
+        run: |
+          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no "root@$DEPLOY_HOST" <<'EOF'
+          cd "$DEPLOY_COMPOSE_DIR"
+          docker-compose up -d --force-recreate
+          EOF
