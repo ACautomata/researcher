@@ -101,6 +101,11 @@ When creating a new subagent:
 4. Write skills under `workspace-<agentId>/skills/` following the single-responsibility principle.
 5. If the main agent needs to orchestrate this subagent, create or update a main agent skill under `skills/`.
 
+## PR Rules
+
+- **Benchmark results required.** When a PR touches `benchmarks/` or any skill/agent that has benchmark coverage, the benchmark test results must be pasted into the PR description or a PR comment. Do not open a PR without them.
+- **Test new features before PR.** Every new feature (skill, agent, workflow, config change) must be tested via OpenClaw — actually trigger the agent in conversation and verify it works end-to-end. Do not open the PR without doing this.
+
 ## Gitignore Strategy
 
 `.env` and `auth-profiles.json` contain secrets — never track them. Runtime data (`logs/`, `tasks/`, `*.sqlite`), QMD caches (`qmd/`, `agents/*/qmd/`), CLI-managed dirs (`extensions/`), and channel data (`qqbot/`) are excluded. Agent workspaces and their checked-in skills are tracked, while runtime state inside those workspaces is ignored. `openclaw.json` is tracked because all tokens are env var references.
