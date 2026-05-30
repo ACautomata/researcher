@@ -373,35 +373,99 @@ Use atomic claims to support literature reviews, experimental decisions, and con
 - Add a `## Connections` section whenever a page references multiple related pages.
 - If a page becomes central, make sure several other pages link to it.
 
+## OpenClaw Subagent Configuration
+
+This agent uses OpenClaw's native `sessions_spawn` mechanism for paper ingest subagents. The following should be set in the OpenClaw agent config:
+
+```yaml
+agents:
+  defaults:
+    subagents:
+      delegationMode: "prefer"       # system-level enforcement, not just prompt suggestion
+      maxConcurrent: 8               # N papers = N parallel subagents
+      maxSpawnDepth: 1               # subagents cannot spawn their own children
+      runTimeoutSeconds: 600         # 10 min per paper ingest
+```
+
+Configuration rationale:
+
+- **`delegationMode: "prefer"`**: Enforce subagent usage at the configuration level. This pairs with the prompt-level rules below — the config says "always delegate complex work," the prompt says "MUST NOT read paper content yourself." Two layers of defense against the main agent cutting corners.
+- **`maxConcurrent: 8`**: Allow parallel processing of up to 8 papers simultaneously. When the user drops N papers into inbox, the main agent spawns N subagents in one batch and waits for all to complete.
+- **`maxSpawnDepth: 1`**: Subagents cannot spawn their own children. Paper ingest is a single-level delegation — the subagent reads text and writes a page, no further delegation needed.
+- **Subagent spawns should use `context: "isolated"`**: Each subagent only needs the full-text file path and the template instructions. It does not need the main agent's conversation history.
+- **Model selection**: Consider setting a cheaper or standard model for subagents (they do mechanical "read → write" work). Reserve the stronger model for the main agent (orchestration and quality review).
+
+### Tool Access for Subagents
+
+Subagents at depth 1 (the default ingest setup) receive file read/write tools but NOT session management tools (`sessions_spawn`, `sessions_list`, `sessions_history`). This is correct — a paper-ingest subagent should only read the extracted text and write the paper page. It should never spawn its own children.
+
+---
+
 ## Paper Ingest Workflow
 
-Use this workflow whenever a paper is added by file, pasted text, or URL.
+This workflow uses a **main-agent / subagent split** to prevent the main agent from cutting corners on paper reading. The main agent orchestrates; subagents do the deep reading and writing.
 
-1. Capture the paper into `raw/sources/` with canonical naming (`YYYY-MM-DD-short-title.ext`). Move the original file from `raw/inbox/` — do not leave duplicates.
-2. Never modify the raw source again after capture, except to add a missing asset or metadata sidecar at ingest time.
-3. Extract or record bibliographic metadata: title, authors, year, venue, DOI/arXiv, code, and project page when available.
-4. Read the paper to the depth possible in the session and set `evidence_level`.
-5. Choose exactly one primary domain under `wiki/domains/`.
-6. Create or update the corresponding paper page in `wiki/domains/<domain>/papers/`; use `sources/` only for legacy pages during migration.
-7. Fill contribution, problem setting, method, experiments, results, limitations, reusable claims, connections, open questions, and provenance. **For experiments and results, extract concrete numbers, baseline names, dataset sizes, training hyperparameters, and ablation deltas from the source. Never replace a number with a qualitative phrase like "显著提升."**
-8. Identify impacted methods, datasets, tasks, metrics, concepts, topics, comparisons, and analyses.
-9. Create missing durable pages only when they are central, recurring, or explicitly requested.
-10. Add atomic claims to relevant topic, method, or comparison pages when they will be reused.
-11. Update comparison pages if the paper changes the state of a method family, benchmark, dataset, metric, or chronology.
-12. Update `wiki/index.md`.
-13. Append an entry to `wiki/log.md`.
-14. Report what changed and what remains uncertain.
+### Main Agent Responsibilities (you — the orchestrator)
 
-Minimum acceptable paper ingest:
+Your job is coordination, not comprehension. You MUST follow these steps in order:
 
-- one raw source captured or referenced,
-- one paper page created or updated,
+1. **Capture raw source**: Rename and move the paper PDF into `raw/sources/` with canonical naming (`YYYY-MM-DD-short-title.ext`). Move it from `raw/inbox/` — do not leave duplicates.
+2. **Extract full text**: Convert the PDF to readable text and save it to `raw/sources/YYYY-MM-DD-short-title-fulltext.txt`. Use PyMuPDF (fitz) or the best available PDF extraction tool — prefer tools that preserve document structure (tables, section hierarchy, formulas) when possible.
+3. **Spawn one subagent per paper — NO EXCEPTIONS**: For each paper, spawn a subagent whose sole task is to read the extracted text and produce the paper page. Pass it the full text file path, the output paper page path, and the template instructions. **You MUST NOT read the paper content yourself.** Your only job here is to construct the subagent prompt via `sessions_spawn` and wait for the result.
+4. **Verify output quality**: When the subagent returns, check that the paper page: (a) exists, (b) has ≥100 lines, (c) has `evidence_level` set in frontmatter, (d) contains at least one concrete number in the Results section. If any check fails, fix the gap or re-spawn the subagent.
+5. **Update navigation**: Update `wiki/index.md`. Append an entry to `wiki/log.md`.
+6. **Report**: Tell the user what changed, what evidence level was set, and what remains uncertain.
+
+**Anti-cheating rule**: If you find yourself reading paper content (beyond scanning title/authors in the filename), STOP. You are doing a subagent's job. Extract the text, spawn a subagent with `sessions_spawn`, and move on.
+
+### Subagent Prompt Template
+
+When spawning a subagent for paper ingest, call `sessions_spawn` with `context: "isolated"` and pass the following prompt as the `task` parameter (fill in the `{}` placeholders):
+
+```
+Read the paper full text at:
+  {fulltext-path}
+
+Produce the paper page at:
+  {paper-page-output-path}
+
+Use ONLY the templates in AGENTS.md §"Paper Page Template" and §"Paper Frontmatter" sections.
+
+Requirements:
+- Follow the 11-section paper page template exactly (Citation → One-Sentence Contribution → Problem Setting → Method → Experiments → Results → Limitations → Reusable Claims → Connections → Open Questions → Provenance).
+- Fill in all frontmatter fields: title, type, domain, status, tags, paper metadata, classification, evidence_level, raw_sources.
+- Set evidence_level based on how much of the paper the full text covers (full-text extraction from PDF → full-paper).
+- Experiments section MUST include: every dataset with size, every baseline method by name, training hyperparameters (optimizer, lr, batch size, epochs, architecture), evaluation protocol.
+- Results section MUST include: at least one concrete number per main claim, key table rows (best method + strongest baseline + gap), ablation deltas.
+- NEVER replace a number with a qualitative phrase like "显著提升" or "outperforms baselines."
+- If a number or detail is missing from the source text, state "not reported in the source" rather than guessing.
+- Write the page body in Chinese; keep paper titles, author names, venue names, and bibliographic identifiers in their original language.
+- Add cross-links to other wiki pages in the Connections section when you can identify relevant existing pages from the content.
+- After writing the page, return the word "done" and the evidence_level you set.
+
+Do NOT ask questions — produce the page and return "done".
+```
+
+### Multi-Paper Ingest
+
+When the user drops N papers into `raw/inbox/`:
+
+- Extract full text from ALL N PDFs first.
+- Then spawn N subagents **in parallel** (one per paper). Use a single `sessions_spawn` batch to launch all of them.
+- **NEVER batch multiple papers into a single subagent.** One paper = one subagent. Period.
+- After ALL subagents return, run quality checks on each output, then update index.md and log.md once.
+
+### Minimum Acceptable Paper Ingest
+
+- one raw source captured,
+- one extracted full text saved,
+- one paper page created (by subagent, ≥100 lines),
 - `evidence_level` recorded,
-- **at least one concrete number in the Results section** (accuracy, FPR, regret, etc.),
+- **at least one concrete number in the Results section**,
 - `wiki/index.md` updated,
 - `wiki/log.md` updated.
 
-Preferred paper ingest:
+### Preferred Paper Ingest
 
 - relevant method, dataset, task, metric, concept, topic, and comparison pages are also updated so the knowledge compounds immediately.
 - Experiments section includes datasets with sizes, baseline names, and training hyperparameters.
@@ -547,7 +611,7 @@ Do not create pages for every passing mention.
 
 These defaults apply until the user changes them:
 
-- Ingest papers one at a time.
+- For paper ingest: main agent MUST NOT read paper content directly. Its job is PDF→text extraction and subagent orchestration via `sessions_spawn`. One paper = one subagent. N papers = N parallel subagents.
 - Use the wiki itself as the main retrieval layer before introducing external search tooling.
 - File substantial answers back into the wiki when they are likely to matter again.
 - Prefer new paper pages under `papers/`; treat existing `sources/` pages as legacy paper pages until migrated.
