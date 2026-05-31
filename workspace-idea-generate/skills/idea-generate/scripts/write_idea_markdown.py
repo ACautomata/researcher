@@ -61,6 +61,33 @@ def collect_open_questions(ideas: list[dict], context: dict | None) -> list[str]
     return deduped
 
 
+def is_wiki_source(source: str) -> bool:
+    lowered = source.lower()
+    return "wiki" in lowered or lowered.endswith(".md") or "/papers/" in lowered or "/domains/" in lowered
+
+
+def collect_wiki_writeback_candidates(ideas: list[dict]) -> list[dict[str, str]]:
+    candidates: list[dict[str, str]] = []
+    for idea in ideas:
+        sources = as_list(idea.get("anchor_sources"))
+        wiki_sources = [source for source in sources if is_wiki_source(source)]
+        if not wiki_sources:
+            continue
+        candidates.append(
+            {
+                "sources": "; ".join(wiki_sources),
+                "idea_id": str(idea.get("idea_id", "idea")),
+                "finding": str(
+                    idea.get("wiki_writeback")
+                    or idea.get("target_problem")
+                    or idea.get("paper_insight_or_limitation")
+                    or ""
+                ),
+            }
+        )
+    return candidates
+
+
 def feedback_prompt(ideas: list[dict]) -> list[str]:
     if not ideas:
         return []
@@ -102,6 +129,10 @@ def render(ideas: list[dict], context: dict | None, analysis: str, top_n: int) -
                 "",
                 f"**Hypothesis:** {idea.get('one_sentence_hypothesis', '')}",
                 "",
+                f"**Anchor sources:** {'; '.join(as_list(idea.get('anchor_sources')))}",
+                "",
+                f"**Target pain point:** {idea.get('target_problem', '')}",
+                "",
                 f"**Paper insight / limitation addressed:** {idea.get('paper_insight_or_limitation', '')}",
                 "",
                 f"**Proposed improvement:** {idea.get('mechanism', '')}",
@@ -129,6 +160,18 @@ def render(ideas: list[dict], context: dict | None, analysis: str, top_n: int) -
                 "",
             ]
         )
+    writeback_candidates = collect_wiki_writeback_candidates(selected)
+    if writeback_candidates:
+        lines.extend(["## Wiki Writeback Candidates", ""])
+        for candidate in writeback_candidates:
+            lines.extend(
+                [
+                    f"- Anchor source(s): {candidate['sources']}",
+                    f"  - Idea ID: {candidate['idea_id']}",
+                    f"  - Finding to compile back into wiki: {candidate['finding']}",
+                ]
+            )
+        lines.append("")
     open_questions = collect_open_questions(selected, context)
     if open_questions:
         lines.extend(["## Open Questions", "", *[f"- {item}" for item in open_questions], ""])

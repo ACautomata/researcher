@@ -51,17 +51,19 @@ outputs/{论文简称}/{论文简称}-wiki.md
 
 **2. 搜索 autoresearch 知识库**
 
-autoresearch 子 agent 维护的 wiki 位于（相对于本 workspace 的路径）：
+autoresearch 子 agent 维护的 wiki 位于：
 
 ```
-../workspace-autoresearch/wiki/
+/workspace/shared/autoresearch-wiki/
 ```
+
+非沙箱环境可使用相对路径 `../workspace-autoresearch/wiki/`。
 
 具体查找方法：
 
-- **方法 A（推荐）：读索引** — 先读 `../workspace-autoresearch/wiki/index.md`，在索引中搜索论文标题关键词，找到对应条目后根据链接定位到具体文件
-- **方法 B：按标题搜文件** — 在 `../workspace-autoresearch/wiki/domains/` 下递归搜索 `.md` 文件，用论文标题中的关键词（如方法名、缩写、第一作者等）匹配文件名或文件内容
-- **方法 C：按领域推断** — 如果已知论文所属领域（如 federated-learning），直接进入 `../workspace-autoresearch/wiki/domains/{domain}/papers/` 查找
+- **方法 A（推荐）：读索引** — 先读 `/workspace/shared/autoresearch-wiki/index.md`，在索引中搜索论文标题关键词，找到对应条目后根据链接定位到具体文件
+- **方法 B：按标题搜文件** — 在 `/workspace/shared/autoresearch-wiki/domains/` 下递归搜索 `.md` 文件，用论文标题中的关键词（如方法名、缩写、第一作者等）匹配文件名或文件内容
+- **方法 C：按领域推断** — 如果已知论文所属领域（如 federated-learning），直接进入 `/workspace/shared/autoresearch-wiki/domains/{domain}/papers/` 查找
 
 **3. 如果仍未找到**
 
@@ -119,7 +121,7 @@ autoresearch 的 wiki 模板（Citation / Problem Setting / Method / Experiments
 
 **你的执行流程**：
 1. 识别目标阶段 = S3
-2. 第零步查找 Wiki：在 `../workspace-autoresearch/wiki/index.md` 中找到 `fedgraph` 条目 → 定位到 `../workspace-autoresearch/wiki/domains/federated-learning/papers/fedgraph-xxx.md`
+2. 第零步查找 Wiki：在 `/workspace/shared/autoresearch-wiki/index.md` 中找到 `fedgraph` 条目 → 定位到 `/workspace/shared/autoresearch-wiki/domains/federated-learning/papers/fedgraph-xxx.md`
 3. 检查前置：`fedgraph-experiment.md` 不存在
 4. 自动补齐：执行 S2（基于已有 Wiki + 论文原文生成 `fedgraph-experiment.md`）
 5. 执行 S3：基于 Wiki + S2 产出生成 `fedgraph-problem.md`
@@ -142,7 +144,7 @@ autoresearch 的 wiki 模板（Citation / Problem Setting / Method / Experiments
 
 ```
 Wiki 输入（来自 autoresearch 知识库）
-../workspace-autoresearch/wiki/domains/{domain}/papers/{slug}.md
+/workspace/shared/autoresearch-wiki/domains/{domain}/papers/{slug}.md
         │
         ▼
 ┌─────────────────────────────────┐
@@ -184,7 +186,7 @@ Wiki 输入（来自 autoresearch 知识库）
 
 | 维度 | 说明 |
 |------|------|
-| **来源** | `autoresearch` 子 agent 维护的知识库：`../workspace-autoresearch/wiki/` |
+| **来源** | `autoresearch` 子 agent 维护的知识库：`/workspace/shared/autoresearch-wiki/` |
 | **查找** | 见上方「第零步：查找已有 Wiki」 |
 | **格式** | autoresearch wiki 模板（Citation / Problem Setting / Method / Experiments / Results / Limitations / Reusable Claims 等） |
 | **缺失时** | 如有 PDF/URL 则直接读取论文原文作为替代输入；否则要求 main agent 先由 autoresearch 入库 |
@@ -207,9 +209,9 @@ Wiki 输入（来自 autoresearch 知识库）
 |------|------|
 | **输入** | Wiki 条目 + S2 实验提取文档 |
 | **输出** | `{论文简称}-problem.md` |
-| **做什么** | 围绕 claim—机制—实验证据三角，从审稿视角发现潜在问题：创新性、重要性、证据充分性、baseline、消融、泛化性、鲁棒性、效率、可复现性 |
+| **做什么** | 围绕 claim—机制—实验证据三角，从审稿视角发现潜在问题：创新性、重要性、紧迫性、证据充分性、baseline、消融、泛化性、鲁棒性、效率、可复现性 |
 | **不做什么** | 不设计实验方案、不提出新方法、不下定论 |
-| **边界** | 区分"已有较强证据支持的问题"、"实验间接暗示的问题"、"仍需后续验证的问题" |
+| **边界** | 每个优先问题都要具体到 claim/机制/实验现象，并区分"已有较强证据支持的问题"、"实验间接暗示的问题"、"仍需后续验证的问题"；需要时结合 wiki 与外部检索判断它是否重要且紧迫 |
 | **开始条件** | 需要 Wiki + S2 输出；至少有一份 Wiki 条目和一份有一定深度的实验提取 |
 
 ### S4: 验证实验设计
@@ -257,7 +259,7 @@ sessions_spawn(
 
 ## 论文信息
 - 标题：{论文标题}
-- Wiki路径：{autoresearch wiki 中的路径，如 ../workspace-autoresearch/wiki/domains/federated-learning/papers/xxx.md}
+- Wiki路径：{autoresearch wiki 中的路径，如 /workspace/shared/autoresearch-wiki/domains/federated-learning/papers/xxx.md}
 - PDF路径：{PDF文件绝对路径或URL，Wiki缺失时必填}
 - 代码仓库：{可选，本地绝对路径}
 
@@ -272,7 +274,7 @@ workspace 下的 `outputs/{论文简称}/` 目录。
 - {论文简称}-codex-prompt.md
 
 注意：Wiki 条目由 autoresearch 子 agent 维护，不需要重新整理。
-如果 Wiki 路径未提供，请在 ../workspace-autoresearch/wiki/ 中自动搜索。
+如果 Wiki 路径未提供，请在 /workspace/shared/autoresearch-wiki/ 中自动搜索。
 全流程完成后，建议自动执行 S6 质量评估。""",
   mode: "run",
   runTimeoutSeconds: 3600
@@ -346,7 +348,7 @@ sessions_spawn(
 | 约定 | 说明 |
 |------|------|
 | **Wiki 来源** | 优先使用 autoresearch 知识库中的 wiki；main agent 应尽量传递 wiki 路径 |
-| **Wiki 查找** | 若未提供 wiki 路径，本 agent 会在 `../workspace-autoresearch/wiki/` 中自动搜索 |
+| **Wiki 查找** | 若未提供 wiki 路径，本 agent 会在 `/workspace/shared/autoresearch-wiki/` 中自动搜索 |
 | **PDF 路径** | Wiki 缺失时的兜底方案；必须是 Gateway 可访问的绝对路径或可公网访问的 URL |
 | **代码仓库** | 只在 S5 需要；如果无仓库，S5 生成通用框架性提示词 |
 | **输出位置** | 默认输出到 `outputs/{论文简称}/` 目录 |
@@ -359,7 +361,7 @@ sessions_spawn(
 
 如果用户要完整流程，优先按下面顺序推进：
 
-1. **查找 Wiki** — 在 `../workspace-autoresearch/wiki/` 中定位论文的 wiki 条目
+1. **查找 Wiki** — 在 `/workspace/shared/autoresearch-wiki/` 中定位论文的 wiki 条目
 2. `paper-experiment-deep-extractor` — S2
 3. `paper-review-style-problem-analyzer` — S3
 4. `paper-validation-experiment-designer` — S4
@@ -377,6 +379,7 @@ sessions_spawn(
 - 论文里没有明确写的内容，不要擅自补全；缺失信息写"论文中未明确说明"。
 - 清楚区分事实、推断和待验证判断。
 - 不要为了质疑而质疑；结论强度要与证据强度匹配。
+- 发现问题时优先保留具体、重要、紧迫且可验证的问题；重要性来自对核心 claim/主流基准/现实使用边界的影响，紧迫性来自近期同类论文、基准变化、复现风险或用户当前研究决策的时间敏感性。
 
 **方法立场**
 - 不要默认直接提出新方法或改进方案，除非用户明确要求。
@@ -391,6 +394,7 @@ sessions_spawn(
 - Wiki 条目由 `autoresearch` 子 agent 维护，本 agent 只消费不创建。
 - 不要修改 autoresearch 知识库中的 wiki 文件。
 - 如果发现 wiki 中有错误或遗漏，在阶段产出中标注，由 main agent 决定是否通知 autoresearch 修正。
+- 如果 S3/S4 过程中因网络或外部材料发现新的相关论文、基准或项目，在最终汇报中单列"建议回写 / 入库来源"，交给 main agent 通知 `autoresearch`。
 
 **输出规范**
 - 输出默认使用 Markdown，尽量条目化表达。

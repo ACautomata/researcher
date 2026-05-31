@@ -12,6 +12,7 @@ REQUIRED_FIELDS = [
     "idea_id",
     "title",
     "one_sentence_hypothesis",
+    "anchor_sources",
     "target_problem",
     "mechanism",
     "paper_insight_or_limitation",
@@ -35,6 +36,114 @@ def is_empty(value: object) -> bool:
     return False
 
 
+GENERIC_ANCHOR_TERMS = {
+    "paper",
+    "papers",
+    "wiki",
+    "literature",
+    "related work",
+    "survey",
+    "domain",
+    "field",
+    "area",
+    "federated learning literature",
+    "related literature",
+    "prior work",
+}
+
+GENERIC_ANCHOR_FRAGMENTS = (
+    "literature",
+    "related work",
+    "prior work",
+    "field",
+    "domain",
+    "area",
+)
+
+CONCRETE_ANCHOR_MARKERS = (
+    "/",
+    ".md",
+    ".pdf",
+    "arxiv",
+    "doi",
+    "http",
+    "wiki/",
+    "paper:",
+    "title:",
+)
+
+CONCRETE_PROBLEM_MARKERS = (
+    "mechanism",
+    "module",
+    "dataset",
+    "metric",
+    "baseline",
+    "ablation",
+    "setting",
+    "split",
+    "boundary",
+    "failure",
+    "limitation",
+    "claim",
+    "experiment",
+    "benchmark",
+    "evaluation",
+    "noise",
+    "robust",
+    "泛化",
+    "鲁棒",
+    "基准",
+    "指标",
+    "数据集",
+    "机制",
+    "模块",
+    "消融",
+    "边界",
+    "失败",
+    "限制",
+    "实验",
+)
+
+
+def anchor_items(value: object) -> list[str]:
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if isinstance(value, str) and value.strip():
+        return [value.strip()]
+    return []
+
+
+def has_generic_anchor(anchors: list[str]) -> bool:
+    for anchor in anchors:
+        normalized = " ".join(anchor.lower().split())
+        if normalized in GENERIC_ANCHOR_TERMS:
+            return True
+        if any(fragment in normalized for fragment in GENERIC_ANCHOR_FRAGMENTS) and not any(
+            marker in normalized for marker in CONCRETE_ANCHOR_MARKERS
+        ):
+            return True
+    return False
+
+
+def has_concrete_anchor(anchors: list[str]) -> bool:
+    return all(any(marker in anchor.lower() for marker in CONCRETE_ANCHOR_MARKERS) for anchor in anchors)
+
+
+def describes_concrete_problem(text: str) -> bool:
+    lowered = text.lower()
+    return len(text) >= 30 and any(marker in lowered for marker in CONCRETE_PROBLEM_MARKERS)
+
+
+def has_wiki_anchor(anchors: list[str]) -> bool:
+    return any(
+        "wiki" in anchor.lower()
+        or anchor.lower().endswith(".md")
+        or "/papers/" in anchor.lower()
+        or "/domains/" in anchor.lower()
+        for anchor in anchors
+    )
+
+
 def validate(ideas: list[dict]) -> dict:
     errors: list[str] = []
     warnings: list[str] = []
@@ -47,6 +156,20 @@ def validate(ideas: list[dict]) -> dict:
         confidence = str(idea.get("confidence", "")).lower()
         if is_empty(evidence) and "low" not in confidence:
             errors.append(f"{label}: missing evidence must be marked low-confidence")
+        anchors = anchor_items(idea.get("anchor_sources"))
+        if not anchors:
+            errors.append(f"{label}: anchor_sources must name specific paper/wiki sources")
+        if len(anchors) > 4:
+            errors.append(f"{label}: anchor_sources must contain one source or a same-type cluster of 2-4 sources")
+        if has_generic_anchor(anchors):
+            errors.append(f"{label}: anchor_sources must not be generic domain labels")
+        if anchors and not has_concrete_anchor(anchors):
+            errors.append(f"{label}: anchor_sources must name concrete papers, wiki paths, URLs, arXiv IDs, or DOIs")
+        if has_wiki_anchor(anchors) and is_empty(idea.get("wiki_writeback")):
+            errors.append(f"{label}: wiki-anchored ideas must include wiki_writeback")
+        target_problem = str(idea.get("target_problem", "")).strip()
+        if not describes_concrete_problem(target_problem):
+            errors.append(f"{label}: target_problem must describe a concrete mechanism/evaluation/limitation pain point")
         metric = idea.get("expected_metric_change")
         if is_empty(metric):
             errors.append(f"{label}: expected_metric_change must name at least one metric")

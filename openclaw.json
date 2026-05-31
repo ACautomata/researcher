@@ -59,8 +59,16 @@
         "mode": "safeguard"
       },
       "sandbox": {
-        "mode": "off",
-        "workspaceAccess": "none"
+        "mode": "all",
+        "scope": "agent",
+        "workspaceAccess": "rw",
+        "docker": {
+          "binds": [
+            "~/.openclaw/workspace-autoresearch/wiki:/workspace/shared/autoresearch-wiki:ro",
+            "~/.openclaw/workspace-paper-review/outputs:/workspace/shared/paper-review-outputs:ro",
+            "~/.openclaw/workspace-idea-generate/idea-runs:/workspace/shared/idea-runs:ro"
+          ]
+        }
       },
       "elevatedDefault": "full",
       "maxConcurrent": 4,

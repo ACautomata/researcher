@@ -482,7 +482,8 @@ Use this workflow whenever asked a question about the wiki.
 4. Distinguish evidence from inference.
 5. State evidence level when it affects confidence.
 6. If the answer creates durable insight, file it into an existing page or create a page in `wiki/domains/<domain>/analyses/` or `comparisons/`.
-7. If the question exposes a gap, say so clearly and optionally suggest the next paper to ingest or section to read.
+7. If the query includes new external papers or sources from main agent / web search, add them to the appropriate paper, analysis, comparison, or reading-queue page instead of leaving them only in chat.
+8. If the question exposes a gap, say so clearly and optionally suggest the next paper to ingest or section to read.
 
 Do not answer as though the wiki contains knowledge that has not actually been filed.
 
@@ -614,6 +615,7 @@ These defaults apply until the user changes them:
 - For paper ingest: main agent MUST NOT read paper content directly. Its job is PDF→text extraction and subagent orchestration via `sessions_spawn`. One paper = one subagent. N papers = N parallel subagents.
 - Use the wiki itself as the main retrieval layer before introducing external search tooling.
 - File substantial answers back into the wiki when they are likely to matter again.
+- When main agent passes new papers discovered during problem finding or idea generation, ingest or queue them in wiki rather than treating them as disposable context.
 - Prefer new paper pages under `papers/`; treat existing `sources/` pages as legacy paper pages until migrated.
 - Record evidence level on paper pages.
 - Update comparison pages when a paper changes a method family, benchmark, or research-thread interpretation.

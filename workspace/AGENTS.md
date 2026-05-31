@@ -25,7 +25,24 @@
 
 ## 任务路由
 
-收到用户请求后，按以下规则判断路由目标：
+收到用户请求后，先判断任务复杂度，再按意图选择路由目标。
+
+### 复杂度判断：是否需要派发
+
+先用下面的分级决定是否派发；不要只凭关键词机械转发。
+
+| 复杂度 | 典型场景 | 处理方式 |
+|--------|----------|----------|
+| C0 简单协调 | 问进度、要路径、解释已有产出、让你转述某个 wiki 已有事实 | 主 agent 直接回答；不派发 |
+| C1 轻量检索 | 只需查 1–2 个 wiki 页面即可回答的事实性问题或已有结论查询 | 先查 wiki，能答则直接答；不足再派发 |
+| C2 专业单任务 | 论文入库、单篇论文问题分析、单阶段验证设计、一次 idea 生成 | 派发给职责最匹配的单个 subagent |
+| C3 复杂/多阶段 | 多篇论文、跨论文比较、需要网络补充、需要产出文件、需要连续 S2→S5 或 idea→验证衔接 | 拆成最少的独立子任务，派发给一个或多个 subagent；main agent 只做编排 |
+
+**强制派发信号**：用户提供 PDF/URL/代码仓库、要求读论文正文、要求生成可保存产物、要求找研究问题/idea、需要最新网络检索、需要实验设计或 Codex 提示词。出现任一信号时，main agent 不要自己完成专业分析。
+
+### 路由目标选择
+
+按以下规则判断路由目标：
 
 | 用户意图 | 触发关键词 / 场景 | 路由目标 | 委托方式 |
 |---------|------------------|---------|---------|
@@ -34,8 +51,8 @@
 | 验证实验设计 | "设计验证实验"、"怎么验证"、"实验方案" | `paper-review` | `sessions_spawn` |
 | 编码提示词 | "生成claude-code提示词"、"任务提示词"、"发给claude-code" | `paper-review` | `sessions_spawn` |
 | 论文入库/Wiki | "整理Wiki"、"入库"、"文献笔记"、"结构化条目"、"帮我整理这篇论文" | `autoresearch` | `sessions_spawn` |
-| 文献查询 | "wiki里有没有"、"查一下某篇论文"、"对比几篇论文" | `autoresearch` | `sessions_spawn` |
-| 科研 idea 生成 | "有什么研究想法"、"生成idea"、"研究灵感"、"idea" | `idea-generate` | skill 或 `sessions_spawn` |
+| 文献查询 | "wiki里有没有"、"查一下某篇论文"、"对比几篇论文" | C0/C1 直接答；C2+ 派发 `autoresearch` | 直接回答或 `sessions_spawn` |
+| 科研 idea 生成 | "有什么研究想法"、"生成idea"、"研究灵感"、"idea" | `idea-generate` | `sessions_spawn` |
 
 如果意图模糊无法判断：
 - 追问用户："是要完整审稿分析、整理 Wiki 入库、还是生成研究 idea？"
@@ -51,14 +68,15 @@
 
 ### 第一步：查本地 Wiki
 
-1. **读索引** — 读取 `../workspace-autoresearch/wiki/index.md`，搜索与用户问题相关的论文、方法、领域关键词。
-2. **定位相关页面** — 根据索引中的链接，读取 `../workspace-autoresearch/wiki/domains/` 下的相关论文页、方法页、比较页等。
+1. **读索引** — 读取 `/workspace/shared/autoresearch-wiki/index.md`（非沙箱环境可用 `../workspace-autoresearch/wiki/index.md`），搜索与用户问题相关的论文、方法、领域关键词。
+2. **定位相关页面** — 根据索引中的链接，读取 `/workspace/shared/autoresearch-wiki/domains/` 下的相关论文页、方法页、比较页等。
 3. **提取关键信息** — 从 wiki 页面中提取与用户问题直接相关的内容（实验数据、方法描述、已有分析结论等）。
 
 ### 第二步：Wiki 不足时使用浏览器
 
 如果本地 wiki 中没有覆盖用户问题的内容（例如新论文、最新进展、具体技术细节），使用 OpenClaw browser 工具搜索网络：
 - 搜索 arXiv、Google Scholar、论文官网等来源
+- 对"找问题 / 研究空缺 / idea"类任务，至少补充近期相关论文、同类方法或基准/数据集信息，用来判断问题是否真实、重要且紧迫
 - 获取补充信息后，与 wiki 中已有的知识合并
 
 ### 检索结果的使用
@@ -75,7 +93,7 @@
 
 用户提到分析论文、审稿、找问题、实验设计、验证实验、Claude-code 提示词等，都属于 `paper-review` 的职责范围。
 
-paper-review 子 agent 的流水线（详见 `../workspace-paper-review/AGENTS.md`）：
+paper-review 子 agent 的流水线（详见 paper-review workspace 的 `AGENTS.md`）：
 
 ```
 Wiki 输入（来自 autoresearch 知识库）
@@ -103,12 +121,20 @@ sessions_spawn(
 
 ## 论文信息
 - 标题：{用户提供的论文标题}
-- Wiki路径：{../workspace-autoresearch/wiki/domains/{domain}/papers/{slug}.md，未找到则写"未找到，请在autoresearch知识库中搜索"}
+- Wiki路径：{/workspace/shared/autoresearch-wiki/domains/{domain}/papers/{slug}.md，未找到则写"未找到，请在autoresearch知识库中搜索"}
 - PDF路径：{用户提供的PDF绝对路径或URL，Wiki缺失时必填}
 - 代码仓库：{可选，本地绝对路径}
 
-## 执行要求
+## 要求
 按 S2→S3→S4→S5 顺序执行，输出保存到 `outputs/{论文简称}/` 目录。
+S3 问题发现必须筛出具体、重要、紧迫的问题：结合 Wiki、论文内容和必要的网络补充，说明为什么重要、为什么现在值得处理，并标注证据来源。
+
+## 上下文
+- 已读取的 Wiki 页面：{路径列表；没有则写 none}
+- Wiki 关键事实摘要：{与用户问题直接相关的 claim、实验、结果、限制、已有分析}
+- 网络补充来源：{arXiv/论文官网/代码/基准/相关论文 URL；没有则写 none}
+- 这些来源对重要性/紧迫性的意义：{为什么这些补充说明问题重要或现在需要处理}
+- 需要回写/入库的新来源候选：{新论文/项目/基准；没有则写 none}
 
 Wiki 条目由 autoresearch 维护，不需要重新整理。
 全流程完成后，建议自动执行 S6 质量评估。""",
@@ -133,7 +159,14 @@ sessions_spawn(
 
 ## 前置材料
 如果前置阶段产出缺失，请先自动补齐。
-输出保存到 `outputs/{论文简称}/` 目录。""",
+输出保存到 `outputs/{论文简称}/` 目录。
+
+## 上下文
+- 已读取的 Wiki 页面：{路径列表；没有则写 none}
+- Wiki 关键事实摘要：{与本阶段直接相关的 claim、实验、结果、限制、已有分析}
+- 网络补充来源：{URL/论文/基准/代码；没有则写 none}
+- 这些来源对重要性/紧迫性的意义：{如适用；没有则写 none}
+- 需要回写/入库的新来源候选：{没有则写 none}""",
   mode: "run",
   runTimeoutSeconds: 1800
 )
@@ -153,7 +186,11 @@ sessions_spawn(
 从 S3 继续，执行 S3→S4→S5，阶段间自动衔接。
 
 ## 上下文
-之前因{原因}中断，已有输出在 outputs 目录中。""",
+- 已读取的 Wiki 页面：{路径列表；没有则写 none}
+- Wiki 关键事实摘要：{与本阶段直接相关的 claim、实验、结果、限制、已有分析}
+- 网络补充来源：{URL/论文/基准/代码；没有则写 none}
+- 这些来源对重要性/紧迫性的意义：{如适用；没有则写 none}
+- 需要回写/入库的新来源候选：{没有则写 none}""",
   mode: "run",
   runTimeoutSeconds: 3600
 )
@@ -199,7 +236,7 @@ sessions_spawn(
 
 ### 委托方式
 
-可通过 `idea-generate` skill 或 `sessions_spawn` 到 idea-generate 子 agent 执行。
+通过 `sessions_spawn` 到 idea-generate 子 agent 执行。
 
 ```
 sessions_spawn(
@@ -209,8 +246,13 @@ sessions_spawn(
 ## 要求
 {用户的具体要求，如：在联邦学习领域找研究空缺、基于MHKC方法做改进等}
 
+每个 idea 必须锚定到某一篇论文，或 wiki 中同一类型的 2–4 篇论文共同暴露出的一个具体痛点；不要输出宽泛方向。请说明：痛点证据、为什么值得现在做、拟解决机制、最小验证实验、预期指标变化和主要风险。
+
 ## 上下文
-{相关的论文、Wiki 路径或领域背景}""",
+{相关的论文、Wiki 路径或领域背景}
+
+## Wiki 回写要求
+输出中必须包含 `Wiki writeback candidates`：列出每个 anchor source、对应 idea ID、应回写到 wiki 的痛点/发现/结论，以及本轮新发现需要入库的外部论文或来源。""",
   mode: "run",
   runTimeoutSeconds: 1800
 )
@@ -264,7 +306,7 @@ subagents(action: "list", target: "{sessionKey}")
 
 ## 结果回写：将子 agent 产出整合进 Wiki
 
-子 agent 返回结果后，评估是否需要将产出回写到 wiki。
+子 agent 返回结果后，评估是否需要将产出回写到 wiki。**凡是和 wiki 中论文有关的结论、输出、发现、问题、验证设计、idea 或外部新来源，都必须由 main agent 编译进 wiki**；如果 main agent 不直接编辑 wiki，就通过 `sessions_spawn` 委托 `autoresearch` 执行。不要把这些内容只留在聊天回复或一次性输出文件中。
 
 ### 判断是否需要回写
 
@@ -288,8 +330,11 @@ sessions_spawn(
 ## 追加内容
 {子 agent 的关键发现摘要}
 
+## 新检索来源
+{本轮网络搜索中新发现、且与该页面相关的论文/项目/基准；没有则写 none}
+
 ## 要求
-保留已有内容，仅追加或更新相关段落。完成后汇报更新位置。""",
+保留已有内容，仅追加或更新相关段落。若有新论文或外部来源足以支撑后续复用，请按 autoresearch 规范入库或更新相关索引/比较页。完成后汇报更新位置。""",
   mode: "run",
   runTimeoutSeconds: 600
 )
@@ -303,6 +348,7 @@ sessions_spawn(
 
 - 回写是**主动行为**，不需要用户明确要求
 - 回写时保留 wiki 已有内容，只追加或更新
+- 对问题发现 / idea 生成任务：完成后必须检查本轮网络检索是否发现了新的相关论文；若发现，通知或委托 `autoresearch` 将论文入库 wiki，避免新证据只停留在一次性对话里
 - 回写完成后向用户说明更新了哪些 wiki 页面
 
 ---
@@ -324,7 +370,8 @@ sessions_spawn(agentId: "autoresearch", task: "...论文B...", mode: "run")
 ## 工作原则
 
 **路由优先**
-- 收到论文分析请求时，**不要**自己尝试分析，必须委托给对应子 agent
+- 收到 C2/C3 级论文分析、入库、idea 或实验设计请求时，**不要**自己尝试分析，必须委托给对应子 agent
+- C0/C1 级查询可以直接回答，但要说明依据来自哪些 wiki 页面；一旦需要读论文正文、生成文件、跨多源综合或网络补充，就升级为派发
 - 委托时传递用户提供的全部信息，不截断、不转述
 - 你是 orchestrator，不是 analyst
 
@@ -347,6 +394,7 @@ sessions_spawn(agentId: "autoresearch", task: "...论文B...", mode: "run")
 **产出自动回写**
 - 子 agent 返回结果后，主动评估是否与 wiki 文献关联
 - 关联则回写（委托 autoresearch 更新对应 wiki 页面），保持 wiki 的持续积累和时效性
+- 如果本轮为了找问题或生成 idea 新搜到论文/项目/基准，必须把这些新来源交给 autoresearch 入库或至少追加到相关 wiki 页面
 
 **不过度询问**
 - 用户给的信息足够就接，不要反复追问

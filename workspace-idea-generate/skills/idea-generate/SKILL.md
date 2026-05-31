@@ -9,7 +9,7 @@ description: Generate structured research ideas from papers, OpenClaw workspace 
 
 Generate candidate research ideas from evidence. The simple demo path still supports papers under a local `paper/` folder, but the normal OpenClaw path can also intake relevant wiki pages, paper-review outputs, experiment logs, failed attempts, repository context, and user preferences. The skill summarizes the research landscape, proposes improvement ideas, filters and ranks them, and writes the most recommended ideas to Markdown.
 
-Do not produce unconstrained brainstorming. Produce ideas that are grounded in paper evidence, comparable side by side, and ready for human review or downstream evaluation.
+Do not produce unconstrained brainstorming. Produce ideas that are grounded in paper evidence, comparable side by side, and ready for human review or downstream evaluation. Each idea must target one concrete pain point from a specific paper/wiki page, or from a same-type cluster of 2–4 related papers; broad directions without a named pain point are not valid idea cards.
 
 ## Requirement Alignment
 
@@ -72,11 +72,13 @@ Use this workflow for the minimum runnable path. Keep the paper-only path compat
    - experiment results and failed attempts
    - user preferences and hard constraints
    - simple, testable modifications
+   Each card must name its anchor paper(s) or wiki page(s), isolate one concrete pain point, and propose a targeted mechanism for that pain point.
 9. Run `scripts/idea_dedup.py`.
 10. Run `scripts/validate_idea_cards.py`.
 11. Fix any validation errors in the JSON.
 12. Run `scripts/write_idea_markdown.py`.
 13. Return the final `recommended-ideas.md` path and a short summary.
+14. If the ideas use wiki papers, include `Wiki writeback candidates` in the final summary: anchor source(s), generated idea IDs, and the conclusions/findings main agent should compile back into wiki.
 
 Example commands:
 
@@ -117,8 +119,8 @@ Read only the files needed for the current request, in this order:
 1. User-provided files, folders, links, or pasted notes.
 2. `paper/` folder via `scripts/build_paper_context_pack.py`, if present.
 3. Generated `paper-context.md`, if present.
-4. Relevant `workspace-autoresearch/wiki/` pages, starting from `wiki/index.md` when available.
-5. Relevant `workspace-paper-review/` outputs, if the task depends on reviewed papers or extracted experiments.
+4. Relevant `/workspace/shared/autoresearch-wiki/` pages, starting from `wiki/index.md` when available.
+5. Relevant `/workspace/shared/paper-review-outputs/` outputs, if the task depends on reviewed papers or extracted experiments.
 6. Experiment logs, result tables, ablations, failed attempts, or qualitative observations.
 7. Relevant `memory/` or `MEMORY.md` entries for recent discussion and failures, if present.
 8. Repo files needed to understand the baseline or implementation scope, if needed.
@@ -138,30 +140,33 @@ Do not bulk-load the entire wiki.
    - historical failures
    - metric weaknesses
    - engineering constraints
-6. Generate candidate ideas using `references/generation-strategies.md`.
-7. Deduplicate and cluster similar ideas.
-8. Validate every idea against `references/idea-card-template.md`.
-9. Score ideas lightly for:
+6. Convert opportunity buckets into narrow pain points. A pain point is valid only if it names: source paper(s), affected mechanism or evaluation setting, observed limitation/failure/contradiction, and why this matters for the requested topic.
+7. Generate candidate ideas using `references/generation-strategies.md`.
+8. Deduplicate and cluster similar ideas.
+9. Validate every idea against `references/idea-card-template.md`.
+10. Score ideas lightly for:
    - evidence strength
    - testability
    - feasibility
    - novelty
    - expected impact
-10. Output recommended Idea Cards using `references/idea-card-template.md`.
-11. If the user provides feedback, apply `docs/interactive-refinement.md` and write a versioned follow-up such as `recommended-ideas.v2.md`.
+11. Output recommended Idea Cards using `references/idea-card-template.md`.
+12. If the user provides feedback, apply `docs/interactive-refinement.md` and write a versioned follow-up such as `recommended-ideas.v2.md`.
 
 Use `references/paper-demo-output-spec.md` for the runnable demo output contract.
 
 ## Hard Rules
 
 1. Ground every idea in evidence, not only model intuition
-2. Include a minimum validation experiment for every idea
-3. Name at least one metric the idea expects to change
-4. Identify a likely risk or failure mode for every idea
-5. Mark weakly supported ideas as `low-confidence`
-6. Prefer 5-10 high-signal ideas over a long noisy list
-7. Do not claim a paper says something unless it appears in `paper-context.md` or another cited source
-8. Prepare ideas for human review or downstream evaluation; do not declare the final winner inside this skill
+2. Anchor every idea to one specific paper/wiki page or a same-type cluster of 2–4 papers; name those sources explicitly
+3. `target_problem` must be a concrete pain point, not a broad research area or method family label
+4. Include a minimum validation experiment for every idea
+5. Name at least one metric the idea expects to change
+6. Identify a likely risk or failure mode for every idea
+7. Mark weakly supported ideas as `low-confidence`
+8. Prefer 5-10 high-signal ideas over a long noisy list
+9. Do not claim a paper says something unless it appears in `paper-context.md` or another cited source
+10. Prepare ideas for human review or downstream evaluation; do not declare the final winner inside this skill
 
 ## Human Feedback Refinement
 
@@ -177,6 +182,7 @@ For the final user reply, keep it short and include:
 2. final `recommended-ideas.md` path
 3. number of papers processed
 4. number of recommended ideas
+5. `Wiki writeback candidates` when any idea is anchored to wiki papers: source path/title, idea IDs, and concise findings for main agent to compile into wiki
 
 The main artifact is the Markdown file, not the chat response. Each Idea Card should follow `references/idea-card-template.md`. Overall output expectations are defined in `references/output-spec.md` and `references/paper-demo-output-spec.md`.
 

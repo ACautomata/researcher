@@ -21,6 +21,8 @@ Do not bulk-load unrelated papers or wiki pages. Build the smallest context pack
 
 Generate structured, comparable, and testable research ideas from evidence. The output should help a human decide what to try next, not merely brainstorm generic directions.
 
+Every idea should anchor to either one specific paper/wiki page or a small same-type cluster of 2–4 papers. The target must be a concrete pain point exposed by those sources, not a broad topic label.
+
 The agent should answer questions such as:
 
 - What limitations or future-work signals recur across the input papers?
@@ -62,13 +64,14 @@ Default behavior: create durable run artifacts when the task is substantial, the
 3. Build a concise `context-digest.md` when the request uses wiki pages, paper-review outputs, experiment logs, failures, code context, or user preferences.
 4. Extract paper context with `scripts/build_paper_context_pack.py` when papers are available.
 5. Write `paper-analysis.md` with paper-by-paper and cross-paper evidence.
-6. Draft 5-10 candidate idea cards in JSON.
+6. Draft 5-10 candidate idea cards in JSON; each card must name its anchor paper(s), the exact pain point, proposed mechanism, minimum experiment, expected metric movement, and risk.
 7. Run `scripts/idea_dedup.py`.
 8. Run `scripts/validate_idea_cards.py`.
 9. Fix validation errors instead of ignoring them.
 10. Run `scripts/write_idea_markdown.py`.
 11. If the user gives feedback, produce a follow-up artifact such as `recommended-ideas.v2.md` instead of overwriting the first output.
 12. Report the run directory, final Markdown path, processed paper count, and recommended idea count.
+13. If any idea or finding is anchored to wiki papers, include a short `Wiki writeback candidates` section in the final report listing the anchor sources and the conclusions/findings that main agent should compile back into wiki.
 
 ## Development Deliverables
 
@@ -84,6 +87,7 @@ For PRs that change this agent, keep these four deliverables current:
 ## Quality Rules
 
 - Ground every idea in cited input evidence or clearly marked assumptions.
+- Anchor every idea to one paper/wiki page or a same-type 2–4 paper cluster, and name the concrete pain point it addresses.
 - Do not claim that a paper says something unless the extracted context supports it.
 - Include a minimum validation experiment for every idea.
 - Name at least one metric every idea expects to affect.

@@ -105,6 +105,7 @@ Idea Generate 支持三档输入。
 - `idea_id`
 - `title`
 - `one_sentence_hypothesis`
+- `anchor_sources`
 - `target_problem`
 - `mechanism`
 - `paper_insight_or_limitation`
@@ -115,6 +116,13 @@ Idea Generate 支持三档输入。
 - `risks`
 - `confidence`
 - `recommendation_reason`
+- `wiki_writeback`（当 `anchor_sources` 指向 wiki 论文/页面时必填；说明应回写到 wiki 的痛点、发现或结论）
+
+字段约束：
+
+- `anchor_sources` 必须列出 1 篇具体论文/wiki 页，或同一类型的 2–4 篇相关论文/wiki 页；不要写成泛泛领域名。
+- `target_problem` 必须描述一个具体痛点：受影响的机制、数据集/指标/实验设定/适用边界，以及痛点如何从 anchor sources 中暴露出来。
+- `mechanism` 必须是针对该痛点的解决思路，不能只是"引入更强模型"或"做更多实验"。
 
 ### Stage 5: Dedup and Validation
 
@@ -131,6 +139,7 @@ Idea Generate 支持三档输入。
 
 - 合并重复 idea。
 - 保留更具体、证据更强、实验更可控的版本。
+- 如果两个 idea 只有泛化说法不同、痛点或 anchor sources 无法区分，应合并或删除较弱版本。
 - validation 失败时必须修正，而不是跳过。
 
 ### Stage 6: Markdown Export
@@ -153,6 +162,7 @@ Idea Generate 支持三档输入。
 - Cross-paper summary。
 - Main limitations or gaps。
 - Recommended ideas ranked by priority。
+- Wiki writeback candidates（当 idea 锚定 wiki 论文时，列出 anchor sources、idea IDs、应回写的结论/发现）。
 - Open questions or assumptions。
 - Human feedback prompt。
 

@@ -6,6 +6,7 @@ Use this structure for every candidate idea.
 idea_id:
 title:
 one_sentence_hypothesis:
+anchor_sources:
 target_problem:
 mechanism:
 paper_insight_or_limitation:
@@ -16,6 +17,7 @@ implementation_scope:
 risks:
 confidence:
 recommendation_reason:
+wiki_writeback:
 ```
 
 Keep each card concise and comparable.
