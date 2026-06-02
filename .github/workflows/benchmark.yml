@@ -27,7 +27,7 @@ jobs:
       BENCH_RESULTS_DIR: bench-results
       BENCH_TARGETS: "idea-generate paper-review paper-review-pipeline paper-ingest idea-generation autoresearch"
       # Pin the upstream image. Override via repo variable OPENCLAW_IMAGE.
-      OPENCLAW_IMAGE_DEFAULT: "ACAutomata/openclaw-docker-cn-im:latest"
+      OPENCLAW_IMAGE_DEFAULT: "acautomata/openclaw-docker-cn-im:latest"
 
     steps:
       - name: "Checkout"
@@ -61,7 +61,7 @@ jobs:
           mkdir -p .bench-runtime
           python3 - <<'PYEOF'
           import os, pathlib
-          image = os.environ.get("OPENCLAW_IMAGE") or "ACAutomata/openclaw-docker-cn-im:latest"
+          image = os.environ.get("OPENCLAW_IMAGE") or "acautomata/openclaw-docker-cn-im:latest"
           data = [
               "OPENCLAW_IMAGE=" + image,
               "OPENCLAW_DATA_DIR=" + os.environ.get("GITHUB_WORKSPACE", ".") + "/.bench-runtime/openclaw-data",

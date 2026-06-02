@@ -20,7 +20,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 COMPOSE_FILE="${BENCH_COMPOSE_FILE:-${ROOT}/docker/docker-compose.bench.yml}"
-IMAGE="${BENCH_OPENCLAW_IMAGE:-ACAutomata/openclaw-docker-cn-im:latest}"
+IMAGE="${BENCH_OPENCLAW_IMAGE:-acautomata/openclaw-docker-cn-im:latest}"
 RUN_ID="${BENCH_RUN_ID:-local-$$}"
 COMPOSE_PROJECT="openclaw-bench-${RUN_ID}"
 
