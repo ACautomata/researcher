@@ -111,25 +111,51 @@ tar --exclude='.git' --exclude='.github' --exclude='.env' \
   docker exec -i "${CONTAINER}" tar -xf - -C /home/node/.openclaw
 log "repo copied into container"
 
-# 6. Health check: `openclaw --local health` from inside the container.
-log "waiting for openclaw CLI inside ${CONTAINER}"
+# 6. Wait for the openclaw container to be healthy. We poll `docker inspect`
+#    for status=healthy (or running + healthcheck=none) and bail loudly if
+#    the container exits before then. CLI-presence alone is not enough --
+#    init.sh can finish while the gateway is still starting, and on a bad
+#    image the container can also just die.
+log "waiting for ${CONTAINER} to reach status=running with health=healthy"
+HEALTHY=0
 for i in $(seq 1 60); do
-  if docker exec "${CONTAINER}" bash -lc 'command -v openclaw >/dev/null'; then
-    break
-  fi
+  STATE="$(docker inspect --format '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${CONTAINER}" 2>/dev/null || true)"
+  case "${STATE}" in
+    running|healthy)
+      HEALTHY=1
+      log "container ${CONTAINER} state=${STATE} after ${i} polls"
+      break
+      ;;
+    exited|dead|removing)
+      echo "[env_setup][FATAL] container ${CONTAINER} state=${STATE}; dumping logs:" >&2
+      docker logs --tail 200 "${CONTAINER}" >&2 || true
+      exit 1
+      ;;
+  esac
   sleep 2
 done
+if [[ "${HEALTHY}" -ne 1 ]]; then
+  echo "[env_setup][FATAL] container ${CONTAINER} did not become healthy in 120s" >&2
+  docker logs --tail 200 "${CONTAINER}" >&2 || true
+  exit 1
+fi
 
+# 7. Smoke turn: a real agent invocation. If this fails the container is
+#    almost certainly not usable for the benchmarks below.
 log "smoke turn: openclaw agent --agent main --message 'ping' --local --json"
-docker exec -e MINIMAX_API_KEY -e MINIMAX_BASE_URL \
-  "${CONTAINER}" bash -lc '
-    export HOME=/home/node
-    export OPENCLAW_CONFIG=/home/node/.openclaw/openclaw.json
-    timeout 90 openclaw agent --agent main --message "ping" --local --json \
-      --session-key "agent:main:bench-smoke-'"${RUN_ID}"'" || true
-  ' | head -c 4000 || true
+if ! docker exec -e MINIMAX_API_KEY -e MINIMAX_BASE_URL \
+    "${CONTAINER}" bash -lc '
+      export HOME=/home/node
+      export OPENCLAW_CONFIG=/home/node/.openclaw/openclaw.json
+      timeout 120 openclaw agent --agent main --message "ping" --local --json \
+        --session-key "agent:main:bench-smoke-'"${RUN_ID}"'"
+    ' ; then
+  echo "[env_setup][FATAL] smoke turn failed; container likely broken" >&2
+  docker logs --tail 200 "${CONTAINER}" >&2 || true
+  exit 1
+fi
 
-# 7. Export the contract for downstream env.sh scripts.
+# 8. Export the contract for downstream env.sh scripts.
 export BENCH_CONTAINER="${CONTAINER}"
 export BENCH_MOUNT="/home/node/.openclaw"
 export BENCH_OPENCLAW="openclaw"

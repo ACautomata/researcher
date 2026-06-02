@@ -98,8 +98,17 @@ jobs:
         run: |
           bash benchmarks/_common/env_setup.sh
 
-      - name: "Sanity check docker is running"
-        run: docker ps
+      - name: "Sanity check container is running"
+        run: |
+          if ! docker ps --filter name=openclaw-bench --filter status=running --format '{{.Names}}' | grep -q '^openclaw-bench$'; then
+            echo "::error::openclaw-bench container is not running. Dumping logs:"
+            docker logs openclaw-bench 2>&1 | tail -100 || true
+            exit 1
+          fi
+          echo "container status:"
+          docker ps --filter name=openclaw-bench
+          echo "--- last 40 log lines ---"
+          docker logs --tail 40 openclaw-bench 2>&1 || true
 
       - name: "Run each benchmark (env.sh then metrics.py)"
         env:
@@ -109,16 +118,27 @@ jobs:
           BENCH_REPO: ${{ github.repository }}
           BENCH_PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          set -u
+          set -eu
+          if ! docker ps --filter name=openclaw-bench --filter status=running --format '{{.Names}}' | grep -q '^openclaw-bench$'; then
+            echo "::error::openclaw-bench container died before benchmarks could run. Dumping logs:"
+            docker logs openclaw-bench 2>&1 | tail -100 || true
+            exit 1
+          fi
           for bench in $BENCH_TARGETS; do
             echo "=========================================="
             echo "benchmark: $bench"
             echo "=========================================="
-            if ! bash "benchmarks/$bench/env.sh"; then
-              echo "::warning::$bench env.sh failed; continuing"
-              continue
+            # Re-check before each: the gateway may have crashed mid-run.
+            if ! docker ps --filter name=openclaw-bench --filter status=running --format '{{.Names}}' | grep -q '^openclaw-bench$'; then
+              echo "::error::$bench aborted: openclaw-bench container is no longer running"
+              docker logs --tail 50 openclaw-bench 2>&1 || true
+              exit 1
             fi
-            python3 "benchmarks/$bench/metrics.py" || true
+            if ! bash "benchmarks/$bench/env.sh"; then
+              echo "::error::$bench env.sh failed"
+              exit 1
+            fi
+            python3 "benchmarks/$bench/metrics.py"
           done
 
       - name: "Aggregate results and post PR comment"
