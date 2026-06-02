@@ -120,6 +120,28 @@ _NOISE_PREFIXES = (
     "[ws]",
     "[memory-core]",
     "[memory-wiki]",
+    "[memory-qmd]",
+    "[qmd]",
+    "[sandbox]",
+    "[auth]",
+    "[lanes]",
+    "[tools]",
+    "[secrets-ref]",
+    "[secrets-store]",
+    "[secrets-warning]",
+    "[fallback]",
+    "[init]",
+    "[post-init]",
+    "[config]",
+    "[bridge]",
+    "[obsidian]",
+    "[vault]",
+    "[wiki]",
+    "[router]",
+    "[worker]",
+    "[spawn]",
+    "[retry]",
+    "[loop]",
     "Config health-state write failed",
     "=== ",
     "初始化",
@@ -144,6 +166,64 @@ _NOISE_PREFIXES = (
     "开放",
 )
 
+# Regex matching a *whole* log/diagnostic line that has a `[tag]` prefix and
+# no real agent content.  Used as a second pass after prefix matching.
+_BRACKET_TAG_RE = re.compile(r"^\s*\[(?P<tag>[a-zA-Z0-9_.-]+)\]\s*(?P<rest>.*)$")
+
+# Diagnostic lines that look like free-form English status text, not
+# agent prose.  Anything matching one of these is dropped.
+_NOISE_SUBSTRINGS = (
+    "Context engine ",
+    "quarantining it for this process",
+    "falling back to default engine",
+    "Context engine \"",
+    "failed during resolve: not registered",
+    "failed to start",
+    "lane task error",
+    "Traceback (most recent call last)",
+    "TypeError:",
+    "RuntimeError:",
+    "Error response from daemon",
+    "EACCES:",
+    "ENOENT:",
+    "openclaw configuration is invalid",
+    "secret reference is unresolved",
+    "no API key found for provider",
+    "Authentication failed",
+    "401 Unauthorized",
+    "403 Forbidden",
+)
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_diagnostics(text: str) -> str:
+    """Drop lines that look like openclaw stderr leakage from a non-JSON reply.
+
+    Passes:
+    1. ANSI escape removal + trim.
+    2. Drop lines that start with any known noise prefix.
+    3. Drop lines that match a `[tag] ...` diagnostic shape.
+    4. Drop lines whose body contains a known noise substring.
+    5. Keep everything else.
+    """
+    cleaned_lines: list[str] = []
+    for line in text.splitlines():
+        stripped = _ANSI_RE.sub("", line).strip()
+        if not stripped:
+            continue
+        if any(stripped.startswith(p) for p in _NOISE_PREFIXES):
+            continue
+        if _BRACKET_TAG_RE.match(stripped):
+            # Looks like a `[foo] ...` log line.  Only keep if the tag is
+            # clearly NOT in our diagnostic tag list.  For safety, drop ALL
+            # bracketed-tag lines; real agent text never starts with `[tag]`.
+            continue
+        if any(sub in stripped for sub in _NOISE_SUBSTRINGS):
+            continue
+        cleaned_lines.append(stripped)
+    return "\n".join(cleaned_lines)
+
 
 def _extract_agent_text(stdout: str, stderr: str) -> str:
     """Pick the agent's final text out of an `openclaw agent --json` reply.
@@ -153,57 +233,43 @@ def _extract_agent_text(stdout: str, stderr: str) -> str:
          {"payloads": [{"text": "...", "mediaUrl": null}, ...], "meta": {...}}
        We concatenate every payloads[].text (the agent may emit multiple
        text parts) and return that.
-    2. If stdout isn't valid JSON (older builds, fall back) but stderr has
-       no obvious error, return stdout as-is.
-    3. If stderr says the agent itself errored (lane task error, etc.),
-       return the stderr line so the judge still has *something* to grade
-       on (and the rationale will surface the failure).
+    2. If stdout is empty or unparsable, fall back to stderr, but run
+       the diagnostic-stripping pass first -- when context-engine plugin
+       fails, openclaw writes ~2kB of `[context-engine] ... [diagnostic] ...`
+       noise to stderr and no real agent text appears.
+    3. If after stripping nothing usable remains, return a sentinel
+       "(no agent response — only diagnostic output)" so downstream
+       judges and the report get a clear signal instead of 2kB of noise.
     """
-    if not stdout.strip():
-        # The CLI may have written its real reply to stderr if --json parsing
-        # itself failed. Surface it so we don't show a confusing empty string.
-        return stderr.strip()
-    try:
-        data = json.loads(stdout)
-    except json.JSONDecodeError:
-        # Plain-text mode. Strip ANSI escapes and known diagnostic prefixes
-        # that sometimes bleed into the captured stream.
-        return _strip_diagnostics(stdout)
+    if stdout.strip():
+        try:
+            data = json.loads(stdout)
+        except json.JSONDecodeError:
+            return _strip_diagnostics(stdout)
 
-    # Common shape: top-level "payloads" list.
-    if isinstance(data, dict):
-        payloads = data.get("payloads")
-        if isinstance(payloads, list) and payloads:
-            texts = [p.get("text", "") for p in payloads if isinstance(p, dict)]
-            joined = "\n".join(t for t in texts if t)
-            if joined.strip():
-                return joined
-        # Some embedded-fallback responses nest under "result.payloads".
-        result = data.get("result")
-        if isinstance(result, dict):
-            payloads = result.get("payloads")
+        # Common shape: top-level "payloads" list.
+        if isinstance(data, dict):
+            payloads = data.get("payloads")
             if isinstance(payloads, list) and payloads:
                 texts = [p.get("text", "") for p in payloads if isinstance(p, dict)]
                 joined = "\n".join(t for t in texts if t)
                 if joined.strip():
-                    return joined
-    return _strip_diagnostics(stdout)
+                    return _strip_diagnostics(joined)
+            # Some embedded-fallback responses nest under "result.payloads".
+            result = data.get("result")
+            if isinstance(result, dict):
+                payloads = result.get("payloads")
+                if isinstance(payloads, list) and payloads:
+                    texts = [p.get("text", "") for p in payloads if isinstance(p, dict)]
+                    joined = "\n".join(t for t in texts if t)
+                    if joined.strip():
+                        return _strip_diagnostics(joined)
 
-
-_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
-
-
-def _strip_diagnostics(text: str) -> str:
-    """Drop lines that look like openclaw stderr leakage from a non-JSON reply."""
-    cleaned_lines: list[str] = []
-    for line in text.splitlines():
-        stripped = _ANSI_RE.sub("", line).strip()
-        if not stripped:
-            continue
-        if any(stripped.startswith(p) for p in _NOISE_PREFIXES):
-            continue
-        cleaned_lines.append(stripped)
-    return "\n".join(cleaned_lines)
+    # Fallback: stderr.  Strip diagnostic noise and return what remains.
+    cleaned_stderr = _strip_diagnostics(stderr)
+    if not cleaned_stderr.strip():
+        return "(no agent response — only diagnostic output)"
+    return cleaned_stderr
 
 
 def main(bench_name: str, agent_id: str | None = None) -> int:
