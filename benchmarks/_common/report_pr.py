@@ -30,7 +30,7 @@ def _load(path: Path) -> dict:
 
 
 def _summarize(report: dict) -> dict:
-    results = report.get("results") or []
+    results = [r for r in (report.get("results") or []) if not r.get("skipped")]
     total = len(results)
     if total == 0:
         return {"total": 0, "passed": 0, "pass_rate": 0.0, "avg_score": 0.0, "weight": 0.0}
@@ -84,6 +84,8 @@ def render(results_dir: Path, base: dict | None) -> str:
     failures: list[dict] = []
     for name, report, _ in summaries:
         for r in report.get("results") or []:
+            if r.get("skipped"):
+                continue
             if not r.get("pass"):
                 failures.append({"bench": name, **r})
     failures.sort(key=lambda r: r.get("score", 1.0))
@@ -109,7 +111,9 @@ def post_comment(body: str) -> bool:
         return False
 
     # List comments, look for one with our marker, edit or create.
-    list_cmd = ["gh", "api", f"repos/{repo}/issues/{pr}/comments", "--paginate"]
+    # `gh api --paginate` emits one JSON array per page unless `--slurp` wraps
+    # them; without slurp, json.loads fails on multi-page PR comment streams.
+    list_cmd = ["gh", "api", f"repos/{repo}/issues/{pr}/comments", "--paginate", "--slurp"]
     env = os.environ.copy()
     env["GH_TOKEN"] = token
     try:
@@ -117,7 +121,8 @@ def post_comment(body: str) -> bool:
     except subprocess.CalledProcessError:
         return False
     try:
-        comments = json.loads(out.stdout or "[]")
+        loaded = json.loads(out.stdout or "[]")
+        comments = [c for page in loaded for c in page] if loaded and isinstance(loaded[0], list) else loaded
     except json.JSONDecodeError:
         comments = []
     existing_id = None

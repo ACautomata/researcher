@@ -27,7 +27,7 @@ jobs:
       BENCH_RESULTS_DIR: bench-results
       BENCH_TARGETS: "idea-generate paper-review paper-review-pipeline paper-ingest idea-generation autoresearch"
       # Pin the upstream image. Override via repo variable OPENCLAW_IMAGE.
-      OPENCLAW_IMAGE_DEFAULT: "acautomata/openclaw-docker-cn-im:latest"
+      OPENCLAW_IMAGE_DEFAULT: "justlikemaki/openclaw-docker-cn-im:latest"
 
     steps:
       - name: "Checkout"
@@ -56,12 +56,13 @@ jobs:
         env:
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
           MINIMAX_BASE_URL: ${{ secrets.MINIMAX_BASE_URL }}
+          BENCH_OPENCLAW_IMAGE: ${{ vars.OPENCLAW_IMAGE || env.OPENCLAW_IMAGE_DEFAULT }}
         run: |
           set -euo pipefail
           mkdir -p .bench-runtime
           python3 - <<'PYEOF'
           import os, pathlib
-          image = os.environ.get("OPENCLAW_IMAGE") or "acautomata/openclaw-docker-cn-im:latest"
+          image = os.environ.get("BENCH_OPENCLAW_IMAGE") or os.environ.get("OPENCLAW_IMAGE") or os.environ.get("OPENCLAW_IMAGE_DEFAULT") or "justlikemaki/openclaw-docker-cn-im:latest"
           data = [
               "OPENCLAW_IMAGE=" + image,
               "OPENCLAW_DATA_DIR=" + os.environ.get("GITHUB_WORKSPACE", ".") + "/.bench-runtime/openclaw-data",
@@ -95,6 +96,7 @@ jobs:
         env:
           MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
           MINIMAX_BASE_URL: ${{ secrets.MINIMAX_BASE_URL }}
+          BENCH_OPENCLAW_IMAGE: ${{ vars.OPENCLAW_IMAGE || env.OPENCLAW_IMAGE_DEFAULT }}
         run: |
           bash benchmarks/_common/env_setup.sh
 
@@ -111,12 +113,6 @@ jobs:
           docker logs --tail 40 openclaw-bench 2>&1 || true
 
       - name: "Run each benchmark (env.sh then metrics.py)"
-        env:
-          BENCH_CONTAINER: openclaw-bench
-          BENCH_MOUNT: /home/node/.openclaw
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BENCH_REPO: ${{ github.repository }}
-          BENCH_PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -eu
           if ! docker ps --filter name=openclaw-bench --filter status=running --format '{{.Names}}' | grep -q '^openclaw-bench$'; then
@@ -139,7 +135,21 @@ jobs:
               exit 1
             fi
             python3 "benchmarks/$bench/metrics.py"
+            if [ ! -s "bench-results/$bench.json" ]; then
+              echo "::error::$bench metrics.py did not write bench-results/$bench.json"
+              exit 1
+            fi
           done
+
+      - name: "Checkout trusted reporter"
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: .bench-trusted
+          sparse-checkout: |
+            benchmarks/_common/report_pr.py
+          sparse-checkout-cone-mode: false
 
       - name: "Aggregate results and post PR comment"
         if: always()
@@ -150,8 +160,26 @@ jobs:
           # detects the empty value and falls back to printing the body to stdout.
           BENCH_PR_NUMBER: ${{ github.event.pull_request.number }}
           BENCH_BASE_SUMMARY: ${{ secrets.BENCH_BASE_RESULTS_JSON }}
+          BENCH_REPORTER: ${{ github.event_name == 'pull_request' && '.bench-trusted/benchmarks/_common/report_pr.py' || 'benchmarks/_common/report_pr.py' }}
         run: |
-          python3 benchmarks/_common/report_pr.py
+          set -euo pipefail
+          if [ -n "${BENCH_BASE_SUMMARY:-}" ]; then
+            python3 - <<'PYEOF'
+          import base64, json, os, pathlib
+          raw = os.environ["BENCH_BASE_SUMMARY"].strip()
+          try:
+              data = json.loads(raw)
+          except json.JSONDecodeError:
+              data = json.loads(base64.b64decode(raw).decode("utf-8"))
+          path = pathlib.Path(".bench-runtime/base-summary.json")
+          path.parent.mkdir(parents=True, exist_ok=True)
+          path.write_text(json.dumps(data), encoding="utf-8")
+          print(path)
+          PYEOF
+            echo "BENCH_BASE_SUMMARY=.bench-runtime/base-summary.json" >> "$GITHUB_ENV"
+            export BENCH_BASE_SUMMARY=.bench-runtime/base-summary.json
+          fi
+          python3 "${BENCH_REPORTER:-benchmarks/_common/report_pr.py}"
 
       - name: "Upload bench-results as artifact"
         if: always()

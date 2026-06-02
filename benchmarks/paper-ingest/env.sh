@@ -4,6 +4,15 @@
 # autoresearch agent can be told to ingest it.
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+RUNTIME_ENV_FILE="${BENCH_RUNTIME_ENV_FILE:-${ROOT}/.bench-runtime/bench-runtime.env}"
+if [[ -f "${RUNTIME_ENV_FILE}" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "${RUNTIME_ENV_FILE}"
+  set +a
+fi
+
 : "${BENCH_CONTAINER:?must be exported by env_setup.sh}"
 : "${BENCH_MOUNT:?must be exported by env_setup.sh}"
 : "${BENCH_RUN_ID:=local}"
@@ -31,6 +40,20 @@ to wiki/log.md.
 '
 echo "${FIXTURE}" | docker exec -i "${BENCH_CONTAINER}" bash -lc \
   "cat > ${TARGET}/benchingest.md"
+
+log "staging comparison seed papers"
+docker exec "${BENCH_CONTAINER}" mkdir -p \
+  "${BENCH_MOUNT}/workspace-autoresearch/wiki/domains/gnn-regularization/papers"
+docker exec -i "${BENCH_CONTAINER}" bash -lc "cat > ${BENCH_MOUNT}/workspace-autoresearch/wiki/domains/gnn-regularization/papers/edge-aware.md" <<'EOF'
+# Edge-aware regularization
+
+Edge-aware regularization is evaluated on homophilous Cora and CiteSeer settings against GCN/GAT-style baselines and reports 1-3% gains in the synthetic benchmark fixture.
+EOF
+docker exec -i "${BENCH_CONTAINER}" bash -lc "cat > ${BENCH_MOUNT}/workspace-autoresearch/wiki/domains/gnn-regularization/papers/gated-attention.md" <<'EOF'
+# Gated attention for heterophilous graphs
+
+Gated attention is represented here as a heterophilous-graph fixture evaluated on Chameleon only, so comparisons must separate it from Cora/CiteSeer homophilous evidence.
+EOF
 
 log "staging qa.jsonl"
 docker exec "${BENCH_CONTAINER}" mkdir -p \

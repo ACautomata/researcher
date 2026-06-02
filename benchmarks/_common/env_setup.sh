@@ -20,7 +20,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 COMPOSE_FILE="${BENCH_COMPOSE_FILE:-${ROOT}/docker/docker-compose.bench.yml}"
-IMAGE="${BENCH_OPENCLAW_IMAGE:-acautomata/openclaw-docker-cn-im:latest}"
+IMAGE="${BENCH_OPENCLAW_IMAGE:-${OPENCLAW_IMAGE:-justlikemaki/openclaw-docker-cn-im:latest}}"
 RUN_ID="${BENCH_RUN_ID:-local-$$}"
 COMPOSE_PROJECT="openclaw-bench-${RUN_ID}"
 
@@ -28,6 +28,16 @@ log() { printf '\n[env_setup] %s\n' "$*"; }
 die() { printf '\n[env_setup][FATAL] %s\n' "$*" >&2; exit 1; }
 
 # 0. Secrets check
+# For local runs, load the documented docker/.env.bench before validating.
+LOCAL_ENV_FILE="${ROOT}/docker/.env.bench"
+if [[ -f "${LOCAL_ENV_FILE}" ]]; then
+  log "loading local env ${LOCAL_ENV_FILE}"
+  set -a
+  # shellcheck disable=SC1090
+  . "${LOCAL_ENV_FILE}"
+  set +a
+fi
+IMAGE="${BENCH_OPENCLAW_IMAGE:-${OPENCLAW_IMAGE:-${IMAGE}}}"
 if [[ -z "${MINIMAX_API_KEY:-}" ]]; then
   die "MINIMAX_API_KEY is not set. Add it as a GitHub Actions secret, then re-run."
 fi
@@ -142,7 +152,7 @@ HEALTHY=0
 for i in $(seq 1 60); do
   STATE="$(docker inspect --format '{{.State.Status}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${CONTAINER}" 2>/dev/null || true)"
   case "${STATE}" in
-    running|healthy)
+    running\|healthy|running\|none)
       HEALTHY=1
       log "container ${CONTAINER} state=${STATE} after ${i} polls"
       break
@@ -183,5 +193,20 @@ export BENCH_OPENCLAW="openclaw"
 export BENCH_COMPOSE_PROJECT="${COMPOSE_PROJECT}"
 export BENCH_ENV_FILE="${ENV_FILE}"
 export BENCH_DATA_DIR="${ENV_DIR}/openclaw-data"
+RUNTIME_ENV_FILE="${ENV_DIR}/bench-runtime.env"
+cat >"${RUNTIME_ENV_FILE}" <<EOF
+BENCH_CONTAINER=${BENCH_CONTAINER}
+BENCH_MOUNT=${BENCH_MOUNT}
+BENCH_OPENCLAW=${BENCH_OPENCLAW}
+BENCH_COMPOSE_PROJECT=${BENCH_COMPOSE_PROJECT}
+BENCH_ENV_FILE=${BENCH_ENV_FILE}
+BENCH_DATA_DIR=${BENCH_DATA_DIR}
+BENCH_OPENCLAW_IMAGE=${IMAGE}
+EOF
+export BENCH_RUNTIME_ENV_FILE="${RUNTIME_ENV_FILE}"
+if [[ -n "${GITHUB_ENV:-}" ]]; then
+  cat "${RUNTIME_ENV_FILE}" >>"${GITHUB_ENV}"
+  printf 'BENCH_RUNTIME_ENV_FILE=%s\n' "${RUNTIME_ENV_FILE}" >>"${GITHUB_ENV}"
+fi
 
-log "ready: container=${BENCH_CONTAINER} mount=${BENCH_MOUNT} data_dir=${BENCH_DATA_DIR}"
+log "ready: container=${BENCH_CONTAINER} mount=${BENCH_MOUNT} data_dir=${BENCH_DATA_DIR} runtime_env=${RUNTIME_ENV_FILE}"

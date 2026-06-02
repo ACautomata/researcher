@@ -43,6 +43,34 @@ def _extract_must_contain(gold: Any) -> list[str]:
     return []
 
 
+def _behavior_checks(answer: str, qa: dict) -> list[str]:
+    """Encode common behavioral rubric constraints for the rule judge.
+
+    Rule-scored QAs often carry their real requirements in `rubric` or
+    `gold_answer.key_behavior`; these checks keep obvious violations from
+    passing on keyword coverage alone.
+    """
+    text = answer or ""
+    lower = text.lower()
+    rubric = " ".join(str(v) for v in [qa.get("rubric"), (qa.get("gold_answer") or {}).get("key_behavior") if isinstance(qa.get("gold_answer"), dict) else None] if v)
+    missing: list[str] = []
+    forbidden_phrases = ["可能是", "应该是", "probably", "should be"]
+    if any(term in rubric for term in ["不出现", "No '", "no '", "No fabrication", "no fabrication", "不要夸大", "unsourced"]):
+        hits = [phrase for phrase in forbidden_phrases if phrase.lower() in lower]
+        if hits:
+            missing.append("forbidden speculative/unsourced phrasing: " + ", ".join(hits[:5]))
+    if "No fabricated numbers" in rubric or "no fabricated numbers" in rubric:
+        allowed_numbers = {"0.18", "0.16", "40", "20", "1", "5"}
+        numbers = set(re.findall(r"(?<![A-Za-z])\d+(?:\.\d+)?%?", text))
+        fabricated = sorted(n for n in numbers if n.rstrip("%") not in allowed_numbers)
+        if fabricated:
+            missing.append("potential fabricated numbers: " + ", ".join(fabricated[:5]))
+    for required in re.findall(r"(?:names?|mentions?|包含|必须包含|必须包含具体|必须).*?([A-Za-z][A-Za-z0-9@_-]+)", rubric):
+        if required.lower() not in lower:
+            missing.append(f"rubric keyword missing: {required}")
+    return missing
+
+
 def judge_with_rules(answer: str, qa: dict) -> dict:
     """Score an answer against qa.gold_answer with simple keyword coverage.
 
@@ -60,13 +88,17 @@ def judge_with_rules(answer: str, qa: dict) -> dict:
 
     text = (answer or "").lower()
     missing = [r for r in required if r.lower() not in text]
+    behavior_missing = _behavior_checks(answer, qa)
     covered = len(required) - len(missing)
     score = covered / len(required)
+    if behavior_missing:
+        score = min(score, max(0.0, 1.0 - (len(behavior_missing) / max(1, len(required)))))
+    all_missing = missing + behavior_missing
     return {
         "score": round(score, 4),
-        "pass": score >= qa.get("pass_threshold", 0.5),
-        "rationale": f"covered {covered}/{len(required)}; missing={missing[:5]}",
-        "missing": missing,
+        "pass": score >= qa.get("pass_threshold", 0.5) and not behavior_missing,
+        "rationale": f"covered {covered}/{len(required)}; missing={all_missing[:5]}",
+        "missing": all_missing,
     }
 
 
@@ -74,7 +106,8 @@ def judge_with_rules(answer: str, qa: dict) -> dict:
 
 
 def judge_with_agent(qa: dict, answer: str, agent_id: str = "main",
-                     model: str | None = None, timeout: int = 600) -> dict:
+                     model: str | None = None, timeout: int = 600,
+                     container: str | None = None) -> dict:
     """Run a one-shot LLM judge via the openclaw CLI.
 
     The judge prompt asks for a JSON verdict: {"score": 0-1, "rationale": "..."}.
@@ -91,8 +124,9 @@ def judge_with_agent(qa: dict, answer: str, agent_id: str = "main",
         f"CANDIDATE:\n{(answer or '')[:8000]}\n"
     )
 
-    cmd = ["openclaw", "agent", "--agent", agent_id, "--message", prompt, "--json", "--local",
-           "--session-key", f"agent:{agent_id}:bench-judge-{os.getpid()}", "--timeout", str(timeout)]
+    openclaw_cmd = ["openclaw", "agent", "--agent", agent_id, "--message", prompt, "--json", "--local",
+                    "--session-key", f"agent:{agent_id}:bench-judge-{os.getpid()}", "--timeout", str(timeout)]
+    cmd = ["docker", "exec", "-i", container, *openclaw_cmd] if container else openclaw_cmd
     if model:
         cmd += ["--model", model]
     try:

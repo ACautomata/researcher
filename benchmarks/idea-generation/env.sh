@@ -7,6 +7,15 @@
 # to look).
 set -euo pipefail
 
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+RUNTIME_ENV_FILE="${BENCH_RUNTIME_ENV_FILE:-${ROOT}/.bench-runtime/bench-runtime.env}"
+if [[ -f "${RUNTIME_ENV_FILE}" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "${RUNTIME_ENV_FILE}"
+  set +a
+fi
+
 : "${BENCH_CONTAINER:?must be exported by env_setup.sh}"
 : "${BENCH_MOUNT:?must be exported by env_setup.sh}"
 : "${BENCH_RUN_ID:=local}"
