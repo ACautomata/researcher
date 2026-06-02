@@ -143,10 +143,10 @@ if [[ -n "${MINIMAX_API_KEY:-}" ]]; then
   docker exec -e MINIMAX_API_KEY \
     "${CONTAINER}" bash -lc '
       export HOME=/home/node
-      mkdir -p /home/node/.openclaw/agents/main/agent
-      printf "%s" "$MINIMAX_API_KEY" | openclaw models auth paste-token \
-        --provider minimax --profile default \
-        || echo "openclaw models auth paste-token failed; will rely on init.sh sync"
+      export OPENCLAW_AGENT_DIR=/home/node/.openclaw/agents/main
+      printf "%s" "$MINIMAX_API_KEY" | openclaw models auth paste-api-key \
+        --provider minimax --agent main \
+        || echo "openclaw models auth paste-api-key failed; will rely on init.sh sync"
     ' || true
 else
   log "MINIMAX_API_KEY not set; skipping explicit auth-profiles write"
