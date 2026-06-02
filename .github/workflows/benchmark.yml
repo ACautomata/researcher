@@ -72,12 +72,10 @@ jobs:
               "TZ=Asia/Shanghai",
               "SYNC_OPENCLAW_CONFIG=false",
               "SYNC_EXTENSIONS_ON_START=false",
-              "SYNC_MODEL_CONFIG=true",
+              "SYNC_MODEL_CONFIG=false",
               "MODEL_ID=minimax/MiniMax-M2.7",
               "PRIMARY_MODEL=minimax/MiniMax-M2.7",
               "BASE_URL=" + (os.environ.get("MINIMAX_BASE_URL") or "https://api.minimaxi.com"),
-              "API_KEY=" + os.environ["MINIMAX_API_KEY"],
-              "MINIMAX_API_KEY=" + os.environ["MINIMAX_API_KEY"],
               "API_PROTOCOL=anthropic",
               "CONTEXT_WINDOW=200000",
               "MAX_TOKENS=8192",
@@ -119,6 +117,8 @@ jobs:
           BENCH_CONTAINER: ${{ env.BENCH_CONTAINER }}
           BENCH_MOUNT: ${{ env.BENCH_MOUNT }}
           BENCH_OPENCLAW: openclaw
+          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          MINIMAX_BASE_URL: ${{ secrets.MINIMAX_BASE_URL }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BENCH_REPO: ${{ github.repository }}
           BENCH_PR_NUMBER: ${{ github.event.pull_request.number }}

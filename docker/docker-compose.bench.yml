@@ -20,18 +20,22 @@ services:
       LANG: en_US.UTF-8
       LANGUAGE: en_US:en
       LC_ALL: en_US.UTF-8
-      # Sync flags. SYNC_OPENCLAW_CONFIG=true lets init.sh's model-config
-      # sync path read MODEL_ID/PRIMARY_MODEL/BASE_URL/API_KEY and write
-      # the auth-profiles.json the gateway actually consults at runtime.
+      # Sync flags. Keep model config sync disabled so init.sh never writes
+      # plaintext credentials from API_KEY to disk. env_setup.sh patches a
+      # SecretRef into openclaw.json instead; benchmark calls pass
+      # MINIMAX_API_KEY only to each `docker exec ... openclaw agent --local`
+      # process.
       SYNC_OPENCLAW_CONFIG: "true"
       SYNC_EXTENSIONS_ON_START: "false"
       SYNC_EXTENSIONS_MODE: "none"
-      SYNC_MODEL_CONFIG: "true"
+      SYNC_MODEL_CONFIG: "false"
       # Model
       MODEL_ID: ${MODEL_ID}
       PRIMARY_MODEL: ${PRIMARY_MODEL}
       BASE_URL: ${BASE_URL}
-      API_KEY: ${API_KEY}
+      # Keep API_KEY empty so init.sh does not write plaintext credentials to disk.
+      # The runtime SecretRef uses MINIMAX_API_KEY from the container env instead.
+      API_KEY: ""
       MINIMAX_API_KEY: ${MINIMAX_API_KEY}
       API_PROTOCOL: ${API_PROTOCOL}
       CONTEXT_WINDOW: ${CONTEXT_WINDOW}

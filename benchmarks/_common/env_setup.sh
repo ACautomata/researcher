@@ -49,12 +49,10 @@ OPENCLAW_GATEWAY_BIND=127.0.0.1
 TZ=Asia/Shanghai
 SYNC_OPENCLAW_CONFIG=false
 SYNC_EXTENSIONS_ON_START=false
-SYNC_MODEL_CONFIG=true
+SYNC_MODEL_CONFIG=false
 MODEL_ID=minimax/MiniMax-M2.7
 PRIMARY_MODEL=minimax/MiniMax-M2.7
 BASE_URL=${MINIMAX_BASE_URL}
-API_KEY=${MINIMAX_API_KEY}
-MINIMAX_API_KEY=${MINIMAX_API_KEY}
 API_PROTOCOL=anthropic
 CONTEXT_WINDOW=200000
 MAX_TOKENS=8192
@@ -133,70 +131,25 @@ log "chown /home/node/.openclaw -> 1000:1000 (openclaw runtime uid)"
 docker exec "${CONTAINER}" chown -R 1000:1000 /home/node/.openclaw || true
 log "repo copied into container"
 
-# Belt-and-suspenders: even if init.sh's config sync already wrote
-# auth-profiles.json, we re-run `openclaw models auth paste-token` so the
-# gateway's auth store definitely has the minimax credential for the
-# embedded (--local) agent calls below. This is the path that fails
-# noisily with 'No API key found for provider "minimax"' if the secret
-# is missing.
-if [[ -n "${MINIMAX_API_KEY:-}" ]]; then
-  log "setting models.providers.minimax.apiKey to MINIMAX_API_KEY via openclaw config set"
-  # The gateway's credential lookup is driven by `models.providers.<id>.apiKey`.
-  # Per docs.openclaw.ai/gateway/secrets + openclawsome.com guide, the
-  # value should be a SecretRef object: {source:"env", provider:"default",
-  # id:"<ENV_VAR_NAME>"}. openclaw then resolves it at runtime from the
-  # forwarded MINIMAX_API_KEY env var. This is the supported, secret-safe
-  # path -- no real key is ever written to disk.
-  patch_secret_ref() {
-    docker exec "${CONTAINER}" bash -lc '
-      export HOME=/home/node
-      REF='\''{"source":"env","provider":"default","id":"MINIMAX_API_KEY"}'\''
-      openclaw config set --json models.providers.minimax.apiKey "$REF" \
-        2>/dev/null || true
-      python3 - <<'\''PY'\''
+# 5b. Patch models.providers.minimax.apiKey with a SecretRef so `openclaw
+#     agent --local` can resolve it from the MINIMAX_API_KEY env var.
+#     All agent calls use `docker exec -e MINIMAX_API_KEY ... openclaw agent
+#     --local`, so the SecretRef resolves inside each exec session.  The
+#     gateway process itself does NOT need the env var.  We deliberately do
+#     NOT restart the container after patching -- restarting was the root
+#     cause of 13+ CI failures because init.sh re-runs on restart and the
+#     container exits within seconds.
+log "patching models.providers.minimax.apiKey with SecretRef (no restart)"
+docker exec "${CONTAINER}" python3 -c '
 import json, pathlib
 p = pathlib.Path("/home/node/.openclaw/openclaw.json")
 data = json.loads(p.read_text(encoding="utf-8"))
 prov = data.setdefault("models", {}).setdefault("providers", {}).setdefault("minimax", {})
 prov["apiKey"] = {"source": "env", "provider": "default", "id": "MINIMAX_API_KEY"}
 p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-PY
-      chown -R 1000:1000 /home/node/.openclaw/openclaw.json
-    '
-  }
-  # First patch (before restart), then restart, then re-patch (init.sh
-  # regenerates openclaw.json on every container start).
-  patch_secret_ref
-  log "restarting openclaw-bench so it re-resolves the SecretRef snapshot"
-  docker compose --project-name "${COMPOSE_PROJECT}" \
-    -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" \
-    restart openclaw-bench
-  # After restart, init.sh re-ran. Re-derive the container name (the id
-  # is new, but container_name=openclaw-bench is stable) and re-wait for
-  # the gateway ready marker before re-patching.
-  sleep 3
-  for i in $(seq 1 60); do
-    STATE="$(docker inspect --format '{{.State.Running}}' openclaw-bench 2>/dev/null || true)"
-    if [[ "${STATE}" != "true" ]]; then
-      die "container openclaw-bench exited after restart (state=${STATE})"
-    fi
-    # Use --since to only match logs from AFTER the restart, avoiding false
-    # positives from the first run's "http server listening" line.
-    if docker logs --since 10s --tail 20 openclaw-bench 2>&1 | grep -qE 'http server listening|heartbeat.*started'; then
-      log "gateway ready after restart (poll $i)"
-      break
-    fi
-    sleep 2
-  done
-  patch_secret_ref
-  log "post-restart SecretRef:"
-  docker exec openclaw-bench python3 -c \
-    'import json; d=json.load(open("/home/node/.openclaw/openclaw.json")); print(d["models"]["providers"]["minimax"].get("apiKey"))' || true
-  # Re-export the (re-derived) container name for downstream steps.
-  CONTAINER="openclaw-bench"
-else
-  log "MINIMAX_API_KEY not set; skipping apiKey patch"
-fi
+print("patched models.providers.minimax.apiKey -> SecretRef(MINIMAX_API_KEY)")
+'
+docker exec "${CONTAINER}" chown 1000:1000 /home/node/.openclaw/openclaw.json
 
 # 6. Wait for the openclaw container to start and the gateway to become
 #    ready. The image's healthcheck is informational only (we set
