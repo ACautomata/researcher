@@ -46,6 +46,10 @@ services:
       OPENCLAW_GATEWAY_BIND: loopback
       OPENCLAW_GATEWAY_MODE: local
       OPENCLAW_GATEWAY_ALLOW_INSECURE_AUTH: "true"
+      # GATEWAY_TOKEN is required at startup even with insecure-auth on. We
+      # never use this token (the CLI runs --local embedded), so a stable
+      # dummy value is enough.
+      GATEWAY_TOKEN: ${GATEWAY_TOKEN:-bench-only-not-a-real-token}
       # Sandbox off in CI
       OPENCLAW_SANDBOX_MODE: off
       OPENCLAW_PLUGINS_ENABLED: "false"
@@ -56,7 +60,11 @@ services:
     init: true
     restart: "no"
     healthcheck:
-      test: ["CMD-SHELL", "command -v openclaw >/dev/null"]
+      # The openclaw CLI is always in PATH; what we actually need to know
+      # is whether the gateway finished starting. `openclaw gateway status`
+      # returns non-zero if startup failed.
+      test: ["CMD-SHELL", "openclaw gateway status >/dev/null 2>&1 || (command -v openclaw >/dev/null && [ -f /home/node/.openclaw/logs/stability/openclaw-stability-*-gateway.startup_failed.json ] && exit 1 || exit 0)"]
       interval: 10s
       timeout: 5s
       retries: 6
+      start_period: 30s
