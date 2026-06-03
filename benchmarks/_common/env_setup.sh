@@ -131,7 +131,7 @@ tar --exclude='.git' --exclude='.github' --exclude='.env' \
 log "creating agent session dirs"
 docker exec "${CONTAINER}" bash -lc '
   set -e
-  for agent_id in main autoresearch paper-review idea-generate; do
+  for agent_id in main autoresearch paper-review idea-generate reviewer; do
     mkdir -p "/home/node/.openclaw/agents/${agent_id}/sessions"
   done
 '

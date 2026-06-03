@@ -19,6 +19,7 @@ This repo follows OpenClaw's hub-and-spoke multi-agent pattern. The main agent (
 - **workspace-autoresearch/** — Sub-agent workspace for the Autoresearch agent. Mirrors the main workspace structure with SOUL.md, AGENTS.md, IDENTITY.md, USER.md, TOOLS.md, MEMORY.md, HEARTBEAT.md, DREAMS.md. This agent is spawned by 颖姗 for paper ingest, literature queries, cross-paper comparison, and wiki quality auditing.
 - **workspace-paper-review/** — Agent workspace for paper review and validation experiment design. Contains SOUL.md, AGENTS.md, USER.md, memory/, and skills/ for the 5-stage paper analysis pipeline.
 - **workspace-idea-generate/** — Sub-agent workspace for the Idea Generate agent. Contains the `idea-generate` skill for paper-grounded research idea cards, opportunity synthesis, deduplication, validation, and Markdown export.
+- **workspace-reviewer/** — Sub-agent workspace for the Reviewer agent. Reviews sub-agent outputs and benchmark candidate answers with a strict pass/fail quality gate.
 - **benchmarks/** — Developer benchmarks and evaluation datasets for testing agent capabilities.
 
 ## Key Configuration Details
@@ -82,6 +83,8 @@ The system uses a **main agent → main agent skills → subagent → subagent s
 3. **Subagents** — each registered in `openclaw.json` under `agents.list`, spawned by the main agent via `sessions_spawn`. Each subagent owns a **single domain of responsibility**:
    - `autoresearch` — paper ingest, wiki maintenance, literature queries, cross-paper comparison.
    - `paper-review` — paper analysis pipeline (wiki entry → experiment extraction → review → validation design → codex prompt).
+   - `idea-generate` — paper-grounded research idea generation, opportunity synthesis, deduplication, validation, and export.
+   - `reviewer` — strict quality review of sub-agent outputs and benchmark agent-judge scoring.
 4. **Subagent skills** — live at `workspace-<agentId>/skills/<skill-name>/`. These handle domain-specific subtasks within the subagent's responsibility scope.
 
 **Constraints:**
@@ -98,7 +101,7 @@ The system uses a **main agent → main agent skills → subagent → subagent s
 
 1. **统一入口**：每个 benchmark 目录必须有 `env.sh` 和 `metrics.py` 两个入口，CI 流程按统一方式调用。CI 调度脚本在 `benchmarks/_common/run_bench.py`，自定义 metrics.py 必须通过它路由。
 2. **QA schema**：benchmark 题目必须符合 `benchmarks/_common/qa_schema.json`；每条 QA 一行 JSON，存在 `benchmarks/<name>/qa.jsonl`。schema 接受额外字段（`additionalProperties: true`），但禁止删掉必填字段。
-3. **强制 main agent 路由**：CI 流程**只**调用 `openclaw agent --agent main ...`，不允许在 `metrics.py`、qa.jsonl 或 prompt 里直接指定其他 agent id。如果某条 QA 需要让特定子 agent 干活，必须在 QA 里加 `target_agent: "<subagent-id>"` 字段；`run_bench.py` 会自动在 prompt 前加一段 `[BENCHMARK DIRECTIVE]`，要求 main 用 `sessions_spawn` 委派给 `target_agent`，并把子 agent 的回复原文返回。`run_bench.py` 对非 main 调用做了 hard assert 保护。
+3. **强制 main agent 路由**：CI 流程的 benchmark 任务**只**调用 `openclaw agent --agent main ...`，不允许在 `metrics.py`、qa.jsonl 或 prompt 里直接指定其他任务 agent id。如果某条 QA 需要让特定子 agent 干活，必须在 QA 里加 `target_agent: "<subagent-id>"` 字段；`run_bench.py` 会自动在 prompt 前加一段 `[BENCHMARK DIRECTIVE]`，要求 main 用 `sessions_spawn` 委派给 `target_agent`，并把子 agent 的回复原文返回。`run_bench.py` 对非 main 任务调用做了 hard assert 保护；但 `judge: "agent"` 的 LLM 评分必须使用专门的 `reviewer` agent。
 4. **统一 env 前置**：在跑任何 benchmark 自己的 `env.sh` 之前，CI 必先跑 `benchmarks/_common/env_setup.sh`，用 `docker compose -f docker/docker-compose.bench.yml up -d` 启动 `justlikemaki/openclaw-docker-cn-im` 镜像，把当前仓库 rsync 进容器内 `/home/node/.openclaw`，等 `openclaw health` 就绪，再跑一次 `--agent main --message "ping" --local` 冒烟。benchmark 的 `env.sh` 只能在此基础上做 fixture 写入，**禁止**重启容器、改镜像、或重写统一 env。
 5. **Metrics 可复用**：`metrics.py` 必须直接调用 `benchmarks/_common/run_bench.py`（即 6 行 shim），不要自己写 `docker exec openclaw agent`。判分优先用 `benchmarks/_common/judge.py` 提供的 `judge_with_rules` / `judge_with_agent`；自己写 judge 时必须基于 QA 的 `gold_answer.must_contain` 或 `rubric`，禁止用硬编码字符串比对。
 6. **PR 评论字段**：CI 会在 PR 评论里汇总每个 benchmark 的 `pass_rate` 和 `avg_score`；新增 benchmark 必须能输出这两个汇总字段（在 `bench-report.json` 顶层），否则不会出现在 PR 评论里。

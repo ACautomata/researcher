@@ -3,7 +3,7 @@
 
 Two judges:
   judge_with_rules(answer, qa)  -- rule-based, uses qa.gold_answer and must_contain-style hints.
-  judge_with_agent(qa, answer, agent_id, model=None) -- LLM judge via `openclaw agent --json --local`.
+  judge_with_agent(qa, answer, agent_id, model=None) -- LLM judge via direct `openclaw agent --agent reviewer`.
 
 Both return a dict: {score: float (0-1), pass: bool, rationale: str, dimensions?: dict}.
 """
@@ -74,27 +74,73 @@ def judge_with_rules(answer: str, qa: dict) -> dict:
 # --- LLM judge ---------------------------------------------------------------
 
 
-def judge_with_agent(qa: dict, answer: str, agent_id: str = "main",
-                     model: str | None = None, timeout: int = 600) -> dict:
-    """Run a one-shot LLM judge via the openclaw CLI.
+def _extract_judge_text(stdout: str) -> str:
+    """Extract the reviewer text from `openclaw agent --json` stdout."""
+    text = stdout or ""
+    if not text.strip():
+        return ""
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        return text
 
-    The judge prompt asks for a JSON verdict: {"score": 0-1, "rationale": "..."}.
+    if isinstance(data, dict):
+        if "score" in data:
+            return json.dumps(data, ensure_ascii=False)
+        payloads = data.get("payloads")
+        if isinstance(payloads, list):
+            joined = "\n".join(
+                str(p.get("text", "")) for p in payloads
+                if isinstance(p, dict) and p.get("text")
+            )
+            if joined.strip():
+                return joined
+        result = data.get("result")
+        if isinstance(result, dict):
+            payloads = result.get("payloads")
+            if isinstance(payloads, list):
+                joined = "\n".join(
+                    str(p.get("text", "")) for p in payloads
+                    if isinstance(p, dict) and p.get("text")
+                )
+                if joined.strip():
+                    return joined
+    return text
+
+
+def judge_with_agent(qa: dict, answer: str, agent_id: str = "reviewer",
+                     model: str | None = None, timeout: int = 600,
+                     container: str | None = None) -> dict:
+    """Run a one-shot LLM judge by directly invoking the reviewer agent.
+
+    The reviewer prompt asks for a JSON verdict: {"score": 0-1, "rationale": "..."}.
     Falls back to rule scoring if the CLI is unavailable.
     """
+    agent_id = "reviewer"
     rubric = qa.get("rubric") or "Score how well the answer matches the gold answer on a 0-1 scale."
     gold = qa.get("gold_answer")
     prompt = (
-        "You are a strict benchmark judge. Read the QA, the reference answer, and the candidate. "
-        "Reply with a single JSON object: {\"score\": <0..1>, \"rationale\": \"<one short sentence>\"}.\n\n"
+        "You are the dedicated OpenClaw Reviewer agent: honest, uncompromising, and fair. "
+        "Read the QA, the reference answer, the rubric, and the candidate. "
+        "Score strictly according to the rubric and required fields. "
+        "Reply with a single JSON object only: {\"score\": <0..1>, \"rationale\": \"<one short sentence>\"}.\n\n"
         f"QA: {qa.get('question', '')}\n\n"
         f"REFERENCE: {json.dumps(gold, ensure_ascii=False) if gold else '(none)'}\n\n"
         f"RUBRIC: {rubric}\n\n"
+        f"PASS_THRESHOLD: {qa.get('pass_threshold', 0.5)}\n\n"
         f"CANDIDATE:\n{(answer or '')[:8000]}\n"
     )
 
     session_key = f"agent:{agent_id}:bench-judge-{os.getpid()}-{uuid.uuid4().hex}"
     cmd = ["openclaw", "agent", "--agent", agent_id, "--message", prompt, "--json", "--local",
            "--session-key", session_key, "--timeout", str(timeout)]
+    container = container or os.environ.get("BENCH_CONTAINER")
+    if container:
+        cmd = [
+            "docker", "exec", "-i",
+            "-e", "MINIMAX_API_KEY", "-e", "MINIMAX_BASE_URL",
+            container,
+        ] + cmd
     if model:
         cmd += ["--model", model]
     try:
@@ -106,8 +152,10 @@ def judge_with_agent(qa: dict, answer: str, agent_id: str = "main",
         return fallback
 
     # Only look at stdout for the JSON verdict; with --json, diagnostics
-    # are routed to stderr (per docs.openclaw.ai/tools/agent-send).
-    text = out.stdout or ""
+    # are routed to stderr (per docs.openclaw.ai/tools/agent-send).  OpenClaw
+    # normally wraps replies in payloads[].text, so extract that before looking
+    # for the reviewer's requested JSON verdict.
+    text = _extract_judge_text(out.stdout or "")
     m = re.search(r"\{.*?\"score\".*?\}", text, re.S)
     if not m:
         fallback = judge_with_rules(answer, qa)

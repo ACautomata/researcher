@@ -4,10 +4,11 @@
 Generic driver for any benchmark directory that follows the unified interface
 (env.sh + qa.jsonl + metrics.py).
 
-**CI policy: every benchmark calls only the `main` agent.** The main agent is
+**CI policy: every benchmark task calls only the `main` agent.** The main agent is
 responsible for delegating to the appropriate sub-agent via `sessions_spawn`.
 Each QA's `target_agent` field names the sub-agent main should spawn; if
-absent, main runs the task itself.
+absent, main runs the task itself. The separate CI scoring step may directly
+invoke the dedicated `reviewer` agent for `judge: "agent"`.
 
 Per-benchmark `metrics.py` becomes a 6-line shim:
 
@@ -51,7 +52,7 @@ def repair_container_permissions(container: str) -> None:
     script = r'''
 set -e
 : "${BENCH_MOUNT:=/home/node/.openclaw}"
-for agent_id in main autoresearch paper-review idea-generate; do
+for agent_id in main autoresearch paper-review idea-generate reviewer; do
   mkdir -p "${BENCH_MOUNT}/agents/${agent_id}/sessions"
 done
 for path in \
@@ -127,11 +128,23 @@ def run_agent(container: str, agent_id: str, qa: dict, run_id: str,
             f"sessions_spawn is non-blocking. After spawning, call "
             f"sessions_yield if it is available, and wait for the "
             f"sub-agent completion message before answering.\n"
-            f"Then return the sub-agent's final reply as your only output.\n"
+            f"After the sub-agent completes, run the `reviewer` agent to audit "
+            f"the sub-agent's final reply against this benchmark directive, the "
+            f"full task, expected artifacts, gold_answer, and rubric below. "
+            f"If reviewer returns FAIL, use sessions_send(sessionKey=<same sessionKey>, "
+            f"message=<reviewer fix prompt>) to send its fix prompt back to the SAME "
+            f"sub-agent session and wait for the repaired answer, then run "
+            f"reviewer again. Do not start a new `{target}` session for fixes. "
+            f"Skip this extra review loop only when the target sub-agent itself "
+            f"is `reviewer`.\n"
+            f"Then return the reviewer-passed sub-agent final reply as your only output.\n"
             f"Do NOT return a runId, pending status, or 'wait for completion' "
             f"message.\n"
             f"Do NOT solve the task yourself. Do NOT add commentary. Return the "
-            f"sub-agent's reply verbatim.\n\n"
+            f"sub-agent's reply verbatim after it has passed reviewer.\n\n"
+            f"BENCHMARK GOLD_ANSWER: {json.dumps(qa.get('gold_answer'), ensure_ascii=False)}\n"
+            f"BENCHMARK RUBRIC: {qa.get('rubric') or '(none)'}\n"
+            f"BENCHMARK EXPECTED_ARTIFACTS: {json.dumps(qa.get('expected_artifacts'), ensure_ascii=False)}\n\n"
             f"---\n\n{prompt}"
         )
     # Use a never-reused key so every QA starts from an empty conversation.
@@ -332,8 +345,9 @@ def _extract_agent_text(stdout: str, stderr: str) -> str:
 
 
 def main(bench_name: str, agent_id: str | None = None) -> int:
-    """Run a benchmark. `agent_id` is the CI-side caller; the contract forces
-    this to `main`. Per-QA sub-agent routing goes through `target_agent`."""
+    """Run a benchmark. `agent_id` is the CI-side task caller; the contract forces
+    this to `main`. Per-QA sub-agent routing goes through `target_agent`; the
+    separate CI scoring path may call reviewer directly."""
     qa_path = Path(os.environ.get("BENCH_QA_PATH", ROOT / "benchmarks" / bench_name / "qa.jsonl"))
     report_path = Path(os.environ.get("BENCH_REPORT_PATH",
                                        ROOT / "benchmarks" / bench_name / "bench-report.json"))
@@ -365,8 +379,11 @@ def main(bench_name: str, agent_id: str | None = None) -> int:
             answer, session_key = run_agent(container, agent_id, qa, run_id, model)
             elapsed = time.time() - t0
             mode = qa.get("judge", "rules")
-            # LLM judge still calls main for consistency with the dispatch path.
-            verdict = (judge_with_agent(qa, answer, agent_id="main", model=model)
+            # LLM judge directly invokes the dedicated reviewer agent. The
+            # main-agent-only policy above applies to each benchmark task, not
+            # to this separate CI scoring step.
+            verdict = (judge_with_agent(qa, answer, agent_id="reviewer", model=model,
+                                        container=container)
                        if mode == "agent" else judge_with_rules(answer, qa))
             # Debug: surface the first 200 chars of the agent's reply so
             # zero-score failures are easy to diagnose from CI logs.

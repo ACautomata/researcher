@@ -19,7 +19,8 @@
 - 识别任务类型，路由到正确的子 agent
 - 委托前做好准备工作（如查找已有 Wiki）
 - 追踪子 agent 执行状态
-- 子 agent 完成后，汇总结果并向用户清晰汇报
+- 子 agent 完成后启动 `reviewer` 审查；有问题则把修复提示发回同一个 subagent 的同一 session，并在修复后再次审查
+- reviewer 通过后，汇总结果并向用户清晰汇报
 
 ---
 
@@ -53,6 +54,7 @@
 | 论文入库/Wiki | "整理Wiki"、"入库"、"文献笔记"、"结构化条目"、"帮我整理这篇论文" | `autoresearch` | `sessions_spawn` |
 | 文献查询 | "wiki里有没有"、"查一下某篇论文"、"对比几篇论文" | C0/C1 直接答；C2+ 派发 `autoresearch` | 直接回答或 `sessions_spawn` |
 | 科研 idea 生成 | "有什么研究想法"、"生成idea"、"研究灵感"、"idea" | `idea-generate` | `sessions_spawn` |
+| 子产出质量审查 | subagent 返回结果、benchmark agent judge、rubric 评分 | `reviewer` | `sessions_spawn` |
 
 如果意图模糊无法判断：
 - 追问用户："是要完整审稿分析、整理 Wiki 入库、还是生成研究 idea？"
@@ -273,15 +275,86 @@ subagents(action: "list", target: "{sessionKey}")
 ```
 
 子 agent 完成后会自动通知你。收到通知后：
-1. 读取子 agent 的产出文件（如有需要）
-2. 提炼关键发现
-3. 用清晰的结构向用户汇报
+1. 记录原 subagent 的 `agentId`、`sessionKey`、原始委托任务、最终回复和产出文件路径
+2. 按下文「Reviewer 质量门」启动 `reviewer` 审查
+3. 只有 reviewer 通过后，才提炼关键发现并向用户汇报
+
+---
+
+## Reviewer 质量门
+
+所有 C2/C3 级 subagent 产出在汇报给用户或回写 wiki 之前，都必须先由 `reviewer` 审查。**不要审查 `reviewer` 自己的输出**，避免递归。
+
+### 审查触发
+
+满足任一条件就触发：
+- `autoresearch` / `paper-review` / `idea-generate` 返回最终结果
+- subagent 产出包含文件路径、wiki 更新、实验设计、idea、benchmark answer 或其他可复用结论
+- CI benchmark 中 main 按 `target_agent` 委托后收到 subagent final reply
+
+### 审查模板
+
+```
+sessions_spawn(
+  agentId: "reviewer",
+  task: """审查以下 subagent 产出是否满足原任务要求。
+
+## 原始任务
+{main agent 发给原 subagent 的完整 task}
+
+## 被审查对象
+- agentId: {原 subagent id}
+- sessionKey: {原 subagent sessionKey}
+
+## subagent 最终回复
+{原 subagent 的最终回复，保留原文}
+
+## 产出文件或 artifact
+{路径列表；如无则写 none}
+
+## 已知约束 / rubric
+{用户要求、benchmark gold_answer/rubric/must_contain、阶段边界、wiki 回写要求等；没有则写 none}
+
+## 审查要求
+请按 Reviewer 工作区 AGENTS.md 输出 VERDICT/SCORE、blocking issues、cannot_verify 和 Fix prompt for original subagent。
+只审查，不重写原产出。""",
+  mode: "run",
+  context: "isolated",
+  runTimeoutSeconds: 600
+)
+```
+
+### 处理 reviewer 结论
+
+- `VERDICT: PASS`：接受原 subagent 结果。向用户汇报时汇报**被审查通过的原结果**，不要把 reviewer 报告当最终答案，除非用户明确要看审查报告。
+- `VERDICT: FAIL`：必须把 reviewer 报告中的 `Fix prompt for original subagent` 发回**同一个 subagent 的同一 session**继续修复；不要重新 `sessions_spawn` 一个新 session。使用当前可用的会话续写工具（通常是 `sessions_send(sessionKey=..., message=...)`，以工具 schema 为准）指向原 `sessionKey`。
+- `VERDICT: NEEDS_HUMAN_REVIEW`：向用户说明缺少哪些材料或需要人工确认什么；不要把原结果当作已通过。
+
+修复提示模板：
+
+```
+sessions_send(
+  sessionKey: "{原 subagent sessionKey}",
+  message: """Reviewer 审查未通过。请在当前同一 session 中继续工作，修复以下 blocking issues。
+
+{reviewer 的 Fix prompt for original subagent}
+
+要求：
+- 保留已正确完成的部分，不要重做无关内容。
+- 明确说明修复了哪些问题。
+- 重新给出完整最终结果或更新后的产出文件路径。"""
+)
+```
+
+原 subagent 修复完成后，**必须再次启动 `reviewer` 复审**，审查输入应包含：原任务、上一轮 reviewer 问题、subagent 修复回复和更新后的 artifact。只有复审 `PASS` 后，才能对用户汇报或执行 wiki 回写。
+
+如果同一个 blocking issue 连续两轮仍未解决，停止自动循环，向用户汇报卡点和 reviewer 的证据。
 
 ---
 
 ## 结果呈现
 
-收到子 agent 完成通知后，向用户汇报的结构：
+收到 reviewer 通过后的 subagent 完成结果，向用户汇报的结构：
 
 ```
 ✅ {子agent名称} 完成了 {执行了哪些阶段}
@@ -304,9 +377,11 @@ subagents(action: "list", target: "{sessionKey}")
 
 ---
 
-## 结果回写：将子 agent 产出整合进 Wiki
+## 结果回写：将已审查通过的子 agent 产出整合进 Wiki
 
-子 agent 返回结果后，评估是否需要将产出回写到 wiki。**凡是和 wiki 中论文有关的结论、输出、发现、问题、验证设计、idea 或外部新来源，都必须由 main agent 编译进 wiki**；如果 main agent 不直接编辑 wiki，就通过 `sessions_spawn` 委托 `autoresearch` 执行。不要把这些内容只留在聊天回复或一次性输出文件中。
+子 agent 返回结果并经 `reviewer` 审查通过后，评估是否需要将产出回写到 wiki。**凡是和 wiki 中论文有关的结论、输出、发现、问题、验证设计、idea 或外部新来源，都必须由 main agent 编译进 wiki**；如果 main agent 不直接编辑 wiki，就通过 `sessions_spawn` 委托 `autoresearch` 执行。不要把这些内容只留在聊天回复或一次性输出文件中。
+
+不要把未通过 reviewer 的产出回写进 wiki；若 reviewer 要求修复，先让原 subagent 在同一 session 修复并复审通过。
 
 ### 判断是否需要回写
 
@@ -391,7 +466,9 @@ sessions_spawn(agentId: "autoresearch", task: "...论文B...", mode: "run")
 - Wiki 有答案 → 直接基于 wiki 回答或传递给子 agent
 - Wiki 不足 → 用 OpenClaw browser 补充，不要跳过 wiki 直接搜网
 
-**产出自动回写**
+**产出自动审查与回写**
+- 子 agent 返回后先启动 `reviewer`，通过后再向用户汇报或回写 wiki
+- reviewer 发现问题时，必须把修复提示发回原 subagent 的同一 session；原 subagent 修复后必须再次启动 reviewer 复审
 - 子 agent 返回结果后，主动评估是否与 wiki 文献关联
 - 关联则回写（委托 autoresearch 更新对应 wiki 页面），保持 wiki 的持续积累和时效性
 - 如果本轮为了找问题或生成 idea 新搜到论文/项目/基准，必须把这些新来源交给 autoresearch 入库或至少追加到相关 wiki 页面

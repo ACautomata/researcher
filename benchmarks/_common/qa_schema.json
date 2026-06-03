@@ -18,7 +18,7 @@
     },
     "target_agent": {
       "type": "string",
-      "enum": ["autoresearch", "paper-review", "idea-generate"],
+      "enum": ["autoresearch", "paper-review", "idea-generate", "reviewer"],
       "description": "Optional. If present, main delegates the task to this sub-agent via sessions_spawn instead of solving it itself. Allowed values come from openclaw.json -> agents.list[]."
     },
     "skill": {
@@ -81,7 +81,7 @@
       "type": "string",
       "enum": ["rules", "agent", "skip"],
       "default": "rules",
-      "description": "rules = judge_with_rules; agent = judge_with_agent (LLM judge, also goes through main); skip = only record raw output."
+      "description": "rules = judge_with_rules; agent = judge_with_agent (LLM judge through dedicated reviewer agent); skip = only record raw output."
     }
   }
 }

@@ -25,11 +25,13 @@ benchmarks/
 
 ## CI policy (binding — see CLAUDE.md "Benchmark 流程")
 
-1. **Main agent only.** The CI invokes `openclaw agent --agent main ...` exclusively.
-   Each QA may declare `target_agent` (autoresearch / paper-review / idea-generate);
+1. **Main agent only for benchmark tasks.** The CI invokes `openclaw agent --agent main ...` for each QA task.
+   Each QA may declare `target_agent` (autoresearch / paper-review / idea-generate / reviewer);
    `run_bench.py` wraps the prompt with a `[BENCHMARK DIRECTIVE]` instructing main to
    use `sessions_spawn(agentId=target_agent, task=...)` and return the sub-agent's
-   final reply verbatim. No benchmark is allowed to call a sub-agent directly.
+   final reply verbatim. No benchmark task is allowed to call a task sub-agent directly.
+   When `judge: "agent"` is used, the reusable judge runs the dedicated `reviewer`
+   agent for scoring.
 2. **Unified env first.** `benchmarks/_common/env_setup.sh` must run before any
    benchmark's own `env.sh`. It pulls `justlikemaki/openclaw-docker-cn-im`,
    brings up `docker-compose.bench.yml`, rsyncs the repo into the container at
@@ -37,7 +39,8 @@ benchmarks/
 3. **QA schema.** Each `benchmarks/<name>/qa.jsonl` is one JSON per line, conformant
    with `benchmarks/_common/qa_schema.json`. Required: `qa_id`, `question`,
    `agent: "main"`. Optional but recommended: `target_agent`, `gold_answer`,
-   `rubric`, `expected_artifacts`.
+   `rubric`, `expected_artifacts`. Use `judge: "agent"` when scoring needs the
+   strict reviewer LLM judge instead of rule coverage.
 4. **Metrics reuse.** `metrics.py` is a 6-line shim that calls
    `benchmarks/_common/run_bench.py:main(name, agent_id="main")`. Custom
    judges must be added in `benchmarks/_common/judge.py`, not duplicated.
