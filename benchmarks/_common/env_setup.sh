@@ -6,8 +6,8 @@
 # and runs one smoke turn. Every benchmark's env.sh runs after this.
 #
 # Required env (set by CI workflow or by the user for local runs):
-#   DEEPSEEK_API_KEY         -- LLM provider key (fail-fast if missing)
-#   DEEPSEEK_BASE_URL        -- optional, defaults to https://api.deepseek.com
+#   MINIMAX_API_KEY         -- LLM provider key (fail-fast if missing)
+#   MINIMAX_BASE_URL        -- optional, defaults to https://api.minimaxi.com
 #   BENCH_RUN_ID            -- used as the session key prefix and as the compose project name
 #   BENCH_COMPOSE_FILE      -- optional, defaults to docker/docker-compose.bench.yml
 #   BENCH_OPENCLAW_IMAGE    -- optional, overrides the image tag
@@ -28,10 +28,10 @@ log() { printf '\n[env_setup] %s\n' "$*"; }
 die() { printf '\n[env_setup][FATAL] %s\n' "$*" >&2; exit 1; }
 
 # 0. Secrets check
-if [[ -z "${DEEPSEEK_API_KEY:-}" ]]; then
-  die "DEEPSEEK_API_KEY is not set. Add it as a GitHub Actions secret, then re-run."
+if [[ -z "${MINIMAX_API_KEY:-}" ]]; then
+  die "MINIMAX_API_KEY is not set. Add it as a GitHub Actions secret, then re-run."
 fi
-: "${DEEPSEEK_BASE_URL:=https://api.deepseek.com}"
+: "${MINIMAX_BASE_URL:=https://api.minimaxi.com}"
 
 # 1. Build a temporary .env the compose file can read.
 ENV_DIR="${ROOT}/.bench-runtime"
@@ -50,12 +50,10 @@ TZ=Asia/Shanghai
 SYNC_OPENCLAW_CONFIG=false
 SYNC_EXTENSIONS_ON_START=false
 SYNC_MODEL_CONFIG=false
-MODEL_ID=deepseek/deepseek-v4-flash
-PRIMARY_MODEL=deepseek/deepseek-v4-flash
-BASE_URL=${DEEPSEEK_BASE_URL}
+MODEL_ID=minimax/MiniMax-M2.7
+PRIMARY_MODEL=minimax/MiniMax-M2.7
+BASE_URL=${MINIMAX_BASE_URL}
 API_PROTOCOL=anthropic
-DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL}
 CONTEXT_WINDOW=200000
 MAX_TOKENS=8192
 DM_POLICY=disabled
@@ -74,13 +72,18 @@ docker pull "${IMAGE}" >/dev/null
 # 3. Bring up the gateway service. We pass the project name to isolate the
 #    stack from any other compose project on the same host.
 #
+#    `--force-recreate` makes sure the container starts from a clean state on
+#    every workflow run: even when the image is unchanged, Docker Compose will
+#    discard the previous container. This guards against state leaking between
+#    consecutive PR runs that share the same runner image cache.
+#
 #    We `set -a; source` the env file so that docker compose's variable
 #    substitution (e.g. `${OPENCLAW_IMAGE}`, `${OPENCLAW_DATA_DIR}`) resolves
 #    from the keys we wrote. `--env-file` alone would only feed substitution
 #    for variables referenced in the compose file, not the compose process's
 #    own os.environ that some compose versions read for `${VAR}` lookups
 #    inside service definitions.
-log "bringing up compose (project=${COMPOSE_PROJECT})"
+log "bringing up compose (project=${COMPOSE_PROJECT}, --force-recreate)"
 set -a
 # shellcheck disable=SC1090
 . "${ENV_FILE}"
@@ -91,7 +94,7 @@ set +a
 mkdir -p "${OPENCLAW_DATA_DIR}"
 docker compose --project-name "${COMPOSE_PROJECT}" \
     -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" \
-    up -d openclaw-bench
+    up -d --force-recreate openclaw-bench
 
 # 4. Wait for `openclaw health` to return ready.
 CONTAINER="$(docker ps --filter "label=com.docker.compose.project=${COMPOSE_PROJECT}" \
@@ -103,143 +106,103 @@ log "container: ${CONTAINER}"
 #    gateway sees the checked-out tree. We use `docker cp` rather than a
 #    host-side rsync into the docker volume because the runner user can't
 #    write into the volume (root-owned), and `docker cp` is unprivileged.
-log "docker cp repo into ${CONTAINER}:/home/node/.openclaw"
-# Clear any pre-existing files inside the mount (except hidden .openclaw
-# artifacts the image may have placed there).
-docker exec "${CONTAINER}" bash -lc '
-  set -e
-  cd /home/node/.openclaw
-  # remove everything except the directory itself so hidden runtime state
-  # (extensions/, qmd/, etc.) created by the image stays intact.
-  find . -mindepth 1 -delete 2>/dev/null || true
-'
-# Stream a tarball of the repo (with the same excludes) and untar inside the
-# container. This avoids needing host-side write access to the volume.
-tar --exclude='.git' --exclude='.github' --exclude='.env' \
-    --exclude='*.sqlite*' --exclude='qmd' --exclude='logs' \
-    --exclude='tasks' --exclude='credentials' --exclude='cron' \
-    --exclude='devices' --exclude='identity' --exclude='feishu' \
-    --exclude='extensions' --exclude='qqbot' --exclude='.openclaw' \
-    --exclude='.dreams' --exclude='dreaming' --exclude='.bench-runtime' \
-    --exclude='bench-results' --exclude='bench-debug' \
-    -C "${ROOT}" -cf - . | \
-  docker exec -i "${CONTAINER}" tar -xf - -C /home/node/.openclaw
-# init.sh runs the openclaw gateway as the in-image node user (uid 1000).
-# The files we just streamed in are owned by root (since `docker exec tar`
-# runs as the container's user -- which is root here -- and tar preserves
-# host uids). The gateway then fails to write logs/, qmd/, .config/, etc.
-# OpenClaw stores session files under agents/<agentId>/sessions, including
-# sessions_spawn child-agent state, so create those dirs before chowning.
-log "creating agent session dirs"
-docker exec "${CONTAINER}" bash -lc '
-  set -e
-  for agent_id in main autoresearch paper-review idea-generate reviewer; do
-    mkdir -p "/home/node/.openclaw/agents/${agent_id}/sessions"
-  done
-'
-# chown the whole tree to uid 1000:1000 to match the runtime user.
-log "chown /home/node/.openclaw -> 1000:1000 (openclaw runtime uid)"
-docker exec "${CONTAINER}" chown -R 1000:1000 /home/node/.openclaw || true
-log "repo copied into container"
-
-# 5b. Inject/refresh the `deepseek` provider in openclaw.json with a SecretRef
-#     so `openclaw agent --local` can resolve it from the DEEPSEEK_API_KEY env
-#     var, and repoint `agents.defaults.model.primary` at deepseek-v4-flash.
-#     All agent calls use `docker exec -e DEEPSEEK_API_KEY ... openclaw agent
-#     --local`, so the SecretRef resolves inside each exec session.  The
-#     gateway process itself does NOT need the env var.  We deliberately do
-#     NOT restart the container after patching -- restarting was the root
-#     cause of 13+ CI failures because init.sh re-runs on restart and the
-#     container exits within seconds.
-log "patching deepseek provider + default model + sandbox off (no restart)"
-docker exec "${CONTAINER}" python3 -c '
+#    This is the same sequence `bench_force_recreate` re-runs after a
+#    container is recreated: clear the mount, stream the repo tarball,
+#    create the per-agent session dirs, chown to 1000:1000, and patch
+#    openclaw.json with the SecretRef + sandbox-off fixes.
+bench_reapply_setup() {
+  local container="${1:-${BENCH_CONTAINER:-}}"
+  [[ -n "${container}" ]] || { echo "[bench_reapply_setup][FATAL] no container" >&2; return 64; }
+  echo "[bench_reapply_setup] docker cp repo into ${container}:/home/node/.openclaw"
+  docker exec "${container}" bash -lc '
+    set -e
+    cd /home/node/.openclaw
+    find . -mindepth 1 -delete 2>/dev/null || true
+  '
+  tar --exclude='.git' --exclude='.github' --exclude='.env' \
+      --exclude='*.sqlite*' --exclude='qmd' --exclude='logs' \
+      --exclude='tasks' --exclude='credentials' --exclude='cron' \
+      --exclude='devices' --exclude='identity' --exclude='feishu' \
+      --exclude='extensions' --exclude='qqbot' --exclude='.openclaw' \
+      --exclude='.dreams' --exclude='dreaming' --exclude='.bench-runtime' \
+      --exclude='bench-results' \
+      -C "${ROOT}" -cf - . | \
+    docker exec -i "${container}" tar -xf - -C /home/node/.openclaw
+  echo "[bench_reapply_setup] creating agent session dirs"
+  docker exec "${container}" bash -lc '
+    set -e
+    for agent_id in main autoresearch paper-review idea-generate reviewer; do
+      mkdir -p "/home/node/.openclaw/agents/${agent_id}/sessions"
+    done
+  '
+  echo "[bench_reapply_setup] chown /home/node/.openclaw -> 1000:1000"
+  docker exec "${container}" chown -R 1000:1000 /home/node/.openclaw || true
+  echo "[bench_reapply_setup] patching openclaw.json (SecretRef + sandbox off)"
+  docker exec "${container}" python3 -c '
 import json, pathlib
 p = pathlib.Path("/home/node/.openclaw/openclaw.json")
 data = json.loads(p.read_text(encoding="utf-8"))
-
-# 1. Inject / refresh the deepseek provider (OpenClaw expects this shape
-#    per docs.openclaw.ai/providers/deepseek/ + gateway/configuration-reference:
-#    the API-protocol field is named "api" with values like
-#    openai-completions / openai-responses / anthropic-messages /
-#    google-generative-ai). We use openai-completions to talk to
-#    DeepSeek via its OpenAI-compatible endpoint at
-#    https://api.deepseek.com/v1.
-providers = data.setdefault("models", {}).setdefault("providers", {})
-ds = providers.setdefault("deepseek", {
-    "baseUrl": "https://api.deepseek.com/v1",
-    "api": "openai-completions",
-    "apiKey": {"source": "env", "provider": "default", "id": "DEEPSEEK_API_KEY"},
-    "models": [
-        {
-            "id": "deepseek-v4-flash",
-            "name": "DeepSeek V4 Flash",
-        },
-    ],
-})
-# Always overwrite apiKey + baseUrl + api with the current SecretRef and
-# openai-completions adapter, even if the provider was already declared
-# elsewhere (and even if a previous attempt used the wrong field name).
-ds["baseUrl"] = "https://api.deepseek.com/v1"
-ds["api"] = "openai-completions"
-ds.pop("apiType", None)  # the `apiType` key is not in the schema; remove if leftover
-ds["apiKey"] = {"source": "env", "provider": "default", "id": "DEEPSEEK_API_KEY"}
-ds.setdefault("models", [])
-
-# 2. Repoint the default model at deepseek-v4-flash so every agent uses
-#    DeepSeek unless overridden by an agent-specific `model` field.
-defaults = data.setdefault("agents", {}).setdefault("defaults", {})
-model = defaults.setdefault("model", {})
-model["primary"] = "deepseek/deepseek-v4-flash"
-fallbacks = model.get("fallbacks") or []
-model["fallbacks"] = [f for f in fallbacks if not str(f).startswith("minimax/")]
-
-# 3. Disable sandboxing: the CI container has no Docker daemon (it *is* the
-#    Docker host for its own children), so sandbox.mode=all makes the agent
-#    fail with "Sandbox mode requires Docker, but the Docker daemon is not
-#    available" before it can call the LLM.
-sandbox = defaults.setdefault("sandbox", {})
+prov = data.setdefault("models", {}).setdefault("providers", {}).setdefault("minimax", {})
+prov["apiKey"] = {"source": "env", "provider": "default", "id": "MINIMAX_API_KEY"}
+sandbox = data.setdefault("agents", {}).setdefault("defaults", {}).setdefault("sandbox", {})
 if sandbox.get("mode") and sandbox["mode"] != "off":
     sandbox["mode"] = "off"
-    print("patched agents.defaults.sandbox.mode -> off (no Docker daemon in CI)")
-
+    print("patched agents.defaults.sandbox.mode -> off")
 p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-print("patched models.providers.deepseek.apiKey -> SecretRef(DEEPSEEK_API_KEY)")
-print("patched agents.defaults.model.primary -> deepseek/deepseek-v4-flash")
+print("patched models.providers.minimax.apiKey -> SecretRef(MINIMAX_API_KEY)")
 '
-docker exec "${CONTAINER}" chown 1000:1000 /home/node/.openclaw/openclaw.json
+  docker exec "${container}" chown 1000:1000 /home/node/.openclaw/openclaw.json
+}
+log "docker cp repo into ${CONTAINER}:/home/node/.openclaw"
+bench_reapply_setup "${CONTAINER}"
+log "repo copied into container"
+
+# 5b. The SecretRef patch for models.providers.minimax.apiKey and the
+#     sandbox-off patch live inside `bench_reapply_setup` (see section 5
+#     above) so that `bench_force_recreate` re-runs them after recreating
+#     the container. We deliberately do NOT restart the container after
+#     patching -- restarting was the root cause of 13+ CI failures because
+#     init.sh re-runs on restart and the container exits within seconds.
+log "SecretRef + sandbox off patches applied via bench_reapply_setup (no restart)"
 
 # 6. Wait for the openclaw container to start and the gateway to become
 #    ready. The image's healthcheck is informational only (we set
 #    restart=no), so we don't rely on `health=healthy`. We poll the
 #    container's State.Running and tail its log for a known ready marker.
-log "waiting for ${CONTAINER} to come up and gateway to be ready"
-READY=0
-for i in $(seq 1 90); do
-  STATE="$(docker inspect --format '{{.State.Running}}' "${CONTAINER}" 2>/dev/null || true)"
-  if [[ "${STATE}" == "true" ]]; then
-    # Look for the gateway-ready marker in the container log.
-    if docker logs --tail 200 "${CONTAINER}" 2>&1 | grep -qE 'http server listening|starting channels and sidecars|\[gateway\] ready|heartbeat.*started'; then
-      READY=1
-      log "container ${CONTAINER} is up and gateway is ready after ${i} polls"
-      break
+#    `bench_wait_ready` is the same loop, factored out so that
+#    `bench_force_recreate` (used between benchmarks) can wait for the new
+#    container the same way.
+bench_wait_ready() {
+  local container="${1:-${BENCH_CONTAINER:-}}"
+  [[ -n "${container}" ]] || { echo "[bench_wait_ready][FATAL] no container" >&2; return 64; }
+  echo "[bench_wait_ready] waiting for ${container} to come up and gateway to be ready"
+  local ready=0
+  for i in $(seq 1 90); do
+    local state
+    state="$(docker inspect --format '{{.State.Running}}' "${container}" 2>/dev/null || true)"
+    if [[ "${state}" == "true" ]]; then
+      if docker logs --tail 200 "${container}" 2>&1 | grep -qE 'http server listening|starting channels and sidecars|\[gateway\] ready|heartbeat.*started'; then
+        ready=1
+        echo "[bench_wait_ready] ${container} is up and gateway is ready after ${i} polls"
+        return 0
+      fi
     fi
-  fi
-  # Detect a hard exit (init.sh crashed). Bail loudly so the workflow fails.
-  RUNNING="$(docker inspect --format '{{.State.Running}}|{{.State.Status}}' "${CONTAINER}" 2>/dev/null || true)"
-  case "${RUNNING}" in
-    false|exited|dead|removing)
-      echo "[env_setup][FATAL] container ${CONTAINER} state=${RUNNING}; dumping logs:" >&2
-      docker logs --tail 200 "${CONTAINER}" >&2 || true
-      exit 1
-      ;;
-  esac
-  sleep 2
-done
-if [[ "${READY}" -ne 1 ]]; then
-  echo "[env_setup][FATAL] gateway not ready in 180s" >&2
-  docker logs --tail 200 "${CONTAINER}" >&2 || true
-  exit 1
-fi
+    local running
+    running="$(docker inspect --format '{{.State.Running}}|{{.State.Status}}' "${container}" 2>/dev/null || true)"
+    case "${running}" in
+      false|exited|dead|removing)
+        echo "[bench_wait_ready][FATAL] container ${container} state=${running}; dumping logs:" >&2
+        docker logs --tail 200 "${container}" >&2 || true
+        return 1
+        ;;
+    esac
+    sleep 2
+  done
+  echo "[bench_wait_ready][FATAL] gateway not ready in 180s" >&2
+  docker logs --tail 200 "${container}" >&2 || true
+  return 1
+}
+bench_wait_ready "${CONTAINER}"
 
 # 8. Export the contract for downstream env.sh scripts AND for subsequent
 #    GitHub Actions steps. We can't `export` from a subshell back into the
@@ -262,6 +225,121 @@ export BENCH_OPENCLAW='openclaw'
 export BENCH_COMPOSE_PROJECT='${COMPOSE_PROJECT}'
 export BENCH_ENV_FILE='${ENV_FILE}'
 export BENCH_DATA_DIR='${ENV_DIR}/openclaw-data'
+
+# Per-benchmark helpers. Source this file from a benchmark's env.sh, then
+# call \`bench_force_recreate\` to tear down the openclaw-bench container and
+# bring it back up. This guarantees each benchmark starts from a clean
+# container, so QA fixtures and runtime state from a previous benchmark
+# cannot leak into the current one. After the recreate we re-apply the repo
+# copy + openclaw.json patches (via bench_reapply_setup) and wait for the
+# gateway to be ready (via bench_wait_ready) before returning, so callers
+# can immediately exec into the new container without racing the gateway
+# init.
+
+bench_reapply_setup() {
+  local container="\${1:-\${BENCH_CONTAINER:-}}"
+  [[ -n "\${container}" ]] || { echo "[bench_reapply_setup][FATAL] no container" >&2; return 64; }
+  local root="${ROOT}"
+  echo "[bench_reapply_setup] docker cp repo into \${container}:/home/node/.openclaw"
+  docker exec "\${container}" bash -lc '
+    set -e
+    cd /home/node/.openclaw
+    find . -mindepth 1 -delete 2>/dev/null || true
+  '
+  tar --exclude='.git' --exclude='.github' --exclude='.env' \
+      --exclude='*.sqlite*' --exclude='qmd' --exclude='logs' \
+      --exclude='tasks' --exclude='credentials' --exclude='cron' \
+      --exclude='devices' --exclude='identity' --exclude='feishu' \
+      --exclude='extensions' --exclude='qqbot' --exclude='.openclaw' \
+      --exclude='.dreams' --exclude='dreaming' --exclude='.bench-runtime' \
+      --exclude='bench-results' \
+      -C "\${root}" -cf - . | \
+    docker exec -i "\${container}" tar -xf - -C /home/node/.openclaw
+  echo "[bench_reapply_setup] creating agent session dirs"
+  docker exec "\${container}" bash -lc '
+    set -e
+    for agent_id in main autoresearch paper-review idea-generate reviewer; do
+      mkdir -p "/home/node/.openclaw/agents/\${agent_id}/sessions"
+    done
+  '
+  echo "[bench_reapply_setup] chown /home/node/.openclaw -> 1000:1000"
+  docker exec "\${container}" chown -R 1000:1000 /home/node/.openclaw || true
+  echo "[bench_reapply_setup] patching openclaw.json (SecretRef + sandbox off)"
+  docker exec "\${container}" python3 -c '
+import json, pathlib
+p = pathlib.Path("/home/node/.openclaw/openclaw.json")
+data = json.loads(p.read_text(encoding="utf-8"))
+prov = data.setdefault("models", {}).setdefault("providers", {}).setdefault("minimax", {})
+prov["apiKey"] = {"source": "env", "provider": "default", "id": "MINIMAX_API_KEY"}
+sandbox = data.setdefault("agents", {}).setdefault("defaults", {}).setdefault("sandbox", {})
+if sandbox.get("mode") and sandbox["mode"] != "off":
+    sandbox["mode"] = "off"
+    print("patched agents.defaults.sandbox.mode -> off")
+p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+print("patched models.providers.minimax.apiKey -> SecretRef(MINIMAX_API_KEY)")
+'
+  docker exec "\${container}" chown 1000:1000 /home/node/.openclaw/openclaw.json
+}
+
+bench_wait_ready() {
+  local container="\${1:-\${BENCH_CONTAINER:-}}"
+  [[ -n "\${container}" ]] || { echo "[bench_wait_ready][FATAL] no container" >&2; return 64; }
+  echo "[bench_wait_ready] waiting for \${container} to come up and gateway to be ready"
+  local ready=0
+  for i in \$(seq 1 90); do
+    local state
+    state="\$(docker inspect --format '{{.State.Running}}' "\${container}" 2>/dev/null || true)"
+    if [[ "\${state}" == "true" ]]; then
+      if docker logs --tail 200 "\${container}" 2>&1 | grep -qE 'http server listening|starting channels and sidecars|\[gateway\] ready|heartbeat.*started'; then
+        ready=1
+        echo "[bench_wait_ready] \${container} is up and gateway is ready after \${i} polls"
+        return 0
+      fi
+    fi
+    local running
+    running="\$(docker inspect --format '{{.State.Running}}|{{.State.Status}}' "\${container}" 2>/dev/null || true)"
+    case "\${running}" in
+      false|exited|dead|removing)
+        echo "[bench_wait_ready][FATAL] container \${container} state=\${running}; dumping logs:" >&2
+        docker logs --tail 200 "\${container}" >&2 || true
+        return 1
+        ;;
+    esac
+    sleep 2
+  done
+  echo "[bench_wait_ready][FATAL] gateway not ready in 180s" >&2
+  docker logs --tail 200 "\${container}" >&2 || true
+  return 1
+}
+
+bench_force_recreate() {
+  if [ -z "\${BENCH_COMPOSE_PROJECT:-}" ] || [ -z "\${BENCH_ENV_FILE:-}" ]; then
+    echo "[bench_force_recreate][FATAL] BENCH_COMPOSE_PROJECT / BENCH_ENV_FILE not set" >&2
+    return 64
+  fi
+  local compose_file="${ROOT}/docker/docker-compose.bench.yml"
+  echo "[bench_force_recreate] bringing up openclaw-bench --force-recreate (project=\${BENCH_COMPOSE_PROJECT})"
+  set -a
+  # shellcheck disable=SC1090
+  . "\${BENCH_ENV_FILE}"
+  set +a
+  docker compose --project-name "\${BENCH_COMPOSE_PROJECT}" \
+      -f "\${compose_file}" --env-file "\${BENCH_ENV_FILE}" \
+      up -d --force-recreate openclaw-bench
+  # Refresh BENCH_CONTAINER to the new container name (compose reuses the
+  # service name unless the project name changed, but be defensive).
+  local new_container
+  new_container="\$(docker ps --filter "label=com.docker.compose.project=\${BENCH_COMPOSE_PROJECT}" --format '{{.Names}}' | head -n1)"
+  if [ -n "\${new_container}" ]; then
+    export BENCH_CONTAINER="\${new_container}"
+  fi
+  # The recreated container is bare: no repo, no SecretRef patch, no
+  # sandbox-off patch. Re-apply the same setup that env_setup.sh ran for
+  # the initial container, so subsequent exec calls see a fully-prepared
+  # environment.
+  bench_reapply_setup "\${BENCH_CONTAINER}"
+  bench_wait_ready "\${BENCH_CONTAINER}"
+}
 EOF
 # Surface the file path so the workflow can source it without re-deriving.
 if [[ -n "${GITHUB_ENV:-}" ]]; then
