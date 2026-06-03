@@ -223,7 +223,7 @@ export BENCH_CONTAINER='${CONTAINER}'
 export BENCH_MOUNT='/home/node/.openclaw'
 export BENCH_OPENCLAW='openclaw'
 export BENCH_COMPOSE_PROJECT='${COMPOSE_PROJECT}'
-export BENCH_ENV_FILE='${ENV_FILE}'
+export BENCH_COMPOSE_ENV_FILE='${ENV_FILE}'
 export BENCH_DATA_DIR='${ENV_DIR}/openclaw-data'
 
 # Per-benchmark helpers. Source this file from a benchmark's env.sh, then
@@ -313,18 +313,18 @@ bench_wait_ready() {
 }
 
 bench_force_recreate() {
-  if [ -z "\${BENCH_COMPOSE_PROJECT:-}" ] || [ -z "\${BENCH_ENV_FILE:-}" ]; then
-    echo "[bench_force_recreate][FATAL] BENCH_COMPOSE_PROJECT / BENCH_ENV_FILE not set" >&2
+  if [ -z "\${BENCH_COMPOSE_PROJECT:-}" ] || [ -z "\${BENCH_COMPOSE_ENV_FILE:-}" ]; then
+    echo "[bench_force_recreate][FATAL] BENCH_COMPOSE_PROJECT / BENCH_COMPOSE_ENV_FILE not set" >&2
     return 64
   fi
   local compose_file="${ROOT}/docker/docker-compose.bench.yml"
   echo "[bench_force_recreate] bringing up openclaw-bench --force-recreate (project=\${BENCH_COMPOSE_PROJECT})"
   set -a
   # shellcheck disable=SC1090
-  . "\${BENCH_ENV_FILE}"
+  . "\${BENCH_COMPOSE_ENV_FILE}"
   set +a
   docker compose --project-name "\${BENCH_COMPOSE_PROJECT}" \
-      -f "\${compose_file}" --env-file "\${BENCH_ENV_FILE}" \
+      -f "\${compose_file}" --env-file "\${BENCH_COMPOSE_ENV_FILE}" \
       up -d --force-recreate openclaw-bench
   # Refresh BENCH_CONTAINER to the new container name (compose reuses the
   # service name unless the project name changed, but be defensive).
