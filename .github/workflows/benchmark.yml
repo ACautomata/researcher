@@ -328,8 +328,18 @@ jobs:
           # call bench_force_recreate using the same compose project.
           # shellcheck disable=SC1091
           . .bench-runtime/bench-runtime-env.sh
+          # Each benchmark's env.sh does `[[ -f "${BENCH_ENV_FILE}" ]]`
+          # to decide whether to load the bench_force_recreate helper.
+          # In the original single-job workflow, env_setup.sh exported
+          # BENCH_ENV_FILE into $GITHUB_ENV. Across jobs, that export
+          # does not propagate, but the env-setup sourceable file
+          # itself is now downloaded as part of the setup->bench
+          # artifact. Re-export BENCH_ENV_FILE pointing at the local
+          # copy so the env.sh guard under `set -u` is satisfied.
+          export BENCH_ENV_FILE="${GITHUB_WORKSPACE}/.bench-runtime/bench-runtime-env.sh"
           echo "BENCH_CONTAINER=${BENCH_CONTAINER:-<unset>}"
           echo "BENCH_COMPOSE_PROJECT=${BENCH_COMPOSE_PROJECT:-<unset>}"
+          echo "BENCH_ENV_FILE=${BENCH_ENV_FILE}"
           bench="${{ matrix.bench }}"
           echo "=========================================="
           echo "benchmark: $bench"
