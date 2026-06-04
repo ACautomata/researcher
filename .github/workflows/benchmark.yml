@@ -183,11 +183,12 @@ jobs:
           name: bench-runtime-env
           # Upload the whole .bench-runtime/ directory so the bench jobs
           # receive .env.bench + bench-runtime-env.sh (and any other
-          # helpers env_setup.sh wrote). Avoid listing individual files
-          # because actions/upload-artifact@v4's path resolution uses
-          # the least common ancestor, which can dedup across paths
-          # declared on different roots.
+          # helpers env_setup.sh wrote). The directory itself is
+          # hidden (dot-prefixed) and contains a hidden .env.bench, so
+          # we must opt into include-hidden-files — otherwise the
+          # upload silently produces "No files were found".
           path: .bench-runtime/
+          include-hidden-files: true
           if-no-files-found: error
 
   # One job per benchmark. They all share the same setup job, so the
