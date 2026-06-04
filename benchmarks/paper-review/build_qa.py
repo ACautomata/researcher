@@ -13,14 +13,6 @@ ROOT = Path(__file__).resolve().parent.parent.parent
 SRC = ROOT / "benchmarks" / "paper-review" / "seed_qa.json"
 DST = ROOT / "benchmarks" / "paper-review" / "qa.jsonl"
 
-SKILL_TO_TARGET = {
-    "wiki-organizer": "paper-review",
-    "experiment-extractor": "paper-review",
-    "problem-analyzer": "paper-review",
-    "validation-designer": "paper-review",
-    "claude-code-prompt-generator": "paper-review",
-}
-
 
 def convert(item: dict) -> dict:
     sa = item.get("standard_answer") or {}
@@ -29,9 +21,9 @@ def convert(item: dict) -> dict:
     return {
         "qa_id": item["id"],
         # CI policy: every benchmark calls only `main`. Sub-agent routing
-        # happens through sessions_spawn, declared via `target_agent`.
+        # is decided by main at runtime via `sessions_spawn`; no per-QA
+        # `target_agent` field is allowed (see benchmarks/_common/qa_schema.json).
         "agent": "main",
-        "target_agent": SKILL_TO_TARGET.get(item.get("skill", ""), "paper-review"),
         "skill": item.get("skill"),
         "task_type": item.get("capability"),
         "input_material": item.get("input_material", ""),
