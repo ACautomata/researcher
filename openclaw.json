@@ -1,7 +1,7 @@
 {
   "meta": {
-    "lastTouchedVersion": "2026.4.21",
-    "lastTouchedAt": "2026-04-23T12:34:17.555Z"
+    "lastTouchedVersion": "2026.4.9",
+    "lastTouchedAt": "2026-06-06T04:27:46.540Z"
   },
   "update": {
     "checkOnStart": false
@@ -13,10 +13,11 @@
       "allowedOrigins": [
         "http://localhost:18789",
         "http://127.0.0.1:18789"
-      ]
+      ],
+      "dangerouslyDisableDeviceAuth": true
     },
     "mode": "local",
-    "port": 18789,
+    "port": 18790,
     "tailscale": {
       "mode": "off",
       "resetOnExit": false
@@ -45,21 +46,19 @@
   "agents": {
     "defaults": {
       "model": {
-        "primary": "minimax/MiniMax-M2.7",
-        "fallbacks": [
-          "minimax/MiniMax-M2.7-highspeed"
-        ]
+        "primary": "deepseek/deepseek-chat",
+        "fallbacks": []
       },
       "models": {
-        "minimax/MiniMax-M2.7": {
-          "alias": "Minimax"
+        "deepseek/deepseek-chat": {
+          "alias": "DeepSeek"
         }
       },
       "compaction": {
         "mode": "safeguard"
       },
       "sandbox": {
-        "mode": "all",
+        "mode": "off",
         "scope": "agent",
         "workspaceAccess": "rw",
         "docker": {
@@ -73,10 +72,14 @@
       "elevatedDefault": "full",
       "maxConcurrent": 4,
       "subagents": {
-        "delegationMode": "prefer",
         "maxConcurrent": 8,
         "maxSpawnDepth": 1,
-        "allowAgents": ["autoresearch", "paper-review", "idea-generate", "reviewer"]
+        "allowAgents": [
+          "autoresearch",
+          "paper-review",
+          "idea-generate",
+          "reviewer"
+        ]
       }
     },
     "list": [
@@ -152,55 +155,27 @@
       "visibility": "all"
     },
     "fs": {
-      "workspaceOnly": true
+      "workspaceOnly": false
     }
   },
   "channels": {
     "feishu": {
-      "enabled": true,
+      "enabled": false,
       "domain": "feishu",
       "connectionMode": "websocket",
       "defaultAccount": "main",
-      "accounts": {
-        "main": {
-          "appId": "${FEISHU_APP_ID}",
-          "appSecret": "${FEISHU_APP_SECRET}",
-          "name": "Research Assistant",
-          "enabled": true
-        },
-        "default": {
-          "dmPolicy": "pairing",
-          "groupPolicy": "allowlist"
-        }
-      },
+      "accounts": {},
       "requireMention": true
     },
     "discord": {
-      "enabled": true,
-      "token": {
-        "source": "env",
-        "provider": "default",
-        "id": "DISCORD_BOT_TOKEN"
-      },
+      "enabled": false,
       "groupPolicy": "open"
     }
   },
   "plugins": {
     "entries": {
-      "minimax": {
-        "enabled": true
-      },
       "browser": {
         "enabled": true
-      },
-      "lossless-claw": {
-        "enabled": true,
-        "config": {
-          "freshTailCount": 64,
-          "incrementalMaxDepth": 1,
-          "contextThreshold": 0.75,
-          "newSessionRetainDepth": 2
-        }
       },
       "memory-core": {
         "config": {
@@ -214,7 +189,7 @@
         "config": {
           "vaultMode": "isolated",
           "vault": {
-            "path": "~/.openclaw/wiki/main",
+            "path": "/home/node/.openclaw/wiki/main",
             "renderMode": "obsidian"
           },
           "obsidian": {
@@ -249,25 +224,14 @@
             "createDashboards": true
           }
         }
+      },
+      "deepseek": {
+        "enabled": true
       }
     },
-    "installs": {
-      "lossless-claw": {
-        "source": "path",
-        "spec": "@martian-engineering/lossless-claw",
-        "installPath": "/home/node/.openclaw/extensions/lossless-claw",
-        "version": "0.5.2",
-        "resolvedName": "@martian-engineering/lossless-claw",
-        "resolvedVersion": "0.9.2",
-        "resolvedSpec": "@martian-engineering/lossless-claw@0.9.2",
-        "integrity": "sha512-T33c/xgqwmb2l3W/PaZxMYiG29wu1lhRGiZ034DVay85Xnubcsqq7cF0zKYqfpU3R572+8eWUw813595KMUwiw==",
-        "shasum": "40fc865a4dd53f494cecae7a249dea5ac9126af1",
-        "resolvedAt": "2026-04-22T16:13:46.239Z",
-        "installedAt": "2026-04-23T04:27:08.670Z"
-      }
-    },
+    "installs": {},
     "slots": {
-      "contextEngine": "lossless-claw"
+      "contextEngine": "legacy"
     }
   },
   "memory": {
@@ -303,36 +267,40 @@
   "models": {
     "mode": "merge",
     "providers": {
-      "minimax": {
-        "baseUrl": "https://api.minimaxi.com/anthropic",
+      "deepseek": {
+        "baseUrl": "https://api.deepseek.com/anthropic",
         "models": [
           {
-            "id": "MiniMax-M2.7",
-            "name": "MiniMax M2.7",
+            "id": "deepseek-chat",
+            "name": "DeepSeek Chat",
             "reasoning": true,
             "input": [
-              "text",
-              "image"
+              "text"
             ],
             "cost": {
-              "input": 0.3,
-              "output": 1.2,
-              "cacheRead": 0.06,
-              "cacheWrite": 0.375
+              "input": 0.27,
+              "output": 1.1,
+              "cacheRead": 0.07,
+              "cacheWrite": 0.27
             },
-            "contextWindow": 204800,
-            "maxTokens": 131072
+            "contextWindow": 131072,
+            "maxTokens": 8192
           }
         ],
         "api": "anthropic-messages",
-        "authHeader": true
+        "authHeader": true,
+        "apiKey": {
+          "source": "env",
+          "provider": "default",
+          "id": "DEEPSEEK_API_KEY"
+        }
       }
     }
   },
   "auth": {
     "profiles": {
-      "minimax:cn": {
-        "provider": "minimax",
+      "deepseek:cn": {
+        "provider": "deepseek",
         "mode": "api_key"
       }
     }

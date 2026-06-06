@@ -66,10 +66,10 @@ jobs:
 
       - name: "Verify required secrets"
         env:
-          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
-          if [ -z "${MINIMAX_API_KEY:-}" ]; then
-            echo "::error::MINIMAX_API_KEY is not configured. Add it to repo Settings -> Secrets and variables -> Actions before running benchmarks." >&2
+          if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
+            echo "::error::DEEPSEEK_API_KEY is not configured. Add it to repo Settings -> Secrets and variables -> Actions before running benchmarks." >&2
             exit 1
           fi
 
@@ -87,8 +87,8 @@ jobs:
       # env_setup.sh writes (kept in sync by code review).
       - name: "Render docker env file from secrets"
         env:
-          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
-          MINIMAX_BASE_URL: ${{ secrets.MINIMAX_BASE_URL }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
         run: |
           set -euo pipefail
           mkdir -p .bench-runtime
@@ -105,11 +105,12 @@ jobs:
               "TZ=Asia/Shanghai",
               "SYNC_OPENCLAW_CONFIG=false",
               "SYNC_EXTENSIONS_ON_START=false",
-              "SYNC_MODEL_CONFIG=false",
-              "MODEL_ID=minimax/MiniMax-M2.7",
-              "PRIMARY_MODEL=minimax/MiniMax-M2.7",
-              "BASE_URL=" + (os.environ.get("MINIMAX_BASE_URL") or "https://api.minimaxi.com"),
-              "API_PROTOCOL=anthropic",
+              "SYNC_MODEL_CONFIG=true",
+              "MODEL_ID=deepseek/deepseek-chat",
+              "PRIMARY_MODEL=deepseek/deepseek-chat",
+              "BASE_URL=" + (os.environ.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com/anthropic"),
+              "DEEPSEEK_BASE_URL=" + (os.environ.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com/anthropic"),
+              "API_PROTOCOL=anthropic-messages",
               "CONTEXT_WINDOW=200000",
               "MAX_TOKENS=8192",
               "DM_POLICY=disabled",
@@ -125,8 +126,8 @@ jobs:
 
       - name: "Unified env (pull image + docker compose up)"
         env:
-          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
-          MINIMAX_BASE_URL: ${{ secrets.MINIMAX_BASE_URL }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
         run: |
           bash benchmarks/_common/env_setup.sh
 
@@ -249,10 +250,10 @@ jobs:
       - name: "Verify required secrets"
         if: steps.filter.outputs.skip != 'true'
         env:
-          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
         run: |
-          if [ -z "${MINIMAX_API_KEY:-}" ]; then
-            echo "::error::MINIMAX_API_KEY is not configured." >&2
+          if [ -z "${DEEPSEEK_API_KEY:-}" ]; then
+            echo "::error::DEEPSEEK_API_KEY is not configured." >&2
             exit 1
           fi
 
@@ -317,8 +318,8 @@ jobs:
           BENCH_CONTAINER: ${{ env.BENCH_CONTAINER }}
           BENCH_MOUNT: ${{ env.BENCH_MOUNT }}
           BENCH_OPENCLAW: openclaw
-          MINIMAX_API_KEY: ${{ secrets.MINIMAX_API_KEY }}
-          MINIMAX_BASE_URL: ${{ secrets.MINIMAX_BASE_URL }}
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ secrets.DEEPSEEK_BASE_URL }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           BENCH_REPO: ${{ github.repository }}
           BENCH_PR_NUMBER: ${{ github.event.pull_request.number }}

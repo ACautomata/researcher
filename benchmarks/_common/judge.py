@@ -44,14 +44,28 @@ def _extract_must_contain(gold: Any) -> list[str]:
     return []
 
 
-def judge_with_rules(answer: str, qa: dict) -> dict:
-    """Score an answer against qa.gold_answer with simple keyword coverage.
+def _extract_must_not_contain(gold: Any) -> list[str]:
+    """Pull forbidden tokens/phrases from gold_answer.must_not_contain."""
+    if not isinstance(gold, dict):
+        return []
+    out = gold.get("must_not_contain") or []
+    return [str(t) for t in out if str(t).strip()]
 
-    Score = covered / required (0 if no requirements). Pass when score >= qa.pass_threshold.
+
+def judge_with_rules(answer: str, qa: dict) -> dict:
+    """Score an answer against qa.gold_answer with keyword coverage + forbidden-term check.
+
+    Positive score = covered / len(required).
+    Each forbidden term found (must_not_contain) reduces the effective covered count by 1.
+    Final score = max(0, covered - violations) / len(required).
+    Pass when score >= qa.pass_threshold.
     """
-    required = _extract_must_contain(qa.get("gold_answer"))
+    gold = qa.get("gold_answer") or {}
+    required = _extract_must_contain(gold)
+    forbidden = _extract_must_not_contain(gold)
+    violation_penalty = gold.get("violation_penalty", 1) if isinstance(gold, dict) else 1
+
     if not required:
-        # No gold answer means we can only do a soft pass: not-empty + length sanity.
         text = (answer or "").strip()
         if not text:
             return {"score": 0.0, "pass": False, "rationale": "empty answer, no gold to check against"}
@@ -61,13 +75,24 @@ def judge_with_rules(answer: str, qa: dict) -> dict:
 
     text = (answer or "").lower()
     missing = [r for r in required if r.lower() not in text]
+    violations = [f for f in forbidden if f.lower() in text]
+
     covered = len(required) - len(missing)
-    score = covered / len(required)
+    effective_covered = max(0, covered - violation_penalty * len(violations))
+    score = effective_covered / len(required)
+
+    rationale_parts = [f"covered {covered}/{len(required)}"]
+    if missing:
+        rationale_parts.append(f"missing={missing[:5]}")
+    if violations:
+        rationale_parts.append(f"FORBIDDEN found={violations[:5]}")
+
     return {
         "score": round(score, 4),
         "pass": score >= qa.get("pass_threshold", 0.5),
-        "rationale": f"covered {covered}/{len(required)}; missing={missing[:5]}",
+        "rationale": "; ".join(rationale_parts),
         "missing": missing,
+        "violations": violations,
     }
 
 
@@ -143,7 +168,7 @@ def judge_with_agent(qa: dict, answer: str, agent_id: str = "reviewer",
     if container:
         cmd = [
             "docker", "exec", "-i",
-            "-e", "MINIMAX_API_KEY", "-e", "MINIMAX_BASE_URL",
+            "-e", "DEEPSEEK_API_KEY", "-e", "DEEPSEEK_BASE_URL",
             container,
         ] + cmd
     if model:

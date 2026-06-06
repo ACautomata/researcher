@@ -18,6 +18,16 @@ def convert(item: dict) -> dict:
     sa = item.get("standard_answer") or {}
     must = sa.get("must_contain") or []
     fields = sa.get("fields") or []
+    must_not = sa.get("must_not_contain") or []
+    vp = sa.get("violation_penalty")
+    ga: dict = {
+        "must_contain": must + fields,
+        "fields": fields,
+        "key_behavior": sa.get("key_behavior", ""),
+    }
+    if must_not:
+        ga["must_not_contain"] = must_not
+        ga["violation_penalty"] = vp if isinstance(vp, (int, float)) else 1
     return {
         "qa_id": item["id"],
         # CI policy: every benchmark calls only `main`. Sub-agent routing
@@ -29,12 +39,11 @@ def convert(item: dict) -> dict:
         "input_material": item.get("input_material", ""),
         "question": item.get("question", ""),
         "expected_artifacts": [f"workspace-paper-review/outputs/bench-<run>/{item['id']}.md"],
-        "gold_answer": {"must_contain": must + fields, "fields": fields,
-                        "key_behavior": sa.get("key_behavior", "")},
+        "gold_answer": ga,
         "rubric": sa.get("key_behavior", "Match the must_contain and key_behavior."),
         "rubric_dimensions": item.get("dimensions", []),
         "pass_threshold": 0.5,
-        "judge": "rules",
+        "judge": "agent",
         "weight": 1.0,
     }
 

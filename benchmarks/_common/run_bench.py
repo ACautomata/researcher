@@ -171,15 +171,14 @@ def run_agent(container: str, agent_id: str, qa: dict, run_id: str,
             material = material.get("content") or Path(material["path"]).read_text(encoding="utf-8")
         prompt = f"{material}\n\n---\n\n{prompt}"
     # Use a never-reused key so every QA starts from an empty conversation.
-    # OpenClaw documents --session-key as the explicit session selector; there
-    # is no separate "new session" flag for `openclaw agent`, so freshness comes
-    # from making the key unique per QA attempt.
+    # `--session-key` accepts the full agent-scoped key and creates a fresh
+    # session when the key has not been seen before.
     session_key = f"agent:{agent_id}:bench-{run_id}-{qa['qa_id']}-{uuid.uuid4().hex}"
     # Propagate the LLM provider credentials into the container. Without
     # these the embedded openclaw agent cannot reach the model.
     cmd = [
         "docker", "exec", "-i",
-        "-e", "MINIMAX_API_KEY", "-e", "MINIMAX_BASE_URL",
+        "-e", "DEEPSEEK_API_KEY", "-e", "DEEPSEEK_BASE_URL",
         container, "openclaw", "agent",
         "--agent", agent_id, "--message", prompt, "--json", "--local",
         "--session-key", session_key,
@@ -373,51 +372,87 @@ def _strip_diagnostics(text: str) -> str:
     return "\n".join(cleaned_lines)
 
 
+def _find_payload_json(text: str) -> dict | None:
+    """Find a JSON object with 'payloads' key embedded in mixed text
+    (diagnostic lines may precede the JSON on stdout or stderr)."""
+    # 1) Try to parse the whole string as JSON.
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict) and "payloads" in data:
+            return data
+    except Exception:
+        pass
+    # 2) Scan for a JSON block that contains a "payloads" key.
+    for m in re.finditer(r'\{[^{]*["\\]?payloads["\\]?', text):
+        start = m.start()
+        depth = 0
+        for j in range(start, len(text)):
+            ch = text[j]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+            if depth == 0:
+                try:
+                    data = json.loads(text[start : j + 1])
+                except Exception:
+                    pass
+                else:
+                    if isinstance(data, dict) and "payloads" in data:
+                        return data
+                break
+    return None
+
+
+def _extract_agent_json_text(stdout: str, stderr: str) -> str:
+    """Extract agent reply from `--json` output that may be mixed with
+    diagnostic lines on either stdout or stderr.
+
+    Returns the concatenated payloads[].text or an empty string.
+    """
+    for source in (stdout, stderr):
+        data = _find_payload_json(source)
+        if not data:
+            continue
+        for key in ("payloads",):
+            pl = data.get(key)
+            if isinstance(pl, list) and pl:
+                joined = "\n".join(
+                    p.get("text", "") for p in pl if isinstance(p, dict)
+                ).strip()
+                if joined:
+                    return joined
+        result = data.get("result")
+        if isinstance(result, dict):
+            pl = result.get("payloads")
+            if isinstance(pl, list) and pl:
+                joined = "\n".join(
+                    p.get("text", "") for p in pl if isinstance(p, dict)
+                ).strip()
+                if joined:
+                    return joined
+    return ""
+
+
 def _extract_agent_text(stdout: str, stderr: str) -> str:
     """Pick the agent's final text out of an `openclaw agent --json` reply.
 
-    Strategy:
-    1. Try to parse stdout as JSON. The docs document shape:
-         {"payloads": [{"text": "...", "mediaUrl": null}, ...], "meta": {...}}
-       We concatenate every payloads[].text (the agent may emit multiple
-       text parts) and return that.
-    2. If stdout is empty or unparsable, fall back to stderr, but run
-       the diagnostic-stripping pass first -- when context-engine plugin
-       fails, openclaw writes ~2kB of `[context-engine] ... [diagnostic] ...`
-       noise to stderr and no real agent text appears.
-    3. If after stripping nothing usable remains, return a sentinel
-       "(no agent response — only diagnostic output)" so downstream
-       judges and the report get a clear signal instead of 2kB of noise.
+    1. Scan stdout, then stderr, for a JSON object with payloads[].text.
+    2. If JSON is found, return concatenated text (clean, no diagnostics).
+    3. Fall back to stripping known diagnostic noise from stdout / stderr.
+    4. If nothing usable remains, return a sentinel string.
     """
-    if stdout.strip():
-        try:
-            data = json.loads(stdout)
-        except json.JSONDecodeError:
-            return _strip_diagnostics(stdout)
+    agent_text = _extract_agent_json_text(stdout, stderr)
+    if agent_text:
+        return agent_text
 
-        # Common shape: top-level "payloads" list.
-        if isinstance(data, dict):
-            payloads = data.get("payloads")
-            if isinstance(payloads, list) and payloads:
-                texts = [p.get("text", "") for p in payloads if isinstance(p, dict)]
-                joined = "\n".join(t for t in texts if t)
-                if joined.strip():
-                    return _strip_diagnostics(joined)
-            # Some embedded-fallback responses nest under "result.payloads".
-            result = data.get("result")
-            if isinstance(result, dict):
-                payloads = result.get("payloads")
-                if isinstance(payloads, list) and payloads:
-                    texts = [p.get("text", "") for p in payloads if isinstance(p, dict)]
-                    joined = "\n".join(t for t in texts if t)
-                    if joined.strip():
-                        return _strip_diagnostics(joined)
+    # Fallback: strip diagnostics from stdout then stderr.
+    for source in (stdout, stderr):
+        cleaned = _strip_diagnostics(source)
+        if cleaned.strip():
+            return cleaned
 
-    # Fallback: stderr.  Strip diagnostic noise and return what remains.
-    cleaned_stderr = _strip_diagnostics(stderr)
-    if not cleaned_stderr.strip():
-        return "(no agent response — only diagnostic output)"
-    return cleaned_stderr
+    return "(no agent response — only diagnostic output)"
 
 
 def main(bench_name: str, agent_id: str | None = None) -> int:
