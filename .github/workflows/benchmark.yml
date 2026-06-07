@@ -40,7 +40,16 @@ permissions:
   pull-requests: write
   issues: write
 
-# Default matrix: every benchmark gets its own job so they run in parallel.
+# Cross-workflow mutex: only one benchmark run active at a time. When a new
+# commit lands or a new PR opens, the in-progress run is cancelled so the new
+# one gets exclusive access to MINIMAX_API_KEY. Within a single run, the bench
+# matrix already uses max-parallel: 1 for sequential execution.
+concurrency:
+  group: bench-${{ github.repository }}
+  cancel-in-progress: true
+
+# Default matrix: every benchmark gets its own job. They run sequentially
+# (max-parallel: 1) so that only one job uses MINIMAX_API_KEY at a time.
 # `workflow_dispatch` may narrow this to a subset via the `only` input. The
 # aggregate job always waits for the whole matrix to settle (`if: always()`)
 # and renders whatever bench-report.json files exist.
@@ -206,6 +215,9 @@ jobs:
   # image pull and gateway boot happen exactly once. Each bench job then
   # re-creates the container via bench_force_recreate (called from its own
   # env.sh) so it starts from a known clean state.
+  #
+  # max-parallel: 1 forces sequential execution so that only one benchmark
+  # uses MINIMAX_API_KEY at a time, avoiding API rate-limit contention.
   bench:
     name: "Bench: ${{ matrix.bench }}"
     needs: setup
@@ -213,6 +225,7 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
+      max-parallel: 1
       matrix:
         bench:
           - idea-generate
@@ -320,6 +333,12 @@ jobs:
           # shellcheck disable=SC1091
           . .bench-runtime/bench-runtime-env.sh
           echo "BENCH_CONTAINER(historical)=${BENCH_CONTAINER:-<unset>} (will be recreated by env.sh)"
+
+      - name: "Cool-down sleep before benchmark"
+        if: steps.filter.outputs.skip != 'true'
+        run: |
+          echo "Sleeping 30s to let API rate limits cool down between benchmarks..."
+          sleep 30
 
       - name: "Run benchmark (env.sh then metrics.py)"
         if: steps.filter.outputs.skip != 'true'
