@@ -176,8 +176,14 @@ prov["apiKey"] = {"source": "env", "provider": "default", "id": "MINIMAX_API_KEY
 default_prov = data.get("models", {}).get("providers", {}).pop("default", None)
 if default_prov is not None:
     print("removed models.providers.default overlay (not needed for bench)")
+# Sandbox mode requires Docker-in-Docker which is not available in CI.
+# Disable sandboxing for the embedded agent runs.
+agents = data.setdefault("agents", {})
+defaults = agents.setdefault("defaults", {})
+defaults["sandbox"] = {"mode": "off"}
 p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 print("patched models.providers.minimax.apiKey -> SecretRef(MINIMAX_API_KEY)")
+print("patched agents.defaults.sandbox.mode -> off")
 '
   docker exec "${container}" chown 1000:1000 /home/node/.openclaw/openclaw.json
 }
@@ -298,14 +304,17 @@ p = pathlib.Path("/home/node/.openclaw/openclaw.json")
 data = json.loads(p.read_text(encoding="utf-8"))
 prov = data.setdefault("models", {}).setdefault("providers", {}).setdefault("minimax", {})
 prov["apiKey"] = {"source": "env", "provider": "default", "id": "MINIMAX_API_KEY"}
-# Docker image upgrade: container init.sh writes models.providers.default
-# with baseUrl from env vars. When it has no models, OpenClaw rejects it.
-# Remove it so the minimax provider is used directly.
 default_prov = data.get("models", {}).get("providers", {}).pop("default", None)
 if default_prov is not None:
     print("removed models.providers.default overlay (not needed for bench)")
+# Sandbox mode requires Docker-in-Docker which is not available in CI.
+# Disable sandboxing for the embedded agent runs.
+agents = data.setdefault("agents", {})
+defaults = agents.setdefault("defaults", {})
+defaults["sandbox"] = {"mode": "off"}
 p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 print("patched models.providers.minimax.apiKey -> SecretRef(MINIMAX_API_KEY)")
+print("patched agents.defaults.sandbox.mode -> off")
 '
   docker exec "\${container}" chown 1000:1000 /home/node/.openclaw/openclaw.json
 }
