@@ -131,7 +131,7 @@ bench_reapply_setup() {
   echo "[bench_reapply_setup] creating agent session dirs"
   docker exec "${container}" bash -lc '
     set -e
-    for agent_id in main autoresearch paper-review idea-generate reviewer; do
+    for agent_id in main ingest curate extract critic design spec audit ideate judge; do
       mkdir -p "/home/node/.openclaw/agents/${agent_id}/sessions"
     done
   '
