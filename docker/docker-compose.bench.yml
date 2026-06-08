@@ -1,6 +1,6 @@
 # CI/CD benchmark compose profile.
 # Mirrors the upstream openclaw-docker-cn-im structure but with ALL channels,
-# plugins, and sandbox mode disabled, and bind restricted to loopback.
+# plugins disabled, and bind restricted to loopback.
 # Only the LLM provider is wired in.
 services:
   openclaw-bench:
@@ -58,8 +58,7 @@ services:
       # never use this token (the CLI runs --local embedded), so a stable
       # dummy value is enough.
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:-bench-only-not-a-real-token}
-      # Sandbox off in CI
-      OPENCLAW_SANDBOX_MODE: off
+      # Sandbox enabled for agent workspace isolation
       OPENCLAW_PLUGINS_ENABLED: "false"
     volumes:
       - ${OPENCLAW_DATA_DIR}:/home/node/.openclaw

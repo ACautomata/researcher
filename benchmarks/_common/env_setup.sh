@@ -60,7 +60,6 @@ DM_POLICY=disabled
 GROUP_POLICY=disabled
 ALLOW_FROM=
 OPENCLAW_WORKSPACE_ROOT=/home/node/.openclaw
-OPENCLAW_SANDBOX_MODE=off
 OPENCLAW_PLUGINS_ENABLED=false
 EOF
 mkdir -p "${ENV_DIR}/openclaw-data"
@@ -109,7 +108,7 @@ log "container: ${CONTAINER}"
 #    This is the same sequence `bench_force_recreate` re-runs after a
 #    container is recreated: clear the mount, stream the repo tarball,
 #    create the per-agent session dirs, chown to 1000:1000, and patch
-#    openclaw.json with the SecretRef + sandbox-off fixes.
+#    openclaw.json with the SecretRef patch.
 bench_reapply_setup() {
   local container="${1:-${BENCH_CONTAINER:-}}"
   [[ -n "${container}" ]] || { echo "[bench_reapply_setup][FATAL] no container" >&2; return 64; }
@@ -137,17 +136,13 @@ bench_reapply_setup() {
   '
   echo "[bench_reapply_setup] chown /home/node/.openclaw -> 1000:1000"
   docker exec "${container}" chown -R 1000:1000 /home/node/.openclaw || true
-  echo "[bench_reapply_setup] patching openclaw.json (SecretRef + sandbox off)"
+  echo "[bench_reapply_setup] patching openclaw.json (SecretRef)"
   docker exec "${container}" python3 -c '
 import json, pathlib
 p = pathlib.Path("/home/node/.openclaw/openclaw.json")
 data = json.loads(p.read_text(encoding="utf-8"))
 prov = data.setdefault("models", {}).setdefault("providers", {}).setdefault("minimax", {})
 prov["apiKey"] = {"source": "env", "provider": "default", "id": "MINIMAX_API_KEY"}
-sandbox = data.setdefault("agents", {}).setdefault("defaults", {}).setdefault("sandbox", {})
-if sandbox.get("mode") and sandbox["mode"] != "off":
-    sandbox["mode"] = "off"
-    print("patched agents.defaults.sandbox.mode -> off")
 p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 print("patched models.providers.minimax.apiKey -> SecretRef(MINIMAX_API_KEY)")
 '
@@ -157,13 +152,13 @@ log "docker cp repo into ${CONTAINER}:/home/node/.openclaw"
 bench_reapply_setup "${CONTAINER}"
 log "repo copied into container"
 
-# 5b. The SecretRef patch for models.providers.minimax.apiKey and the
-#     sandbox-off patch live inside `bench_reapply_setup` (see section 5
-#     above) so that `bench_force_recreate` re-runs them after recreating
-#     the container. We deliberately do NOT restart the container after
-#     patching -- restarting was the root cause of 13+ CI failures because
-#     init.sh re-runs on restart and the container exits within seconds.
-log "SecretRef + sandbox off patches applied via bench_reapply_setup (no restart)"
+  # 5b. The SecretRef patch for models.providers.minimax.apiKey lives inside
+  #     `bench_reapply_setup` (see section 5 above) so that
+  #     `bench_force_recreate` re-runs it after recreating the container.
+  #     We deliberately do NOT restart the container after patching --
+  #     restarting was the root cause of 13+ CI failures because init.sh
+  #     re-runs on restart and the container exits within seconds.
+  log "SecretRef patch applied via bench_reapply_setup (no restart)"
 
 # 6. Wait for the openclaw container to start and the gateway to become
 #    ready. The image's healthcheck is informational only (we set
@@ -258,23 +253,19 @@ bench_reapply_setup() {
   echo "[bench_reapply_setup] creating agent session dirs"
   docker exec "\${container}" bash -lc '
     set -e
-    for agent_id in main autoresearch paper-review idea-generate reviewer; do
+    for agent_id in main ingest curate extract critic design spec audit ideate judge; do
       mkdir -p "/home/node/.openclaw/agents/\${agent_id}/sessions"
     done
   '
   echo "[bench_reapply_setup] chown /home/node/.openclaw -> 1000:1000"
   docker exec "\${container}" chown -R 1000:1000 /home/node/.openclaw || true
-  echo "[bench_reapply_setup] patching openclaw.json (SecretRef + sandbox off)"
+  echo "[bench_reapply_setup] patching openclaw.json (SecretRef)"
   docker exec "\${container}" python3 -c '
 import json, pathlib
 p = pathlib.Path("/home/node/.openclaw/openclaw.json")
 data = json.loads(p.read_text(encoding="utf-8"))
 prov = data.setdefault("models", {}).setdefault("providers", {}).setdefault("minimax", {})
 prov["apiKey"] = {"source": "env", "provider": "default", "id": "MINIMAX_API_KEY"}
-sandbox = data.setdefault("agents", {}).setdefault("defaults", {}).setdefault("sandbox", {})
-if sandbox.get("mode") and sandbox["mode"] != "off":
-    sandbox["mode"] = "off"
-    print("patched agents.defaults.sandbox.mode -> off")
 p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 print("patched models.providers.minimax.apiKey -> SecretRef(MINIMAX_API_KEY)")
 '
@@ -333,8 +324,8 @@ bench_force_recreate() {
   if [ -n "\${new_container}" ]; then
     export BENCH_CONTAINER="\${new_container}"
   fi
-  # The recreated container is bare: no repo, no SecretRef patch, no
-  # sandbox-off patch. Re-apply the same setup that env_setup.sh ran for
+  # The recreated container is bare: no repo, no SecretRef patch.
+  # Re-apply the same setup that env_setup.sh ran for
   # the initial container, so subsequent exec calls see a fully-prepared
   # environment.
   bench_reapply_setup "\${BENCH_CONTAINER}"
