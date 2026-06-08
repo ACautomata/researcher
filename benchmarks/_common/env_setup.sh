@@ -324,6 +324,16 @@ bench_force_recreate() {
   if [ -n "\${new_container}" ]; then
     export BENCH_CONTAINER="\${new_container}"
   fi
+  # Defensive: docker compose up -d --force-recreate occasionally leaves
+  # the container in created / exited state when the host docker daemon is
+  # under load. bench_reapply_setup would then fail with "container is not
+  # running". Explicitly start it.
+  local _state
+  _state="\$(docker inspect --format '{{.State.Running}}' "\${BENCH_CONTAINER}" 2>/dev/null || echo "false")"
+  if [ "\${_state}" != "true" ]; then
+    echo "[bench_force_recreate] container \${BENCH_CONTAINER} not running (state=\${_state}); starting"
+    docker start "\${BENCH_CONTAINER}" >/dev/null 2>&1 || true
+  fi
   # The recreated container is bare: no repo, no SecretRef patch.
   # Re-apply the same setup that env_setup.sh ran for
   # the initial container, so subsequent exec calls see a fully-prepared

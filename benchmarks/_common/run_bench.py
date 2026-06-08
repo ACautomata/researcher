@@ -382,43 +382,110 @@ def _extract_agent_text(stdout: str, stderr: str) -> str:
          {"payloads": [{"text": "...", "mediaUrl": null}, ...], "meta": {...}}
        We concatenate every payloads[].text (the agent may emit multiple
        text parts) and return that.
-    2. If stdout is empty or unparsable, fall back to stderr, but run
-       the diagnostic-stripping pass first -- when context-engine plugin
-       fails, openclaw writes ~2kB of `[context-engine] ... [diagnostic] ...`
+    2. If stdout is empty or unparsable as a whole, try to find a JSON
+       object embedded in stdout (some openclaw builds prepend diagnostic
+       lines like "- Canonicalized N orphaned session key(s) ..." to the
+       JSON payload, which makes json.loads(stdout) raise). The fallback
+       scans for the first '{' that starts a top-level object and
+       attempts to parse from there.
+    3. If stdout is empty or has no parseable JSON, fall back to stderr,
+       but run the diagnostic-stripping pass first -- when context-engine
+       plugin fails, openclaw writes ~2kB of `[context-engine] ... [diagnostic] ...`
        noise to stderr and no real agent text appears.
-    3. If after stripping nothing usable remains, return a sentinel
+    4. If after stripping nothing usable remains, return a sentinel
        "(no agent response — only diagnostic output)" so downstream
        judges and the report get a clear signal instead of 2kB of noise.
     """
     if stdout.strip():
-        try:
-            data = json.loads(stdout)
-        except json.JSONDecodeError:
-            return _strip_diagnostics(stdout)
-
-        # Common shape: top-level "payloads" list.
-        if isinstance(data, dict):
-            payloads = data.get("payloads")
-            if isinstance(payloads, list) and payloads:
-                texts = [p.get("text", "") for p in payloads if isinstance(p, dict)]
-                joined = "\n".join(t for t in texts if t)
-                if joined.strip():
-                    return _strip_diagnostics(joined)
-            # Some embedded-fallback responses nest under "result.payloads".
-            result = data.get("result")
-            if isinstance(result, dict):
-                payloads = result.get("payloads")
-                if isinstance(payloads, list) and payloads:
-                    texts = [p.get("text", "") for p in payloads if isinstance(p, dict)]
-                    joined = "\n".join(t for t in texts if t)
-                    if joined.strip():
-                        return _strip_diagnostics(joined)
+        data = _try_parse_json(stdout)
+        if data is not None:
+            extracted = _text_from_json(data)
+            if extracted is not None:
+                return extracted
+        # Whole stdout didn't parse -- try to find a JSON object embedded
+        # after diagnostic noise (some openclaw builds emit session
+        # canonicalization messages before the JSON payload).
+        embedded = _extract_embedded_json(stdout)
+        if embedded is not None:
+            extracted = _text_from_json(_try_parse_json(embedded))
+            if extracted is not None:
+                return extracted
+        # Last resort: return the cleaned noise text so the judge sees
+        # whatever non-JSON content was in stdout.
+        return _strip_diagnostics(stdout)
 
     # Fallback: stderr.  Strip diagnostic noise and return what remains.
     cleaned_stderr = _strip_diagnostics(stderr)
     if not cleaned_stderr.strip():
         return "(no agent response — only diagnostic output)"
     return cleaned_stderr
+
+
+def _try_parse_json(text: str) -> object | None:
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+def _extract_embedded_json(text: str) -> str | None:
+    """Find the first top-level JSON object embedded in text.
+
+    Scans for the first '{' that is the start of a balanced top-level
+    object (string-aware), then returns the substring from there. Used
+    to recover from openclaw builds that prepend non-JSON diagnostic
+    lines to the JSON payload.
+    """
+    for i, ch in enumerate(text):
+        if ch != "{":
+            continue
+        depth = 0
+        in_str = False
+        escape = False
+        for j in range(i, len(text)):
+            c = text[j]
+            if in_str:
+                if escape:
+                    escape = False
+                elif c == "\\":
+                    escape = True
+                elif c == '"':
+                    in_str = False
+            else:
+                if c == '"':
+                    in_str = True
+                elif c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = text[i : j + 1]
+                        if _try_parse_json(candidate) is not None:
+                            return candidate
+                        break
+    return None
+
+
+def _text_from_json(data: object) -> str | None:
+    """Pull the concatenated payloads[].text out of an `openclaw agent --json` reply."""
+    if not isinstance(data, dict):
+        return None
+    payloads = data.get("payloads")
+    if isinstance(payloads, list) and payloads:
+        texts = [p.get("text", "") for p in payloads if isinstance(p, dict)]
+        joined = "\n".join(t for t in texts if t)
+        if joined.strip():
+            return joined
+    # Some embedded-fallback responses nest under "result.payloads".
+    result = data.get("result")
+    if isinstance(result, dict):
+        payloads = result.get("payloads")
+        if isinstance(payloads, list) and payloads:
+            texts = [p.get("text", "") for p in payloads if isinstance(p, dict)]
+            joined = "\n".join(t for t in texts if t)
+            if joined.strip():
+                return joined
+    return None
 
 
 def main(bench_name: str, agent_id: str | None = None) -> int:
