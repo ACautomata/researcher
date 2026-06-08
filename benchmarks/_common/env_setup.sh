@@ -64,11 +64,38 @@ OPENCLAW_PLUGINS_ENABLED=false
 EOF
 mkdir -p "${ENV_DIR}/openclaw-data"
 
-# 2. Pull the image (idempotent). Use docker hub mirror if available.
+# 2a. Pre-seed the data directory with a minimally-valid openclaw.json so
+#     the gateway starts clean (no config invalid errors) even though we
+#     haven't rsync'd the repo yet. The real config arrives during
+#     `bench_reapply_setup` and bench_force_recreate overwrites this
+#     openclaw.json with the repo copy + SecretRef patch.
+log "pre-seeding openclaw.json in data dir to avoid gateway config errors"
+mkdir -p "${ENV_DIR}/openclaw-data"
+cat >"${ENV_DIR}/openclaw-data/openclaw.json" <<'PRESEEDEOF'
+{
+  "gateway": {"mode": "local", "bind": "loopback", "port": 18789, "auth": {"mode": "token"}},
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "minimax": {
+        "baseUrl": "https://api.minimaxi.com/anthropic",
+        "api": "anthropic-messages",
+        "authHeader": true,
+        "apiKey": {"source": "env", "provider": "default", "id": "MINIMAX_API_KEY"}
+      }
+    }
+  }
+}
+PRESEEDEOF
+# We can't set the apiKey until the container is running (the container
+# env provides MINIMAX_API_KEY). For now we use a placeholder; the SecretRef
+# patch in bench_reapply_setup replaces it after docker compose.
+
+# 2b. Pull the image (idempotent). Use docker hub mirror if available.
 log "pulling ${IMAGE}"
 docker pull "${IMAGE}" >/dev/null
 
-# 3. Bring up the gateway service. We pass the project name to isolate the
+# 3. Bring up the gateway service.
 #    stack from any other compose project on the same host.
 #
 #    `--force-recreate` makes sure the container starts from a clean state on
@@ -161,9 +188,8 @@ log "repo copied into container"
   # 5b. The SecretRef patch for models.providers.minimax.apiKey lives inside
   #     `bench_reapply_setup` (see section 5 above) so that
   #     `bench_force_recreate` re-runs it after recreating the container.
-  #     We deliberately do NOT restart the container after patching --
-  #     restarting was the root cause of 13+ CI failures because init.sh
-  #     re-runs on restart and the container exits within seconds.
+  #     The pre-seeded openclaw.json (section 2a) prevents the gateway from
+  #     starting up invalid, so we don't need to restart.
   log "SecretRef patch applied via bench_reapply_setup (no restart)"
 
 # 6. Wait for the openclaw container to start and the gateway to become
