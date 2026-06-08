@@ -490,13 +490,22 @@ def main(bench_name: str, agent_id: str | None = None) -> int:
                         f"stdout_bytes={len(raw.get('stdout', ''))} "
                         f"stderr_bytes={len(raw.get('stderr', ''))} "
                         f"agent_text_chars={len(answer or '')}")
-            # Surface the first 200 chars of the agent's reply so
-            # zero-score failures are easy to diagnose from CI logs.
+            # Print summary line to stderr for quick scanning in CI logs.
+            # Then emit the full agent answer inside a GitHub Actions log group
+            # so it's fully visible without truncation.  `::group::` / `::endgroup::`
+            # are rendered as collapsible sections by GitHub Actions.
             head = (answer or "").replace("\n", "\\n")[:200]
             print(f"  [{qa['qa_id']}] score={verdict.get('score', 0):.3f} "
                   f"pass={verdict.get('pass', False)} "
                   f"len(answer)={len(answer or '')} head={head!r}",
                   file=sys.stderr)
+            group_title = (f"QA {qa['qa_id']} — agent reply "
+                           f"(score={verdict.get('score', 0):.2f}, "
+                           f"pass={verdict.get('pass', False)}, "
+                           f"{len(answer or '')} chars)")
+            print(f"::group::{group_title}")
+            print(answer or "(no agent response)")
+            print("::endgroup::")
             result_entry = {
                 "qa_id": qa["qa_id"], "task_type": qa.get("task_type"),
                 "weight": qa.get("weight", 1.0),
