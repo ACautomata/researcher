@@ -64,11 +64,38 @@ OPENCLAW_PLUGINS_ENABLED=false
 EOF
 mkdir -p "${ENV_DIR}/openclaw-data"
 
-# 2. Pull the image (idempotent). Use docker hub mirror if available.
+# 2a. Pre-seed the data directory with a minimally-valid openclaw.json so
+#     the gateway starts clean (no config invalid errors) even though we
+#     haven't rsync'd the repo yet. The real config arrives during
+#     `bench_reapply_setup` and bench_force_recreate overwrites this
+#     openclaw.json with the repo copy + SecretRef patch.
+log "pre-seeding openclaw.json in data dir to avoid gateway config errors"
+mkdir -p "${ENV_DIR}/openclaw-data"
+cat >"${ENV_DIR}/openclaw-data/openclaw.json" <<'PRESEEDEOF'
+{
+  "gateway": {"mode": "local", "bind": "loopback", "port": 18789, "auth": {"mode": "token"}},
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "minimax": {
+        "baseUrl": "https://api.minimaxi.com/anthropic",
+        "api": "anthropic-messages",
+        "authHeader": true,
+        "apiKey": {"source": "env", "provider": "default", "id": "MINIMAX_API_KEY"}
+      }
+    }
+  }
+}
+PRESEEDEOF
+# We can't set the apiKey until the container is running (the container
+# env provides MINIMAX_API_KEY). For now we use a placeholder; the SecretRef
+# patch in bench_reapply_setup replaces it after docker compose.
+
+# 2b. Pull the image (idempotent). Use docker hub mirror if available.
 log "pulling ${IMAGE}"
 docker pull "${IMAGE}" >/dev/null
 
-# 3. Bring up the gateway service. We pass the project name to isolate the
+# 3. Bring up the gateway service.
 #    stack from any other compose project on the same host.
 #
 #    `--force-recreate` makes sure the container starts from a clean state on
@@ -143,8 +170,20 @@ p = pathlib.Path("/home/node/.openclaw/openclaw.json")
 data = json.loads(p.read_text(encoding="utf-8"))
 prov = data.setdefault("models", {}).setdefault("providers", {}).setdefault("minimax", {})
 prov["apiKey"] = {"source": "env", "provider": "default", "id": "MINIMAX_API_KEY"}
+# Docker image upgrade: container init.sh writes models.providers.default
+# with baseUrl from env vars. When it has no models, OpenClaw rejects it.
+# Remove it so the minimax provider is used directly.
+default_prov = data.get("models", {}).get("providers", {}).pop("default", None)
+if default_prov is not None:
+    print("removed models.providers.default overlay (not needed for bench)")
+# Sandbox mode requires Docker-in-Docker which is not available in CI.
+# Disable sandboxing for the embedded agent runs.
+agents = data.setdefault("agents", {})
+defaults = agents.setdefault("defaults", {})
+defaults["sandbox"] = {"mode": "off"}
 p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 print("patched models.providers.minimax.apiKey -> SecretRef(MINIMAX_API_KEY)")
+print("patched agents.defaults.sandbox.mode -> off")
 '
   docker exec "${container}" chown 1000:1000 /home/node/.openclaw/openclaw.json
 }
@@ -155,9 +194,8 @@ log "repo copied into container"
   # 5b. The SecretRef patch for models.providers.minimax.apiKey lives inside
   #     `bench_reapply_setup` (see section 5 above) so that
   #     `bench_force_recreate` re-runs it after recreating the container.
-  #     We deliberately do NOT restart the container after patching --
-  #     restarting was the root cause of 13+ CI failures because init.sh
-  #     re-runs on restart and the container exits within seconds.
+  #     The pre-seeded openclaw.json (section 2a) prevents the gateway from
+  #     starting up invalid, so we don't need to restart.
   log "SecretRef patch applied via bench_reapply_setup (no restart)"
 
 # 6. Wait for the openclaw container to start and the gateway to become
@@ -266,8 +304,17 @@ p = pathlib.Path("/home/node/.openclaw/openclaw.json")
 data = json.loads(p.read_text(encoding="utf-8"))
 prov = data.setdefault("models", {}).setdefault("providers", {}).setdefault("minimax", {})
 prov["apiKey"] = {"source": "env", "provider": "default", "id": "MINIMAX_API_KEY"}
+default_prov = data.get("models", {}).get("providers", {}).pop("default", None)
+if default_prov is not None:
+    print("removed models.providers.default overlay (not needed for bench)")
+# Sandbox mode requires Docker-in-Docker which is not available in CI.
+# Disable sandboxing for the embedded agent runs.
+agents = data.setdefault("agents", {})
+defaults = agents.setdefault("defaults", {})
+defaults["sandbox"] = {"mode": "off"}
 p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 print("patched models.providers.minimax.apiKey -> SecretRef(MINIMAX_API_KEY)")
+print("patched agents.defaults.sandbox.mode -> off")
 '
   docker exec "\${container}" chown 1000:1000 /home/node/.openclaw/openclaw.json
 }
@@ -323,6 +370,16 @@ bench_force_recreate() {
   new_container="\$(docker ps --filter "label=com.docker.compose.project=\${BENCH_COMPOSE_PROJECT}" --format '{{.Names}}' | head -n1)"
   if [ -n "\${new_container}" ]; then
     export BENCH_CONTAINER="\${new_container}"
+  fi
+  # Defensive: docker compose up -d --force-recreate occasionally leaves
+  # the container in created / exited state when the host docker daemon is
+  # under load. bench_reapply_setup would then fail with "container is not
+  # running". Explicitly start it.
+  local _state
+  _state="\$(docker inspect --format '{{.State.Running}}' "\${BENCH_CONTAINER}" 2>/dev/null || echo "false")"
+  if [ "\${_state}" != "true" ]; then
+    echo "[bench_force_recreate] container \${BENCH_CONTAINER} not running (state=\${_state}); starting"
+    docker start "\${BENCH_CONTAINER}" >/dev/null 2>&1 || true
   fi
   # The recreated container is bare: no repo, no SecretRef patch.
   # Re-apply the same setup that env_setup.sh ran for

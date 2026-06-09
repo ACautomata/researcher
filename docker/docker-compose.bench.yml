@@ -25,22 +25,17 @@ services:
       # SecretRef into openclaw.json instead; benchmark calls pass
       # MINIMAX_API_KEY only to each `docker exec ... openclaw agent --local`
       # process.
-      SYNC_OPENCLAW_CONFIG: "true"
+      SYNC_OPENCLAW_CONFIG: "false"
       SYNC_EXTENSIONS_ON_START: "false"
       SYNC_EXTENSIONS_MODE: "none"
       SYNC_MODEL_CONFIG: "false"
-      # Model
-      MODEL_ID: ${MODEL_ID}
-      PRIMARY_MODEL: ${PRIMARY_MODEL}
-      BASE_URL: ${BASE_URL}
-      # Keep API_KEY empty so init.sh does not write plaintext credentials to disk.
-      # The runtime SecretRef uses MINIMAX_API_KEY from the container env instead.
-      API_KEY: ""
+      # Model config comes from openclaw.json (checked in + SecretRef patch by
+      # bench_reapply_setup), NOT from env vars. Removing MODEL_ID / PRIMARY_MODEL /
+      # BASE_URL / API_PROTOCOL / CONTEXT_WINDOW / MAX_TOKENS from the container
+      # env prevents init.sh from writing models.providers.default (which lacks
+      # models and causes the upgraded gateway to reject the config).
       MINIMAX_API_KEY: ${MINIMAX_API_KEY}
       MINIMAX_BASE_URL: ${MINIMAX_BASE_URL}
-      API_PROTOCOL: ${API_PROTOCOL}
-      CONTEXT_WINDOW: ${CONTEXT_WINDOW}
-      MAX_TOKENS: ${MAX_TOKENS}
       # Channels: explicitly disabled so the gateway never tries to dial out.
       DM_POLICY: disabled
       GROUP_POLICY: disabled
