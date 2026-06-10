@@ -96,10 +96,10 @@ Paper ingest 使用 OpenClaw 的 sessions_spawn 机制。推荐配置：
 
 - delegationMode: prefer（配置层面强制子 agent 使用）
 - maxConcurrent: 8（允许 N 篇论文并行处理）
-- maxSpawnDepth: 1（子 agent 不能再 spawn 子 agent）
+- maxSpawnDepth: 2（允许 orchestrate 编排层派发 worker；worker 自身不能再 spawn）
 - context: isolated（每个子 agent 只需全文文件路径和模板指令）
 
-子 agent 在 depth 1 接收文件读写工具，但不接收 session 管理工具（sessions_spawn、sessions_list、sessions_history）。
+子 agent 在 depth 2 接收文件读写工具，但不接收 session 管理工具（sessions_spawn、sessions_list、sessions_history）。
 
 ### 子 agent 委托模板
 

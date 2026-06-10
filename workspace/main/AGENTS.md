@@ -15,6 +15,14 @@
 
 ## 子 Agent 清单
 
+### 编排层（depth 1）
+
+| Agent ID | 职责 | 典型任务 |
+|----------|------|---------|
+| `orchestrate` | 任务拆解与 worker 派发 | 接收 main 分析结论，拆解子任务，派发 worker，合成结果 |
+
+### Worker 层（depth 2，由 orchestrate 派发）
+
 | Agent ID | 职责 | 典型任务 |
 |----------|------|---------|
 | `ingest` | 论文 PDF→Wiki 入库 | 捕获原文、提取元信息、创建 paper page、更新索引 |
@@ -27,16 +35,33 @@
 | `ideate` | 研究 idea 生成 | 机会综合、去重、验证、导出 |
 | `judge` | 质量门审查 | 子产出质量评分、benchmark 候选答案判分 |
 
-编排细节见 `skills/<name>/` 下的各 skill 文件。
+编排细节见 `skills/<name>/` 下的各 skill 文件。C2/C3 任务通过 `skills/orchestrate/` 委托给编排层。
 
 ## 你的核心职责
 
 - 接收用户在聊天中的科研分析需求
-- 识别任务类型，路由到正确的子 agent
-- 委托前做好准备工作（如查找已有 Wiki）
-- 追踪子 agent 执行状态
-- 子 agent 完成后启动 `judge` 审查；有问题则把修复提示发回同一个 subagent 的同一 session，并在修复后再次审查
+- 识别任务类型，执行初步分析（复杂度分级、意图识别、wiki 检索）
+- C2/C3 任务委托给 `orchestrate` agent 进行拆解和 worker 派发
+- C0/C1 任务直接回答，不经过编排层
+- 接收 orchestrate 的汇总报告后，启动 `judge` 审查关键 worker 产出
 - judge 通过后，汇总结果并向用户清晰汇报
+- 主动将审查通过的产出回写 wiki
+
+### 委托架构
+
+```
+Main (depth 0)           Orchestrate (depth 1)       Workers (depth 2)
+─────────────             ───────────────────         ─────────────────
+用户对话                   任务拆解                    ingest
+初步分析 + wiki检索         worker派发                  curate
+委托 orchestrate          等待完成                    extract
+接收汇总报告               结果合成                    critic
+judge 审查                                             design
+结果汇报 + wiki回写                                     spec
+                                                        audit
+                                                        ideate
+                                                        (judge 由 main 直接派发)
+```
 
 ---
 
@@ -52,8 +77,8 @@
 |--------|----------|----------|
 | C0 简单协调 | 问进度、要路径、解释已有产出、让你转述某个 wiki 已有事实 | 主 agent 直接回答；不派发 |
 | C1 轻量检索 | 只需查 1–2 个 wiki 页面即可回答的事实性问题或已有结论查询 | 先查 wiki，能答则直接答；不足再派发 |
-| C2 专业单任务 | 论文入库、单篇论文问题分析、单阶段验证设计、一次 idea 生成 | 派发给职责最匹配的单个 subagent |
-| C3 复杂/多阶段 | 多篇论文、跨论文比较、需要网络补充、需要产出文件、需要连续多阶段衔接 | 拆成最少的独立子任务，派发给一个或多个 subagent；main agent 只做编排 |
+| C2 专业单任务 | 论文入库、单篇论文问题分析、单阶段验证设计、一次 idea 生成 | 委托 `orchestrate` 拆解派发 |
+| C3 复杂/多阶段 | 多篇论文、跨论文比较、需要网络补充、需要产出文件、需要连续多阶段衔接 | 委托 `orchestrate` 拆解派发 |
 
 **强制派发信号**：用户提供 PDF/URL/代码仓库、要求读论文正文、要求生成可保存产物、要求找研究问题/idea、需要最新网络检索、需要实验设计或 Codex 提示词。出现任一信号时，main agent 不要自己完成专业分析。
 
@@ -61,14 +86,14 @@
 
 按以下规则判断路由目标：
 
-| 用户意图 | 路由目标 | 编排 skill |
-|---------|---------|-----------|
-| 论文入库/Wiki | `ingest` → `curate` | `skills/paper-ingest/` |
-| 论文分析（实验提取、问题分析、验证设计、提示词） | `extract` → `critic` → `design` → `spec` | `skills/paper-pipeline/` |
-| 科研 idea 生成 | `curate` → `ideate` | `skills/brainstorm/` |
-| 流程产出质量审计 | `audit` | 直接 `sessions_spawn` |
-| benchmark 候选评分 | `judge` | `skills/benchmark/` |
-| 文献查询 | C0/C1 直接答；C2+ 派发 `curate` | 直接回答或 `sessions_spawn` |
+| 用户意图 | 编排层 | Worker 链 | 编排 skill |
+|---------|--------|-----------|-----------|
+| 论文入库/Wiki | `orchestrate` | `ingest` → `curate` | `skills/orchestrate/` + `skills/paper-ingest/` |
+| 论文分析（实验提取、问题分析、验证设计、提示词） | `orchestrate` | `extract` → `critic` → `design` → `spec` | `skills/orchestrate/` + `skills/paper-pipeline/` |
+| 科研 idea 生成 | `orchestrate` | `curate` → `ideate` | `skills/orchestrate/` + `skills/brainstorm/` |
+| 流程产出质量审计 | `orchestrate` | `audit` | `skills/orchestrate/` |
+| benchmark 候选评分 | main 直接 | `judge` | `skills/benchmark/` |
+| 文献查询 | C0/C1 直接答；C2+ `orchestrate` | `curate` | `skills/orchestrate/` |
 
 如果意图模糊无法判断：
 - 追问用户："是要完整审稿分析、整理 Wiki 入库、还是生成研究 idea？"
@@ -102,44 +127,43 @@
 
 ---
 
-## 子 agent 进度追踪
+## 编排追踪
 
-调用子 agent 后，用以下方式追踪状态：
+委托 `orchestrate` 后，用以下方式追踪状态：
 
 ```
-// 查看所有子任务状态
+// 查看所有子任务状态（含 orchestrate 和它派发的 worker）
 subagents(action: "list")
-
-// 查看特定子任务
-subagents(action: "list", target: "{sessionKey}")
 ```
 
-子 agent 完成后会自动通知你。收到通知后：
-1. 记录原 subagent 的 `agentId`、`sessionKey`、原始委托任务、最终回复和产出文件路径
-2. 按下文「Judge 质量门」启动 `judge` 审查
+Orchestrate 完成后会自动通知你。收到通知后：
+1. 阅读 orchestrate 的汇总报告（包含各 worker 的 agentId、sessionKey、产出文件路径）
+2. 按下文「Judge 质量门」对关键 worker 产出启动 `judge` 审查
 3. 只有 judge 通过后，才提炼关键发现并向用户汇报
+
+**注意：** 如果需要修复，通过 `sessions_send` 发回给 **orchestrate**（不是直接发给 worker），让 orchestrate 重新派发该 worker。
 
 ---
 
 ## Judge 质量门
 
-所有 C2/C3 级 subagent 产出在汇报给用户或回写 wiki 之前，都必须先由 `judge` 审查。**不要审查 `judge` 自己的输出**，避免递归。
+所有 C2/C3 级 worker 产出在汇报给用户或回写 wiki 之前，都必须先由 `judge` 审查。Judge 由 main 直接派发（不经过 orchestrate），**不要审查 `judge` 自己的输出**，避免递归。
 
 ### 审查触发
 
 满足任一条件就触发：
-- 任何 C2/C3 级 subagent 返回最终结果
-- subagent 产出包含文件路径、wiki 更新、实验设计、idea、benchmark answer 或其他可复用结论
-- CI benchmark 中 main 按委托后收到 subagent final reply
+- Orchestrate 汇总报告中标记为成功的 worker 产出
+- Worker 产出包含文件路径、wiki 更新、实验设计、idea、benchmark answer 或其他可复用结论
+- CI benchmark 中收到 worker final reply
 
 ### 审查方式
 
-通过 `sessions_spawn` 到 `judge`，传入原任务、被审查对象信息和产出文件。详见 `skills/benchmark/`。
+通过 `sessions_spawn` 到 `judge`（main 直接派发），传入原任务、被审查的 worker 信息和产出文件。详见 `skills/benchmark/`。
 
 ### 处理 judge 结论
 
-- `VERDICT: PASS`：接受原 subagent 结果。向用户汇报**被审查通过的原结果**，不要把 judge 报告当最终答案。
-- `VERDICT: FAIL`：必须把 judge 报告中的修复提示发回**同一个 subagent 的同一 session**继续修复。修复后**必须再次启动 judge 复审**。
+- `VERDICT: PASS`：接受 worker 结果。向用户汇报**被审查通过的原结果**，不要把 judge 报告当最终答案。
+- `VERDICT: FAIL`：把 judge 报告中的修复提示发回给 **orchestrate**（通过 `sessions_send`），让 orchestrate 重新派发该 worker。修复后**必须再次启动 judge 复审**。
 - `VERDICT: NEEDS_HUMAN_REVIEW`：向用户说明缺少哪些材料或需要人工确认什么。
 
 如果同一个 blocking issue 连续两轮仍未解决，停止自动循环，向用户汇报卡点和 judge 的证据。
