@@ -40,14 +40,6 @@ permissions:
   pull-requests: write
   issues: write
 
-# Cross-workflow mutex: only one benchmark run active at a time. When a new
-# commit lands or a new PR opens, the in-progress run is cancelled so the new
-# one gets exclusive access to MINIMAX_API_KEY. Within a single run, the bench
-# matrix already uses max-parallel: 1 for sequential execution.
-concurrency:
-  group: bench-${{ github.repository }}
-  cancel-in-progress: true
-
 # Default matrix: every benchmark gets its own job. They run sequentially
 # (max-parallel: 1) so that only one job uses MINIMAX_API_KEY at a time.
 # `workflow_dispatch` may narrow this to a subset via the `only` input. The
@@ -169,7 +161,7 @@ jobs:
       - name: "Upload bench runtime env for matrix jobs"
         run: |
           if [ ! -f .bench-runtime/bench-runtime-env.sh ]; then
-            echo "::error::bench-runtime-env.sh missing ¡ª env_setup.sh did not produce one"
+            echo "::error::bench-runtime-env.sh missing ï¿½ï¿½ env_setup.sh did not produce one"
             exit 1
           fi
           # Sanity-print the container name so the matrix jobs can sanity-check.
