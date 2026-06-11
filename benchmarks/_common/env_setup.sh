@@ -271,16 +271,17 @@ bench_wait_ready() {
         echo "[bench_wait_ready] ${container} is up and gateway is ready after ${i} polls"
         return 0
       fi
+    else
+      local running
+      running="$(bench_running_state "${container}")"
+      case "${running}" in
+        false\|exited|false\|dead|false\|stopped|false\|removing|missing\|missing)
+          echo "[bench_wait_ready][FATAL] container ${container} state=${running}; dumping logs:" >&2
+          bench_logs_tail "${container}" 200 >&2 || true
+          return 1
+          ;;
+      esac
     fi
-    local running
-    running="$(bench_running_state "${container}")"
-    case "${running}" in
-      false\|exited|false\|dead|false\|stopped|false\|removing|missing\|missing)
-        echo "[bench_wait_ready][FATAL] container ${container} state=${running}; dumping logs:" >&2
-        bench_logs_tail "${container}" 200 >&2 || true
-        return 1
-        ;;
-    esac
     sleep 2
   done
   echo "[bench_wait_ready][FATAL] gateway not ready in 180s" >&2
@@ -296,7 +297,9 @@ bench_force_recreate() {
   echo "[bench_force_recreate] bringing up openclaw-bench --force-recreate (runtime=${BENCH_CONTAINER_RUNTIME}, project=${BENCH_COMPOSE_PROJECT})"
   bench_runtime_up
   if ! bench_is_running "${BENCH_CONTAINER}"; then
-    echo "[bench_force_recreate] container ${BENCH_CONTAINER} not running; starting"
+    echo "[bench_force_recreate] container ${BENCH_CONTAINER} not running after bench_runtime_up; dumping logs:" >&2
+    bench_logs_tail "${BENCH_CONTAINER}" 200 >&2 || true
+    echo "[bench_force_recreate] attempting start" >&2
     bench_container_cli start "${BENCH_CONTAINER}" >/dev/null 2>&1 || true
   fi
   bench_reapply_setup "${BENCH_CONTAINER}"
@@ -379,6 +382,16 @@ log "bringing up container (project=${COMPOSE_PROJECT}, --force-recreate)"
 bench_runtime_up
 CONTAINER="${BENCH_CONTAINER}"
 log "container: ${CONTAINER}"
+
+# Defensive: docker compose up -d --force-recreate occasionally leaves the
+# container in created / exited state when the host daemon is under load.
+# bench_reapply_setup would then fail with "container is not running".
+if ! bench_is_running "${CONTAINER}"; then
+  echo "[env_setup] container ${CONTAINER} not running after bench_runtime_up; dumping logs:" >&2
+  bench_logs_tail "${CONTAINER}" 200 >&2 || true
+  echo "[env_setup] attempting start" >&2
+  bench_container_cli start "${CONTAINER}" >/dev/null 2>&1 || true
+fi
 
 # 4. Copy the repo into /home/node/.openclaw and patch bench settings.
 log "copy repo into ${CONTAINER}:/home/node/.openclaw"
