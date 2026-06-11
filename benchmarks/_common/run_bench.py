@@ -94,6 +94,301 @@ def _debug_banner(bench: str) -> None:
           f"{artifacts.resolve()}", file=sys.stderr)
 
 
+# ---------------------------------------------------------------------------
+# Session log extraction (DEBUG mode)
+# ---------------------------------------------------------------------------
+# When BENCH_DEBUG=1, after each QA run we extract the full session JSONL
+# transcript for the main agent AND every sub-agent it spawned.  These are
+# copied out of the container into bench-debug/<bench>/<qa_id>/sessions/ so
+# the CI debug artifact upload includes them.  We also print a condensed
+# human-readable summary in the CI logs inside ::group:: blocks.
+
+_AGENT_IDS = ("main", "ingest", "curate", "extract", "critic",
+              "design", "spec", "audit", "ideate", "judge")
+
+_SESSION_MOUNT = "/home/node/.openclaw"
+
+
+def _agent_id_from_session_key(session_key: str) -> str:
+    """Best-effort extraction of the agent id from a session key.
+
+    Session keys look like ``agent:main:bench-...`` or
+    ``agent:main:subagent:curate:bench-...``.  The agent id is the token
+    immediately following ``subagent:`` for spawned sessions, otherwise the
+    second colon-delimited token.
+    """
+    parts = session_key.split(":")
+    try:
+        sub_idx = parts.index("subagent")
+        return parts[sub_idx + 1]
+    except (ValueError, IndexError):
+        pass
+    # Not a subagent key — the agent id is the second token.
+    if len(parts) >= 2:
+        return parts[1]
+    return "main"
+
+
+def _container_cat(container: str, path: str) -> str | None:
+    """Read a text file from inside *container*, returning its contents or None."""
+    try:
+        proc = subprocess.run(
+            ["docker", "exec", container, "cat", path],
+            capture_output=True, text=True, timeout=15,
+        )
+        if proc.returncode == 0:
+            return proc.stdout
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return None
+
+
+def _container_find_session_jsonl(container: str, agent_id: str,
+                                  session_id: str) -> str | None:
+    """Return the container-side path to a session JSONL file, or None."""
+    candidate = f"{_SESSION_MOUNT}/agents/{agent_id}/sessions/{session_id}.jsonl"
+    try:
+        proc = subprocess.run(
+            ["docker", "exec", container, "test", "-f", candidate],
+            capture_output=True, timeout=5,
+        )
+        if proc.returncode == 0:
+            return candidate
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return None
+
+
+def _print_session_summary(session_path: str, label: str) -> None:
+    """Print the **complete** session transcript in CI logs.
+
+    Output is wrapped in a GitHub Actions ``::group::`` block.  The full raw
+    JSONL content is printed — no truncation — so that every tool call, tool
+    result, and model turn is visible in the CI DEBUG logs.
+    """
+    print(f"::group::📋 Session: {label}")
+    try:
+        raw_text = Path(session_path).read_text(encoding="utf-8")
+    except OSError as e:
+        print(f"(cannot read session file: {e})")
+        print("::endgroup::")
+        return
+
+    lines = raw_text.splitlines()
+
+    # Print a structured turn-by-turn summary first, then the raw JSONL.
+    turn_count = 0
+    tool_count = 0
+    for raw_line in lines:
+        try:
+            evt = json.loads(raw_line)
+        except json.JSONDecodeError:
+            continue
+        etype = evt.get("type", "")
+        if etype == "message":
+            role = evt.get("role", "?")
+            content = evt.get("content", "")
+            if isinstance(content, list):
+                for block in content:
+                    if not isinstance(block, dict):
+                        continue
+                    btype = block.get("type", "")
+                    if btype == "tool_use":
+                        tool_count += 1
+                        name = block.get("name", "?")
+                        inp = json.dumps(block.get("input", {}), ensure_ascii=False)
+                        print(f"  [{role}] 🔧 tool_call #{tool_count}: {name}")
+                        print(f"         input: {inp}")
+                    elif btype == "tool_result":
+                        out = block.get("content", "")
+                        if isinstance(out, list):
+                            out = " ".join(
+                                c.get("text", "") if isinstance(c, dict) else str(c)
+                                for c in out
+                            )
+                        out = str(out)
+                        print(f"  [{role}] 📄 tool_result #{tool_count}:")
+                        print(f"         {out}")
+                    elif btype == "text":
+                        txt = block.get("text", "")
+                        print(f"  [{role}] 💬 {txt}")
+            elif isinstance(content, str) and content.strip():
+                print(f"  [{role}] {content}")
+            turn_count += 1
+        elif etype == "session":
+            print(f"  [meta] model={evt.get('model', '?')} "
+                  f"sessionId={evt.get('sessionId', '?')} "
+                  f"spawnedBy={evt.get('spawnedBy', '-')}")
+        elif etype == "thinking_level_change":
+            print(f"  [meta] thinking_level={evt.get('thinkingLevel', '?')}")
+        elif etype == "model_change":
+            print(f"  [meta] model → {evt.get('model', '?')}")
+
+    print(f"  ── {turn_count} message turns, {tool_count} tool calls ──")
+    print("::endgroup::")
+
+    # Also print the full raw JSONL in a separate group for forensic analysis.
+    print(f"::group::📋 Raw JSONL: {label}")
+    print(raw_text)
+    print("::endgroup::")
+
+
+def _extract_qa_sessions(container: str, session_key: str,
+                         debug_dir: Path) -> int:
+    """Extract all session JSONL transcripts related to *session_key*.
+
+    Copies the main agent's session JSONL and every child session JSONL
+    (discovered via SQLite ``subagent_runs`` and fallback ``sessions.json``
+    scanning) into ``<debug_dir>/sessions/``.  Also prints condensed
+    summaries in CI logs.
+
+    Returns the number of session files extracted (0 on failure).
+    """
+    sessions_out = debug_dir / "sessions"
+    sessions_out.mkdir(parents=True, exist_ok=True)
+
+    extracted = 0
+
+    # ---- 1. Main agent session -------------------------------------------
+    main_sessions_json = _container_cat(
+        container, f"{_SESSION_MOUNT}/agents/main/sessions/sessions.json"
+    )
+    main_index: dict[str, dict] = {}
+    if main_sessions_json:
+        try:
+            main_index = json.loads(main_sessions_json)
+        except json.JSONDecodeError:
+            print("[sessions] warning: could not parse main sessions.json", file=sys.stderr)
+
+    main_entry = main_index.get(session_key, {})
+    main_session_id = main_entry.get("sessionId", "")
+    if main_session_id:
+        src = _container_find_session_jsonl(container, "main", main_session_id)
+        if src:
+            dst = sessions_out / f"main-{main_session_id}.jsonl"
+            try:
+                subprocess.run(
+                    ["docker", "cp", f"{container}:{src}", str(dst)],
+                    capture_output=True, timeout=15,
+                )
+                if dst.exists():
+                    _print_session_summary(str(dst), f"main ({session_key})")
+                    extracted += 1
+            except (subprocess.TimeoutExpired, OSError) as e:
+                print(f"[sessions] warning: docker cp main session failed: {e}", file=sys.stderr)
+    else:
+        print(f"[sessions] warning: main session key {session_key!r} not found "
+              f"in sessions.json", file=sys.stderr)
+
+    # ---- 2. Discover child sessions via SQLite ---------------------------
+    child_keys: list[tuple[str, str]] = []  # (session_key, agent_id)
+    try:
+        proc = subprocess.run(
+            ["docker", "exec", container, "sqlite3", "-readonly",
+             f"{_SESSION_MOUNT}/state/openclaw.sqlite",
+             "SELECT child_session_key, workspace_dir FROM subagent_runs "
+             "WHERE controller_session_key = ?",
+             session_key],
+            capture_output=True, text=True, timeout=10,
+        )
+        if proc.returncode == 0 and proc.stdout.strip():
+            for line in proc.stdout.strip().splitlines():
+                parts = line.split("|", 1)
+                child_key = parts[0].strip()
+                ws_dir = parts[1].strip() if len(parts) > 1 else ""
+                # workspace_dir is like /home/node/.openclaw/workspace/curate
+                # → agent sessions live at /home/node/.openclaw/agents/curate/sessions/
+                agent_id = "main"
+                if ws_dir:
+                    ws_rel = ws_dir.replace(f"{_SESSION_MOUNT}/workspace/", "")
+                    if ws_rel and ws_rel != ws_dir:
+                        agent_id = ws_rel.split("/")[0]
+                if not agent_id or agent_id not in _AGENT_IDS:
+                    agent_id = _agent_id_from_session_key(child_key)
+                child_keys.append((child_key, agent_id))
+    except (subprocess.TimeoutExpired, OSError) as e:
+        print(f"[sessions] warning: SQLite child-session query failed: {e}", file=sys.stderr)
+
+    # ---- 3. Fallback: scan all agent sessions.json for spawnedBy ---------
+    if not child_keys:
+        for agent_id in _AGENT_IDS:
+            agent_sessions = _container_cat(
+                container, f"{_SESSION_MOUNT}/agents/{agent_id}/sessions/sessions.json"
+            )
+            if not agent_sessions:
+                continue
+            try:
+                agent_index = json.loads(agent_sessions)
+            except json.JSONDecodeError:
+                continue
+            for key, entry in agent_index.items():
+                if entry.get("spawnedBy") == session_key:
+                    child_keys.append((key, agent_id))
+
+    # ---- 4. Copy child session JSONLs ------------------------------------
+    # Also snapshot each agent's sessions.json so we have the cross-reference.
+    seen_agents: set[str] = set()
+    for child_key, agent_id in child_keys:
+        seen_agents.add(agent_id)
+        # Find the sessionId by reading that agent's sessions.json.
+        agent_sessions_json = _container_cat(
+            container, f"{_SESSION_MOUNT}/agents/{agent_id}/sessions/sessions.json"
+        )
+        child_entry: dict = {}
+        if agent_sessions_json:
+            try:
+                child_entry = json.loads(agent_sessions_json).get(child_key, {})
+            except json.JSONDecodeError:
+                pass
+        child_session_id = child_entry.get("sessionId", "")
+        if not child_session_id:
+            continue
+        src = _container_find_session_jsonl(container, agent_id, child_session_id)
+        if not src:
+            continue
+        dst = sessions_out / f"{agent_id}-{child_session_id}.jsonl"
+        try:
+            subprocess.run(
+                ["docker", "cp", f"{container}:{src}", str(dst)],
+                capture_output=True, timeout=15,
+            )
+            if dst.exists():
+                _print_session_summary(str(dst), f"{agent_id} ({child_key})")
+                extracted += 1
+        except (subprocess.TimeoutExpired, OSError) as e:
+            print(f"[sessions] warning: docker cp child session failed: {e}", file=sys.stderr)
+
+    # ---- 5. Snapshot sessions.json for each involved agent ----------------
+    for agent_id in seen_agents:
+        src = f"{_SESSION_MOUNT}/agents/{agent_id}/sessions/sessions.json"
+        dst = sessions_out / f"{agent_id}-sessions.json"
+        try:
+            subprocess.run(
+                ["docker", "cp", f"{container}:{src}", str(dst)],
+                capture_output=True, timeout=10,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+    # Always snapshot main sessions.json.
+    main_src = f"{_SESSION_MOUNT}/agents/main/sessions/sessions.json"
+    main_dst = sessions_out / "main-sessions.json"
+    if not (main_dst).exists():
+        try:
+            subprocess.run(
+                ["docker", "cp", f"{container}:{main_src}", str(main_dst)],
+                capture_output=True, timeout=10,
+            )
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+
+    if extracted == 0:
+        print(f"[sessions] no session JSONL files extracted for {session_key}", file=sys.stderr)
+    else:
+        print(f"[sessions] extracted {extracted} session JSONL(s) for {session_key} "
+              f"→ {sessions_out.resolve()}", file=sys.stderr)
+    return extracted
+
+
 def repair_container_permissions(container: str) -> None:
     """Make benchmark-created runtime files writable by OpenClaw's node user.
 
@@ -551,6 +846,13 @@ def main(bench_name: str, agent_id: str | None = None) -> int:
                 _debug_write(qa_debug_dir / "06_verdict.json", json.dumps(verdict, ensure_ascii=False, indent=2))
                 _debug_write(qa_debug_dir / "07_answer_full.txt", answer or "")
                 _debug_write(qa_debug_dir / "08_qa.json", json.dumps(qa, ensure_ascii=False, indent=2))
+                # Extract the full session transcript (main + all spawned sub-agents)
+                # from the container. Best-effort: failures log a warning and continue.
+                try:
+                    _extract_qa_sessions(container, session_key, qa_debug_dir)
+                except Exception as exc:
+                    print(f"[sessions] warning: session extraction failed for "
+                          f"{session_key}: {exc}", file=sys.stderr)
             _debug_echo("qa_done", f"id={qa['qa_id']} score={verdict.get('score', 0):.3f} "
                         f"pass={verdict.get('pass', False)} elapsed={elapsed:.1f}s "
                         f"returncode={raw.get('returncode')} timed_out={raw.get('timed_out')} "
