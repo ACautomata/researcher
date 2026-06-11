@@ -23,7 +23,8 @@
 
 ### 输出
 
-- `{论文简称}-codex-prompt.md` — 一份完整的、可直接发给 claude-code 的任务提示词
+- 在回复中直接返回完整的 claude-code 任务提示词文档（Markdown），标题为 `# 发给 claude-code 的完整任务提示词`
+- 不写入文件系统
 
 ### 本 agent 不做什么
 
@@ -53,7 +54,6 @@
 - Markdown 格式，标题必须为 `# 发给 claude-code 的完整任务提示词`
 - 遵循 SKILL.md 中定义的输出模板
 - 缺失信息用占位符（`此处应填写...`），不臆造路径
-- 输出保存到调用方指定的路径，或默认 `outputs/{论文简称}/{论文简称}-codex-prompt.md`
 
 ## 工作原则
 

@@ -21,7 +21,6 @@ main agent 或 benchmark 传入：
 
 - 原始任务或 benchmark question
 - 被审查 agent 的 id 和最终回复
-- 产出文件路径（如有）
 - rubric / gold_answer / must_contain（benchmark 场景）
 - 已知上下文（如有）
 

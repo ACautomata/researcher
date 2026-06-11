@@ -158,7 +158,6 @@ Orchestrate 返回给 main 的汇总报告格式：
 #### T{N}: {描述} → {worker}
 - 状态: ✅/❌
 - Session: {sessionKey}
-- 产出: {file paths}
 - 关键发现: {summary}
 
 ### 建议
@@ -175,7 +174,7 @@ User: "帮我完整分析这篇论文 /Users/papers/attention.pdf"
 1. Main 做 pre-flight：读 wiki index，确认无已有条目。意图=论文分析，复杂度=C3，路由=paper-pipeline (S1-S6)。
 2. Main 委托 orchestrate，传入分析结论和路由建议。
 3. Orchestrate 拆解为 T1(ingest)→T2(extract)→T3(critic)→T4(design)→T5(spec)→T6(audit)，串行派发。
-4. Orchestrate 返回汇总报告，含 6 个子任务结果和各产出文件路径。
+4. Orchestrate 返回汇总报告，含 6 个子任务结果和关键发现。
 5. Main 派 judge 审查 S2-S5 关键产出。
 6. Judge 通过后，main 向用户汇报。
 
