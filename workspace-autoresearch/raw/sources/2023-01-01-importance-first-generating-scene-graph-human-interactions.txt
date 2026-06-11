@@ -1,0 +1,3017 @@
+arXiv:2111.14754v4  [math.OC]  20 Sep 2024
+Optimal and H∞Control of Stochastic Reaction
+Networks∗
+Corentin Briat and Mustafa Khammash†
+D-BSSE, ETH-Z¨urich
+September 23, 2024
+Abstract
+Stochastic reaction networks is a powerful class of models for the representation
+a wide variety of population models including biochemistry. The control of such net-
+works has been recently considered due to their important implications for the control
+of biological systems. Their optimal control, however, has been relatively few studied
+until now. The continuous-time ﬁnite-horizon optimal control problem is formulated
+ﬁrst and explicitly solved in the case of unimolecular reaction networks. The problems
+of the optimal sampled-data control, the continuous H∞control, and the sampled-data
+H∞control of such networks are addressed next. The results in the unimolecular case
+take the form of nonstandard Riccati diﬀerential equations or diﬀerential Lyapunov
+equations coupled with diﬀerence Riccati equations, which can all be solved numeri-
+cally by backward-in-time integration.
+Keywords. Stochastic reaction networks, Markov processes, Optimal and H∞control,
+Dynamic Programming
+1
+Introduction
+Reaction networks are a very general class of systems that can represent a wide variety of real-
+world processes including population, ecological, biochemical, epidemiological, and social
+systems, etc. – see [1] for a survey. Deterministic reaction network are usually represented
+in terms diﬀerential equations and their extensions such as delay-diﬀerential equations or
+partial diﬀerential equations, when delays or diﬀusion eﬀects need to be taken into account.
+Tools for analyzing and controlling them are now well established even though some more
+∗This work was supported by the European Research Council under the European Union’s Horizon 2020
+research and innovation programme / ERC Grant agreement under Grant 743269 (CyberGenetics)
+†email:
+corentin@briat.info,
+mustafa.khammash@bsse.ethz.ch;
+url:
+www.briat.info,
+https://www.bsse.ethz.ch/ctsb.
+1
+specialized tools, tailored to the framework of reaction networks, have also been derived
+for analyzing their stability using, for instance, chemical reaction network theory [2, 3] or
+Lyapunov methods [4–6]. The control of such networks is now a growing interest in the
+control community [7–18].
+In a biological context, deterministic models are only accurate when the populations are
+both large in size and homogenously distributed so that the interactions between the diﬀerent
+network components can be assumed to evolve in a continuous fashion and the network
+participants can be characterized in terms of a continuous variables; such as concentrations in
+chemistry. However, when the network participants are in low-copy numbers, the assumption
+of homogeneity may break down, the actual count of the network participants needs now to
+be kept track of, and the randomness in the reactions can not be neglected anymore. In such
+a case, it is necessary to consider stochastic reaction networks which have been shown to be
+of crucial importance in biology due to their ability to capture both intra- and inter-cellular
+variability [19]. Such networks can then be represented as continuous time Markov jump
+processes [20] and their approximations. The analysis of stochastic reaction networks is still
+an open problem for which partial solutions have been obtained and formulated in terms of
+both theoretical and computational tools [21–23]. Theoretical results regarding their control
+have also been obtained in [24–26] in the moment equations framework and in [7,27–30] in
+the framework of chemical reaction network controllers, that is, controllers implemented as
+stochastic reaction networks themselves. Practical implementations of such control strategies
+in a biological setting have been reported in [31–36], and in [34, 36, 37] in the contexts of
+in-silico controllers and in-vivo controllers, respectively.
+Until now, all the designed controllers were chosen such that some simple control objec-
+tives were satisﬁed, such as set-point regulation, constant disturbance rejection, robustness
+to uncertainties, robustness to noise, or even noise exploitation. In this regard, the con-
+troller structures able to ensure (robust) perfect adaptations were restricted to Proportional-
+Integral-Derivative-like controllers and their approximations. While this is a perfectly viable
+solution in the Single-Input-Single-Output (SISO) case, the Multiple-Input-Multiple-Output
+(MIMO) case makes the tuning of such controllers a much harder task. A natural step for-
+ward is, therefore, the design of controllers that would minimize some cost in order to solve
+optimal MIMO control problems – as historically done in the ﬁeld of control with the intro-
+duction of the Linear Quadratic (LQ) and the Linear Quadratic Gaussian (LQG) control, to
+cite a few. The two main analytical approaches for solving optimal control problems are Pon-
+tryagin’s Maximum Principle and Dynamic Programming. The former is essentially based
+on the calculus of variations, which is an extension of the usual Lagrange multiplier approach
+for standard optimization [38–40]. It can be seen as a trajectory-based (or temporal-based)
+approach and is convenient to use whenever state and control constraints are involved. The
+latter, on the other hand, is based on Bellman’s Principle of Optimality [41], and unlike the
+Maximum Principle, it is a spatial approach based on the use of a so-called value function
+which needs to satisfy a certain optimality condition at every point in the state-space [42,43].
+Both approaches have beneﬁts and drawbacks, and their connections are now well under-
+stood.
+2
+The objective of this paper is to develop an optimal control theory for stochastic reaction
+networks. This problem, despite its importance, as been relatively few studied until now.
+General results on the optimal control of general Markov processes have been obtained
+for instance in [44, 45]. The optimal control of stochastic reaction networks is considered
+in [46] under the assumption that the copy number of the involved species is large, which
+justiﬁes the use of limiting arguments, and that the set of possible actions is ﬁnite. Some
+approximate online algorithms are proposed there based on state-space truncation and on
+the empirical evaluation of the cost to optimize. The optimal control of inﬁnite-dimensional
+piecewise deterministic Markov processes is considered in [47] with some application to the
+control of neuronal dynamics via optogenetics.
+In this setup, the process switches from
+one dynamics to another following a ﬁnite Markov chain whose rates are control input. An
+alternative approach for the control of stochastic reaction networks is to ﬁrst approximate the
+Markov jump process as a diﬀusion process [48], for instance, on which standard tools such
+as Pontryagin’s Maximum Principle and Dynamic Programming can be applied. However, it
+is known that those approximate dynamics may dramatically diﬀer from that of the original
+jump Markov process and, in this regard, this does not seem to a valid option.
+We propose in this paper to keep the original Markov jump process formulation and to
+address the optimal control problem using Dynamic Programming directly. Even though it
+is known that such an approach suﬀers from the so-called curse-of-dimensionality, it seems
+interesting, at least, to develop it for theoretical purposes.
+Similar approximate solving
+methods to those that can be used for standard optimal control problems can be considered
+in the present context. For this reason, they will only be brieﬂy mentioned here without
+entering into details. The optimal control of Markov chains and Markov processes has also
+been addressed but essentially only in the ﬁnite-state space setting [42,43,47]; an approach
+that has also been adapted to the inﬁnite state-space case through either its discretization
+or its truncation [46], as often done in the Reinforcement Learning and Control of Markov
+Decision Processes [49]. The approach we consider here keeps the structure of the problem
+intact and deals with the actual system and its state-space structure directly.
+We ﬁrst address the continuous-time ﬁnite-horizon optimal control of stochastic reaction
+networks and provide the characterization of the optimal continuous-time control law in
+terms of a Hamilton-Jacobi-Bellman (HJB) equation taking, in this case, the form of a
+diﬀerential-diﬀerence equation. This has to be contrasted with the usual partial diﬀerential
+equations obtained in optimal control and the fact that viscosity solutions do not play an
+as important role as in previous works [50]. In fact, it should only be necessary to consider
+mild-solutions instead.
+In the special case of unimolecular networks, the HJB equation
+exactly reduces to a nonstandard Riccati diﬀerential equation which does not seem to have
+been previously obtained in the literature; see e.g. [51]. However, its structure is suﬃciently
+similar to existing ones so that some of the existing analysis tools can be considered; e.g.
+for the establishing the existence of solutions. Unfortunately, it is not immediate to see
+any connection with a ”Hamiltonian matrix” as in previous works on the optimal control of
+deterministic or diﬀusion processes.
+We provide then a solution to the optimal sampled-data control of stochastic reaction
+3
+networks. To this aim, we ﬁrst reformulate the overall system as a stochastic hybrid system
+[52] which contains both random and deterministic jumps. While the former correspond to
+state updates from the randomly ﬁring reactions, the latter corresponds to the control input
+updates, which are assumed to occur periodically. The advantage of this reformulation lies
+in the fact that the structure of the system remains unchanged unlike in other methods such
+as in discretization-based ones. Note also that the overall procedure to exactly discretize
+a stochastic reaction network with inﬁnite state-space is unclear and, even if possible, it
+would result in a dramatic reformulation of the model of the system which would not be
+exploitable for control purposes. A ﬁnal drawback of discretization-based methods is the loss
+of the so-called inter-sample behavior which needs is involved in the cost expression. This
+issue notably motivated the introduction of lifting methods [53, 54] and other subsequent
+ones. Based on the hybrid reformulation, we characterize the optimal control law in terms
+of hybrid HJB equations. In the unimolecular case, those equations reduce to a Lyapunov
+diﬀerential equation coupled with a discrete-time Riccati diﬀerence equation.
+We next remove the assumption that some of the uncontrolled inputs are known and
+consider them as unknown exogenous disturbances.
+To account for this, we consider an
+H∞performance criterion, introduced in the control literature in [55] and reﬁned in [56,57]
+in the context of optimal control and game theory. Such a framework allows to quantify
+the impact of those exogenous inputs on the so-called controlled/performance outputs in an
+L2-sense and from which we develop an approach to compute the optimal control law that
+minimizes the worst-case L2-gain of the transfer from exogenous inputs to the controlled
+outputs. This is achieved using a game-theoretic approach which exactly characterizes both
+the optimal control law and the worst-case exogenous inputs in terms of the solution of a
+Hamilton-Jacobi-Isaacs (HJI) equation [58]. In the case of stochastic reaction networks, this
+equation takes the form of a nonlinear diﬀerential-diﬀerence equation which reduces, in the
+unimolecular case, to a non-standard Riccati diﬀerential equation which does not seem to
+have been reported nor studied elsewhere before.
+As in the continuous-time optimal control problem, we also extend those results to the
+sampled-data case where we use, again, a hybrid formulation of the system which allows to
+keep all the necessary information about the system between the sampling instants. The
+discretization of the process would result in the loss of both the structure of the system and
+its inter-sample behavior while the use of lifting methods would require the consideration of
+integral input and output operators [59], which would dramatically complicate the overall
+approach. The hybrid approach circumvents all those issues in an elegant way and allows
+to characterize the optimal sampled-data control law and the worst-case exogenous distur-
+bances in terms of the solution of hybrid HJI equations which reduce, in the unimolecular
+case, to a Riccati diﬀerential equation coupled with a discrete-time Riccati diﬀerence equa-
+tion.
+Notations. The cone of real positive (semi)deﬁnite matrices of dimension n is denoted by
+(Sn
+⪰0) Sn
+≻0. For a square real matrix A, we denote Sym[A] := A + AT. For a diﬀerentiable
+function V (t, x), we denote by Vt(t, x) its partial derivative with respect to t. For some
+4
+scalars x1, . . . , xn, the vector consisting of stacking those entries vertically with x1 on top is
+denoted by coln
+i=1(xi) or col(x1, . . . , xn). We denote by ed+1 the vector of zeros of dimension
+n (n ≥d + 1) except at the position d + 1 where the entry is one.
+Outline. Preliminaries on stochastic reaction networks are recalled in Section 2. The opti-
+mal continuous-time control of stochastic reaction networks and its sampled-data counterpart
+are considered in Section 3 and Section 4, respectively. Similarly, the optimal continuous-time
+H∞control of stochastic reaction networks and its sampled-data counterpart are addressed
+in Section 3 and Section 6, respectively.
+2
+Preliminaries
+2.1
+Stochastic Reaction Networks
+A reaction network (X, R) consists of a set of d molecular species X = {X1, . . . , Xd} that
+interacts through K reaction channels R = {R1, . . . , RK} denoted as
+Rk :
+d
+X
+i=1
+ζl
+k,iXi
+ρk(t)
+−−−→
+d
+X
+i=1
+ζr
+k,iXi, k = 1, . . . , K
+(1)
+where ρk : R≥0 7→R≥0 is the (time-varying) reaction rate parameter and ζℓ
+k,i, ζr
+k,i ∈Zd
+≥0 are
+the left and right stoichiometric vectors. The stoichiometric vector of reaction Rk is given
+by ζk := ζr
+k −ζℓ
+k ∈Zd where ζr
+k = col(ζr
+k,1, . . . , ζr
+k,d) and ζl
+k = col(ζl
+k,1, . . . , ζl
+k,d). That is, when
+the reaction Rk ﬁres, the state jumps from x to x + ζk. The stoichiometry matrix S ∈Zd×K
+is deﬁned as S :=
+
+ζ1 . . . ζK
+
+. When the kinetics is mass-action, the propensity function of
+reaction Rk is given by λk(t, x) = ρk(t)Pk(t, x) where
+Pk(t, x) =
+d
+Y
+i=1
+
+xi
+ζk,i
+
+(2)
+and is such that λk(t, x) = 0 if x ∈Zd
+≥0 and x+ζk /∈Zd
+≥0. Under the well-mixed assumption,
+this network can be described by a continuous-time Markov process (X1(t), . . . , Xd(t))t≥0
+with state-space Zd
+≥0; see e.g. [60].
+For any locally bounded function V : R × Zd
+≥0 7→R, the generator A of the Markov
+process associated with the reaction network (X, R) is deﬁned as
+(AV )(t, x) = Vt(t, x) +
+K
+X
+i=1
+λi(t, x)∆iV (t, x)
+(3)
+where ∆iV (t, x) := V (t, x + ζi) −V (t, x).
+5
+2.2
+Kolmogorov’s equations
+Forward Kolmogorov Equation. Let (X1(t), . . . , Xd(t))t≥0 be the CTMC representing
+the stochastic reaction network (X, R) with some initial state X(0) ∈Zd
+≥0. For any state
+value x ∈Zd
+≥0, we can deﬁne the probability to be in that state at time t as
+p(t, x) := P(X(t) = x|X(0)).
+(4)
+It is known that the time evolution of this probability distribution is described by the so-
+called Forward Kolmogorov Equation or Chemical Master Equation (CME) [60] given by
+pt(t, x) =
+K
+X
+k=1
+λk(t, x −ζk)p(t, x −ζk) −
+K
+X
+k=1
+λk(t, x)p(t, x), x ∈Zd
+≥0.
+(5)
+The CME is a linear diﬀerential equation of dimension equal to the number of elements in the
+state-space. In the present case, this number is inﬁnite and of the cardinality of the natural
+numbers. The CME is, in general, diﬃcult to solve analytically and this is the reason why
+only few analytical results exist.
+Backward Kolmogorov Equation. Let f : Zd
+≥0 7→R be a locally bounded function.
+Then, the backward time evolution of the function V (t, x) := E[f(X(T))|X(t) = x), with
+E[f(X(T))] ﬁnite, according to the CTMC (X1(t), . . . , Xd(t))t≥0 representing the stochastic
+reaction network (X, R) over the time interval [0, T] is governed by the Backward Kolmogorov
+equation
+−Vt(t, x) =
+K
+X
+k=1
+λk(t, x)(V (t + ζk) −V (t, x))
+(6)
+together with the terminal condition V (T, x) = f(x). This equation will turn out to play a
+crucial role in the optimal control of stochastic reaction networks.
+2.3
+Moment equations
+Based on the CME, dynamical expressions for the ﬁrst- and second-order moments may be
+easily derived and are given by
+dE[X(t)]
+dt
+=
+SE[λ(t, X(t))],
+dE[X(t)X(t)T]
+dt
+=
+Sym[SE[λ(t, X(t))X(t)T]] + S diag{E[λ(t, X(t))]}ST.
+(7)
+Those equations cannot be directly solved in the general case due to some moment clo-
+sure issues (see e.g. [61]) but become exactly solvable in the unimolecular case where the
+propensity functions take the form λ(t, x) = Wx(t)x + W0(t), for some suitable functions
+6
+Wx : R≥0 7→RK×d
+≥0 , Wx(t) =: colK
+i=1(wT
+x,k), W0 : R≥0 7→RK
+≥0, W0(t) =: colK
+i=1(wT
+0,k). In such a
+case, the moment equations can be rewritten as
+dE[X(t)]
+dt
+=
+A(t)E[X(t)] + d(t),
+dU(t)
+dt
+=
+Sym
+ A(t)U(t) + d(t)E[X(t)T]
+
++ S diag{Wx(t)E[X(t)] + W0(t)}ST
+(8)
+where U(t) := E[X(t)X(t)T], A(t) = SWx(t) = Pn
+i=1 ζkwT
+x,k, d(t) = SW0(t) = Pn
+i=1 ζkwT
+0,k.
+Introducing ¯X(t) = col(X(t), 1) and ¯U(t) := E[ ¯X(t) ¯X(t)T], we get that
+dE[ ¯X(t)]
+dt
+=
+¯A(t)E[ ¯X(t)],
+d ¯U(t)
+dt
+=
+¯A(t) ¯U(t) + ¯U(t) ¯A(t)T + 1
+2
+K
+X
+i=1
+  ¯Ak(t) ¯U(t)ed+1ζT
+k + ζkeT
+d+1 ¯U(t) ¯Ak(t)T
+(9)
+where
+¯A(t) =
+
+A(t)
+d(t)
+0
+0
+
+, ¯Ak(t) =
+
+ζkwx,k(t)
+ζkw0,k(t)
+0
+0
+
+.
+(10)
+It is interesting to note that the dynamics of the mean molecular species is described by a
+Linear Time-Varying (LTV) positive system, meaning that state is conﬁned in the nonneg-
+ative cone [62]. This can be veriﬁed from the fact that the matrix A(·) is Metzler (i.e. all
+the oﬀ-diagonal entries are nonnegative and d(·) is nonnegative. Similarly, the second-order
+moments are conﬁned in the positive semideﬁnite cone, which is a well-known property.
+3
+Continuous-Time Optimal Control of Stochastic Re-
+action Networks
+The objective of this section is the development of optimal control results for stochastic
+reaction networks.
+A general result is given ﬁrst, and adapted to the case of stochastic
+reaction networks with mass-action kinetics. The latter result is then specialized to the case
+of unimolecular reaction networks having aﬃne propensity functions. This case is analogous
+to that of the optimal control of ﬁnite-dimensional linear time-varying systems and, as such,
+it will be shown that the solution of the optimal control problem can be formulated in terms
+of the solution of a diﬀerential Riccati equation.
+3.1
+General stochastic reaction networks
+The class of reaction networks considered in Section 2 are autonomous networks in the sense
+that those networks do not possess any input channels that can be actuated. In this regard,
+we need to extend the class of networks of Section 2 to intercorporate some inputs channels
+acting at the level of propensity functions; e.g.
+at the level of the reaction rates.
+This
+choice is motivated by cybergenetical or optogenetical applications where networks have
+7
+been controlled by acting on their propensity functions using an external stimulus such as
+light [35, 47, 63, 64] or chemical inducers [32]. In this regard, it seems natural to make the
+following assumption on the propensity functions:
+Assumption 1 The propensity functions of the network (X, R) are locally bounded func-
+tions of the form λk(t, x, u), k = 1, . . . , K, where u ∈Rm
+≥0 is the control input vector, and,
+as before, x ∈Zd
+≥0 is the state of the network.
+In order to control the system in the desired way, we introduce the following cost
+JT(u)
+:=
+E
+Z T
+0
+q(s, X(s), u(s))ds + qT(X(T))
+
+(11)
+where q : [0, T] × Zd
+≥0 × Rm
+≥0 7→R≥0 is the running cost and qT : Zd
+≥0 7→R≥0 is the terminal
+cost. The control input is then chosen such that this cost is minimized
+u∗= argmin
+u∈U0,T
+JT(u)
+(12)
+where we have assumed that such a minimum exists and where Us,t is the set of admissible
+control inputs deﬁned as
+Us,t :=
+
+u ∈L2([s, t] × Zd
+≥0, Rm
+≥0) : u mesurable
+	
+, 0 ≤s ≤t ≤T.
+(13)
+In order to solve the above optimization problem, we consider the Dynamic Programming
+approach [42,43,65] which relies on the concept of value function deﬁned as
+V (t, x) := min
+u∈Ut,T E
+Z T
+t
+q(s, X(s), u(s))ds
+X(t) = x
+
+, V (T, x) = qT(x)
+(14)
+for x ∈Zd
+ge0 and which leads to the following result:
+Theorem 2 Let us consider a general reaction network (X, R) satisfying Assumption 1.
+Then, the optimal control law that minimizes the cost (11) is given by
+u∗(t, x) = argmin
+u
+( K
+X
+i=1
+λi(t, x, u)∆iV (t, x) + q(t, x, u)
+)
+(15)
+where the function V (t, x) is the solution to the Hamilton-Jacobi-Bellman equation given by
+Vt(t, x) + min
+u
+( K
+X
+i=1
+λi(t, x, u)∆iV (t, x) + q(t, x, u)
+)
+= 0, V (T, x) = qT(x)
+(16)
+for (x, t) ∈Zd
+≥0 × [0, T]. Moreover, in such a case, the optimal cost JT(u∗) coincides with
+V (0, X(0)).
+8
+It seems important to stress here that the above equation is vastly diﬀerent from the
+standard Hamilton-Jacobi-Bellman equation for the optimal control of continuous-time sys-
+tems governed by (stochastic) diﬀerential equations. In those cases, the value function is
+described in terms of ﬁrst-order or second-order elliptic partial diﬀerential equations. In the
+present case, we simply have a diﬀerential equation in time whereas the partial derivative
+operator with respect to the state is replaced by diﬀerence operators due to the presence of
+jump dynamics. In this regard, the solutions are expected to be quite diﬀerent from those in
+the standard setup of the control of systems governed by diﬀerential equations and stochastic
+diﬀerential equations. In this regard, the concept of viscosity solutions does not play an as
+essential role as in most of existing optimal control problems.
+We now focus on the optimal control of stochastic reaction networks with mass-action
+kinetics as deﬁned in (2) where each one of the reaction rates is now a potential control
+input. This leads to the consideration of the following assumption:
+Assumption 3 The propensity functions of the network (X, R) are of the form
+λi(t, x, u) = fi(t, x) + gi(t, x)u, i = 1, . . . , K
+(17)
+where the fi(t, x)’s are suitable polynomials and the gi(t, x)’s are suitable row-vector polyno-
+mials. Moreover, the function q(t, x, u) in the cost (11) takes the form
+q(t, x, u) = ˜q(t, x) + uTR(t)u
+(18)
+where ˜q(t, x) is some nonnegative polynomial and R(·) ≻0.
+We then have the following result:
+Theorem 4 Let us consider a reaction network (X, R) that satisﬁes Assumption 3. Then,
+the optimal control law minimizing the cost (11) with (18) is given by
+u∗(t, x) = −1
+2R(t)−1g(t, x)T∆V (t, x),
+(19)
+where the value function V (t, x) satisfying V (T, x) = qT(x), solves the diﬀerential-diﬀerence
+equation over t ∈[0.T]
+Vt(t, x)+
+K
+X
+i=1
+fi(t, x)∆iV (t, x)−1
+4∆V (t, x)Tg(t, x)R(t)−1g(t, x)T∆V (t, x)+ ˜q(t, x) = 0, (20)
+where g(t, x) = colK
+i=1(gi(t, x)), and ∆V (t, x) = colK
+i=1(∆iV (t, x)).
+Proof : The Hamilton-Jacobi-Bellman equation is given in this case by
+Vt(t, x) +
+K
+X
+i=1
+fi(t, x)∆iV (t, x) + min
+u
+( K
+X
+i=1
+∆iV (t, x)gi(t, x)u + q(t, x, u)
+)
+= 0
+(21)
+9
+Since q(t, x, u) is strictly convex in u and λ(t, x, u) is aﬃne in u, then there exists a unique
+global minimum to (16). Computing the derivative of the expression in brackets in (21) with
+respect to u yields the optimal control input given in (19) and substituting this expression
+in (16) yields (20).
+♦
+Remark 5 The diﬀerential-diﬀerence equation (20) is diﬃcult to solve in the general setting.
+It is, however, possible to ﬁnd an approximate solution by turning this the equation into an
+inequality as
+Vt(t, x) +
+K
+X
+i=1
+fi(t, x)∆iV (t, x) −1
+4∆V (t, x)Tg(t, x)R(t)−1g(t, x)T∆V (t, x) + ˜q(t, x) ≥0 (22)
+together with V (T, x) ≥qT(x) and by using optimization methods, such as SOS programming
+[66], under the assumption that the propensity functions and the approximate value function
+are polynomial. Note that, In such a case, V (0, X(0)) will only be an upper bound on the
+optimal cost.
+3.2
+Unimolecular stochastic reaction networks
+In the case of unimolecular stochastic reaction networks with mass action kinetics, the
+propensity functions reduce to
+λi(t, x, u) = ¯wi(t)T¯x + ¯bi(t)Tu
+(23)
+where ¯x := col(x, 1), where ¯wi(t) = col(wi,x(t), wi,0(t)), wi,x ∈Rd
+≥0, ¯wi,0(t) ∈R≥0, and
+¯bi ∈Rm
+≥0, i = 1, . . . , K. As already mentioned in Section 2.3, an important property of
+unimolecular reaction networks is that their moment equation is closed. In the present case,
+one can write the following expression for the ﬁrst-order moment equation
+d
+dtE[X(t)] = A(t)E[X(t)] + B(t)E[u(t)] + d(t)
+(24)
+where
+A(t) =
+K
+X
+k=1
+ζk ¯wk,x(t)T, B(t) =
+K
+X
+k=1
+ζk¯bk(t)T, and d(t) =
+K
+X
+k=1
+ζk ¯wk,0(t).
+(25)
+As unimolecular reaction networks are analogues of linear systems, the following Linear
+Quadratic (LQ) cost is considered
+JT(u)
+:=
+E
+Z T
+0
+  ¯X(s)TQ(s) ¯X(s) + u(s)TR(s)u(s)
+
+ds + ¯X(T)TQT ¯X(T)
+
+(26)
+where Q : [0, T] 7→Sd+1
+⪰0 , R : [0, T] 7→Sm
+≻0, and QT ∈Sd+1
+⪰0 . We then have the following
+result:
+10
+Theorem 6 Let us consider the unimolecular reaction network (X, R) with propensity func-
+tions (23). Then, the optimal control input minimizing the cost (26) is given by
+u∗(t) = −1
+2R(t)−1Ωu(t)¯x(t)
+(27)
+where
+Ωu(t)
+:=
+2 ¯B(t)TP(t) + Γ(t)eT
+d+1,
+Γ(t)
+:=
+K
+X
+k=1
+¯Bk(t)TP(t)¯ζk,
+(28)
+and P : [0, T] 7→Sd+1, P(T) = QT, solves the Riccati diﬀerential equation
+˙P(t) + ¯A(t)TP(t) + P(t) ¯A(t) + Q(t) −1
+4Ωu(t)TR(t)−1Ωu(t)
++1
+2
+K
+X
+k=1
+( ¯Ak(t)TP(t)¯ζkeT
+d+1 + ed+1¯ζT
+k P(t) ¯Ak(t)) = 0.
+(29)
+where ¯Ak(t) = ¯ζk ¯wk(t)T, ¯Bk(t) = ¯ζk¯bk(t)T,
+¯A(t) =
+
+A(t)
+d(t)
+0
+0
+
+, ¯B(t) =
+
+B(t)
+0
+
+, and ¯ζk =
+
+ζk
+0
+
+.
+(30)
+Moreover, we have that J∗
+T = JT(u∗) = V (0, X(0)).
+Proof : Since the running cost is strictly convex in u and the propensity functions are aﬃne
+in u, then a minimum for JT(u) exists. We will show that a quadratic value function of the
+form V (t, x) = ¯xTP(t)¯x veriﬁes the Hamilton-Jacobi-Bellman equation (16) which is given
+in this case by
+¯xT ˙P(t)¯x + ¯xTQ(t)¯x + min
+u
+( K
+X
+i=1
+λi(t, x, u)∆iV (t, x) + uTR(t)u
+)
+= 0
+(31)
+and P(T) = QT where
+∆iV (t, x) = ¯ζT
+i P(t)¯x + ¯xTP(t)¯ζi + ¯ζT
+i P(t)¯ζi
+(32)
+and where ¯ζk is deﬁned in the result.
+Computing the derivative with respect to u and
+equating it to zero yields
+K
+X
+i=1
+∆iV (t, x)¯bi(t) + 2R(t)u = 0,
+(33)
+which results in the optimal control law
+u∗(t, x) := 1
+2R(t)−1
+ K
+X
+i=1
+∆iV (t, x)¯bi(t)
+!
+.
+(34)
+11
+Substituting the explicit expressions for the ∆iV (t, x)’s yields (27) and substituting, in turn,
+(27) in (31) yields
+¯xT ˙P(t)¯x −1
+4(2 ¯B(t)TP(t)¯x + Γ(t))TR(t)−1(2 ¯B(t)TP(t)¯x + Γ(t))
++
+K
+X
+k=1
+¯wi(t)¯x
+ 2¯ζT
+k P(t)¯x + ¯ζT
+k P(t)¯ζk
+
++ ¯xTQ(t)¯x = 0.
+(35)
+Using the fact that
+¯wk(t)T¯x
+ 2¯ζT
+k P ¯x + ¯ζT
+k P ¯ζk
+
+=
+¯xT
+
+Sym
+
+P(t)¯ζk ¯wk(t)T + 1
+2 ¯wk(t)¯ζT
+k P(t)¯ζkeT
+d+1
+
+¯x
+=
+¯xT
+
+Sym
+
+P(t) ¯Ak(t) + 1
+2
+¯Ak(t)TP(t)¯ζkeT
+d+1
+
+¯x,
+(36)
+we obtain
+K
+X
+k=1
+λk(t, x)
+ 2¯ζT
+k P(t)¯x + ¯ζT
+k P(t)¯ζk
+
+=
+¯xT
+ 
+Sym
+"
+P(t) ¯A(t) + 1
+2
+K
+X
+k=1
+¯Ak(t)TP(t)¯ζkeT
+d+1
+#!
+¯x.
+(37)
+Finally, noting that Γ(t) = Γ(t)eT
+d+1¯x yields
+¯xT ˙P(t)¯x −¯xT1
+4(2 ¯B(t)TP(t) + Γ(t)eT
+d+1)TR(t)−1(2 ¯B(t)TP(t) + Γ(t)eT
+d+1)¯x
++¯xT
+ 
+Sym
+"
+P(t) ¯A(t) + 1
+2
+K
+X
+k=1
+¯Ak(t)TP(t)¯ζkeT
+d+1
+#!
+¯x + ¯xTQ(t)¯x = 0.
+(38)
+As this expression holds for all ¯x ∈Zd
+≥0, then this is equivalent to the Riccati diﬀerential
+equation (29).
+♦
+As a matter of comparison, we can state here the more classical result on the optimal
+LQ control of the moment equation (24):
+Theorem 7 Let us consider the moment system (24). Then, the optimal (deterministic)
+control input that minimizes the cost
+JE
+T (u) :=
+Z T
+0
+ E[ ¯X(s)]TQ(s)E[ ¯X(s)] + u(s)TR(s)u(s)
+
+ds + E[ ¯X(T)]TQT E[ ¯X(T)]
+(39)
+is given by
+u∗(t) := −R(t)−1 ¯B(t)TP(t)E[ ¯X(t)]
+(40)
+where P : [0, T] 7→Sd+1, P(T) = QT , solves the Riccati diﬀerential equation
+˙P(t) + ¯A(t)TP(t) + P(t) ¯A(t) + Q(t) −P(t) ¯B(t)R(t)−1 ¯B(t)P(t) = 0, t ∈[0, T].
+(41)
+Moreover, we have that JE∗
+T
+:= JE
+T (u∗) = E[ ¯X0]TP(0)E[ ¯X0].
+12
+It is important to stress that the obtained Riccati diﬀerential equation obtained in The-
+orem 6 is dramatically diﬀerent from the classical one provided in Theorem 7 and those
+obtained in the LQ control of linear stochastic diﬀerential equations. Firstly, we can observe
+the presence of the additional Γ(t) terms in both the optimal control law and in the Riccati
+diﬀerential equation. Secondly, there is an extra sum, linear in P(t), in the Riccati diﬀeren-
+tial equation. This is a consequence of the fact that jumps act on the state in the additive
+way x 7→x + ζk.
+It seems also important to clarify under which conditions a solution to the Riccati diﬀer-
+ential equation exists on the interval [0, T] as such equations may have a ﬁnite escape time.
+From the theory of Riccati diﬀerential equations [51], we know that a solution will exist in an
+interval (T −ε, T] for some suﬃciently small ε > 0. However, using the fact that the matrix
+P is symmetric and positive semideﬁnite, the standard arguments for the global existence
+of a solution P on [0, T] can be straightforwardly adapted to the current Riccati equation.
+However, it seems that the characterization of the solution in terms of a Hamiltonian matrix
+does not exist in this setting due to the very peculiar structure of the Riccati diﬀerential
+equation.
+4
+Optimal Sampled-Data Control of Stochastic Reac-
+tion Networks
+There are multiple ways for considering sampled-data systems and sampled-data control
+problems. Chronologically, the ﬁrst approach to have been introduced was based on the
+direct discretization of the dynamics of the process [67].
+While this procedure is quite
+straightforward in the linear deterministic case, it is way more involved in the stochastic
+or the nonlinear settings because of their more complex nature. A subsequently proposed
+approach was based on the so-called ”lifting procedure” which turned the sampled-data sys-
+tem into an inﬁnite-dimensional system [53,54]. This approach had the beneﬁt of preserving
+the information on the inter-sample behavior, lost by the discretization procedure, at the
+expense of having to work in the inﬁnite-dimensional setting. Variations of the approach
+managed to keep the dimension of the state-space ﬁnite but the input and output spaces still
+had to be considered as inﬁnite-dimensional [59,68] in order to be able to properly address
+the performance analysis and optimization problems. Another approach that makes the sys-
+tem inﬁnite-dimensional is the so-called input-delay approach that turns the sampled-data
+system into a system with a sawtooth time-varying delay [69] and on which available tools
+for the analysis and the control of time-delay systems can be applied. An impulsive systems
+formulation was considered in [70] and had the advantage of keeping the state-space as well
+as the input- and output spaces ﬁnite-dimensional, at the reasonably aﬀordable expense of
+making the dynamics of the system hybrid. This framework is now included in the very
+general hybrid systems framework [71] for which many analysis tools have been developed
+since then.
+The main limitation for using a discrete-time approach in the current setting lies in the
+13
+diﬃculty in computing or even considering the map F : R≥0 × Zd
+≥0 × Rm
+≥0 7→Zd
+≥0 such that
+X(tk+1) = F(k, X(tk), u(tk)), tk = kTs
+(42)
+where Ts > 0 is the sampling period and u(tk) is the control input value at tk. This map
+clearly relates to the transition kernel P(X(tk+1) = x+|X(tk) = x) which is, in general, a
+complex function of the propensity functions related to the exponential of the CME operator
+which is not exactly computable in the current setting. Even if it were computable, the
+resulting dependence on u(tk) would be quite complex and, hence, diﬃcult to consider for
+optimal control purposes. Finally, the inter-sample behavior would be lost when discretizing
+the process while this information is necessary to consider in the cost to minimize. The lifting
+and the input-delay approaches are much less convenient to use than the hybrid formulation
+which keeps the state-space ﬁnite-dimensional and allows for the use of simpler concepts
+than those required for dealing with inﬁnite-dimensional systems. Adding the fact that a
+Markov jump process can already be seen as a stochastic hybrid system closes the deal in
+favor of the hybrid systems approach.
+4.1
+Sampled-data stochastic reaction networks as stochastic hy-
+brid systems
+A sampled-data stochastic reaction network is stochastic reaction network having a piecewise
+constant control input which is only updated at every time tk = kTs, k ∈Z≥0, where Ts > 0
+is the sampling period. Such a system can be described as a stochastic hybrid system [52]
+with
+• a ﬂow map
+˙X(t)
+=
+0
+˙v(t)
+=
+0
+
+if t ∈[0, T] −{tk}k≥0
+(43)
+• K spontaneous jump maps
+X(t+)
+=
+X(t) + ζi
+v(t+)
+=
+v(t)
+
+∼λi(t, X(t), v(t)), i = 1, . . . , K, and
+(44)
+• a deterministic jump map
+X(t+)
+=
+X(t)
+v(t+)
+=
+u(t)
+
+if t ∈{tk}k≥0 ∩[0, T].
+(45)
+It seems important to explain this model in more details. Since the molecular counts are
+piecewise constant, it is immediate to see that the derivative of the molecular counts between
+jumps should be zero. The second state, v ∈Rd
+≥0, has been added in order to model the
+zero-order hold (ZOH) that keeps the value of the control input constant over each sampling
+period. In this regard, the ﬂow map can be considered as trivial in the current context. The
+14
+K spontaneous jumps, which are exponentially distributed with rate λi(t, X, v), i = 1, . . . , K,
+correspond to the random ﬁrings of the K possible reactions and only change the value of
+the molecular counts. Finally, the deterministic jump map updates the value of the control
+input while leaving the molecular counts unchanged.
+4.2
+General stochastic reaction networks
+In the case of general networks, the propensity functions can be written as λi(t, x, v) as
+deﬁned in (17) where we replace the control input u the state v of the ZOH. We consider
+here the following cost
+JT(u) := E
+"Z T
+0
+qc(s, x(s), v(s))ds +
+N−1
+X
+k=0
+qd(k, x(tk), v(tk), u(tk)) + qc,T(x(T), v(T))
+#
+(46)
+where qc : [0, T] × Zd
+≥0 × Rm
+≥0 7→R≥0 is the continuous-time running cost, qd : {0, . . . , N −
+1} × Zd
+≥0 × Rm
+≥0 × Rm
+≥0 7→R≥0 is the discrete-time running cost, and qc,T : Zd
+≥0 × Rm
+≥0 7→R≥0
+is the terminal cost. We also assume, without loss of generality, that tN = NTs = T. The
+control law is then given by
+u∗= argmin
+u∈V0,T
+JT(u)
+(47)
+where we have assumed that such a minimum exists and
+Vs,t :=
+
+u ∈ℓ2([s, t] ∩{t0, . . . , tN} × Zd
+≥0, Rm
+≥0) : u mesurable
+	
+, t ≥s.
+(48)
+Considering the value function
+V (t, x, v)
+=
+min
+u∈Vt,T E
+
+
+Z T
+t
+qc(s, x(s), v(s))ds +
+X
+k:t<tk≤(N−1)T
+qd(k, x(tk), v(tk), u(tk))
+
+X(t)
+=
+x
+v(t)
+=
+x
+
+
+(49)
+which is deﬁned for all (x, v) ∈Zd
+≥0 × Rm
+≥0, we obtain the following result:
+Theorem 8 Let us consider the sampled-data reaction network represented by (43), (44),
+(45), and (17). The optimal control input is given by
+u∗(tk) = argmin
+u
+{V (t+
+k , x, u) + qd(k, x, u)}, k = 0, . . . , N −1
+(50)
+where the value function V veriﬁes the following hybrid HJB equation
+Vt(t, x, v) +
+K
+X
+k=1
+λk(t, x, v)(V (t, x + ζk, v) −V (t, x, v))
++qc(t, x, v) = 0, t ∈(tk, tk+1], k = 0, . . . , N −1
+(51)
+and
+V (t+
+k , x, u∗(tk)) −V (tk, x, v) + qd(k, x, v, u∗(tk)) = 0, k = 0, . . . , N −1
+(52)
+with the terminal condition V (T, x, v) = qc,T(x, v).
+15
+Proof :
+The proof simply consists of applying Dynamic Programming to the system (43),
+(44), (45), and (17).
+♦
+4.3
+Unimolecular stochastic reaction networks
+In this case, the propensity functions vector is given by
+λi(t, x, v) = ¯wi(t)T¯x + ¯bi(t)Tv =: ¯λi(t)Tz
+(53)
+where ¯wi(t) = col(wi,x(t), wi,0(t)), wi,x ∈Rd
+≥0, ¯wi,0(t) ∈R≥0, ¯bi(·) ∈Rm
+≥0, ¯λi(t) := col( ¯wi(t),¯bi(t)),
+¯x := col(x, 1), and z := col(x, 1, v). As in the continuous-time case, we can write the moment
+equations in closed-form with the diﬀerence that it takes now the form of a linear impulsive
+system
+d
+dt
+
+E[X(t)]
+E[v(t)]
+
+=
+
+A(t)
+B(t)
+0
+0
+ 
+E[X(t)]
+E[v(t)]
+
++
+
+d(t)
+0
+
+, t ̸= tk
+
+E[X(t+
+k )]
+E[v(t+
+k )]
+
+=
+
+I
+0
+0
+0
+ 
+E[X(tk)]
+E[v(tk)]
+
++
+
+0
+I
+
+E[u(tk)], k = 0, . . . , N −1
+(54)
+where
+A(t) =
+K
+X
+k=1
+ζk ¯wk,x(t)T, B(t) =
+K
+X
+k=1
+ζk¯bk(t)T, and d(t) =
+K
+X
+k=1
+ζk ¯wk,0(t)T.
+(55)
+We also introduce the following hybrid LQ cost
+JT(u)
+:=
+E
+"Z T
+0
+z(s)TQc(s)z(s)ds +
+N−1
+X
+k=0
+ z(tk)TQd(k)z(tk) + u(tk)TRd(k)u(tk)
+
++ z(T)TQc,Tz(T)
+
+.
+(56)
+where Qc : [0, T] 7→Sd+1+m
+⪰0
+, Qc,T ∈Sd+1+m
+⪰0
+, Qd : {0, . . . , N −1} 7→Sd+1+m
+⪰0
+and Rd :
+{0, . . . , N −1} 7→Sm
+≻0. This leads to the following result:
+Theorem 9 Let us consider the sampled-data unimolecular stochastic reaction network (43),
+(44), and (45) with propensities (53). Then, the optimal control input that minimizes the
+cost (56) is given by
+u∗(tk) = K(k)z(tk) = −(Rd(k) + P3(t+
+k ))−1P2(t+
+k )T¯x(tk), k = 0, . . . , N −1
+(57)
+where P : [0, T] 7→Sd+1+m, P(T) = QT, solves the Lyapunov diﬀerential equation
+˙P(t) + Qc(t) + ¯A(t)TP(t) + P(t) ¯A(t) + 1
+2
+K
+X
+i=1
+Sym(¯λi(t)¯ζT
+i P(t)¯ζieT
+d+m+1) = 0, t ∈(tk, tk+1]
+(58)
+16
+and the Riccati diﬀerence equation
+P1(t+
+k ) −P2(t+
+k )(P3(t+
+k ) + Rd(k))−1P2(t+
+k )T + Qd,1(k) −P1(tk)
+=
+0
+Qd,2(k) −P2(tk)
+=
+0
+Qd,3(k) −P3(tk)
+=
+0
+(59)
+for k = 0, . . . , N −1 and where ¯ζi = col(ζi, 0, 0) together with
+¯A(t) =
+
+
+A(t)
+d(t)
+B(t)
+0
+0
+0
+0
+0
+0
+
+, P(t) =
+ P1(t)
+P2(t)
+P2(t)T
+P3(t)
+
+, Qd(k) =
+ Qd,1(k)
+Qd,2(k)
+Qd,2(k)T
+Qd,3(k)
+
+(60)
+with P1(t) ∈Sd+1, P2(t) ∈R(d+1)×m, P3(t) ∈Sm, Qd,1(k) ∈Sd+1
+⪰0 , Qd,2(k) ∈R(d+1)×m, and
+Qd,3(k) ∈Sm
+⪰0.
+Proof :
+Let ¯ζi = (ζi, 0, 0) ∈Rd+m+1. We will show that the value function V (t, x, v) :=
+zTP(t)z, P(t) ∈Sd+1+m
+⪰0
+, veriﬁes the hybrid Dynamic Programming equations of Theorem
+8. For the ﬂow part, we get that
+zT ˙P(t)z + zTQc,k(t)z +
+K
+X
+i=1
+λi(t, x, v)∆iV (t, x, v) = 0
+(61)
+where
+∆iV (t, x, v) := ¯ζT
+i P(t)z + ¯zTP(t)¯ζi + ¯ζT
+i P(t)¯ζi.
+(62)
+Therefore
+zT ˙P(t)z + zTQc(t)z +
+K
+X
+i=1
+¯λi(t)Tz
+ ¯ζT
+i P(t)z + zTP(t)¯ζi + ¯ζT
+i P(t)¯ζi
+
+= 0.
+(63)
+The above expression can be decomposed as the sum of
+K
+X
+i=1
+¯λi(t)Tz
+ ¯ζT
+i P(t)z + zTP(t)¯ζi
+
+= ¯A(t)TP(t) + P(t) ¯A(t)
+(64)
+with
+K
+X
+i=1
+¯λi(t)Tz¯ζT
+i P(t)¯ζi = 1
+2
+K
+X
+i=1
+zT Sym(¯λi(t)¯ζT
+i P(t)¯ζieT
+d+1)z.
+(65)
+Substituting those two expressions in (63) yields the Lyapunov diﬀerential equation (58).
+This proves the result for the ﬂow part.
+We now look at the jump part of the dynamics. The Dynamic Programming equation is
+given in this case by
+min
+u(tk)
+
+
+x(tk)
+1
+u(tk)
+
+
+T
+P(t+
+k )
+
+
+x(tk)
+1
+u(tk)
+
+−z(tk)TP(tk)z(tk) + z(tk)TQd(k)z(tk) + u(tk)TRd(k)u(tk) = 0.
+(66)
+17
+Let us then partition P as in (60) and computing the derivative with respect to u(tk) yields
+∂
+∂u(tk)
+
+
+
+
+
+x(tk)
+1
+u(tk)
+
+
+T
+P(t+
+k )
+
+
+x(tk)
+1
+u(tk)
+
++ u(tk)TRd(k)u(tk)
+
+
+
+=
+2
+
+P2(t+
+k )T
+P3(t+
+k )
+
+
+
+x(tk)
+1
+u(tk)
+
+
++2u(tk)TRd(k).
+(67)
+This means that the optimal control input veriﬁes the expression
+(Rd(k) + P3(t+
+k ))u(tk) + P2(t+
+k )T¯x(tk) = 0
+(68)
+which yields, in turn, the expression u(tk) = K(k)¯x(tk) with K(k) = −(Rd(k)+P3(t+
+k ))−1P2(t+
+k )T.
+If we now deﬁne H(k) as
+H(k) :=
+ Id+1
+0
+K(k)
+0
+
+(69)
+then, we get that
+
+
+x(tk)
+1
+u(tk)
+
+= H(k)z(k),
+(70)
+and, substituting this expression in (66), we obtain the expression
+H(k)TP(t+
+k )H(k) + Qd(k) +
+K(k)
+0T Rd(k)
+K(k)
+0
+−P(tk) = 0.
+(71)
+Expanding the above equality yields
+
+P1(t+
+k ) + Sym[P2(t+
+k )K(k)] + K(k)T(Rd(k) + P3(t+
+k )K(k)
+0
+0
+0
+
++ Qd(k) −P(tk) = 0, (72)
+which reduces to Qd,2(k) −P2(tk) = 0, Qd,3(k) −P3(tk) = 0 , and
+P1(t+
+k ) + Sym[P2(t+
+k )K(k)] + K(k)T(Rd(k) + P3(t+
+k )K(k) + Qd,1(k) −P1(tk) = 0.
+(73)
+Finally, since K(k) = −(Rd(k) + P3(t+
+k ))−1P2(t+
+k )T, the above expression simpliﬁes to
+P1(t+
+k ) −P2(t+
+k )(P3(t+
+k ) + Rd(k))−1P2(t+
+k )T + Qd,1(k) −P1(tk) = 0
+(74)
+together with Qd,2(k) −P2(tk) = 0, Qd,3(k) −P3(tk) = 0, which proves (59) and the desired
+result.
+♦
+18
+5
+Continuous-Time H∞Control of Stochastic Reaction
+Networks
+The objective of this section is to develop an H∞(or L2) control theory for stochastic reaction
+networks. The key idea is to derive a control law that can guarantee a certain attenuation
+level from exogenous inputs to control outputs in an L2-sense. Such a result exists in a wide
+variety of contexts (see e.g. [72]) but does not seem to have been developed for jump Markov
+processes describing stochastic reaction networks. A general result is ﬁrst derived and is
+specialized to the unimolecular case, for which a Bounded Real Lemma is also obtained.
+5.1
+Preliminaries
+Similarly as in the previous section, we extend the reaction network (X, R) to not only
+involve m control inputs but also p exogenous inputs, all of them acting at the propensity
+level. This gives rise to the following structural assumption:
+Assumption 10 The propensity functions of the network (X, R) are of the form λ(t, x, u, w)
+where u ∈Rm
+≥0 is the control input vector and w ∈Rp
+≥0 is the vector of exogenous distur-
+bances. We also deﬁne the so-called controlled output vector z(t) = h(t, x(t), u(t), w(t)) where
+h : R≥0 × Zd
+≥0 × Rm
+≥0 × Rp
+≥0 7→Rq is assumed to be a continuous function.
+The H∞control is tightly connected to the concept of L2-gain of operators and the L2-
+norm of signals. Before being able to proceed with the main results, it is important to state
+the following deﬁnitions:
+Deﬁnition 11 The (ﬁnite-time) L2-norm of the signal w : [0, T] 7→Rp is deﬁned as
+||w||L2([0,T]) :=
+Z T
+0
+E[||w(s)||2
+2]ds
+1/2
+.
+(75)
+We can now deﬁne the concept of L2-gain of operators:
+Deﬁnition 12 The ﬁnite-horizon L2-gain of the transfer/operator w 7→z associated with
+the stochastic reaction network (X, R) under Assumption 10 is deﬁned as
+||w 7→z||L2([0,T])−L2([0,T]) :=
+sup
+w∈W0,T ,||w||L2([0,T ])̸=0,X(0)=0
+||z||L2([0,T])
+||w||L2([0,T])
+(76)
+where
+Ws,t :=
+
+w ∈L2([s, t] × Zd
+≥0 × Rm
+≥0, Rp
+≥0) : w mesurable
+	
+, t ≥s.
+(77)
+The H∞control problem consists of solving the following optimization problem
+min
+u∈U0,T ||w 7→z||L2([0,T])−L2([0,T]) = min
+u∈U0,T
+sup
+w∈W0,T ,||w||L2([0,T ])̸=0,X(0)=0
+||z||L2([0,T])
+||w||L2([0,T])
+,
+(78)
+where Us,t is deﬁned in (13). It is important to stress that in the above optimal control
+problem, the control input is not allowed to depend on the (typically unknown) exogenous
+input w, while the reverse is possible.
+19
+5.2
+General stochastic reaction networks
+A way to solve the H∞control problem (78) is through the introduction of the cost
+JT(u, w)
+:=
+E
+Z T
+0
+ r(s, u(s)) + ||z(s)||2
+2 −γ2||w(s)||2
+2
+
+ds + qT(X(T))
+
+(79)
+where r : [0, T] × Rm
+≥0 7→R≥0 is the running cost for the control input and qT : Zd
+≥0 7→R
+is the terminal cost. The control input is chosen in such a way that it minimizes the worst
+case
+J∗
+T = min
+u∈U0,T max
+w∈W0,T JT(u, w)
+(80)
+We also make the following assumption
+Assumption 13 The equality
+∂2
+∂u∂w
+ λ(t, x, u, w)T∆V (t, x) + r(t, u) + zTz −γ2wTw
+
+= 0
+(81)
+holds and the function λ(t, x, u, w)T∆V (t, x) + r(t, u) + zTz −γ2wTw is strongly convex in u
+and strongly concave in w.
+Considering the value function
+V (t, x) = min
+u∈Ut,T max
+w∈Wt,T E
+Z T
+t
+ r(s, u(s)) + ||z(s)||2
+2 −γ2||w(s)||2
+2
+
+ds
+ X(t) = x
+
+, V (T, x) = qT(x)
+(82)
+deﬁned for all x ∈Zd
+≥0 leads to the following result:
+Theorem 14 Let us consider a stochastic reaction network satisfying Assumption 10 and
+Assumption 13. Then an optimal pair (u∗, w∗) that solves the optimization problem (80) is
+given by
+u∗(t)
+=
+argmin
+u
+( K
+X
+i=1
+λi(t, x(t), u, w)∆iV (t, x(t)) + r(t, u) + z(t)Tz(t)
+)
+,
+w∗(t)
+=
+argmax
+w
+( K
+X
+i=1
+λi(t, x(t), u, w)∆iV (t, x(t)) + z(t)Tz(t) −γ2wTw
+)
+,
+(83)
+where the function V (t, x) satisﬁes the Hamilton-Jacobi-Isaacs (HJI) equation given by
+Vt(t, x) + min
+u max
+w
+( K
+X
+i=1
+λi(t, x, u, w)∆iV (t, x) + r(t, u) + z(t)Tz(t) −γ2w(t)Tw(t)
+)
+= 0
+(84)
+and V (T, x) = qT (x).
+20
+Moreover, in such a case, the optimal cost J∗
+T := JT(u∗, w∗) coincides with V (0, X(0))
+and we have that
+V (0, X(0)) = ||z||2
+L2([0,T]) −γ2||w∗||2
+L2([0,T]) +
+Z T
+0
+r(s, u∗(s))ds + E[qT (X(T))].
+(85)
+which reduces in the case of no terminal cost and zero initial condition to
+||z||2
+L2([0,T]) < γ2||w||2
+L2([0,T])
+(86)
+for all w ∈W0,T .
+Proof : Due to Assumption 13 there exists an unique optimal point (u∗, w∗) given by (83) to
+the optimal control problem (80) and the optimal control input u∗is independent of w. The
+rest of the result follows from dynamic programming. The conclusion of the result follows
+from the fact that we have
+V (0, X(0)) = ||z||2
+L2([0,T]) −γ2||w∗||2
+L2([0,T]) +
+Z T
+0
+r(s, u∗(s))ds + E[qT (X(T))],
+(87)
+which is equivalent to say that
+||z||2
+L2([0,T]) = γ2||w∗||2
+L2([0,T]) −
+Z T
+t
+r(s, u∗(s))ds −E[qT (X(T))] + V (0, X(0))
+(88)
+Under zero initial conditions and no terminal cost, this reduces to
+||z||2
+L2([0,T]) = γ2||w∗||2
+L2([0,T]) −
+Z T
+t
+r(s, u∗(s))ds < γ2||w||2
+L2([0,T])
+(89)
+and the inequality follows from the fact that r is nonnegative.
+♦
+We now address the important subclass of stochastic reaction networks with mass-action
+kinetics considered with a quadratic running cost:
+Assumption 15 The propensity functions of the network (X, R) are of the form
+λi(t, x, u, w) = fi(t, x) + gu,i(t, x)u + gw,i(t, x)w, i = 1, . . . , K
+(90)
+where the fi(t, x)’s are suitable polynomials and the gu,i(t, x)’s and gw,i(t, x)’s are suitable
+row-vector polynomials. Moreover, the function r(t, u) in the cost (11) takes the form
+r(t, u) = uTR(t)u
+(91)
+where R(·) ≻0 and the controlled output is such that z = h(t, x).
+This leads to the following result:
+21
+Theorem 16 Let us consider a stochastic reaction network satisfying Assumption 15. Then
+an optimal pair (u∗, w∗) that solves the optimization problem (80) is given by
+u∗(t)
+=
+−1
+2R(t)−1gu(t, x)T∆V (t, x),
+w∗(t)
+=
+1
+2γ gw(t, x)T∆V (t, x),
+(92)
+where the function V (t, x) satisﬁes the Hamilton-Jacobi-Isaacs (HJI) equation given by
+Vt(t, x) + h(x)Th(x) + f(t, x)T∆V (t, x) −1
+4∆V (t, x)Tgu(t, x)R(t)−1gu(t, x)T∆V (t, x)
++ 1
+4γ2∆V (t, x)Tgu(t, x)gu(t, x)T∆V (t, x) = 0
+(93)
+and V (T, x) = qT (x) where f(t, x) = colK
+i=1(fi(t, x)), gu(t, x) = colK
+i=1(gu,i(t, x)), gw(t, x) =
+colK
+i=1(gw,i(t, x)), and ∆V (t, x) = colK
+i=1(∆Vi(t, x)). Moreover, assuming zero initial condi-
+tions and no terminal cost, we have that
+||z||2
+L2([0,T]) < γ2||w||2
+L2([0,T])
+(94)
+for all w ∈W0,T .
+Proof :
+A reaction network that satisﬁes Assumption 15 also satisﬁes Assumption 10 and
+Assumption 13. The explicit expressions for (83) can be obtained by diﬀerentiating (84) with
+respect to u and w and equating those expressions to zero. Substitution of those explicit
+expressions in (84) yields (93).
+♦
+5.3
+Control of unimolecular reaction networks
+In the unimolecular case, the propensity functions can be written as
+λi(t, x, u, w) = ¯wi(t)T¯x + ¯bi(t)Tu + ¯ei(t)Tw, i = 1, . . . , K
+(95)
+where ¯wi(t) = (wi,x(t), wi,0(t)), wi,x ∈Rd
+≥0, ¯wi,0(t) ∈R≥0, ¯bi(t) ∈Rm
+≥0, and ¯ei(t) ∈Rp
+≥0,
+i = 1, . . . , K. The controlled output z is assumed to depend linearly on the signals, that is
+z(t) = C(t)X(t) + D(t)u(t) + F(t)w(t) + f(t)
+(96)
+where C : [0, T] 7→Rq×d, D : [0, T] 7→Rq×m, F : [0, T] 7→Rq×p, and f : [0, T] 7→Rq
+≥0 are
+assumed to be continuous functions. We also deﬁne ¯C(t) =
+
+C(t)
+f(t)
+
+.
+For this class of unimolecular networks, the moment equations read
+d
+dtE[X(t)]
+=
+A(t)E[X(t)] + B(t)E[u(t)] + E(t)E[w(t)] + d(t)
+E[z(t)]
+=
+C(t)E[X(t)] + D(t)E[u(t)] + F(t)E[w(t)] + f(t)
+(97)
+22
+where
+A(t) =
+K
+X
+k=1
+ζk ¯wk,x(t)T, B(t) =
+K
+X
+k=1
+ζk¯bk(t)T, E(t) =
+K
+X
+k=1
+ζk¯ek(t) and d(t) =
+K
+X
+k=1
+ζk ¯wk,0(t)T.
+(98)
+Finally, we consider the following quadratic version of the cost (79) given by
+JT(u, w)
+:=
+E
+Z T
+0
+ u(s)TR(s)u(s) + ||z(s)||2
+2 −γ2||w(s)||2
+2
+
+ds + ¯X(T)TQT ¯X(T)
+
+(99)
+where ¯X = col(X, 1), R : [0, T] 7→Sm
+≻0, QT ∈Sd+1
+⪰0 , and γ > 0. We then have the following
+result:
+Theorem 17 Assume that D(·)TF(·) ≡0 and let γ > 0. Let us further consider a uni-
+molecular reaction network (X, R) with propensity functions (95) and controlled output (96).
+Then, the optimal pair (u∗, w∗) that solves the optimization problem
+min
+u∈U0,T max
+w∈W0,T JT(u, w)
+(100)
+where JT(u, w) is given in (99) is given by
+u∗(t, x(t)) = −1
+2(R(t) + D(t)TD(t))−1Ωu(t)¯x(t)
+(101)
+and
+w∗(t, x(t)) = (γ2I −F(t)TF(t))−1Ωw(t)¯x(t)
+(102)
+where
+Ωu(t)
+:=
+2D(t)T ¯C(t) + 2 ¯B(t)TP(t) +
+K
+X
+k=1
+¯Bk(t)TP(t)¯ζkeT
+d+1
+Ωw(t)
+:=
+2F(t)T ¯C(t) + 2 ¯E(t)TP(t) +
+K
+X
+k=1
+¯Ek(t)TP(t)¯ζkeT
+d+1,
+(103)
+and where P : [0, T] 7→Sd+1, P(T) = QT, solves the Riccati diﬀerential equation
+˙P(t) + ¯A(t)TP(t) + P(t) ¯A(t) + ¯C(t)T ¯C(t) −1
+4Ωu(t)T(R(t) + D(t)TD(t))−1Ωu(t)
++1
+4Ωw(t)T(γ2I −F(t)TF(t))−1Ωw(t) + 1
+2
+K
+X
+k=1
+Sym
+ ¯Ak(t)TP(t)¯ζkeT
+d+1
+
+= 0
+(104)
+where γ2I −F(t)TF(t) ≻0, ¯Ak(t) = ¯ζk ¯wk(t)T, ¯Bk(t) = ¯ζk¯bk(t)T, ¯Ek(t) = ¯ζk¯ek(t)T,
+¯A(t) =
+
+A(t)
+d(t)
+0
+0
+
+, ¯B(t) =
+
+B(t)
+0
+
+, ¯E(t) =
+
+E(t)
+0
+
+, and ¯C(t) =
+
+C(t)
+f(t)
+
+.
+(105)
+23
+Moreover, in such a case, we have that
+||z||2
+L2([0,T]) = γ2||w∗||2
+L2([0,T]) −V (0, X(0)) −||R1/2u∗||2
+L2([0,T]) −||Q1/2
+T
+¯X(T)||2
+2
+(106)
+which reduces to
+||z||2
+L2([0,T]) < γ2||w||2
+L2([0,T])
+(107)
+for all w ∈W0,T whenever X(0) = 0 and QT = 0.
+Proof : In the present case, the Hamilton-Jacobi-Isaacs equation reads
+Vt(t, x) + min
+u max
+w
+( K
+X
+i=1
+λi(t, x, u, w)∆iV (t, x) + uTR(t)u + zTz −γ2wTw
+)
+= 0.
+(108)
+First of all, note that
+z(t)Tz(t) =
+
+
+¯x
+u
+w
+
+
+T
+M(t)
+
+
+¯x
+u
+w
+
+
+(109)
+where
+M(t) :=
+
+
+¯C(t)T ¯C(t)
+¯C(t)TD(t)
+¯C(t)TF(t)
+D(t)T ¯C(t)
+D(t)TD(t)
+0
+F(t)T ¯C(t)
+0
+F(t)TF(t)
+
+
+(110)
+and where we have used the fact that D(t)TF(t) = 0. Then, computing the derivative of the
+expression in the min-max expression in (108) with respect to u and w, and equating those
+expressions to zero yields
+K
+X
+i=1
+¯bT
+i ∆iV (t, x) + 2¯xT ¯C(t)TD(t) + 2uT(R(t) + D(t)TD(t))
+=
+0,
+K
+X
+i=1
+¯eT
+i ∆iV (t, x) + 2¯xT ¯C(t)TF(t) + 2wT(F(t)TF(t) −γ2I)
+=
+0.
+(111)
+Solving those equations for u and w yields
+u∗
+=
+−1
+2(R(t) + D(t)TD(t))−1
+"
+2D(t)T ¯C(t)¯x +
+K
+X
+i=1
+¯bi∆iV (t, x)
+#
+,
+w∗
+=
+1
+2(γ2I −F(t)TF(t))−1
+"
+2F(t)T ¯C(t)¯x +
+K
+X
+i=1
+¯ei∆iV (t, x)
+#
+(112)
+where we have used the fact that γ2I−F(t)TF(t) ≻0, and hence invertible, since γ2||w||2
+L2,T ≥
+||z||2
+L2,T > ||Fw||2
+L2,T. Similarly, R(t) + D(t)TD(t) is invertible since R(t) + D(t)TD(t) ⪰
+R(t) ≻0. The Hessian at (u∗, w∗) is given by
+R(t) + D(t)TD(t)
+0
+0
+F(t)TF(t) −γ2I
+
+(113)
+24
+which proves that we have a minimum at u = u∗since R(t)+D(t)TD(t) ≻0 and a maximum
+at w = w∗since F(t)TF(t) −γ2I ≺0. We also have that
+K
+X
+i=1
+¯bi∆iV (t, x)
+=
+K
+X
+i=1
+
+2¯bi¯ζT
+i P(t)¯x + bi¯ζT
+i P(t)¯ζi
+
+=
+2 ¯B(t)TP(t)¯x +
+K
+X
+i=1
+¯ET
+i P(t)¯ζi
+=
+ 
+2 ¯B(t)TP(t) +
+K
+X
+i=1
+¯BT
+i P(t)¯ζieT
+d+1
+!
+¯x.
+(114)
+Similarly,
+K
+X
+i=1
+¯ei∆iV (t, x)
+=
+ 
+2 ¯E(t)TP(t) +
+K
+X
+i=1
+¯ET
+i P(t)¯ζieT
+d+1
+!
+¯x.
+(115)
+Therefore, we get that
+u∗(t)
+=
+−1
+2(R(t) + D(t)TD(t))−1
+"
+2D(t)T ¯C(t) + 2 ¯B(t)TP(t) +
+K
+X
+i=1
+¯BT
+i P(t)¯ζieT
+d+1
+#
+¯x
+=
+: −1
+2Zu(t)¯x,
+w∗(t)
+=
+1
+2(γ2I −F(t)TF(t))−1
+"
+2F(t)T ¯C(t) + 2 ¯E(t)TP(t) +
+K
+X
+i=1
+¯ET
+i P(t)¯ζieT
+d+1
+#
+¯x
+=:
+1
+2Zw(t)¯x.
+(116)
+Hence, the following expression holds at optimality
+z∗(t)Tz∗(t) −γ2w∗(t)Tw(t) + u∗(t)TR(t)u∗(t)
+=
+¯xT
+
+
+I
+−Zu(t)/2
+Zw(t)/2
+
+
+T
+M(t)
+
+
+I
+−Zu(t)/2
+Zw(t)/2
+
+¯x.
+(117)
+As previously, we have that
+¯wk(t)T¯x
+ 2¯ζT
+k P ¯x + ¯ζT
+k P ¯ζk
+
+=
+¯xT
+
+Sym
+
+P(t)¯ζk ¯wk(t)T + 1
+2 ¯wk(t)¯ζT
+k P(t)¯ζkeT
+d+1
+
+¯x
+=
+¯xT
+
+Sym
+
+P(t) ¯Ak(t) + 1
+2
+¯Ak(t)TP(t)¯ζkeT
+d+1
+
+¯x
+(118)
+and, hence,
+K
+X
+k=1
+¯wk(t)T¯x
+ 2¯ζT
+k P ¯x + ¯ζT
+k P ¯ζk
+
+= ¯xT
+ 
+Sym
+"
+P(t) ¯A(t) + 1
+2
+K
+X
+k=1
+¯Ak(t)TP(t)¯ζkeT
+d+1
+#!
+¯x.
+(119)
+25
+We also have
+K
+X
+k=1
+¯bk(t)Tu∗(t)∆kV (t, x)
+=
+u∗(t)T
+K
+X
+k=1
+¯bk(t)∆kV (t, x)
+=
+u∗(t)T
+ 
+2 ¯B(t)TP(t) +
+K
+X
+i=1
+¯Bi(t)TP(t)¯ζieT
+d+1
+!
+¯x
+=
+−1
+2 ¯xTZu(t)T
+ 
+2 ¯B(t)TP(t) +
+K
+X
+i=1
+¯Bi(t)TP(t)¯ζieT
+d+1
+!
+¯x
+(120)
+Similarly,
+X
+k
+¯ek(t)Tw∗(t)∆kV (t, x)
+=
+1
+2 ¯xTZw(t)T
+ 
+2 ¯E(t)TP(t) +
+K
+X
+i=1
+¯Ei(t)TP(t)¯ζieT
+d+1
+!
+¯x
+(121)
+Summing all those terms yields the following explicit expression for (108)
+¯xT
+
+˙P(t) + P(t) ¯A + ¯ATP(t) + ¯C(t)T ¯C(t) + 1
+4Zu(t)T(D(t)TD(t) + R(t))Zu(t)
++1
+4Zw(t)T(F(t)TF(t) −γ2I)Zw(t) −Zu(t)TD(t)T ¯C(t) + Zw(t)F(t)T ¯C(t)
+−1
+2Zu(t)T
+ 
+2 ¯B(t)TP(t) +
+K
+X
+i=1
+¯Bi(t)TP(t)¯ζieT
+d+1
+!
+−1
+2Zw(t)T
+ 
+2 ¯E(t)TP(t) +
+K
+X
+i=1
+¯Ei(t)TP(t)¯ζieT
+d+1
+!
++ 1
+2
+K
+X
+k=1
+Sym[ ¯Ak(t)TP(t)¯ζkeT
+d+1]
+#
+¯x = 0
+(122)
+which simpliﬁes to
+¯xT
+
+˙P(t) + P(t) ¯A + ¯ATP(t) + ¯C(t)T ¯C(t) −1
+2Zu(t)T(D(t)TD(t) + R(t))Zu(t)
++1
+4Zw(t)T(γ2I −F(t)TF(t))Zw(t) + 1
+2
+K
+X
+k=1
+Sym[ ¯Ak(t)TP(t)¯ζkeT
+d+1]
+#
+¯x = 0.
+(123)
+Since this must hold for all ¯x = col(x, 1) with x ∈Zd
+≥0, then this is equivalent to saying that
+˙P(t) + P(t) ¯A(t) + ¯A(t)TP(t) + ¯C(t)T ¯C(t) −1
+2Zu(t)T(D(t)TD(t) + R(t))Zu(t)
++1
+4Zw(t)T(γ2I −F(t)TF(t))Zw(t) + 1
+2
+K
+X
+k=1
+Sym[ ¯Ak(t)TP(t)¯ζkeT
+d+1] = 0,
+(124)
+which proves the result.
+♦
+26
+As for the LQ control, the Riccati equation obtained for stochastic reaction networks
+is quite diﬀerent that the deterministic counterpart. The exact closed-loop H∞-norm (or,
+equivalently, the L2-gain) can be computed using a simple bisection algorithm which checks,
+at each iteration, whether a solution to the Riccati diﬀerential equation exists. Indeed, if
+the chosen γ is smaller than the minimum achievable closed-loop H∞-norm, then the Riccati
+equation will have a ﬁnite escape time.
+5.4
+H∞analysis of stochastic unimolecular reaction networks
+It seems interesting to address the H∞analysis problem for completeness. To this aim, we
+consider the unimolecular stochastic reaction network (X, R) with propensity functions
+λi(t, x, w) = ¯wi(t)T¯x + ¯ei(t)Tw, i = 1, . . . , K,
+(125)
+and controlled output
+z(t) = C(t)X(t) + F(t)w(t).
+(126)
+This leads us to the following result:
+Theorem 18 (Bounded Real Lemma) Let γ be a positive scalar. Let us further consider
+a unimolecular reaction network (X, R) with propensity functions (125) and controlled output
+(126). Then, this reaction network has ﬁnite-time L2-gain if and only if there exists a matrix-
+valued function P : [0, T] 7→Sd+1, P(T) = 0, that solves the Riccati diﬀerential equation
+˙P(t) + ¯A(t)TP(t) + P(t) ¯A(t) + ¯C(t)T ¯C(t) + 1
+2
+K
+X
+k=1
+Sym
+ ¯Ak(t)TP(t)¯ζkeT
+d+1
+
++1
+4Ωw(t)T(γ2I −F(t)TF(t))−1Ωw(t) = 0
+(127)
+where γ2I −F(t)TF(t) ≻0, ¯Ak(t) = ¯ζk ¯wk(t)T, ¯Ek = ¯ζk¯ek(t)T, and
+Ωw(t) := 2F(t)T ¯C(t) + 2 ¯E(t)TP(t) +
+K
+X
+k=1
+¯Ek(t)TP(t)¯ζkeT
+d+1,
+(128)
+where the matrices are the same as those in Theorem 17. Moreover, in such a case, the
+worst-case disturbance input is given by
+w∗(t, x(t)) = (γ2I −F(t)TF(t))−1Ωw(t)¯x(t),
+(129)
+and we have that
+||z||2
+L2([0,T]) ≤γ2||w||2
+L2([0,T])
+(130)
+for all w ∈W0,T whenever X(0) = 0 and equality holds with w = w∗.
+27
+Proof :
+The proof is based on that of Theorem 17 where we have set ¯B(·) = ¯Bk(·) = 0,
+D(·) = 0. In such a case, the optimal control input deﬁned in (101) collapses to zero whereas
+the diﬀerential Riccati equation reduces to (127). Finally, assuming no terminal cost (i.e.
+QT = 0), and zero initial conditions yield the result.
+♦
+This result can be considered as the Bounded Real Lemma for unimolecular reaction
+networks. In fact, it can be reformulated, in perhaps a more familiar form, in terms of the
+Linear Matrix Inequalities γ2I −F(t)TF(t) ≻0 and
+
+
+˙P(t) + Sym
+"
+P(t) ¯A(t) + 1
+2
+K
+X
+k=1
+¯Ak(t)TP(t)¯ζkeT
+d+1
+#
++ ¯C(t)T ¯C(t)
+1
+2Ωw(t)T
+1
+2Ωw(t)
+F(t)TF(t) −γ2I
+
+⪯0
+(131)
+which must hold for all t ∈[0, T]. An approximate solution can then be found by using
+polynomial optimization methods such as SOS programming; see e.g. [66,73].
+6
+Optimal Sampled-data H∞Control of Stochastic Re-
+action Networks
+We now generalize the results of the previous sections to derive an H∞control strategy in the
+sampled-data setting. Again, we exploit the hybrid formulation to represent the sampled-
+data controlled reaction network with uncertain norm-bounded inputs. Besides the already
+discussed diﬃculties in discretizing the dynamics of the stochastic reaction network in Section
+5, it is important to also add here that the hybrid formulation allows one to consider the
+input and output function spaces without needing to consider integral operators as required,
+for instance, in the lifting approach; see e.g. [59]. The hybrid formulation allows one to
+deal with the original system directly and to rely on tools from hybrid systems theory. As
+previously, a general result is given together with its specialization to unimolecular networks.
+6.1
+Preliminaries
+As previously, we consider that the network (X, R) has m control inputs and p exogenous
+inputs. This motivates the following assumption
+Assumption 19 The propensity functions of the network (X, R) are of the form λ(t, x, v, wc)
+where v ∈Rm
+≥0 is the state of the zero-order hold and wc ∈Rpc
+≥0 is the vector of continuous
+exogenous disturbances. We also deﬁne the controlled outputs zc(t) = hc(t, x(t), v(t), wc(t))
+and zd(k) = hd(tk, x(tk), v(tk), wd(k)) where wd ∈Rpd
+≥0 is the vector of discrete exogenous
+disturbances and
+hc : R≥0 × Zd
+≥0 × Rm
+≥0 × Rpc
+≥0
+7→
+Rqc,
+hd : R≥0 × Zd
+≥0 × Rm
+≥0 × Rpd
+≥0
+7→
+Rqd
+(132)
+28
+are assumed to be continuous functions.
+We extend here the notion of L2-norm to hybrid signals:
+Deﬁnition 20 The L2 × ℓ2-norm of a hybrid signal w := (wc, wd) where wc : [0, T] 7→Rpc
+≥0
+and wd : {0, . . . , N} 7→Rpd
+≥0 is deﬁned as
+
+
+
+wc
+wd
+
+
+L2([0,T])×ℓ2([0,N])
+:=
+ Z T
+0
+E[||wc(s)||2
+2]ds +
+N
+X
+k=0
+E[||wd(k)||2
+2]
+!1/2
+.
+(133)
+We also need the following extension of the L2-gain:
+Deﬁnition 21 Let us consider the reaction network (X, R) which satisﬁes Assumption 19
+and assume that it deﬁnes an operator L2([0, T], Rpc
+≥0) × ℓ2({0, . . . , N}, Rpd
+≥0) ∋(wc, wd) =:
+z 7→w := (zc, zd) ∈L2([0, T], Rqc
+≥0) × ℓ2({0, . . . , N}, Rpd
+≥0). Then, the ﬁnite-horizon L2 × ℓ2-
+gain of that operator is deﬁned as
+||w 7→z||L2([0,T])×ℓ2([0,N])−L2([0,T])×ℓ2([0,N]) :=
+sup
+||w||L2([0,T ])×ℓ2([0,N])=1
+X(0)=0
+||z||L2([0,T])×ℓ2([0,N])
+(134)
+for all adapted signals w in L2([0, T]) × ℓ2([0, N]).
+Based on the above deﬁnitions, we can state the main problem of the section which is to
+solve the following optimization problem
+min
+u
+
+
+
+wc
+wd
+
+7→
+
+zc
+zd
+
+
+L2([0,T])×ℓ2([0,N])−L2([0,T])×ℓ2([0,N])
+(135)
+where the control input u is adapted and independent of w. In order to solve this problem,
+the following cost is introduced:
+JT(u, wc, wd)
+:=
+E
+Z T
+0
+ ||zc(s)||2
+2 −γ2||wc(s)||2
+2
+
+ds + qT( ¯X(T), v(T))
++
+N−1
+X
+k=0
+ r(tk, u(tk)) + ||zd(k)||2
+2 −γ2||wd(k)||2
+2
+
+#
+(136)
+where r : [0, T] ×Rm
+≥0 7→R≥0 is the running cost and qT : Zd
+≥0 7→R is the terminal cost. The
+control input is chosen in such a way that it minimizes the worst case cost
+J∗
+T = min
+u∈V0,T
+max
+wc∈Wc
+0,T ,wd∈Wd
+0,T
+JT(u, wc, wd)
+(137)
+where we have assumed that the minimum and maximum both exist, and
+Vs,t
+:=
+
+u ∈ℓ2([s, t] ∩{t0, . . . , tN} × Zd
+≥0, Rm
+≥0) : u mesurable
+	
+,
+Wc
+s,t
+:=
+
+wc ∈L2([s, t] × Zd
+≥0 × Rm
+≥0, Rpc
+≥0) : wc mesurable
+	
+,
+Wd
+s,t
+:=
+
+wd ∈ℓ2([s, t] ∩{t0, . . . , tN} × Zd
+≥0 × Rm
+≥0, Rpd
+≥0) : wd mesurable
+	
+,
+(138)
+29
+for all T ≥t ≥s ≥0. To solve this problem, we rely, once again, on Dynamic Programming
+and we introduce the value function
+V (t, x, v)
+=
+min
+u∈Vt,T
+max
+wc∈Wc
+t,T ,wd∈Wd
+t,T
+E
+Z T
+t
+ ||z(s)||2
+2 −γ2||wc(s)||2
+2
+
+ds
++
+N−1
+X
+k|tk>t
+ r(tk, u(tk)) + ||zd(k)||2
+2 −γ2||wd(k)||2
+2
+
+
+X(t) = x, v(t) = v
+
+
+(139)
+which satisﬁes V (T, x, v) = qT (x, v) for all (x, v) ∈Zd
+≥0 × Rm
+≥0. This yields the following
+result:
+Theorem 22 Let us consider the sampled-data reaction network represented by (43), (44),
+(45), which also satisﬁes Assumption 19. Then, the optimal control input and worst-case
+exogenous inputs are given by
+u∗(tk)
+=
+argmin
+u
+{V (t+
+k , x, u) + r(k, u) + zd(k)Tzd(k)},
+w∗
+c(t)
+=
+argmax
+wc
+( K
+X
+i=1
+λi(t, x, v, wc)∆Vi(t, x) + zc(t)Tzc(t) −γ2wc(t)Twc(t)
+)
+,
+w∗
+d(k)
+=
+argmax
+wd
+{zd(k)Tzd(k) −γ2wd(k)Twd(k)},
+(140)
+which hold for all t ∈(tk, tk+1] and k = 0, . . . , N −1, and where the value function V veriﬁes
+the following hybrid Hamilton-Jacobi-Isaacs (HJI) equation
+Vt(t, x, v) + max
+wc
+( K
+X
+i=1
+λi(t, x, v, wc)∆iV (t, x, v) + zT
+c zc −γ2wT
+c wc
+)
+= 0,
+(141)
+and
+min
+u max
+wd
+
+V (t+
+k , x, u) −V (tk, x, v) + r(tk, u) + zT
+d zd −γ2wT
+d wd
+	
+= 0,
+(142)
+which hold for all t ∈(tk, tk+1] and k = 0, . . . , N −1, together with the terminal condition
+V (T, x, v) = 0.
+6.2
+Control of unimolecular reaction networks
+In this case of unimolecular networks, the propensity functions can be expressed as
+λi(t, x, v, wc) = ¯wT
+i ¯x + ¯bT
+i v + ¯eT
+i wc, i = 1, . . . , K
+(143)
+where ¯wi(·) ∈Rd+1, ¯bi(·) ∈Rm, and ¯ei(·) ∈Rpc, i = 1, . . . , K. Similarly, we have that (132)
+becomes
+zc(t)
+=
+Cc(t)X(t) + Dc(t)v(t) + Fc(t)wc(t) + fc(t),
+zd(k)
+=
+Cd(k)X(tk) + Dd,v(k)v(tk) + Dd,u(k)u(tk) + Fd(tk)wd(k) + fd(k),
+(144)
+30
+where the above matrix-valued functions are continuous and of appropriate dimensions.
+Deﬁning now the quadratic cost
+JT(u, wc, wd)
+:=
+E
+Z T
+0
+ ||zc(s)||2
+2 −γ2||wc(s)||2
+2
+
+ds + ˜x(T)TQT ˜x(T)
++
+N−1
+X
+k=0
+ u(tk)TR(k)u(tk) + ||zd(k)||2
+2 −γ2||wd(k)||2
+2
+
+#
+(145)
+allows us to formulate the following result:
+Theorem 23 Assume that Dd,u(·)TFd(·) ≡0 and let γ > 0.
+Let us further consider a
+sampled-data unimolecular reaction network (X, R) of the form (43), (44) and (45) with
+propensity functions (143). Then, the optimal triplet (u∗, w∗
+c, w∗
+d) that solves the optimization
+problem
+J∗
+T = min
+u∈V0,T
+max
+wc∈Wc
+0,T ,wd∈Wd
+0,T
+JT(u, wc, wd)
+(146)
+where JT(u, wc, wd) is deﬁned in (145) is given by
+u∗(tk, x, v) = −(P3(t+
+k ) + R(k) + Dd,u(k)TDd,u(k))−1Ωu(k)
+
+¯x
+v
+
+(147)
+w∗
+c(t, x, v) = (γ2I −Fc(t)TFc(t))−1Ωc(t)¯x
+(148)
+and
+w∗
+d(k, x, v) = (γ2I −Fd(k)TFd(k))−1Fd(k)T(Cd(k)¯x + Dd,v(k)v)
+(149)
+where
+Ωu(k)
+:=
+P2(t+
+k ) −Cd(k)TDd,u(k)
+Dd,v(k)TDd,u(k)
+T
+Ωw(t)
+:=
+2Fc(t)T ¯C(t) + 2 ¯E(t)TP(t) +
+K
+X
+k=1
+¯Ek(t)TP(t)¯ζkeT
+d+1,
+(150)
+where P : [0, T] 7→Sd+m+1, P(T) = QT, solves the Riccati diﬀerential equation
+˙P(t) + ¯A(t)TP(t) + P(t) ¯A(t) + ¯C(t)T ¯C(t) + 1
+2
+K
+X
+k=1
+Sym
+ ¯Ak(t)TP(t)¯ζkeT
+d+1
+
++1
+4Ωw(t)T(γ2I −Fc(t)TFc(t))−1Ωw(t) = 0
+(151)
+where γ2I −Fc(t)TFc(t) ≻0, ¯Ak(t) = ¯ζk ¯wk(t)T, ¯Bk(t) = ¯ζk¯bk(t)T, ¯Ek(t) = ¯ζk¯ek(t)T, and the
+Riccati diﬀerence equation
+
+I
+0
+
+P1(t+
+k )
+
+I
+0
+T
+−P(tk) + ¯Cd(k)T ¯Cd(k) + ¯Cd(k)TFd(k)(γ2I −Fd(k)TFd(k))−1Fd(k)T ¯Cd(k)
+−Ωu(k)T(P3(t+
+k ) + R(k) + Dd,u(k)TDd,u(k))−1Ωu(k) = 0
+(152)
+31
+where ¯Cc(t) :=
+
+Cc(t)
+Dc(t)
+fc(t)
+
+, ¯Cd(k) :=
+
+Cd(k)
+Dd,v(k)
+fd(k)
+
+,
+¯A(t) :=
+
+
+A(t)
+d(t)
+B(t)
+0
+0
+0
+0
+0
+0
+
+, ¯E(t) :=
+
+
+E(t)
+0
+0
+
+, ¯ζk :=
+
+
+ζk
+0
+0
+
+, P(t) =
+ P1(t)
+P2(t)
+P2(t)T
+P3(t)
+
+,
+(153)
+and P1(·) ∈Sd+1, P2(·) ∈R(d+1)×m, and P3(·) ∈Sm. Moreover, in such a case, we have that
+||zc||2
+L2([0,T]) + ||zd||2
+ℓ2([0,N]) = γ2(||w∗
+c||2
+L2([0,T]) + ||w∗
+d||2
+ℓ2([0,N]))
+−V (0, X(0)) −||R1/2u∗||2
+L2([0,T]) −||Q1/2
+T
+¯X(T)||2
+2
+(154)
+which reduces to
+||zc||2
+L2([0,T]) + ||zd||2
+ℓ2([0,N]) < γ2(||wc||2
+L2([0,T]) + ||wd||2
+ℓ2([0,N]))
+(155)
+for all wc ∈Wc
+0,T , wc ∈Wd
+0,T, whenever X(0) = 0 and QT = 0.
+Proof : In the present case, the conditions of Theorem 22 reduce to
+Vt(t, x, v) + max
+w
+( K
+X
+i=1
+λi(t, x, v, w)∆iV (t, x, v) + zc(t)Tzc(t) −γ2wc(t)Twc(t)
+)
+= 0
+(156)
+min
+u max
+w
+
+Vt(t+
+k , x, u) −Vt(tk, x, v) + uTR(k)u + zd(k)Tzd(k) −γ2wd(k)Twd(k)
+	
+= 0 (157)
+and V (T, x) = qT(x). Computing the derivative with respect to wc in (156) yields
+K
+X
+i=1
+¯ei(t)T∆iV (t, x, v) + 2¯xTCc(t)TFc(t) + 2vTDc(t)TFc(t) + 2wT
+c Fc(t)TFc(t) −2γ2wT
+c . (158)
+Equating this to zero and solving for wc yields
+w∗
+c(t) = 1
+2(γ2I −Fc(t)TFc(t))−1
+" K
+X
+k=1
+¯ek(t)∆kV (t, x, v) + 2Fc(t)T ¯Cc(t)˜x(t)
+#
+(159)
+where ˜x = (x, 1, v). This is, indeed, a maximum if and only if F T
+c Fc −γ2 is negative deﬁnite.
+Substituting this expression in (156) yields the Riccati diﬀerential equation (151).
+Analogously, the derivative of (157) with respect to wd is given by
+2¯xTP2(t+
+k )+2uTP3(t+
+k )+2uTR(k)+2¯xTCd(k)TDd,u(k)+2vTDd,v(k)TDd,u(k)+2uTDd,u(k)TDd,u(k)
+(160)
+and equating it to 0 yields
+u∗(tk, ¯x, v)
+=
+−(P3(t+
+k ) + R(k) + Dd,u(k)TDd,u(k))−1(P2(t+
+k )T¯x + DT
+d,uCd(k)¯x + Dd,u(k)TDd,v(k)v)
+=:
+Kx(k)¯x + Kv(k)v := K(k)˜x.
+(161)
+32
+Similar calculations for wd yield
+2¯xTCd(k)TFd(k) + 2vTDd,v(k)TFd(k) + 2wT
+d Fd(k)TFd(k) −2γ2wT
+d
+(162)
+which leads to the optimal value
+w∗
+d(k) = (γ2I −Fd(k)TFd(k))−1Fd(k)T(Cd(k)¯x + Dd,v(k)v) = Wx(k)¯x + Wv(k)v := W(k)˜x.
+(163)
+The Hessian matrix is given by
+P3(t+
+k ) + R(k) + Dd,u(k)TDd,u(k)
+0
+0
+Fd(k)TFd(k) −γ2
+
+(164)
+and shows that we get a maximum in wd if and only if F T
+d Fd −γ2 is negative deﬁnite where
+and a minimum in u if and only if P3(t+
+k ) + R(k) + Dd,u(k)TDd,u(k) is positive deﬁnite. The
+latter condition is the case since R(k) ≻0 while the former is enforced by the condition in
+the result. Let u∗=: Kx¯x + Kvv and w∗
+d =: Wx¯x + Wvv. Substituting those expressions in
+(157) yields
+
+I
+0
+Kx(k)
+Kv(k)
+T
+P(t+
+k )
+
+I
+0
+Kx(k)
+Kv(k)
+
+−P(tk) + K(k)TR(k)K(k)
++Ωd(k)TΩd(k) −γ2W(k)TW(k) = 0
+(165)
+where Ωd(k) := ¯Cd(k) + ¯Dd,u(k)K(k) + Fd(k)W(k). This can be reformulated as
+
+P1(t+
+k )
+0
+0
+0
+
++ Sym
+
+P2(t+
+k )
+0
+
+K
+
++ K(k)T(P3(t+
+k ) + R(k) + DT
+d,uDd,u)K(k)
++ Sym( ¯CT
+d Dd,uK(k)) + W(k)T(Fd(k)TFd(k) −γ2I)W(k)
++ Sym( ¯CT
+d FdW(k)) + ¯CT
+d ¯Cd = 0.
+(166)
+Using now equalities
+W(k)T(Fd(k)TFd(k) −γ2I)W(k)
+=
+−¯Cd(k)TFd(k)(γ2I −Fd(k)TFd(k))−1Fd(k)T ¯Cd(k)
+¯Cd(k)TFdW(k)
+=
+¯Cd(k)TFd(k)(γ2I −Fd(k)TFd(k))−1Fd(k)T ¯Cd(k).
+K(k)T(P3(t+
+k ) + R(k) + DT
+d,uDd,u)K(k)
+=
+Ωd(k)T(P3(t+
+k ) + R(k) + DT
+d,uDd,u)−1Ωd(k)
+
+P2(t+
+k )
+0
+
++ ¯Cd(k)TDd,u(k)
+
+K
+=
+−Ωd(k)T(P3(t+
+k ) + R(k) + DT
+d,uDd,u)−1Ωd(k)
+(167)
+where
+Ωd(k) =
+P2(t+
+k )
+0
+
++ ¯Cd(k)TDd,u(k),
+(168)
+yields the desired result.
+♦
+33
+7
+Concluding statements
+Optimal control results have been obtained for stochastic reaction networks. A diﬃculty of
+the approach is the impossibility of ensuring the nonnegativity of the control input, which
+results in the non-optimality of the control laws when restricted to nonnegative values. Such
+optimal control problems have been considered in the past [74] but using the Pontryagin’s
+Maximum Principle, which is not available in the current context. So, an alternative ap-
+proach needs to be developed. Future extensions of the results would be the consideration
+of cost with inﬁnite horizon through long-run average cost criterion.
+References
+[1] J. Goutsias and G. Jenkinson, “Markovian dynamics on complex reaction networks,”
+Physics reports, vol. 529, pp. 199–264, 2013.
+[2] F. Horn and R. Jackson, “General mass action kinetics,” Archive for rational mechanics
+and analysis, vol. 47(2), pp. 81–116, 1972.
+[3] M. Feinberg, “Complex balancing in general kinetic systems,” Archive for rational me-
+chanics and analysis, vol. 49(3), pp. 187–194, 1972.
+[4] F. Blanchini and G. Giordano, “Piecewise-linear Lyapunov functions for structural sta-
+bility of biochemical networks,” Automatica, vol. 50(10), pp. 2482–2493, 2014.
+[5] M. A. Al-Radhawi and D. Angeli, “New approach to the stability of chemical reaction
+networks: Piecewise linear in rates Lyaunov functions,” IEEE Transactions on Auto-
+matic Control, vol. 61(1), pp. 76–89, 2016.
+[6] M. A. Al-Radhawi, D. Angeli, and E. D. Sontag, “A computational framework for
+a Lyaunov-enabled analysis of biochemical reaction networks,” PLOS Computational
+Biology, vol. 16(2), p. e1007681, 2020.
+[7] C. Briat, A. Gupta, and M. Khammash, “Antithetic integral feedback ensures robust
+perfect adaptation in noisy biomolecular networks,” Cell Systems, vol. 2, pp. 17–28,
+2016.
+[8] C. Cuba Samaniego and E. Franco, “An ultrasensitive biomolecular network for robust
+feedback control,” in 20th IFAC World Congress, 2017, pp. 11 437–11 443.
+[9] F. Xiao and J. C. Doyle, “Robust perfect adaptation in biomolecular reaction networks,”
+BioRxiv, p. 299057, 2018.
+[10] C. Briat, “A biology-inspired approach to the positive integral control of positive systems
+- the antithetic, exponential, and logistic integral controllers,” SIAM Journal on Applied
+Dynamical Systems, vol. 19(1), pp. 619–664, 2020.
+34
+[11] C. Cuba Samaniego, N. A. Delateur, G. Giordano, and E. Franco, “Biomolecular stabil-
+isation near the unstable equilibrium of a biological system,” in 58th IEEE Conference
+on Decision and Control, Nice, France, 2019, pp. 958–964.
+[12] D. K. Agrawal, R. Marshall, M. Ali Al-Radhawi, V. Noireaux, and E. Sontag, “Some
+remarks on robust gene regulation in a biomolecular integral controller,” in 58th IEEE
+Conference on Decision and Control, Nice, France, 2019, pp. 2820–2825.
+[13] D. Del Vecchio and R. M. Murray, Eds., Biomolecular Feedback Systems.
+Princeton
+University Press, 2015.
+[14] D. Del Vecchio, A. J. Dy, and Y. Qian, “Control theory meets synthetic biology,” Journal
+of The Royal Society Interface, vol. 13, no. 120, 2016.
+[15] D. Del Vecchio, H. Abdallah, Y. Qian, and J. J. Collins, “A blueprint for a synthetic
+genetic feedback controller to reprogram cell fate,” International Journal of Control,
+vol. 4, pp. 1–12, 2017.
+[16] M. Khammash, M. di Bernardo, and D. di Bermardo, “Cybergenetics: Theory and
+methods for genetic control systems,” in 58th IEEE Conference on Decision and Control,
+Nice, France, 2019, pp. 916–926.
+[17] N. Olsman, A.-A. Baetica, F. Xiao, Y. P. Leong, and R. M. Murray, “Hard limits and
+performance tradeoﬀs in a class of antithetic integral feedback networks,” Cell Systems,
+vol. 9, pp. 1–15, 2019.
+[18] N. Olsman, F. Xiao, and J. C. Doyle, “Architectural principles for characterizing the
+performance of antithetic integral feedback networks,” iScience, vol. 14, pp. 277–291,
+2019.
+[19] M. B. Elowitz, A. J. Levine, E. D. Siggia, and P. S. Swain, “Stochastic gene expression
+in a single cell,” Science, vol. 297(5584), pp. 1183–1186, 2002.
+[20] D. F. Anderson and T. G. Kurtz, Stochastic Analysis of Biochemical Systems, ser.
+Mathematical Biosciences Institute Lecture Series.
+Springer Verlag, 2015, vol. 1.2.
+[21] A. Gupta, C. Briat, and M. Khammash, “A scalable computational framework for
+establishing long-term behavior of stochastic reaction networks,” PLOS Computational
+Biology, vol. 10(6), p. e1003669, 2014.
+[22] S. Engblom, “On the stability of stochastic jump kinetics,” ArXiv:1202.3892, 2012.
+[Online]. Available: http://arxiv.org/abs/1202.3892
+[23] M. Rathinam, “Moment growth bounds on continuous time Markov processes on non-
+negative integer lattices,” Quaterly of Applied Mathematics, vol. LXXIII, no. 2, pp.
+347–364, 2015.
+35
+[24] C. Briat and M. Khammash, “Computer control of gene expression: Robust setpoint
+tracking of protein mean and variance using integral feedback,” in 51st IEEE Conference
+on Decision and Control, Maui, Hawaii, USA, 2012, pp. 3582–3588.
+[25] ——, “Integral population control of a quadratic dimerization process,” in 52nd IEEE
+Conference on Decision and Control, Florence, Italy, 2013, pp. 3367–3372.
+[26] ——, “In-silico proportional-integral moment control of stochastic gene expression,”
+IEEE Transactions on Automatic Control, vol. 66(7), pp. 3007–3019, 2021.
+[27] ——, “Ergodicity analysis and antithetic integral control of a class of stochastic reaction
+networks with delays,” SIAM Journal on Applied Dynamical Systems, vol. 19(3), pp.
+1575–1608, 2020.
+[28] C. Briat, A. Gupta, and M. Khammash, “Variance reduction for antithetic integral
+control of stochastic reaction networks,” Journal of the Royal Society: Interface, vol.
+15(143), p. 20180079, 2018.
+[29] A. Gupta and M. Khammash, “An antithetic integral rein controller for bio-molecular
+networks,” in 58th IEEE Conference on Decision and Control, Nice, France, 2019, pp.
+2808–2813.
+[30] C. Briat and M. Khammash, “Ergodicity, output-controllability, and antithetic integral
+control of uncertain stochastic reaction networks,” IEEE Transactions on Automatic
+Control, vol. 66(5), pp. 2087–2098, 2020.
+[31] A. Milias-Argeitis, S. Summers, J. Stewart-Ornstein, I. Zuleta, D. Pincus, H. El-Samad,
+M. Khammash, and J. Lygeros, “In silico feedback for in vivo regulation of a gene
+expression circuit,” Nature Biotechnology, vol. 29, pp. 1114–1116, 2011.
+[32] J. Uhlendorf, A. Miermont, T. Delaveau, G. Charvin, F. Fages, S. Bottani, G. Batt,
+S. Bottani, G. Batt, and P. Hersen, “Long-term model predictive control of gene ex-
+pression at the population and single-cell levels,” Proceedings of the National Academy
+of Sciences, vol. 109(35), pp. 14 271–14 276, 2012.
+[33] A. Milias-Argeitis, M. Rullan, S. K. Aoki, P. Buchmann, and M. Khammash, “Auto-
+mated optogenetic feedback control for precise and robust regulation of gene expression
+and cell growth,” Nature Communications, vol. 7(12546), pp. 1–11, 2016.
+[34] G. Fiore, G. Perrino, M. di Bernardo, and D. di Bernardo, “In vivo real-time control of
+gene expression: A comparative analysis of feedback control strategies in yeast,” ACS
+Synthetic Biology, vol. 5(2), pp. 154–162, 2016.
+[35] J.-B. Lugagne, S. Sosa Carrillo, M. Kirch, A. K¨ohler, G. Batt, and P. Hersen, “Balancing
+a genetic toggle switch by real-time feedback control and periodic forcing,” Nature
+Communications, vol. 8, pp. 1–8, 2017.
+36
+[36] B. Shannon, C. G. Zamora-Chimal, L. Postiglione, D. Salzano, C. S. Grierson,
+L. Marucci, N. J. Savery, and M. di Bernardo, “Optimal control of markov jump pro-
+cesses: Asymptotic analysis, algorithms and applications to the modeling of chemical
+reaction systems,” ACS Synthetic Biology, vol. 9(10), pp. 2617–2624, 2018.
+[37] S. Aoki, G. Lillacci, A. Gupta, A. Baumschlager, D. Schweingruber, and M. Khammash,
+“A universal biomolecular integral feedback controller for robust perfect adaptation,”
+Nature, vol. 570, pp. 533–537, 2019.
+[38] S. Boyd and L. Vandenberghe, Convex Optimization. Cambridge, MA, USA: Cambridge
+University Press, 2004.
+[39] D. G. Luenberger, Optimization by Vector Space Methods.
+John Wiley and Sons, 1969.
+[40] I. M. Ross, A Primer on Pontryagin’s Principle in Optimal Control.
+Collegiate Pub-
+lishers, 2009.
+[41] R. Bellman, “The theory of dynamic programming,” Bulleting of the American Mathe-
+matical Society, vol. 60, pp. 503–515, 1954.
+[42] D. Bertsekas, Dynamic Programming and Optimal Control Vol. I - 4th Edition. Athena
+Scientiﬁc, 2017.
+[43] ——, Dynamic Programming and Optimal Control Vol. II - 4th Edition.
+Athena Sci-
+entiﬁc, 2012.
+[44] R. H. Stockbridge, “Time-average control of martingale problems: a linear programming
+formulation,” The Annals of Probability, vol. 18(1), pp. 206–217, 1990.
+[45] T. G. Kurtz and R. H. Stockbridge, “Existence of Markov controls and characterization
+of optimal Markov controls,” SIAM Journal on Control and Optimization, vol. 36, no. 2,
+pp. 609–653, 1998.
+[46] W. Zhang, C. Hartmann, and M. von Kleist, “Optimal control of markov jump processes:
+Asymptotic analysis, algorithms and applications to the modeling of chemical reaction
+systems,” Communications in Mathematical Sciences, vol. 16(2), pp. 293–331, 2018.
+[47] V. Renault, M. Thieullen, and E. Tr´elat, “Optimal control of inﬁnite-dimensional piece-
+wise deterministic markov processes and application to the control of neuronal dynamics
+via optogenetics,” Networks & Heterogeneous Media, vol. 12(3), pp. 417–459, 2017.
+[48] N. Van Kampen, Stochastic Processes in Physics and Chemistry. North Holland, 2007.
+[49] D. P. Bertsekas, Reinforcement Learning and Optimal Control. Athena Scientiﬁc, 2019.
+[50] W. H. Fleming, H., and H. M. Soner, Controlled Markov processes and viscosity solu-
+tions, ser. Stochastic Modelling and Applied Probability.
+Springer, New York, 2006,
+vol. 25.
+37
+[51] H. Abou-Kandil, G. Freiling, V. Ionecu, and G. Jank, Matrix Riccati Equations in
+Control and Systems Theory.
+Springer Basel, 2003.
+[52] A. R. Teel, A. Subbaraman, and A. Sferlazza, “Stability analysis for stochastic hybrid
+systems: A survey,” Automatica, vol. 50(10), pp. 2435–2456, 2014.
+[53] Y. Yamamoto, “New approach to sampled-data control systems - a function space
+method,” in 29th IEEE Conference on Decision and Control, Honolulu, Hawai, 1990,
+pp. 1882–1887.
+[54] ——, “A function space approach to sampled data control systems and tracking prob-
+lems,” IEEE Transactions on Automatic Control, vol. 39(4), pp. 703–713, 1994.
+[55] G. Zames, “Feedback and optimal sensitivity: Model reference transformations, mul-
+tiplicative seminorms, and approximate inverses,” IEEE Transactions on Automatic
+Control, vol. 26(2), pp. 301–320, 1981.
+[56] J. C. Doyle, K. Glover, P. P. Khargonekar, and B. A. Francis, “State space solutions
+to standard H2 and H∞control problems,” IEEE Transactions on Automatic Control,
+vol. 34, pp. 831–847, 1989.
+[57] T. Basar and P. Bernard, H∞Optimal Control and Related Minimax design problems
+- A Dynamic Game Approach. Systems and Control: Foundation and Applications.
+Boston: Birkhauser, 1995.
+[58] R. Isaacs, Diﬀerential Games.
+John Wileys and Sons, Inc., 1965.
+[59] T. Chen and B. Francis, Optimal Sampled-Data Control Systems.
+Berlin: Springer,
+1995.
+[60] D. Anderson and T. G. Kurtz, “Continuous time Markov chain models for chemical
+reaction networks,” in Design and analysis of biomolecular circuits - Engineering Ap-
+proaches to Systems and Synthetic Biology, H. Koeppl, D. Densmore, G. Setti, and M. di
+Bernardo, Eds.
+Springer Science+Business Media, 2011, pp. 3–42.
+[61] A. Singh and J. P. Hespanha, “Approximate moment dynamics for chemically reacting
+systems,” IEEE Transactions on Automatic Control, vol. 56(2), pp. 414–418, 2011.
+[62] L. Farina and S. Rinaldi, Positive Linear Systems: Theory and Applications.
+John
+Wiley & Sons, 2000.
+[63] A. Milias-Argeitis, S. Summers, J. Stewart-Ornstein, I. Zuleta, D. Pincus, H. El-Samad,
+M. Khammash, and J. Lygeros, “In silico feedback for in vivo regulation of a gene
+expression circuit,” Nature Biotechnology, vol. 29, pp. 1114–1116, 2011.
+[64] M. Rullan, D. Benzinger, G. W. Schmidt, A. Gupta, A. Milias-Argeitis, and M. Kham-
+mash, “Optogenetic single-cell control of transcription achieves mrna tunability and
+reduced variability,” BioRxiv, 2017.
+38
+[65] R. Bellman, Dynamic Programming.
+Princeton University Press, Princeton, New Jer-
+sey, USA, 1957.
+[66] P. Parrilo, “Structured semideﬁnite programs and semialgebraic geometry methods in
+robustness and optimization,” Ph.D. dissertation, California Institute of Technology,
+Pasadena, California, 2000.
+[67] E. I. Jury, Sampled-data control systems.
+New-York: John Wiley, 1958.
+[68] B. Bamieh, J. B. Pearson, B. A. Francis, and A. Tannenbaum, “A lifting technique for
+linear periodic systems with applications to sampled-data control,” Systems & Control
+Letters, vol. 17, pp. 79–88, 1991.
+[69] E. Fridman, A. Seuret, and J. P. Richard, “Robust sampled-data stabilization of linear
+systems: An input delay approach,” Automatica, vol. 40, pp. 1441–1446, 2004.
+[70] N. Sivashankar and P. P. Khargonekar, “Characterization of the L2-induced norm for
+linear systems with jumps with applications to sampled-data systems,” SIAM Journal
+on Control and Optimization, vol. 32(4), pp. 1128–1150, 1994.
+[71] R. Goebel, R. G. Sanfelice, and A. R. Teel, Hybrid Dynamical Systems. Modeling,
+Stability, and Robustness.
+Princeton University Press, 2012.
+[72] A. van der Schaft, L2-Gain and Passivity Techniques in Nonlinear Control.
+Springer-
+Verlag, London, 2000.
+[73] A. Papachristodoulou, J. Anderson, G. Valmorbida, S. Prajna, P. Seiler, and P. A.
+Parrilo, SOSTOOLS: Sum of squares optimization toolbox for MATLAB v3.00, 2013.
+[74] W. P. M. H. Heemels, S. J. L. Van Eijndhoven, and A. A. Stoorvogel, “Linear quadratic
+regulator problem with positive controls,” International Journal of Control, vol. 70(4),
+pp. 551–578, 1998.
+39

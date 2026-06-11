@@ -1,0 +1,2315 @@
+arXiv:2505.20106v1  [cs.CV]  26 May 2025
+JOURNAL OF LATEX CLASS FILES, VOL. 18, NO. 9, SEPTEMBER 2020
+1
+From Data to Modeling: Fully Open-vocabulary
+Scene Graph Generation
+Zuyao Chen
+, Jinlin Wu
+, Zhen Lei
+, Fellow, IEEE, and Chang Wen Chen
+, Fellow, IEEE
+Abstract—We present OvSGTR, a novel transformer-based
+framework for fully open-vocabulary scene graph generation
+that overcomes the limitations of traditional closed-set mod-
+els. Conventional methods restrict both object and relationship
+recognition to a fixed vocabulary, hindering their applicability
+to real-world scenarios where novel concepts frequently emerge.
+In contrast, our approach jointly predicts objects (nodes) and
+their inter-relationships (edges) beyond predefined categories.
+OvSGTR leverages a DETR-like architecture featuring a frozen
+image backbone and text encoder to extract high-quality visual
+and semantic features, which are then fused via a transformer
+decoder for end-to-end scene graph prediction. To enrich the
+model’s understanding of complex visual relations, we propose
+a relation-aware pre-training strategy that synthesizes scene
+graph annotations in a weakly supervised manner. Specifically,
+we investigate three pipelines—scene parser-based, LLM-based,
+and multimodal LLM-based—to generate transferable supervi-
+sion signals with minimal manual annotation. Furthermore, we
+address the common issue of catastrophic forgetting in open-
+vocabulary settings by incorporating a visual-concept retention
+mechanism coupled with a knowledge distillation strategy, en-
+suring that the model retains rich semantic cues during fine-
+tuning. Extensive experiments on the VG150 benchmark demon-
+strate that OvSGTR achieves state-of-the-art performance across
+multiple settings, including closed-set, open-vocabulary object
+detection-based, relation-based, and fully open-vocabulary sce-
+narios. Our results highlight the promise of large-scale relation-
+aware pre-training and transformer architectures for advancing
+scene graph generation towards more generalized and reliable
+visual understanding.
+Index Terms—Computer vision, scene graph generation, open
+vocabulary, visual relationship detection
+I. INTRODUCTION
+S
+CENE Graph depicts visual objects and their inter-
+relationships in a scene. This structured representation has
+gained increasing attention and has been utilized in various
+visual tasks, including image captioning [11], [12], [13], [14],
+[15], visual question answering [16], [17], [18], [19], image
+generation [20], [21], and robot navigation [22], [23], [24], etc.
+The study of Scene Graph Generation (SGG) has achieved sig-
+nificant advancements, including standard benchmark datasets
+like Visual Genome [1], classical frameworks like IMP [1],
+Zuyao Chen and Chang Wen Chen are with the Department of Com-
+puting, The Hong Kong Polytechnic University, Hong Kong (e-mail:
+zuyao.chen@connect.polyu.hk; changwen.chen@polyu.edu.hk).
+Jinlin Wu is with CAIR, HKISI-CAS, Hong Kong SAR and MAIS, Institute
+of Automation, Chinese Academy of Sciences, China (e-mail: jinlin.wu@cair-
+cas.org.hk).
+Zhen Lei is with CAIR, HKISI-CAS, Hong Kong SAR, MAIS, Institute of
+Automation, Chinese Academy of Sciences, China, and School of Artificial
+Intelligence, University of Chinese Academy of Sciences, China (e-mail:
+zhen.lei@ia.ac.cn).
+Our code is available at https://github.com/gpt4vision/OvSGTR.
+and Motifs [2]. Despite such achievements, current methods
+primarily work within a limited framework, restricting object
+and relationship categories to a predefined set. This constraint
+restricts the wider applicability of SGG models across various
+real-world applications.
+This drawback of prevalent SGG models originates in
+two aspects. First, the complex and costly annotation of
+scene graphs leads to a shortage of large-scale scene graph
+datasets with a rich vocabulary. To alleviate this issue, some
+weakly-supervised methods [25], [26] utilize a language scene
+parser to obtain ungrounded relationship triplets as pseudo
+labels for learning scene graphs. However, as pointed out in
+GPT4SGG [27], these methods suffer from inaccurate parsing
+results, ambiguous grounding of relationship triplets, and bi-
+ased caption data. Second, prevalent SGG models treat object
+and relationship recognition as a multi-class classification
+problem, typically relying on a fixed classifier, such as a fully
+connected layer, in such cases. Inspired by advancements in
+open-vocabulary object detection [28], [29], [30], [31], [32],
+recent studies [9], [10] have sought to augment the SGG task
+from a closed-set to an open-vocabulary domain. However,
+these efforts primarily adopt an object-centric perspective,
+focusing solely on scene graph nodes. A holistic approach to
+open-vocabulary SGG requires a thorough analysis of both
+nodes and edges. This raises two key questions that drive
+our research: Can the model predict unseen objects or
+relationships ? What happens when the model encounters
+both unseen objects and unseen relationships in a scene?
+To address the drawback, we compare different pipelines
+for relation-aware pre-training, where only weak supervision
+of scene graphs is provided. In this work, we evaluate three
+types of pipelines: (1) a scene parser-based pipeline [33],
+which leverages caption data and a natural language parser to
+extract ungrounded relationship triplets; (2) an LLM (Large
+Language Model)-based pipeline, such as GPT4SGG [27],
+which replaces the scene parser with a more powerful LLM
+to synthesize a dense scene graph; and (3) a multimodal LLM-
+based pipeline, which directly generates a dense scene graph
+with grounded objects. These pipelines enable the learning of
+transferable scene graph knowledge with minimal or no human
+annotations, significantly enhancing SGG model performance,
+particularly in open-vocabulary settings.
+Building on our analysis of the limitations in current SGG
+models and the pipelines for relation-aware pretraining, we
+re-evaluate the conventional SGG settings and propose four
+distinct scenarios (see Fig. 1):
+1) Closed-set SGG: Having been extensively studied in pre-
+vious works [1], [2], [3], [4], [5], [6], [7], [8], this setting
+JOURNAL OF LATEX CLASS FILES, VOL. 18, NO. 9, SEPTEMBER 2020
+2
+SGG
+Model
+User
+Fixed Vocabulary (Object & Relationship)
+man
+pant
+helmet
+in
+on
+(a) Closed-set SGG.
+SGG
+Model
+a man is on a skateboard
+Novel Objects
+man
+pant
+helmet
+skateboard
+wheel
+in
+on
+on
+(b) OvD-SGG.
+man
+pant
+helmet
+shirt
+in
+wearing
+on
+Novel Relationships
+(c) OvR-SGG.
+SGG
+Model
+a man wearing a shirt is riding a skateboard
+Novel Objects / Relationships
+man
+pant
+helmet
+shirt
+skateboard
+wheel
+riding
+on
+wearing
+in
+on
+(d) OvD+R-SGG.
+Fig. 1: Illustration of SGG Scenarios (best view in color). Dashed nodes or edges in (a) - (d) refer to unseen category instances
+(during training), and stars refer to the difficulty of each setting. Previous works [1], [2], [3], [4], [5], [6], [7], [8] mainly focus
+on Closed-set SGG and few studies [9], [10] cover OvD-SGG. In this work, we give a more comprehensive study towards
+fully open vocabulary SGG.
+involves predicting nodes (i.e., objects) and edges (i.e.,
+relationships) from a predefined set. Research in this
+area mainly focuses on feature aggregation and unbiased
+learning to mitigate long-tail distribution issues.
+2) OvD-SGG (Open Vocabulary object Detection-based
+SGG): As explored in [10], this scenario extends Closed-
+set SGG from the object (node) perspective by enabling
+the recognition of unseen object categories during infer-
+ence. However, the set of relationships remains fixed.
+3) OvR-SGG (Open Vocabulary Relation-based SGG): This
+scenario introduces an open-vocabulary setting for rela-
+tionships, requiring the model to predict unseen relation
+categories. This task is inherently more challenging
+due to the absence of pre-trained relation-aware models
+and reliance on less accurate scene graph annotations.
+Specifically, while OvD-SGG omits unseen object cat-
+egories during training—yielding graphs with fewer
+nodes but correct edges—OvR-SGG excludes unseen
+relation categories, resulting in graphs with fewer edges.
+Consequently, the model must distinguish novel relation-
+ships from the “background”.
+4) OvD+R-SGG (Open Vocabulary Detection+Relation-
+based SGG): The most challenging scenario, where both
+unseen objects and unseen relationships are present,
+leads to sparser and less accurate training graphs. This
+setting demands robust detection and relation modeling
+under open-vocabulary conditions.
+These distinct scenarios exhibit unique intrinsic characteristics
+and challenges, motivating further investigation into open-
+vocabulary scene graph generation.
+With these distinct challenges in mind, we introduce OvS-
+GTR (Open-vocabulary Scene Graph Transformers), a novel
+framework designed to tackle the complexities of open-
+vocabulary SGG. Our approach not only predicts unseen
+objects and relationships but also effectively handles the
+scenario in which both nodes and edges correspond to cate-
+gories absent during training. Our framework consists of three
+main components: (1) a frozen image backbone for visual
+feature extraction, (2) a frozen text encoder for textual feature
+extraction, and (3) a transformer decoder for scene graph
+generation. During relation-aware pre-training, we explored
+three pipelines to generate scene graph supervision. In the
+fine-tuning phase, relation triplets with location information
+(i.e., bounding boxes) are sampled from manual annotations.
+These triplets are then associated with visual features, and
+visual-concept similarities are computed for both nodes and
+edges. The resulting similarities are used to predict object and
+relation categories, thereby enhancing the model’s ability to
+generalize to unseen categories.
+Furthermore, in our evaluation of relation-involved open-
+vocabulary SGG settings (i.e., OvR-SGG and OvD+R-SGG),
+we empirically identified a catastrophic forgetting problem
+JOURNAL OF LATEX CLASS FILES, VOL. 18, NO. 9, SEPTEMBER 2020
+3
+concerning relation categories. This forgetting degrades the
+model’s ability to retain information learned from the relation-
+aware pre-training stage when it is subsequently exposed to
+fine-grained SGG annotations. To address this challenge, we
+propose a visual-concept retention mechanism coupled with a
+knowledge distillation strategy. In our approach, a pre-trained
+model serves as a teacher to guide the student model, ensuring
+that the rich semantic space of relations is preserved while
+adapting to new, fine-grained annotations. Simultaneously,
+the visual-concept retention mechanism helps maintain the
+model’s proficiency in recognizing novel relations.
+To our knowledge, OvSGTR is the first framework towards
+fully open-vocabulary SGG. We hope that this work will
+inspire a series of follow-up studies to further advance open-
+vocabulary scene graph generation. In summary, our key
+contributions are as follows:
+• We conduct an in-depth study of open-vocabulary SGG
+from both node and edge perspectives, distinguishing
+four distinct settings—Closed-set SGG, OvD-SGG, OvR-
+SGG, and OvD+R-SGG. Our quantitative and qualitative
+analyses provide a holistic understanding of the unique
+challenges inherent to each scenario.
+• We introduce a novel SGG framework, OvSGTR, where
+both objects (nodes) and relationships (edges) are extend-
+able to unseen categories, greatly broadening the practical
+applicability of SGG models in real-world scenarios.
+• By exploring three relation-aware pre-training pipelines,
+our approach significantly enriches the representation of
+relationships in open-vocabulary settings.
+• Extensive experiments on the VG150 benchmark validate
+the effectiveness of our framework, demonstrating state-
+of-the-art performance across all evaluated scenarios.
+II. RELATED WORK
+Scene Graph Generation (SGG) aims to produce informa-
+tive graphs that localize objects and describe the relationships
+among them. Prior work has largely focused on contextual
+information aggregation [1], [34], [2], [3], [35], [36], [37],
+[38] and unbiased learning to address the long-tail distribution
+[4], [5], [6], [39], [40], [41]. Typically, SGG methods rely on
+closed-set object detectors such as Faster R-CNN [42], which
+are unable to handle unseen objects or relations, thereby limit-
+ing their real-world applicability. Recent studies [9], [10] have
+extended closed-set SGG to object-centric open vocabulary
+SGG; however, these approaches still struggle to generalize
+to unseen relations as well as combinations of unseen objects
+and relations.
+An alternative approach to advancing SGG involves leverag-
+ing weak supervision from image caption data, leading to the
+emergence of language-supervised SGG [25], [26], [10]. This
+strategy offers a cost-effective alternative to expensive manual
+annotation. Nonetheless, prior work using language supervi-
+sion faces notable limitations: (1) it is confined to closed-set
+relation recognition, and (2) issues such as object grounding
+ambiguity and the inherently biased, sparse nature of caption
+data often yield incomplete scene graphs, as highlighted in
+GPT4SGG [27].
+In contrast, our framework is fully open vocabulary. It
+overcomes the closed-set assumptions of previous methods
+[25], [10], enabling the model to learn rich semantic concepts
+that generalize to downstream tasks. Moreover, we provide
+a comprehensive study on relation-aware pretraining, an area
+that has been underexplored in prior SGG research.
+In essence, our work generalizes open vocabulary SGG by
+seamlessly integrating it with closed-set SGG. To our knowl-
+edge, this represents the first unified framework dedicated to
+achieving fully open vocabulary SGG, encompassing both the
+nodes and edges of scene graphs.
+Vision-Language Pretraining (VLP) has recently attracted
+considerable attention in a wide range of vision-language
+tasks. The primary objective of VLP is to establish an align-
+ment between visual and linguistic semantic spaces. For exam-
+ple, CLIP [44] demonstrates impressive zero-shot image clas-
+sification capabilities through contrastive learning on large-
+scale image-text datasets. Building upon this success, several
+subsequent methods [30], [45], [31] have focused on learning
+fine-grained alignments between image regions and language
+data, thereby enabling object detectors to recognize unseen
+objects by leveraging linguistic information. This success on
+downstream tasks exemplifies the potential of aligning visual
+features with relational concepts, which is a fundamental
+step towards developing a fully open-vocabulary scene graph
+generation framework.
+Open-vocabulary Object Detection (OvD) aims to detect
+previously unseen classes during inference, thereby breaking
+the constraint of a fixed, predefined object set (e.g., 80
+categories in COCO [46]). To achieve this, Ov-RCNN [28]
+transfers semantic knowledge acquired from image captions
+to the downstream object detection task. Notably, supervision
+signals for unseen or novel classes are excluded during de-
+tector training, even though these classes are present in the
+large vocabulary of captions. Beyond direct caption learn-
+ing, ViLD [47] distills knowledge from a pre-trained open-
+vocabulary image classification model into a two-stage object
+detector. In addition to OvD, various methods and applications
+have been developed, including open-vocabulary segmentation
+[48], open-vocabulary video understanding [49], and open-
+vocabulary scene graph generation [9], [10], [50]. For a more
+comprehensive analysis of open-vocabulary learning, we refer
+readers to [51] and [52].
+Large Language Models (LLMs) have been emerged as a
+powerful technique that widely affects the research commu-
+nity. Its complex reasoning and zero-shot capabilities provides
+a new paradigm for visual reasoning tasks like SGG. For
+instance, LLM4SGG [53] employed LLMs to extract relational
+triplets from captions through original and paraphrased text.
+GPT4SGG [27] leveraged an LLM to synthesize scene graphs
+from local and global textual descriptions. Beyond LLMs,
+the multimodal LLMs like GPT-4V [54] show strong visual
+reasoning capabilities. These drive us to build a connection be-
+tween the relation-aware pre-training and (multimodal) LLMs,
+in which how to leverage the (multimodal) LLM become the
+critical question for learning a transferable visual knowledge.
+JOURNAL OF LATEX CLASS FILES, VOL. 18, NO. 9, SEPTEMBER 2020
+4
+Scene Parser
+man
+skate-
+board
+on
+Ungrounded Triplets
+Global Caption
+Region Captions
+man.1
+helmet.3
+wearing
+shirt.2
+Grounded Triplets
+wearing
+man.1
+helmet.3
+wearing
+shirt.2
+wearing
+LLM
+Localized Objects
+skateboard.4
+riding
+MLLM
+Scene Parser-
+based
+LLM-based
+MLLM-based
+a man is on a skateboard
+a man is wearing a helmet
+a man is wearing a shirt
+man.1: [0, 140, 815, 883]
+shirt.2: [57, 315, 361, 694]
+helmet.3: [0, 699, 163, 883]
+skateboard.4: [700, 140, 840, 371]
+Fig. 2: Comparison of different pipelines for relation-aware pre-training. (a) Early weakly-supervised methods [25], [26] utilize
+a language scene parser [33] to extract relationship triplets; (b) LLM-based methods replace the scene parser with a more
+powerful LLM to synthesize a more dense scene graph, e.g., GPT4SGG [27]; (c) Multimodal LLM (MLLM)-based pipeline
+directly digests an input image and outputs a dense scene graph, e.g., MegaSG [43].
+III. METHODOLOGY
+Given an image I, the goal of the SGG task is to generate
+a descriptive graph G = (V, E), where each node vi ∈V con-
+tains location (bounding box) and object category information,
+and each edge eij ∈E represents the relationship between
+nodes vi and vj. In open-vocabulary settings, the label set C
+is divided into two disjoint subsets: base classes CB and novel
+classes CN (CB ∪CN = C, CB ∩CN = ∅).
+In this work, we unify node- and edge-level open-
+vocabulary scene graph generation within a single end-to-
+end transformer framework. Compared to our previous confer-
+ence paper [55], we studied three relation-aware pre-training
+pipelines—namely, a scene parser-based, an LLM-based, and a
+multimodal LLM-based pipeline—to enrich visual relationship
+understanding. In addition, we expand our experimental eval-
+uation by including comprehensive experiments on the GQA
+dataset, which demonstrate improved generalization in diverse,
+real-world scenarios.
+A. Relation-aware Pre-training
+The common paradigm in SGG is to use a pre-trained
+object detector (e.g., Faster R-CNN) to provide a good initial
+for detecting objects, while this neglects the relationship
+between objects. To learn a transferable knowledge of visual
+relationships, three pipelines have been explored in this work,
+as shown in Fig. 2:
+(a) Scene Parser-based Pipeline: Learning from the caption
+as in previous methods [25], [26]. These approaches
+leverage a language parser to extract ungrounded triplets
+from captions. However, they face challenges such as
+inaccurate parsing, ambiguity in grounding triplets, and
+biased as well as sparse caption data (see GPT4SGG [27]
+for further discussion).
+(b) LLM-based Pipeline: Learning from the LLM as in
+GPT4SGG [27]. This method adopts a two-stage pipeline:
+first, captioning dense regions, and then synthesizing the
+scene graph using a large language model (e.g., GPT-4).
+The principal advantage of this pipeline is its powerful
+language understanding and reasoning capabilities, intrin-
+sic to LLMs, which enable it to overcome limitations
+(e.g., inaccurate parsing) of conventional scene parser-
+based pipeline.
+(c) Multimodal LLM-based Pipeline: Learning from the mul-
+timodal LLM as in MegaSG [43]. This approach directly
+processes an input image to generate a dense scene graph.
+A potential drawback is the limited spatial information
+(i.e., bounding boxes) provided, as multimodal LLMs
+are less effective at localizing objects compared to dedi-
+cated object detectors. Nonetheless, unlike an LLM-based
+pipeline, this paradigm directly captures visual details,
+thereby enabling a more precise association between
+nodes and edges.
+These pipelines aim to learn knowledge about visual re-
+lationships without or with fewer human annotations, sig-
+nificantly boosting the performance of SGG models under
+different settings.
+JOURNAL OF LATEX CLASS FILES, VOL. 18, NO. 9, SEPTEMBER 2020
+5
+Visual-Concept Alignment
+Visual-Concept Retaining
+Edge features
+[CLS] man. table. helmet.· · ·
+skateboard. shirt. pant. [SEP] on.
+in. of. wears. · · · riding. with.
+[SEP][PAD][PAD]
+TE
+IB
+...
+queries
+Transformer
+multi-scale
+features
+...
+hidden
+features
+man
+pant
+helmet
+shirt
+skateboard
+wheel
+riding
+on
+wears
+in
+on
+helmet
+pant
+man
+wheel
+shirt
+n1 n2 n3 n4 n5
+on
+in
+of
+· · ·
+with
+e14 e43 e25 · · ·
+· · ·
+e45
+TE
+Text Encoder
+IB
+Image Backbone
+[
+]
+Concatenation
+Visual features of nodes
+Visual features of edges
+Word embedding
+
+Frozen modules
+[CLS]/[SEP]/[PAD]
+Unused tokens
+student’s feature space
+teacher’s feature space
+Ldistill
+[
+]
+MLP
+Fig. 3: Overview of our proposed OvSGTR. The proposed OvSGTR is equipped with a frozen image backbone to extract visual
+features, a frozen text encoder to extract text features, and a transformer for decoding scene graphs. Visual features for nodes
+are the output hidden features of the transformer; Visual features for edges are obtained via a light-weight relation head (i.e.,
+with only two-layer MLP). Visual-concept alignment associates visual features of nodes/edges with corresponding text features.
+Visual-concept retention aims to transfer the teacher’s capability of recognizing unseen categories to the student.
+B. Fully Open Vocabulary Architecture
+As shown in Fig. 3, OvSGTR is a DETR-like architecture
+composed of three main components: a visual encoder for
+image feature extraction, a text encoder for processing textual
+data, and a transformer that simultaneously performs object
+detection and relationship recognition. When provided with
+paired image-text data, OvSGTR adeptly generates the corre-
+sponding scene graphs. To reduce the optimization burden, the
+weights of both the image backbone and the text encoder are
+frozen during training.
+Feature Extraction. Given an image–text pair, we extract
+multi-scale visual features using an image backbone (e.g.,
+Swin Transformer [56]) and obtain text features via a text
+encoder (e.g., BERT [57]). The visual and text features are
+then fused and enhanced using cross-attention within the
+deformable encoder module of the transformer.
+Prompt Construction. We construct the text prompt by
+concatenating all possible (or sampled) noun phrases and
+relation categories. For example, a prompt may be formatted as
+[CLS] girl. umbrella. table. bathing. · · ·
+zebra. [SEP] on. in. wears. · · · walking.
+[SEP][PAD][PAD], which is analogous to the strategy
+employed in GLIP [30] and Grounding DINO [45] that
+concatenate all noun phrases. For a large vocabulary during
+training, we randomly sample negative words and constrain
+the total number of positive and negative words to be M
+(e.g., M = 80).
+Node Representation. Given K object queries, the model
+follows the standard DETR framework to output K hidden
+features {vi}K
+i=1. Each feature is processed by:
+• a bounding box head (a three-layer fully connected
+network) to decode location information (i.e., a 4-
+dimensional vector), and
+• a parameter-free classification head that computes the
+similarity between hidden features and text features.
+These hidden features serve as the visual representations for
+the predicted nodes.
+Edge Representation. Instead of using a complex mes-
+sage passing mechanism for relation features, we design a
+lightweight relation head that concatenates the node features
+for the subject and object with relation query features. To
+learn a relation-aware representation, we initialize a random
+embedding for querying relations. This embedding interacts
+with the image and text features via cross-attention in the
+decoder stage. Based on this design, for any subject–object
+pair (si, oj), the edge representation is computed as
+esi→oj = fθ
+
+[vsi, voj, r]
+
+,
+(1)
+where vsi and voj denote the node representations for the
+subject and object, respectively, r represents the relation query
+features, [·] indicates concatenation, and fθ is a two-layer
+multilayer perceptron.
+JOURNAL OF LATEX CLASS FILES, VOL. 18, NO. 9, SEPTEMBER 2020
+6
+Loss
+Function.
+Following
+previous
+DETR-like
+meth-
+ods [58], [45], we employ an L1 loss and a GIoU loss [59]
+for the bounding-box regression. For object or relation classi-
+fication, we use Focal Loss [60] as a contrastive loss between
+predictions and language tokens.
+To decode object and relation categories in a fully open-
+vocabulary manner, the fixed classifier (a fully connected
+layer) is replaced with a visual–concept alignment module
+(detailed in Section III-C).
+C. Learning Visual-Concept Alignment
+A central component of our framework is the alignment
+of visual features with their corresponding textual concepts.
+At the node level, given an image, our model produces K
+predicted nodes {˜vj}K
+j=1, which must be accurately paired
+with the N ground-truth nodes {vi}N
+i=1. To achieve this, we
+employ a bipartite matching strategy akin to that used in
+standard DETR. The matching process is formulated as
+max
+M
+N
+X
+i=1
+K
+X
+j=1
+sim(vi, ˜vj) · Mij,
+(2)
+where sim(·, ·) measures the similarity between a ground-truth
+node and a predicted node, taking into account both spatial
+(e.g., bounding box) and semantic (e.g., category) cues. Here,
+M ∈RN×K is a binary assignment matrix with Mij = 1 if
+node vi is matched with ˜vj, and Mij = 0 otherwise.
+For each matched pair (vi, ˜vj), we enhance their alignment
+by jointly optimizing spatial and semantic consistencies. The
+spatial alignment is enforced by minimizing the L1 and GIoU
+losses between the corresponding bounding boxes. Concur-
+rently, the categorical similarity is defined as
+simcat(vi, ˜vj) = σ
+ ⟨wvi, vj⟩
+
+,
+(3)
+where wvi is the word embedding corresponding to the
+ground-truth node vi, vj is the visual representation of the
+predicted node ˜vj, ⟨·, ·⟩denotes the dot product, and σ(·) is the
+sigmoid function. This formulation serves to align the visual
+features of nodes with their semantic prototypes in the text
+space.
+To extend relation recognition from a closed-set to an open-
+vocabulary setting, we further learn a joint visual-semantic
+space that aligns relation features with textual descriptions.
+Specifically, given a text input t processed by a text encoder
+Et, and a relation feature e, we compute the alignment score
+as
+s(e) = ⟨e, f(Et(t))⟩,
+(4)
+where f(·) is a fully connected layer that projects the text
+embedding into the relation feature space. The alignment is
+supervised via a binary cross-entropy loss defined as
+Lbce =
+1
+|P| + |N|
+X
+e∈P∪N
+h
+−ye log σ
+ s(e)
+
+−
+ 1 −ye
+
+log
+
+1 −σ
+ s(e)
+i
+,
+(5)
+where ye ∈{0, 1} indicates whether e corresponds to a
+positive sample (with positive and negative samples denoted
+by P and N, respectively) and σ(·) is the sigmoid function.
+This loss encourages high alignment scores for true correspon-
+dences, while penalizing false matches.
+Learning visual-concept alignment is inherently challeng-
+ing due to the scarcity of relation-aware pre-trained mod-
+els on large-scale datasets. While object-language alignment
+has advanced considerably with models like CLIP [44] and
+GLIP [30], relation modeling remains largely underexplored.
+Moreover, the manual annotation of scene graphs is both labor-
+intensive and costly, limiting the scalability of SGG datasets.
+To address these challenges, we investigate three paradigms of
+relation-aware pre-training (see Section III-A). By leveraging
+weak supervision, our approach facilitates the learning of rich
+representations for both objects and relationships.
+D. Visual-Concept Retention with Knowledge Distillation
+To enable the model to recognize a diverse set of objects
+and relationships beyond a limited fixed vocabulary, we build
+upon the visual-concept alignment introduced in Section III-C.
+Empirically, we observe that directly optimizing the model
+on a new dataset using Eq. 5 leads to catastrophic forget-
+ting—even when starting from a relation-aware pre-trained
+model. This issue is particularly evident in the OvR-SGG or
+OvD+R-SGG settings, where unseen (or novel) relationships
+are excluded from the scene graph. As a result, the model must
+discriminate novel relations from the background, a task that
+becomes increasingly challenging.
+To alleviate this problem, we incorporate a knowledge
+distillation strategy that preserves the learned semantic space.
+Specifically, we designate the pre-trained model (obtained
+via weak supervision as described in Section III-A) as the
+teacher, while the current model acts as the student. For each
+negative sample, we enforce that the student’s edge features
+approximate those of the teacher. Formally, the distillation loss
+is defined as
+Ldistill =
+1
+|N|
+X
+e∈N
+es −et
+1 ,
+(6)
+where es and et denote the student’s and teacher’s edge
+features, respectively, and N represents the set of negative
+samples. The overall training objective then becomes
+L = Lbce + λLdistill,
+(7)
+with λ balancing the contributions of the ground-truth super-
+vision and the distillation loss.
+This knowledge distillation approach enables the model to
+acquire more precise information for base classes while pre-
+serving its capacity to generalize to unseen categories during
+fine-tuning. Consequently, our pipeline—pre-training on large-
+scale, coarse data followed by fine-tuning on a more fine-
+grained SGG dataset— becomes more effective and adaptable.
+IV. EXPERIMENTS
+A. Datasets and Experiment setup
+Datasets. The VG150 dataset [1] is a widely adopted bench-
+mark that provides human-annotated labels for 150 object
+JOURNAL OF LATEX CLASS FILES, VOL. 18, NO. 9, SEPTEMBER 2020
+7
+categories and 50 relation categories. It comprises a total of
+108, 777 images, with 70% reserved for training, 5, 000 for
+validation, and the remainder for testing. Consistent with the
+evaluation of VS3 [10], we remove images utilized by the pre-
+trained object detector Grounding DINO [45], resulting in a
+test set of 14, 700 images.
+For relation-aware pre-training, we explored three different
+pipelines:
+• Scene Parser-based Pipeline: We employ an off-the-shelf
+language parser [33] to extract relation triplets from
+image captions, yielding ∼104k images with coarse scene
+graphs from the COCO caption training set.
+• LLM-based Pipeline: ∼113k COCO images are annotated
+with scene graphs by GPT-4 [61] in GPT4SGG [27].
+• Multimodal LLM-based Pipeline: 1M images are anno-
+tated using Gemini 1.5 Flash [62] in MegaSG [43]. To
+prevent information leakage and reduce the computational
+burden, we select 644k images from MegaSG for pre-
+training.
+GQA [63] utilizes the same image corpus as Visual
+Genome [64] but features more diverse annotations, compris-
+ing 1, 703 object classes and 310 predicates. Similar to VQ150,
+GQA200 [65], [66] is a reduced version of GQA that contains
+200 object classes and 100 predicate classes.
+Metrics. We primarily adopt the SGDet protocol [1], [4]
+(also known as SGGen) for fair comparisons. SGDet gen-
+erates a scene graph directly from an input image without
+any predefined object boxes. Performance is evaluated using
+Recall@K (K = 20/50/100), which measures the fraction of
+correctly predicted relation triplets among the top-K predic-
+tions. A triplet is considered correct if its subject, object,
+and predicate labels match the ground truth, and both subject
+and object regions have the same label or an IoU ≥0.5. To
+ensure comprehensive evaluation, we also report results for the
+PredCls setting, where ground-truth object labels and locations
+are provided. Since our approach detects objects in a one-stage
+manner, we implement PredCls by selecting image regions
+that best match the ground-truth objects in post-processing
+before performing relation recognition. For the Closed-set
+SGG setting, we additionally report Mean Recall@K (mR@K,
+K = 20/50/100) and inference speed.
+Implementation Details. Our model is initialized with pre-
+trained Grounding DINO [45]. The visual backbone (i.e.,
+Swin-T or Swin-B) and the text encoder (i.e., BERT-base [57])
+remain frozen, while other components, including the relation-
+aware embedding, are randomly initialized. For pairwise re-
+lation recognition, we retain the top 100 detected objects per
+image. The model is trained on an 8×NVIDIA A100 GPU
+cluster using the AdamW [67] optimizer.
+B. Main Results
+1) Relation-aware Pre-training: We systematically evalu-
+ate the zero-shot performance of recent state-of-the-art SGG
+methods under three different large-scale pre-training pipelines
+(see Section III-A). As summarized in Table I, large-scale pre-
+training yields consistent improvements in visual relationship
+recognition across a variety of models. In particular, our
+proposed OvSGTR (Swin-B) achieves substantial performance
+gains: e.g., it improves R@20, R@50, and R@100 in the
+PredCls setting from baseline values of 16.82, 22.79, and 27.04
+to 39.04, 45.86, and 48.54, respectively. These improvements
+demonstrate the effectiveness of incorporating multimodal
+knowledge for relation-aware representation learning.
+The superior results of OvSGTR are largely attributed to two
+key factors. First, the multimodal LLM-based pipeline pro-
+duces high-quality scene graph annotations, leading to richer
+supervision signals for pre-training. Second, the use of large-
+scale data exposes the model to a diverse range of object and
+predicate instances, improving its ability to generalize to previ-
+ously unseen visual relationships. The zero-shot improvements
+suggest that the learned representations capture more fine-
+grained semantic cues, enabling accurate predicate classifica-
+tion even when the specific object-predicate-object
+combinations were not explicitly encountered during training.
+Moreover, the comparison in Table II shows that these
+relation-aware pre-training pipelines consistently improve
+SGG performance on the standard VG150 benchmark. The re-
+sults demonstrate that large-scale, relation-centric pre-training
+strategies can effectively address the inherent data scarcity
+in SGG tasks. Compared with other baselines like
+[2], [4],
+our OvSGTR exhibits clear advantages in capturing visual
+relationships between objects, highlighting the importance of
+leveraging richer linguistic and visual cues during training.
+Overall, these findings underscore the idea that combining
+large-scale multimodal pre-training with specialized SGG
+methods can significantly enhance the recognition of com-
+plex visual relationships. By integrating knowledge from pre-
+trained language models and carefully curated scene graph
+annotations, OvSGTR achieves state-of-the-art performance,
+enhancing the recognition of complex visual relationships.
+2) Closed-set SGG Benchmark: The closed-set SGG setting
+follows previous works [2], [4], [36], [1], [10] and employs the
+VG150 dataset [1] with full manual annotations for training
+and evaluation. Experimental results on the VG150 test set
+(Table III) show that our proposed model outperforms all
+competitors. Notably, compared to the recent VS3 [10], our
+OvSGTR (with Swin-T) achieves performance gains of up
+to 4.9% for R@50 and 6.9% for R@100. Improvements
+in mR@K further indicate that our model better addresses
+long-tail bias. Moreover, the performance improvement (with
+vs. without relation-aware pretraining, e.g., 27.8/36.4/42.4 vs.
+28.6/37.6/43.4) demonstrates that large-scale relation-aware
+pre-training is beneficial for recognizing both visual relation-
+ships and objects.
+While many prior approaches rely on complex message-
+passing mechanisms to extract relation features, our model
+attains strong performance with a simpler relation head con-
+sisting of only two MLP layers. For instance, OvSGTR (with
+Swin-T) achieves results comparable to, or even superior to,
+those of VS3 (with Swin-L), while requiring fewer trainable
+parameters (41M vs. 124M) and exhibiting lower inference
+latency (0.13 s vs. 0.24 s).
+3) OvD-SGG Benchmark: Following previous works [9],
+[10], the OvD-SGG setting ensures that models do not see
+novel object categories during training. Specifically, 70% of
+JOURNAL OF LATEX CLASS FILES, VOL. 18, NO. 9, SEPTEMBER 2020
+8
+TABLE I: Zero-shot performance of state-of-the-art methods on the VG150 test set. For the COCO Caption dataset, a language
+parser [33] has been used for extracting triplets from the caption. To prevent information leakage, we sampled 644k images
+from MegaSG, ensuring that the CLIP similarity of each sampled image with the VG test set remained below 0.9.
+SGG model
+Training Data
+SGDet
+PredCls
+R@20/50/100
+mR@20/50/100
+R@20/50/100
+mR@20/50/100
+LSWS [68]
+-
+3.28
+3.69
+-
+-
+-
+MOTIFS [2]
+5.02
+6.40
+7.33
+-
+-
+-
+Uniter [69]
+COCO [46]
+5.42
+6.74
+7.62
+-
+-
+-
+VS3
+(Swin-T) [10]
+Caption
+4.56
+5.79
+6.79
+2.18
+2.59
+3.00
+12.30
+16.77
+19.40
+3.56
+4.79
+5.51
+VS3
+(Swin-L) [10]
+(104k)
+4.82
+6.20
+7.48
+2.29
+2.70
+3.09
+12.54
+17.28
+19.89
+3.57
+4.83
+5.56
+OvSGTR(Swin-T)
+6.61
+8.92
+10.90
+1.09
+1.53
+1.95
+16.65
+22.44
+26.64
+2.47
+3.58
+4.41
+OvSGTR(Swin-B)
+6.85
+9.33
+11.47
+1.28
+1.79
+2.18
+16.82
+22.79
+27.04
+2.94
+4.24
+5.26
+VS3
+(Swin-T) [10]
+4.92
+6.32
+7.22
+1.90
+2.44
+2.80
+13.90
+17.06
+18.60
+3.87
+4.81
+5.30
+VS3
+(Swin-L) [10]
+COCO
+5.07
+7.40
+9.50
+1.30
+1.93
+2.42
+14.53
+18.72
+20.73
+3.87
+4.91
+5.46
+OvSGTR(Swin-T)
+GPT4SGG [27]
+7.35
+9.66
+11.14
+2.73
+3.67
+4.52
+21.03
+24.43
+25.98
+6.61
+7.82
+8.54
+OvSGTR(Swin-B)
+(113K)
+7.65
+10.10
+11.73
+2.92
+3.84
+4.69
+21.13
+24.78
+26.25
+7.10
+8.49
+9.37
+VS3
+(Swin-T) [10]
+5.56
+8.19
+10.17
+1.15
+1.71
+2.20
+23.81
+29.64
+32.18
+4.70
+5.96
+6.57
+VS3
+(Swin-L) [10]
+MegaSG
+9.74
+14.80
+18.80
+1.57
+2.71
+3.75
+31.88
+38.77
+41.76
+5.32
+6.88
+7.58
+OvSGTR(Swin-T)
+(644k)
+9.94
+13.92
+17.17
+3.05
+4.03
+4.76
+37.12
+44.10
+47.09
+8.49
+10.22
+11.07
+OvSGTR(Swin-B)
+10.36
+14.61
+18.13
+3.01
+4.10
+4.98
+39.04
+45.86
+48.54
+8.45
+10.30
+11.12
+TABLE II: Comparison with state-of-the-art methods on the VG150 test set (under SGDet protocol). The symbol ✧denotes
+fully supervised methods. “VG Caption” is processed using the Scene Parser-based Pipeline, “VG@GPT4SGG” follows the
+LLM-based Pipeline, and “VG@Gemini” employs the Multimodal LLM-based Pipeline.
+SGG model
+Training Data
+Grounding
+R@20/50/100
+mR@20/50/100
+IMP [1] ✧
+17.73
+25.48
+30.71
+2.66
+4.10
+5.29
+MOTIFS [2] ✧
+VG150
+25.40
+32.34
+36.80
+5.80
+7.38
+9.04
+VS3
+(Swin-L) [10] ✧
+(∼56k )
+-
+27.34
+36.04
+40.88
+4.43
+6.45
+7.81
+OvSGTR(Swin-B) ✧
+27.75
+36.44
+42.35
+5.24
+7.41
+8.98
+IMP [1]
+GLIP-L [30]
+6.51
+9.54
+11.86
+0.88
+1.41
+1.89
+LSWS [68]
+-
+-
+3.85
+4.04
+-
+-
+-
+MOTIFS [2]
+VG Caption
+Li et al. [26]
+8.25
+10.50
+11.98
+-
+-
+-
+MOTIFS [2]
+(∼73k)
+GLIP-L [30]
+13.88
+18.46
+21.81
+3.71
+4.85
+5.58
+VS3
+(Swin-L) [10]
+GLIP-L [30]
+11.31
+16.00
+19.85
+2.39
+3.80
+4.87
+OvSGTR(Swin-B)
+GLIP-L [30]
+16.36
+22.14
+26.20
+3.80
+5.24
+6.25
+IMP [1]
+12.78
+16.63
+19.39
+3.86
+4.88
+5.76
+MOTIFS [2]
+VG@GPT4SGG
+16.41
+20.46
+23.23
+5.86
+7.36
+8.51
+VS3
+(Swin-L) [10]
+(∼46k)
+17.77
+22.42
+25.29
+4.24
+5.82
+6.97
+OvSGTR(Swin-B)
+-
+20.12
+25.03
+28.84
+5.68
+7.14
+8.22
+VS3
+(Swin-L) [10]
+VG@Gemini
+17.10
+22.70
+26.10
+3.60
+5.11
+6.26
+OvSGTR(Swin-B)
+(∼50k)
+-
+19.78
+26.08
+30.66
+5.07
+6.72
+7.86
+the VG150 object categories are designated as base categories,
+and the remaining 30% serve as novel categories. The exper-
+iments mirror those in the Closed-set SGG scenario, except
+that annotations for novel object categories are omitted during
+training. After excluding unseen object nodes, the VG150
+training set contains 50,107 images.
+Table IV reports the performance under the OvD-SGG
+setting in terms of “Base+Novel (Object)” and “Novel (Ob-
+ject).” The results show that our proposed model substan-
+tially outperforms previous methods, indicating a strong open-
+vocabulary recognition and generalization capability. Com-
+pared to VS3 [10], our approach yields improvements of up to
+68.9% and 70.4% in R@50 and R@100, respectively, on novel
+categories. Since OvD-SGG only excludes nodes of novel
+object categories, the learning process for relations remains
+unaffected. This highlights that the open-vocabulary ability of
+the object detector plays a more decisive role in OvD-SGG.
+4) OvR-SGG Benchmark.: Different from OvD-SGG which
+removes all unseen nodes, OvR-SGG only removes unseen
+edges but retains the original nodes. Considering that VG150
+has 50 relation categories, we randomly select 15 of them as
+unseen (novel) relation categories. During training, only base
+relation annotations are available. After removing these unseen
+edges, 44,333 images from VG150 remain for training.
+Similar to OvD-SGG, Table V reports the performance
+of OvR-SGG in terms of both “Base+Novel (Relation)” and
+JOURNAL OF LATEX CLASS FILES, VOL. 18, NO. 9, SEPTEMBER 2020
+9
+TABLE III: Experimental results of Closed-set SGG on VG150 test set. “40M/177M” in Params. refers to 40M trainable
+parameters and 177M total parameters. Inference time is benchmarked on an NVIDIA RTX 3090 GPU with batch size 1 and
+an input resolution 1000 × 600. Time for SGNLS [25] is benchmarked on an NVIDIA A100 GPU (80G) due to memory out
+of usage. Throughout the paper, we use ⋆to indicate relation-aware pre-training on MegaSG.
+SGG model
+Backbone
+Detector
+Params.
+R@20/50/100
+mR@20/50/100
+Time (s)
+IMP [1]
+RX-101
+146M/308M
+17.7
+25.5
+30.7
+2.7
+4.1
+5.3
+0.25
+MOTIFS [2]
+RX-101
+Faster
+205M/367M
+25.5
+32.8
+37.2
+5.0
+6.8
+7.9
+0.27
+VCTREE [3]
+RX-101
+R-CNN
+197M/358M
+24.7
+31.5
+36.2
+-
+-
+-
+0.38
+SGNLS [25]
+RX-101
+165M/327M
+24.6
+31.8
+36.3
+-
+-
+-
+> 7
+HL-Net [70]
+RX-101
+220M/382M
+26.0
+33.7
+38.1
+-
+-
+-
+0.10
+FCSGG [71]
+HRNetW48
+-
+87M/87M
+13.6
+18.6
+22.5
+2.3
+3.2
+3.9
+0.13
+SGTR [36]
+R-101
+DETR
+36M/96M
+-
+24.6
+28.4
+-
+-
+-
+0.21
+VS3 [10]
+Swin-T
+-
+93M/233M
+26.1
+34.5
+39.2
+-
+-
+-
+0.16
+VS3 [10]
+Swin-L
+-
+124M/432M
+27.3
+36.0
+40.9
+4.4
+6.5
+7.8
+0.24
+OvSGTR
+Swin-T
+DETR
+41M/178M
+27.0
+35.8
+41.3
+5.0
+7.2
+8.8
+0.13
+OvSGTR
+Swin-B
+41M/238M
+27.8
+36.4
+42.4
+5.2
+7.4
+9.0
+0.19
+OvSGTR⋆
+Swin-T
+41M/178M
+27.3
+36.2
+41.9
+5.3
+7.7
+9.4
+0.13
+OvSGTR⋆
+Swin-B
+41M/238M
+28.6
+37.6
+43.4
+5.8
+8.3
+10.2
+0.19
+TABLE IV: Experimental results (R@20/50/100) of OvD-SGG setting on VG150 test set.
+Method
+Base+Novel (Object)
+Novel (Object)
+PredCls
+SGDet
+PredCls
+SGDet
+IMP [1]
+46.79 / 54.21 / 56.85
+2.09 / 2.85 / 3.45
+42.02 / 51.15 / 54.36
+0.00 / 0.00 / 0.00
+MOTIFS [2]
+45.88 / 53.54 / 56.23
+2.61 / 3.30 / 3.83
+39.58 / 49.63 / 53.00
+0.00 / 0.00 / 0.00
+VCTREE [3]
+48.38 / 55.69 / 58.05
+2.76 / 3.47 / 3.95
+42.96 / 52.28 / 55.75
+0.00 / 0.00 / 0.00
+TDE [4]
+52.49 / 60.18 / 62.47
+2.68 / 3.49 / 4.01
+48.90 / 58.69 / 61.50
+0.00 / 0.00 / 0.00
+VS3 [10] (Swin-T)
+39.83 / 46.73 / 49.11
+9.85 / 14.49 / 17.87
+36.16 / 44.51 / 47.63
+6.02 / 10.24 / 13.44
+OvSGTR (Swin-T)
+54.05 / 60.58 / 62.10
+12.34 / 18.14 / 23.20
+51.47 / 59.01 / 60.65
+6.90 / 12.06 / 16.49
+OvSGTR (Swin-B)
+53.81 / 59.83 / 61.34
+15.43 / 21.35 / 26.22
+51.16 / 58.30 / 60.00
+10.21 / 15.58 / 19.96
+OvSGTR⋆(Swin-T)
+52.24 / 58.60 / 60.35
+14.33 / 20.91 / 25.98
+50.67 / 58.18 / 60.15
+10.52 / 17.30 / 22.90
+OvSGTR⋆(Swin-B)
+54.74 / 60.93 / 62.49
+15.21 / 21.21 / 26.12
+53.21 / 60.78 / 62.60
+10.31 / 15.78 / 20.47
+“Novel (Relation).” From Table V, the proposed OvSGTR no-
+tably outperforms other competitors, even without distillation.
+However, a marked decline in performance is observed across
+all methods (including OvSGTR without distillation) in the
+“Novel (Relation)” categories, highlighting the inherent diffi-
+culty of recognizing novel relations in the OvR-SGG paradigm.
+Nevertheless, with visual-concept retention, the performance
+of OvSGTR (w/ Swin-T) on novel relations is significantly
+improved from 0.10 (R@50, SGDet) to 13.45 (R@50, SGDet).
+Further, with large-scale relation-aware pre-training on
+MegaSG, OvSGTR (w/ Swin-B) achieves a notable perfor-
+mance gain (e.g., 16.59/22.86/27.37 vs. 12.09/16.39/19.72
+in SGDet for novel relations) compared to pre-training on
+COCO Caption. This result showcases that scaling relation-
+aware pre-training is both valuable and effective.
+5) OvD+R-SGG Benchmark.: To further extend the SGG
+task to a fully open-vocabulary domain, we propose the
+OvD+R-SGG benchmark, where both novel object and novel
+relation categories are excluded during training. Specifically,
+we merge the splits from OvD-SGG and OvR-SGG using their
+respective base object and base relation categories, resulting
+in 36,425 training images from VG150.
+Table VI presents the performance of OvD+R-SGG under
+three settings: Joint Base+Novel (i.e., all object and relation
+categories), Novel (Object) (i.e., only novel object categories),
+and Novel (Relation) (i.e., only novel relation categories). As
+with OvR-SGG, we observe catastrophic forgetting in OvD+R-
+SGG, but our proposed visual-concept retention significantly
+mitigates this issue. Compared to existing methods, our model
+achieves notable gains across all metrics. For instance, under
+the Joint Base+Novel setting, the proposed OvSGTR (w/ Swin-
+B) achieves 17.84% (R@50, SGDet), surpassing VS3 (5.87%)
+by 11.97 points. Moreover, for Novel (Object) categories, our
+approach attains 15.66% (R@50, SGDet, compared to 5.98%
+from VS3), and for Novel (Relation) categories, OvSGTR (w/
+Swin-B) reaches 17.15% (R@50, SGDet), outperforming VS3,
+which failed to recognize novel relationships.
+6) Overall Analysis: Experimental results highlight distinct
+challenges across the four settings. Based on these findings:
+1) Many previous methods rely on a two-stage object detector,
+Faster R-CNN [42], and complex message-passing mecha-
+nisms. However, our model demonstrates that a one-stage
+DETR-based framework can significantly outperform R-CNN-
+like architectures, even when using only a single MLP for
+relation feature representation. 2) Previous methods employing
+a closed-set object detector struggle to recognize objects
+without textual cues in object-involved open-vocabulary SGG
+(i.e., OvD-SGG and OvD+R-SGG). 3) The performance drop
+JOURNAL OF LATEX CLASS FILES, VOL. 18, NO. 9, SEPTEMBER 2020
+10
+TABLE V: Experimental results of OvR-SGG setting on VG150 test set. ‡ denotes w.o. relation-aware pre-training. † denotes
+w.o. distillation but w. relation-aware pre-training on COCO Caption (i.e., using the Scene Parser-based Pipeline).
+Method
+Base+Novel (Relation)
+Novel (Relation)
+PredCls
+SGDet
+PredCls
+SGDet
+IMP [1]
+23.41 / 25.74 / 26.59
+9.16 / 12.42 / 14.48
+0.00 / 0.00 / 0.00
+0.00 / 0.00 / 0.00
+MOTIFS [2]
+24.82 / 27.13 / 27.99
+12.41 / 15.29 / 16.81
+0.00 / 0.00 / 0.00
+0.00 / 0.00 / 0.00
+VCTREE [3]
+26.91 / 29.34 / 30.16
+12.38 / 15.11 / 16.81
+0.00 / 0.00 / 0.00
+0.00 / 0.00 / 0.00
+TDE [4]
+26.69 / 28.98 / 29.76
+12.43 / 15.37 / 17.21
+0.00 / 0.00 / 0.00
+0.00 / 0.00 / 0.00
+VS3 [10] (Swin-T)
+22.27 / 24.32 / 24.99
+12.45 / 15.63 / 17.29
+0.00 / 0.00 / 0.00
+0.00 / 0.00 / 0.00
+OvSGTR (Swin-T)‡
+26.57 / 28.46 / 29.09
+14.60 / 18.09 / 20.41
+0.00 / 0.00 / 0.00
+0.00 / 0.00 / 0.00
+OvSGTR (Swin-T)†
+25.57 / 27.63 / 28.28
+14.32 / 17.69 / 19.96
+0.17 / 0.25 / 0.27
+0.05 / 0.10 / 0.15
+OvSGTR (Swin-T)
+31.83 / 37.58 / 40.68
+15.85 / 20.46 / 23.86
+21.01 / 27.42 / 31.30
+10.17 / 13.45 / 16.19
+OvSGTR⋆(Swin-T)
+40.60 / 46.82 / 49.03
+19.38 / 25.40 / 29.71
+28.91 / 36.78 / 39.96
+12.23 / 17.02 / 21.15
+OvSGTR (Swin-B)‡
+26.83 / 28.83 / 29.42
+15.39 / 19.07 / 21.37
+0.00 / 0.00 / 0.00
+0.00 / 0.00 / 0.00
+OvSGTR (Swin-B)†
+26.21 / 28.30 / 28.96
+15.00 / 18.58 / 20.84
+0.10 / 0.13 / 0.14
+0.06 / 0.08 / 0.10
+OvSGTR (Swin-B)
+34.37 / 41.04 / 44.67
+17.63 / 22.89 / 26.65
+24.95 / 32.85 / 37.87
+12.09 / 16.39 / 19.72
+OvSGTR⋆(Swin-B)
+44.53 / 51.31 / 53.71
+21.09 / 27.92 / 32.74
+38.27 / 47.42 / 50.90
+16.59 / 22.86 / 27.73
+TABLE VI: Experimental results of OvD+R-SGG setting on VG150 test set. † denotes w.o. distillation but w. relation-aware
+pre-training on COCO Caption (i.e., using the Scene Parser-based Pipeline).
+Method
+Joint Base+Novel
+Novel (Object)
+Novel (Relation)
+R@20
+R@50
+R@100
+R@20
+R@50
+R@100
+R@20
+R@50
+R@100
+IMP [1]
+0.57
+0.81
+0.99
+0.00
+0.00
+0.00
+0.00
+0.00
+0.00
+MOTIFS [2]
+0.77
+0.95
+1.10
+0.00
+0.00
+0.00
+0.00
+0.00
+0.00
+VCTREE [3]
+0.84
+1.06
+1.17
+0.00
+0.00
+0.00
+0.00
+0.00
+0.00
+TDE [4]
+0.81
+0.99
+1.13
+0.00
+0.00
+0.00
+0.00
+0.00
+0.00
+VS3 [10] (Swin-T)
+4.03
+5.87
+7.19
+3.73
+5.98
+7.47
+0.00
+0.00
+0.00
+OvSGTR (Swin-T)†
+5.20
+7.88
+10.06
+4.18
+6.82
+9.23
+0.00
+0.00
+0.00
+OvSGTR (Swin-T)
+10.02
+13.50
+16.37
+10.56
+14.32
+17.48
+7.09
+9.19
+11.18
+OvSGTR⋆(Swin-T)
+10.67
+15.15
+18.82
+8.22
+12.49
+16.29
+9.62
+13.68
+17.19
+OvSGTR (Swin-B)†
+7.85
+11.23
+14.21
+9.26
+13.27
+16.83
+1.20
+1.78
+2.57
+OvSGTR (Swin-B)
+12.37
+17.14
+21.03
+12.63
+17.58
+21.70
+10.56
+14.62
+18.22
+OvSGTR⋆(Swin-B)
+12.54
+17.84
+21.95
+10.29
+15.66
+19.84
+12.21
+17.15
+21.05
+in OvD+R-SGG compared to other settings suggests it is
+significantly more challenging, underscoring the need for
+further exploration toward fully open-vocabulary SGG. 4)
+Large-scale relation-aware pre-training substantially enhances
+the generalization ability of SGG models across both closed-
+set and open-vocabulary scenarios. This indicates that the
+synthesized SGG dataset plays a crucial role in bridging the
+gap between these settings.
+C. Ablation Study
+Effect of Relation Queries. We first consider removing the
+relation query embedding. In this case, the relation feature is
+computed by
+esi→oj = fθ
+ [vsi, voj]
+
+,
+(8)
+which only encodes features from the subject and object nodes.
+We further extend Eq. (1) to a more general form:
+esi→oj = 1
+M
+M
+X
+n=1
+fθ
+ [vsi, voj, rn]
+
+,
+(9)
+0
+1
+3
+5
+10
+20
+30
+40
+25.44
+25.73
+24.84
+25.13
+33.45
+33.92
+33.24
+33.49
+39.12
+39.48
+38.94
+39.23
+R@20
+R@50
+R@100
+Fig. 4: Ablation study of relation queries on VG150 validation
+set under the setting of Closed-set SGG.
+where multiple relation queries are averaged. As shown in
+Fig. 4, the model achieves the highest performance when the
+number of relation queries is set to 1. This result can be inter-
+preted from two perspectives: (i) relation queries interact with
+all edges during training, thereby capturing global information
+from the entire dataset; (ii) increasing the number of relation-
+aware queries does not introduce additional supervision but
+JOURNAL OF LATEX CLASS FILES, VOL. 18, NO. 9, SEPTEMBER 2020
+11
+bus-0
+window-3
+street-8
+windshield-7
+tire-5
+wheel-1
+window-2
+window-4
+window-6
+window-9
+has
+has
+has
+has
+on
+on
+has
+has
+has
+on
+under
+has
+man-2
+pant-1
+logo-8
+shirt-3
+helmet-0
+shoe-9
+head-6
+shoe-10
+glove-5
+sock-7
+glove-4
+on
+wearing
+on
+wearing
+has
+on
+on
+wearing
+wearing
+wearing
+bus.0/
+vehicle.7
+sidewalk.5
+windshield.6
+tire.3/
+wheel.4
+tire.1/wheel.2
+on
+on
+on
+above
+animal.1/
+player.3
+bat.2
+helmet-0
+glove.6
+glove.5
+sock.4
+holding
+wearing
+wearing
+wearing
+wearing
+bus.0
+window.8
+street.1
+building.4
+wheel.9
+tire.2/wheel.3
+window.6
+window.7
+car.5
+on
+behind
+has
+has
+of
+of
+behind
+has
+of
+has
+has
+behind
+on
+man.0
+pant.3/short.6
+helmet.2
+shirt.1
+leg.9
+glove.7
+sock.5 glove.4/hand.8
+wearing
+has
+wearing
+has
+wearing
+has
+on
+wearing
+on
+bus-0
+tire-1
+tire-3
+street-2
+vehicle-4
+has
+has
+on
+behind
+man-0
+glove-2
+leg-8
+helmet-3
+hat-6
+leg-7
+glove-5
+shirt-4
+bat-1
+wearing
+wearing
+has
+has
+has
+has
+holding
+wearing
+(a) Trained on Closed-set SGG.
+(b) Trained on OvD-SGG.
+(c) Trained on OvR-SGG.
+(d) Trained on OvD+R-SGG.
+Fig. 5: Qualitative results of our model (w. Swin-T) on VG150 test set (best view in color). For clarity, we only show triplets
+with high confidence in top-20 predictions. Dashed nodes or arrows refer to novel object categories or novel relationships. It
+is worth noticing that the “bat” class does not exist in the VG150 dataset.
+TABLE VII: Impact of hyper-parameter λ for distillation loss
+on VG150 validation set under the setting of OvR-SGG. a →b
+refers to the performance shift from a (initial checkpoint’s
+performance) to b during training.
+λ
+Base+Novel
+Novel
+R@50
+R@100
+R@50
+R@100
+0
+7.25 →13.74
+8.98 →16.11
+10.78 →0.32
+13.24 →0.38
+0.1
+7.25 →16.00
+8.98 →19.20
+10.78 →11.54
+13.24 →13.94
+0.3
+7.25 →14.35
+8.98 →17.04
+10.78 →10.71
+13.24 →12.71
+0.5
+7.25 →13.34
+8.98 →16.08
+10.78 →10.90
+13.24 →13.22
+increases the optimization burden.
+Hyper-parameter λ for Distillation. Table VII shows the
+impact of varying the hyper-parameter λ. When λ = 0.1, the
+model achieves the best performance. By contrast, removing
+distillation leads to a substantial drop in performance for
+novel categories, indicating that the model struggles to retain
+the knowledge inherited from pre-trained models for these
+categories.
+TABLE VIII: Experimental results on the GQA200 test set.
+OvSGTR is pre-trained on MegaSG. “OvSGTR-T” refers to
+our model with the Swin-T backbone, while “OvSGTR-B”
+denotes the variant with the Swin-B backbone.
+Method
+PredCls
+SGDet
+R@50
+R@100
+R@50
+R@100
+IMP [1]
+57.5
+59.6
+22.3
+26.7
+MOTIFS [2]
+60.2
+62.1
+24.8
+28.8
+VCTREE [3]
+62.2
+63.9
+27.1
+30.8
+TDE [4]
+64.2
+66.0
+27.2
+31.5
+OvSGTR-T (w/o fine-tuning)
+38.0
+40.5
+11.6
+13.9
+OvSGTR-T (w/ fine-tuning)
+60.7
+62.7
+32.8
+37.9
+OvSGTR-B(w/o fine-tuning)
+38.2
+40.9
+11.4
+13.9
+OvSGTR-B (w/ fine-tuning)
+61.5
+63.4
+33.9
+39.2
+D. Extension: Comparison on GQA Benchmark
+Beyond the widely used VG150 benchmark, we also val-
+idate our framework on the GQA dataset. Following prior
+works [65], [66], [72], we use the GQA200 split that contains
+JOURNAL OF LATEX CLASS FILES, VOL. 18, NO. 9, SEPTEMBER 2020
+12
+Class
+person
+dog
+car
+chair
+tree
+phone
+pizza
+bottle
+Class
+person
+dog
+car
+chair
+tree
+phone
+pizza
+bottle
+(a) Object features (w/o relation-aware pre-training).
+Class
+person
+dog
+car
+chair
+tree
+phone
+pizza
+bottle
+Class
+person
+dog
+car
+chair
+tree
+phone
+pizza
+bottle
+(b) Object features (w/ relation-aware pre-training).
+Predicate
+on
+of
+near
+holding
+riding
+Predicate
+on
+of
+near
+holding
+riding
+(c) Relation features (w/o relation-aware pre-training).
+Predicate
+on
+of
+near
+holding
+riding
+Predicate
+on
+of
+near
+holding
+riding
+(d) Relation features (w/ relation-aware pre-training).
+Fig. 6: t-SNE [73] visualizations of object and relation features. (a)–(b) show object features extracted by OvSGTR-B without
+and with relation-aware pre-training, respectively. (c)–(d) show relation features under the same settings. Arrows indicate the
+evolution of features after fine-tuning on VG150.
+200 objects and 100 predicates. As shown in Table VIII,
+our proposed OvSGTR demonstrates a strong generalization
+capability on GQA200. Without fine-tuning, both Swin-T and
+Swin-B variants of OvSGTR achieve remarkable performance
+in the PredCls setting. However, their SGDet scores remain
+low due to domain shift and lack of localization supervision.
+After fine-tuning the GQA200 training set, both variants
+show significant improvements, particularly under the SGDet
+protocol. Notably, OvSGTR-B achieves 33.9% (R@50) and
+39.2% (R@100) in SGDet, surpassing all previous competi-
+tors. These results highlight the effectiveness of our relation-
+aware pre-training and visual-concept alignment mechanisms,
+which enable the model to adapt to novel domains with
+minimal supervision.
+Overall, the GQA results further validate the scalability and
+effectiveness of OvSGTR under different dataset distributions,
+reinforcing its applicability in real-world, diverse visual envi-
+ronments.
+E. Visualization and Discussion
+1) Relation-aware pre-training: To enrich the understand-
+ing of relation-aware pre-training, we visualize the object
+and relation features using t-SNE [73] in Fig. 6. Object and
+relation features become more discriminative and semantically
+clustered after pre-training on MegaSG. For instance, object
+features like “dog”, “pizza”, and “phone” form tighter, more
+coherent clusters. Similarly, relation features such as “on,”
+“riding”, and “holding” become more separable, resulting in
+better classification of relationships.
+This relation-aware pre-training significantly boosts general-
+ization, especially in open-vocabulary scenarios, where models
+must reason over novel object and relation categories. By
+learning transferable representations from weak supervision,
+our framework achieves superior zero-shot performance and
+mitigates reliance on fully annotated datasets.
+2) Qualitative Results: We present qualitative results of our
+model trained under four settings, as shown in Fig. 5. From the
+figure, the model trained on the Closed-set SGG setting tends
+to generate denser scene graphs, as all object and relation-
+ship categories are available during training. In contrast, the
+model trained under the OvD-SGG setting demonstrates the
+ability to detect novel objects (e.g., “bat”, “bus”), although
+the relationships are limited to the seen predicate set. Under
+the OvR-SGG setting, all object nodes are retained, but the
+model must infer novel relationships. This results in sparser
+graphs; however, the model still predicts some unseen relations
+(e.g., “on”, “of”) with reasonable accuracy. Notably, the model
+trained on OvD+R-SGG, despite lacking full supervision of
+both novel objects and relationships, is still able to recognize
+unseen object categories such as “bus” and “bat” (which does
+not exist in the VG150 dataset), along with novel relationships
+like “on”. This highlights the strong generalization ability of
+our approach under fully open-vocabulary settings.
+V. CONCLUSION
+This work advances scene graph generation (SGG) from
+a closed-set paradigm to a fully open-vocabulary setting by
+considering both object nodes and relationship edges. We
+categorize SGG scenarios into four distinct settings—Closed-
+SGG, OvD-SGG, OvR-SGG, and OvD+R-SGG—and introduce
+OvSGTR, a unified transformer-based framework that ad-
+dresses these challenges. Our framework aligns visual features
+with semantic information from both base and novel cate-
+gories, enabling it to capture complex inter-object relationships
+JOURNAL OF LATEX CLASS FILES, VOL. 18, NO. 9, SEPTEMBER 2020
+13
+and generalize to unseen objects and relations. To obtain
+a transferable representation for relations, we studied three
+relation-aware pre-training pipelines and adopted a knowledge
+distillation strategy to prevent catastrophic forgetting during
+fine-tuning. Extensive experiments on the VG150 benchmark
+demonstrate that our method achieves new state-of-the-art
+performance across all settings. These results highlight the
+benefits of integrating large-scale relation-aware pre-training
+with effective relation-aware strategies, contributing to im-
+proved scene graph generation.
+REFERENCES
+[1] D. Xu, Y. Zhu, C. B. Choy, and L. Fei-Fei, “Scene graph generation by
+iterative message passing,” in IEEE Conf. Comput. Vis. Pattern Recog.,
+2017, pp. 3097–3106.
+[2] R. Zellers, M. Yatskar, S. Thomson, and Y. Choi, “Neural motifs: Scene
+graph parsing with global context,” in IEEE Conf. Comput. Vis. Pattern
+Recog., 2018, pp. 5831–5840.
+[3] K. Tang, H. Zhang, B. Wu, W. Luo, and W. Liu, “Learning to compose
+dynamic tree structures for visual contexts,” in IEEE Conf. Comput. Vis.
+Pattern Recog., 2019, pp. 6619–6628.
+[4] K. Tang, Y. Niu, J. Huang, J. Shi, and H. Zhang, “Unbiased scene graph
+generation from biased training,” in IEEE Conf. Comput. Vis. Pattern
+Recog., 2020, pp. 3713–3722.
+[5] M. Chiou, H. Ding, H. Yan, C. Wang, R. Zimmermann, and J. Feng,
+“Recovering the unbiased scene graphs from the biased ones,” in ACM
+Int. Conf. Multimedia, 2021, pp. 1581–1590.
+[6] R. Li, S. Zhang, B. Wan, and X. He, “Bipartite graph network with
+adaptive message passing for unbiased scene graph generation,” in IEEE
+Conf. Comput. Vis. Pattern Recog., 2021, pp. 11 109–11 119.
+[7] T. Chen, W. Yu, R. Chen, and L. Lin, “Knowledge-embedded routing
+network for scene graph generation,” in IEEE Conf. Comput. Vis. Pattern
+Recog., 2019, pp. 6163–6171.
+[8] J. Zhang, K. J. Shih, A. Elgammal, A. Tao, and B. Catanzaro, “Graphical
+contrastive losses for scene graph parsing,” in IEEE Conf. Comput. Vis.
+Pattern Recog., 2019, pp. 11 535–11 543.
+[9] T. He, L. Gao, J. Song, and Y. Li, “Towards open-vocabulary scene
+graph generation with prompt-based finetuning,” in Eur. Conf. Comput.
+Vis., 2022, pp. 56–73.
+[10] Y. Zhang, Y. Pan, T. Yao, R. Huang, T. Mei, and C. W. Chen, “Learning
+to generate language-supervised and open-vocabulary scene graph using
+pre-trained visual-semantic space,” in IEEE Conf. Comput. Vis. Pattern
+Recog., 2023, pp. 2915–2924.
+[11] X. Yang, K. Tang, H. Zhang, and J. Cai, “Auto-encoding scene graphs
+for image captioning,” in IEEE Conf. Comput. Vis. Pattern Recog., 2019,
+pp. 10 685–10 694.
+[12] S. Chen, Q. Jin, P. Wang, and Q. Wu, “Say as you wish: Fine-grained
+control of image caption generation with abstract scene graphs,” in IEEE
+Conf. Comput. Vis. Pattern Recog., 2020, pp. 9959–9968.
+[13] J. Gu, S. R. Joty, J. Cai, H. Zhao, X. Yang, and G. Wang, “Unpaired
+image captioning via scene graph alignments,” in Int. Conf. Comput.
+Vis., 2019, pp. 10 322–10 331.
+[14] D. Wang, D. Beck, and T. Cohn, “On the role of scene graphs in image
+captioning,” in LANTERN@EMNLP-IJCNLP, 2019, pp. 29–34.
+[15] K. Nguyen, S. Tripathi, B. Du, T. Guha, and T. Q. Nguyen, “In defense
+of scene graphs for image captioning,” in Int. Conf. Comput. Vis., 2021,
+pp. 1387–1396.
+[16] D. Teney, L. Liu, and A. van den Hengel, “Graph-structured representa-
+tions for visual question answering,” in IEEE Conf. Comput. Vis. Pattern
+Recog., 2017, pp. 3233–3241.
+[17] S. V. Nuthalapati, R. Chandradevan, E. Giunchiglia, B. Li, M. Kayser,
+T. Lukasiewicz, and C. Yang, “Lightweight visual question answering
+using scene graphs,” in CIKM, 2021, pp. 3353–3357.
+[18] F. K. Kenfack, F. A. Siddiky, F. Balint-Benczedi, and M. Beetz,
+“Robotvqa - A scene-graph- and deep-learning-based visual question
+answering system for robot manipulation,” in IROS, 2020, pp. 9667–
+9674.
+[19] S. Lee, J. Kim, Y. Oh, and J. H. Jeon, “Visual question answering over
+scene graph,” in Proc. Int. Conf. Graph Comput., 2019, pp. 45–50.
+[20] J. Johnson, A. Gupta, and L. Fei-Fei, “Image generation from scene
+graphs,” in IEEE Conf. Comput. Vis. Pattern Recog., 2018, pp. 1219–
+1228.
+[21] L. Yang, Z. Huang, Y. Song, S. Hong, G. Li, W. Zhang, B. Cui,
+B. Ghanem, and M. Yang, “Diffusion-based scene graph to image gener-
+ation with masked contrastive pre-training,” CoRR, vol. abs/2211.11138,
+2022.
+[22] A. Werby, C. Huang, M. B¨uchner, A. Valada, and W. Burgard, “Hier-
+archical open-vocabulary 3d scene graphs for language-grounded robot
+navigation,” CoRR, vol. abs/2403.17846, 2024.
+[23] H. Yin, X. Xu, Z. Wu, J. Zhou, and J. Lu, “Sg-nav: Online 3d scene
+graph prompting for llm-based zero-shot object navigation,” CoRR, vol.
+abs/2410.08189, 2024.
+[24] Y. Miao, F. Engelmann, O. Vysotska, F. Tombari, M. Pollefeys, and
+D. B. Bar´ath, “Scenegraphloc: Cross-modal coarse visual localization
+on 3d scene graphs,” in Eur. Conf. Comput. Vis., A. Leonardis, E. Ricci,
+S. Roth, O. Russakovsky, T. Sattler, and G. Varol, Eds., vol. 15066,
+2024, pp. 127–150.
+[25] Y. Zhong, J. Shi, J. Yang, C. Xu, and Y. Li, “Learning to generate scene
+graph from natural language supervision,” in Int. Conf. Comput. Vis.,
+2021, pp. 1823–1834.
+[26] X. Li, L. Chen, W. Ma, Y. Yang, and J. Xiao, “Integrating object-aware
+and interaction-aware knowledge for weakly supervised scene graph
+generation,” in ACM Int. Conf. Multimedia, 2022, pp. 4204–4213.
+[27] Z. Chen, J. Wu, Z. Lei, Z. Zhang, and C. Chen, “GPT4SGG: Synthe-
+sizing scene graphs from holistic and region-specific narratives,” arXiv
+preprint arXiv:2312.04314, 2023.
+[28] A. Zareian, K. D. Rosa, D. H. Hu, and S. Chang, “Open-vocabulary
+object detection using captions,” in IEEE Conf. Comput. Vis. Pattern
+Recog., 2021, pp. 14 393–14 402.
+[29] S. Wu, W. Zhang, S. Jin, W. Liu, and C. C. Loy, “Aligning bag of
+regions for open-vocabulary object detection,” in IEEE Conf. Comput.
+Vis. Pattern Recog., 2023, pp. 15 254–15 264.
+[30] L. H. Li, P. Zhang, H. Zhang, J. Yang, C. Li, Y. Zhong, L. Wang,
+L. Yuan, L. Zhang, J. Hwang, K. Chang, and J. Gao, “Grounded
+language-image pre-training,” in IEEE Conf. Comput. Vis. Pattern
+Recog., 2022, pp. 10 955–10 965.
+[31] Y. Zhong, J. Yang, P. Zhang, C. Li, N. Codella, L. H. Li, L. Zhou,
+X. Dai, L. Yuan, Y. Li, and J. Gao, “Regionclip: Region-based language-
+image pretraining,” in IEEE Conf. Comput. Vis. Pattern Recog., 2022,
+pp. 16 772–16 782.
+[32] Y. Du, F. Wei, Z. Zhang, M. Shi, Y. Gao, and G. Li, “Learning to prompt
+for open-vocabulary object detection with vision-language model,” in
+IEEE Conf. Comput. Vis. Pattern Recog., 2022, pp. 14 064–14 073.
+[33] J.
+Mao,
+“Scene
+graph
+parser,”
+https://github.com/vacancy/
+SceneGraphParser, 2022.
+[34] Y. Li, W. Ouyang, B. Zhou, K. Wang, and X. Wang, “Scene graph
+generation from objects, phrases and region captions,” in Int. Conf.
+Comput. Vis., 2017, pp. 1270–1279.
+[35] T. Chen, W. Yu, R. Chen, and L. Lin, “Knowledge-embedded routing
+network for scene graph generation,” in IEEE Conf. Comput. Vis. Pattern
+Recog., 2019, pp. 6163–6171.
+[36] R. Li, S. Zhang, and X. He, “Sgtr: End-to-end scene graph generation
+with transformer,” in IEEE Conf. Comput. Vis. Pattern Recog., 2022, pp.
+19 464–19 474.
+[37] S. Khandelwal and L. Sigal, “Iterative scene graph generation,” in Adv.
+Neural Inform. Process. Syst., S. Koyejo, S. Mohamed, A. Agarwal,
+D. Belgrave, K. Cho, and A. Oh, Eds., 2022.
+[38] Y. Cong, M. Y. Yang, and B. Rosenhahn, “Reltr: Relation transformer
+for scene graph generation,” IEEE Trans. Pattern Anal. Mach. Intell.,
+vol. 45, no. 9, pp. 11 169–11 183, 2023.
+[39] S. Sun, S. Zhi, Q. Liao, J. Heikkil¨a, and L. Liu, “Unbiased scene graph
+generation via two-stage causal modeling,” IEEE Trans. Pattern Anal.
+Mach. Intell., vol. 45, no. 10, pp. 12 562–12 580, 2023.
+[40] T. Jin, F. Guo, Q. Meng, S. Zhu, X. Xi, W. Wang, Z. Mu, and
+W. Song, “Fast contextual scene graph generation with unbiased context
+augmentation,” in IEEE Conf. Comput. Vis. Pattern Recog., 2023, pp.
+6302–6311.
+[41] J. Jeon, K. Kim, K. Yoon, and C. Park, “Semantic diversity-aware
+prototype-based learning for unbiased scene graph generation,” in Eur.
+Conf. Comput. Vis., A. Leonardis, E. Ricci, S. Roth, O. Russakovsky,
+T. Sattler, and G. Varol, Eds., vol. 15126, 2024, pp. 379–395.
+[42] S. Ren, K. He, R. Girshick, and J. Sun, “Faster r-cnn: Towards real-time
+object detection with region proposal networks,” Adv. Neural Inform.
+Process. Syst., vol. 28, 2015.
+[43] Z. Chen, J. Wu, Z. Lei, and C. W. Chen, “What makes a scene? scene
+graph-based evaluation and feedback for controllable generation,” arXiv
+preprint arXiv:2411.15435, 2024.
+JOURNAL OF LATEX CLASS FILES, VOL. 18, NO. 9, SEPTEMBER 2020
+14
+[44] A. Radford, J. W. Kim, C. Hallacy, A. Ramesh, G. Goh, S. Agarwal,
+G. Sastry, A. Askell, P. Mishkin, J. Clark, G. Krueger, and I. Sutskever,
+“Learning transferable visual models from natural language supervi-
+sion,” in ICML, 2021, pp. 8748–8763.
+[45] S. Liu, Z. Zeng, T. Ren, F. Li, H. Zhang, J. Yang, C. Li, J. Yang, H. Su,
+J. Zhu, and L. Zhang, “Grounding DINO: marrying DINO with grounded
+pre-training for open-set object detection,” CoRR, vol. abs/2303.05499,
+2023.
+[46] X. Chen, H. Fang, T. Lin, R. Vedantam, S. Gupta, P. Doll´ar, and C. L.
+Zitnick, “Microsoft COCO captions: Data collection and evaluation
+server,” CoRR, vol. abs/1504.00325, 2015.
+[47] X. Gu, T. Lin, W. Kuo, and Y. Cui, “Open-vocabulary object detection
+via vision and language knowledge distillation,” in Int. Conf. Learn.
+Represent., 2022.
+[48] G. Ghiasi, X. Gu, Y. Cui, and T. Lin, “Scaling open-vocabulary image
+segmentation with image-level labels,” in Eur. Conf. Comput. Vis., 2022,
+pp. 540–557.
+[49] M. Wang, J. Xing, and Y. Liu, “Actionclip: A new paradigm for video
+action recognition,” CoRR, vol. abs/2109.08472, 2021.
+[50] R. Li, S. Zhang, D. Lin, K. Chen, and X. He, “From pixels to graphs:
+Open-vocabulary scene graph generation with vision-language models,”
+in IEEE Conf. Comput. Vis. Pattern Recog., 2024, pp. 28 076–28 086.
+[51] J. Wu, X. Li, S. Xu, H. Yuan, H. Ding, Y. Yang, X. Li, J. Zhang,
+Y. Tong, X. Jiang et al., “Towards open vocabulary learning: A survey,”
+IEEE Trans. Pattern Anal. Mach. Intell., 2024.
+[52] C. Zhu and L. Chen, “A survey on open-vocabulary detection and
+segmentation: Past, present, and future,” CoRR, vol. abs/2307.09220,
+2023.
+[53] K. Kim, K. Yoon, J. Jeon, Y. In, J. Moon, D. Kim, and C. Park,
+“LLM4SGG: Large language models for weakly supervised scene graph
+generation,” in IEEE Conf. Comput. Vis. Pattern Recog., 2024, pp.
+28 306–28 316.
+[54] OpenAI, “GPT-4v(ision) System Card,” https://openai.com/research/
+gpt-4v-system-card, 2023.
+[55] Z. Chen, J. Wu, Z. Lei, Z. Zhang, and C. W. Chen, “Expanding scene
+graph boundaries: fully open-vocabulary scene graph generation via
+visual-concept alignment and retention,” in Eur. Conf. Comput. Vis.,
+2024, pp. 108–124.
+[56] Z. Liu, Y. Lin, Y. Cao, H. Hu, Y. Wei, Z. Zhang, S. Lin, and
+B. Guo, “Swin transformer: Hierarchical vision transformer using shifted
+windows,” in Int. Conf. Comput. Vis., 2021, pp. 9992–10 002.
+[57] J. Devlin, M. Chang, K. Lee, and K. Toutanova, “BERT: pre-training of
+deep bidirectional transformers for language understanding,” in NAACL-
+HLT, 2019, pp. 4171–4186.
+[58] X. Zhu, W. Su, L. Lu, B. Li, X. Wang, and J. Dai, “Deformable DETR:
+deformable transformers for end-to-end object detection,” in Int. Conf.
+Learn. Represent., 2021.
+[59] H. Rezatofighi, N. Tsoi, J. Gwak, A. Sadeghian, I. D. Reid, and
+S. Savarese, “Generalized intersection over union: A metric and a loss
+for bounding box regression,” in IEEE Conf. Comput. Vis. Pattern
+Recog., 2019, pp. 658–666.
+[60] T. Lin, P. Goyal, R. B. Girshick, K. He, and P. Doll´ar, “Focal loss for
+dense object detection,” in Int. Conf. Comput. Vis., 2017, pp. 2999–3007.
+[61] J. Achiam, S. Adler, S. Agarwal, L. Ahmad, I. Akkaya, F. L. Aleman,
+D. Almeida, J. Altenschmidt, S. Altman, S. Anadkat et al., “Gpt-4
+technical report,” arXiv preprint arXiv:2303.08774, 2023.
+[62] M. Reid, N. Savinov, D. Teplyashin, D. Lepikhin, T. Lillicrap, J.-b.
+Alayrac, R. Soricut, A. Lazaridou, O. Firat, J. Schrittwieser et al.,
+“Gemini 1.5: Unlocking multimodal understanding across millions of
+tokens of context,” arXiv preprint arXiv:2403.05530, 2024.
+[63] D. A. Hudson and C. D. Manning, “Gqa: A new dataset for real-world
+visual reasoning and compositional question answering,” in IEEE Conf.
+Comput. Vis. Pattern Recog., 2019, pp. 6700–6709.
+[64] R. Krishna, Y. Zhu, O. Groth, J. Johnson, K. Hata, J. Kravitz, S. Chen,
+Y. Kalantidis, L.-J. Li, D. A. Shamma et al., “Visual genome: Connecting
+language and vision using crowdsourced dense image annotations,”
+IJCV, vol. 123, pp. 32–73, 2017.
+[65] X. Dong, T. Gan, X. Song, J. Wu, Y. Cheng, and L. Nie, “Stacked
+hybrid-attention and group collaborative learning for unbiased scene
+graph generation,” in IEEE Conf. Comput. Vis. Pattern Recog., 2022,
+pp. 19 427–19 436.
+[66] G. Sudhakaran, D. S. Dhami, K. Kersting, and S. Roth, “Vision relation
+transformer for unbiased scene graph generation,” in Int. Conf. Comput.
+Vis., 2023, pp. 21 882–21 893.
+[67] I. Loshchilov and F. Hutter, “Decoupled weight decay regularization,”
+in Int. Conf. Learn. Represent., 2019.
+[68] K. Ye and A. Kovashka, “Linguistic structures as weak supervision for
+visual scene graph generation,” in IEEE Conf. Comput. Vis. Pattern
+Recog., 2021, pp. 8289–8299.
+[69] Y. Chen, L. Li, L. Yu, A. E. Kholy, F. Ahmed, Z. Gan, Y. Cheng, and
+J. Liu, “UNITER: universal image-text representation learning,” in Eur.
+Conf. Comput. Vis., 2020, pp. 104–120.
+[70] X. Lin, C. Ding, Y. Zhan, Z. Li, and D. Tao, “Hl-net: Heterophily
+learning network for scene graph generation,” in IEEE Conf. Comput.
+Vis. Pattern Recog., 2022, pp. 19 454–19 463.
+[71] H. Liu, N. Yan, M. S. Mortazavi, and B. Bhanu, “Fully convolutional
+scene graph generation,” in IEEE Conf. Comput. Vis. Pattern Recog.,
+2021, pp. 11 546–11 556.
+[72] J. Li, Y. Wang, X. Guo, R. Yang, and W. Li, “Leveraging predicate and
+triplet learning for scene graph generation,” in IEEE Conf. Comput. Vis.
+Pattern Recog., 2024, pp. 28 369–28 379.
+[73] L. Van der Maaten and G. Hinton, “Visualizing data using t-sne.” Journal
+of machine learning research, vol. 9, no. 11, 2008.

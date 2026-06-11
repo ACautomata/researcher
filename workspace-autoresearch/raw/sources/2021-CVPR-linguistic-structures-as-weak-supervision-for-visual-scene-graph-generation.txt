@@ -1,0 +1,1461 @@
+Linguistic Structures as Weak Supervision for Visual Scene Graph Generation
+Keren Ye
+Adriana Kovashka
+Department of Computer Science, University of Pittsburgh
+{yekeren, kovashka}@cs.pitt.edu
+https://github.com/yekeren/WSSGG
+Abstract
+Prior work in scene graph generation requires categor-
+ical supervision at the level of triplets—subjects and ob-
+jects, and predicates that relate them, either with or without
+bounding box information. However, scene graph gener-
+ation is a holistic task: thus holistic, contextual supervi-
+sion should intuitively improve performance. In this work,
+we explore how linguistic structures in captions can beneﬁt
+scene graph generation. Our method captures the informa-
+tion provided in captions about relations between individ-
+ual triplets, and context for subjects and objects (e.g. visual
+properties are mentioned). Captions are a weaker type of
+supervision than triplets since the alignment between the
+exhaustive list of human-annotated subjects and objects in
+triplets, and the nouns in captions, is weak. However, given
+the large and diverse sources of multimodal data on the
+web (e.g. blog posts with images and captions), linguis-
+tic supervision is more scalable than crowdsourced triplets.
+We show extensive experimental comparisons against prior
+methods which leverage instance- and image-level supervi-
+sion, and ablate our method to show the impact of leverag-
+ing phrasal and sequential context, and techniques to im-
+prove localization of subjects and objects.
+1. Introduction
+Recognizing visual entities and understanding the rela-
+tions among them are two fundamental problems in com-
+puter vision. The former task is known as object detection
+(OD) and the latter as visual relation detection (VRD). In
+turn, scene graph generation (SGGen) requires to jointly de-
+tect the entities and classify their relations.
+While scene graphs are a holistic, contextual represen-
+tation of an image, the types of supervision that have been
+used capture context in an impoverished way. In particular,
+prior methods use supervision in the form of either subject-
+predicate-object triplets with bounding boxes for the subject
+and object [27, 34, 49] or subject-predicate-object triplets at
+the image level only [54, 57]. Thus, information in the su-
+pervision is local (separate triplets) while the scene graph
+Standard crowdsourced 
+supervision:
+(man, standing on, rails)
+(man, in, shirt)
+Output: Scene graph (part shown)
+man
+shirt
+rails
+shirt? rails?
+man?
+Our supervision:
+“Man in checkered shirt is 
+standing on the rails.”
+man
+rails
+shirt
+standing on
+checkered
+is
+Figure 1. We tackle the problem of generating scene graphs with
+supervision in the form of captions at training time. Parsing from
+captions enables utilization of the huge amount of image-text data
+available on the internet. The linguistic structure extracted main-
+tains the relational information described in the caption without
+the loss of cross-triplet references, and facilitates disambiguation.
+to be output captures the entire image. This discrepancy
+between the properties of the desired output (global) and
+training data (local) becomes problematic due to potential
+ambiguity in the visual input. For example, in Fig. 1, multi-
+ple persons are standing on the rails. Thus, standard super-
+vision (top) which breaks down a scene graph into triplets,
+may create confusion.
+In contrast, captions capture global context that allows
+us to link multiple triplets, and localize a man who is both
+standing on the rails, and wearing a (checkered) shirt. Cap-
+tions are linguistic constructs, and language could be ar-
+gued to capture common sense (e.g., BERT [11] models
+are good at question-answering and commonsense tasks).
+Captions are also advantageous in terms of cost: humans
+naturally provide language descriptions of visual content
+they upload, thus caption-like supervision can be seen as
+“free”. However, caption supervision contains noise, which
+presents some challenges. First, captions provide supervi-
+sion at the image level, similar to prior work in weakly-
+supervised scene graph generation [54]. Second, prior work
+[32, 51] shows that captions do not cover all relevant ob-
+jects: not all content is mentioned, and some of the men-
+tioned content is not referring to the image explicitly or is
+not easily localizable. Because captions are noisy, the su-
+pervision we use is even weaker than prior work [54].
+8289
+We propose an approach that leverages global context,
+using captions as supervision. Our approach models con-
+text for scene graphs in two ways. First, it extracts infor-
+mation from captions beyond the subject-predicate-object
+entities (e.g., in the form of attributes like “checkered”, in
+Fig. 1). This context enables more accurate representations
+of concepts, and thus more accurate localization of each
+subject-predicate-object triplet.
+Second, visuo-linguistic
+context provides a way to reason about common-sense rela-
+tionships within each triplet, to prevent non-sensical triplets
+from being generated (e.g., “rails standing on man” is un-
+likely, while “man standing on rails” is likely). To cope
+with the challenges of the noise contained in captions, we
+rely on an iterative detection method which helps prune
+some spurious relations between caption words and image
+regions, via boostrapping. While the captions we use are
+crowdsourced, our method paves the road for using image-
+caption pairs harvested from the internet for free, using
+text accompanying images on the web, from blogs, social
+media posts, YouTube video descriptions, and instructional
+videos [31, 42, 53]. Note that our method internally uses a
+graph with broad types of nodes, including adjectives, even
+though these are not part of the graph that is being output at
+test time. A side contribution is an adaptation of techniques
+from weakly-supervised object detection to improve local-
+ization of subject and object through iterative reﬁnement,
+which has not been used for scene graph generation before.
+To isolate the contribution of global context from the
+noise contained in captions (i.e., objects not being men-
+tioned), we verify our approach in two settings. First, we
+construct a ground-truth triplet graph by connecting triplets
+with certain overlap. We show that our full method greatly
+outperforms prior work (it boosts the performance of [54]
+by 59%-67%). Second, we use two types of actual captions.
+This causes overall performance to drop, but we observe
+that modeling phrasal (cross-triplet) and sequential (within-
+triplet) linguistic context achieves strong results, signiﬁ-
+cantly better than more direct uses of captions, and com-
+petitive with methods using clean image-level supervision.
+To summarize, our contributions are as follows:
+• We examine a new mechanism for scene graph gener-
+ation using a new type of weak supervision.
+• We contextualize embeddings for subject/object enti-
+ties based on linguistic structures (e.g. noun phrases).
+• We propose new joint classiﬁcation and localization of
+subject, object and predicate within a triplet.
+• We leverage weakly-supervised object detection tech-
+niques to improve scene graph generation.
+2. Related Work
+Learning from textual descriptions: Open information
+extraction systems [3, 9, 12, 29, 50] produce relation triples
+using surface and dependency patterns, but target language-
+only relation extraction or question answering. On the vi-
+sion end, method exist to parse a question or image into
+a structured, tree-like form, for composable visual reason-
+ing [2, 13, 17, 20, 28, 52]. Following the emergence of
+scene graphs [18] as a global description of an image, au-
+tomatic parsing from textual descriptions to scene graphs
+[41, 46] aims to ﬁll the gap between texts and images. It
+tackles practical issues such as pronoun resolution and plu-
+ral nouns, and duplicates some nodes in the scene graph if
+necessary. Though we use the parser designed in [41], our
+reliance on parsing is different. While the above methods
+tackle pure language tasks, visual question answering, and
+image retrieval, we use the parsed results as supervised sig-
+nals to guide a scene graph generation model during train-
+ing. Our work is similar to [7, 16, 51] since we extract or
+amplify information from captions. However, these works
+only extract entities from captions, while we also learn from
+the properties and relations described.
+Also related are
+recent methods that use supervision from visual-language
+pairs [10, 30, 33, 43, 47], but these learn general-purpose
+representations and do not perform scene graph generation.
+Visual grounding of phrases locates the entities in an
+image, based on a given natural language query. [19] align
+sentence fragments with image regions. [6, 40] attend to the
+relevant image regions to reconstruct the input phrase, sim-
+ilar to weakly-supervised object detection. [58] incorporate
+a spatial transformer [15] to reﬁne object boxes relative to
+multi-scale anchors. We use a technique similar to visual
+grounding to ﬁnd label-related regions, but our key inno-
+vation lies in our use of the linguistic structure. We allow
+context to propagate to language queries to improve entity
+detection. Our model only takes image inputs at test time.
+Scene graph generation (SGGen) aims to localize and
+recognize all visual entities and predict predicates between
+them. Most approaches [8, 14, 24, 26, 27, 34, 38, 48, 49, 55]
+learn to generate graphs in a fully-supervised manner, in
+which training data involves both entities (bounding boxes
+and labels) and predicates. Inspired by weakly-supervised
+object detection (WSOD) [5, 35], [37, 54, 57] somewhat
+reduce the reliance on these labor-intensive annotations.
+[37] infer visual relations using only image-level triplets.
+[57] directly apply WSOD for entity localization and add a
+weakly-supervised visual relation detection (WSVRD) task
+for classifying entity pairs. [54] match predicates to enti-
+ties and jointly infer the entities, predicates, and their align-
+ments, using a bipartite graph. However, [37, 54, 57] still
+require clean triplet annotations from crowdsourcing, while
+our method only requires captions.
+Further, we capture
+visual properties in the internal graph our method uses at
+training time; these cannot be represented using triplets but
+help to enrich the visual representation and better ground
+entities. [54]’s method includes a more general (subject,
+predicate, ∅) graph, but it does not capture visual attributes.
+8290
+8%
+60%
+31%
+…
+1%
+70%
+10%
+20%
+…
+0%
+5%
+0%
+0%
+95%
+99%
+0%
+1%
+…
+Sec 3.4 ITERATIVE
+𝜙(𝑣!)
+𝜙(𝑣")
+𝜙(𝑣#)
+𝜙(𝑣$!)
+ROI Pooling and FC Layers
+…
+…
+Proposal feature extraction
+“a girl wearing sunglasses is sitting 
+on the sofa, eating a banana”
+Sec 3.1 PHRASAL context
+Message passing 
+on the text graph
+“𝑔𝑙𝑎𝑠𝑠𝑒𝑠”
+“𝑔𝑖𝑟𝑙”
+“𝑏𝑎𝑛𝑎𝑛𝑎”
+“𝑠𝑜𝑓𝑎”
+“𝑠𝑖𝑡𝑜𝑛”
+“𝑒𝑎𝑡”
+“𝑤𝑒𝑎𝑟”
+𝐺%
+𝜓(“𝑔𝑙𝑎𝑠𝑠𝑒𝑠”; 𝐺!)
+𝜓(“𝑔𝑖𝑟𝑙”; 𝐺!)
+𝜓(“𝑏𝑎𝑛𝑎𝑛𝑎”; 𝐺!)
+𝜓(“𝑠𝑜𝑓𝑎”; 𝐺!)
+𝜙(𝑣!)
+𝜙(𝑣")
+𝜙(𝑣#)
+𝜙(𝑣$!)
+…
+…
+“𝑔𝑖𝑟𝑙”
+“𝑤𝑒𝑎𝑟”
+“𝑔𝑙𝑎𝑠𝑠𝑒𝑠”
+“𝑔𝑖𝑟𝑙”
+“𝑏𝑎𝑛𝑎𝑛𝑎”
+“𝑒𝑎𝑡”
+“𝑔𝑖𝑟𝑙”
+“𝑠𝑜𝑓𝑎”
+“𝑠𝑖𝑡𝑜𝑛”
+Sec 3.2 Associating visual boxes
+𝐴𝑡𝑡𝑒𝑛𝑡𝑖𝑜𝑛𝑚𝑜𝑑𝑒𝑙(𝑠𝑜𝑓𝑡𝑚𝑎𝑥𝑎𝑐𝑟𝑜𝑠𝑠𝑣𝑖𝑠𝑢𝑎𝑙𝑎𝑥𝑖𝑠),
+predict: ”glasses”, “girl”, “banana”, “sofa”
+RNN
+RNN
+“𝑔𝑖𝑟𝑙”,
+/start/,
+“𝑔𝑙𝑎𝑠𝑠𝑒𝑠”, ∅
+“𝑔𝑖𝑟𝑙”
+RNN
+“𝑔𝑙𝑎𝑠𝑠𝑒𝑠”
+“𝑤𝑒𝑎𝑟”
+Sec. 3.5 SEQUENTIAL context
+banana
+glasses
+girl
+“𝑔𝑙𝑎𝑠𝑠𝑒𝑠”
+“𝑔𝑖𝑟𝑙”
+“𝑏𝑎𝑛𝑎𝑛𝑎”
+“𝑒𝑎𝑡”
+“𝑤𝑒𝑎𝑟”
+During inference, our model 
+generates the scene graph for the 
+image without the help from captions
+Sec 3.3 Initial scene graph
+Figure 2. Model overview. Our model uses the image’s paired caption as weak supervision to learn the entities in the image and the relations
+among them. At inference time, it generates scene graphs without help from texts. To learn our model, we ﬁrst allow context information
+to propagate on the text graph to enrich the entity word embeddings (Sec. 3.1). We found this enrichment provides better localization of the
+visual objects. Then, we optimize a text-query-guided attention model (Sec. 3.2) to provide the image-level entity prediction and associate
+the text entities with visual regions best describing them. We use the joint probability (Eq. 6) to choose boxes associated with both subject
+and object (Sec. 3.3), then use the top scoring boxes (Eq. 7) to learn better grounding (Sec. 3.4). Finally, we use an RNN (Sec. 3.5) to capture
+the vision-language common-sense and reﬁne our predictions. Our code is available at https://github.com/yekeren/WSSGG.
+3. Approach
+Inputs.
+Our method does not rely on dense human-
+annotated instances and relations, but takes in linguistic
+structures as supervised signals (Fig. 2 top-left).
+Such
+structural text information is abandoned in other weakly-
+supervised methods [54, 56, 57]. We ﬁrst convert captions
+paired with images into text graphs using a language parser
+[41]. The resulting graphs describe the entities in the cap-
+tion and the relations (e.g., verbs or prepositions) among
+them. We call this setting Cap-Graph. Our method’s perfor-
+mance depends on how exhaustive the caption is, and how
+robust is the parser chosen. Thus, we also design a setting
+where we extract a ground-truth text graph from the scene
+graph annotations, ignoring bounding boxes (GT-Graph).
+Training pipeline overview (Fig. 2): We extract the
+visual object proposals using FasterRCNN [39]. We ex-
+tract the text graph from paired captions (Cap-Graph) or
+directly read the ground-truth text graph (GT-Graph). We
+use a graph neural network based on the phrasal struc-
+ture to enrich the text node representation (Fig. 2 top-left,
+Sec. 3.1). This enrichment simpliﬁes the later localization
+step because we can search for more speciﬁcally described
+regions (e.g., “girl eating banana,” rather than “girl”). By
+optimizing the image-level entity scores and treating the
+text entities as queries, we obtain attention scores, which
+strongly imply the visual regions that best describe the text
+entities (Fig. 2 top-middle, Sec. 3.2).
+We design a way
+to learn from the weak signal of the attention scores and
+predict initial relation detection results in the form of 5-
+tuples (Sec. 3.3). These groundings are further reﬁned us-
+ing WSOD techniques [45] (Sec. 3.4). Finally, we capture
+visuo-linguistic common sense to further rule out unlikely
+relation tuples (Fig. 2 middle-bottom, Sec. 3.5). We use
+an RNN to model the ﬂuency of scene graph tuples, en-
+forcing that subject/object regions should be followed by
+their labels, and subject/object should be followed by ob-
+ject/predicate. This module reassigns labels and reranks 5-
+tuples to improve the relation detection: if an uncommon
+tuple is fed to the model, it will be assigned a low score.
+3.1. Modeling PHRASAL context
+We ﬁrst determine how to represent the text entities to
+be matched in the image. A naive solution would be to use
+the word embeddings, but this method ignores the context
+captured in phrases. We advocate the use of the hints in the
+phrasal structure, namely mentions of related adjectives and
+objects. As shown in Fig. 2 top-left, “wearing sunglasses,”
+“sitting on the sofa” and “eating a banana” provide context
+for the same “girl” and make her distinguishable from other
+potential instances of “girl”. We infer the contextualized
+entity word features via the phrasal context and apply them
+in Sec. 3.2 to localize visual objects.
+We have summarized all notations in Tab. 1 to facil-
+itate reading the following text.
+The linguistic structure
+(Fig. 2 top-left) parsed from a caption is represented us-
+ing a text graph GL = (E, R). E = [e1 · · · ene]T denotes
+the ne text graph entities where each ei ∈{1 . . . ce} rep-
+resents an entity class ID (ce classes in total, which are
+deﬁned by [54] or [48] in our experiments; in Fig. 2 top-
+left, E = [“glasses”, “girl”, “banana”, “sofa”]T ).
+R =
+[(r1, s1, o1) · · · (rnr, snr, onr)]T describes the nr relations.
+For the i-th relation: ri ∈{1 . . . cr} is the relation class
+ID; si, oi ∈{1 . . . ne} are entity indices: esi denotes the
+subject entity and eoi the object entity; in Fig. 2 top-left,
+8291
+Visual features
+Vprop
+Region proposals
+nv × 1
+Vfeat
+Region proposal features
+nv × dcnn
+nv = 20
+Number of region proposals
+dcnn = 1536
+Feature dimension
+Text graph GL(E, R), parsed from caption
+E = [ei]ne
+i=1
+Entities (graph nodes)
+|E| = ne
+R = [(ri, si, oi)]nr
+i=1
+Relations (graph edges)
+|R| = nr
+ne, nr
+Number of entities/relations in a graph
+ce, cr
+Number of entity/relation classes (vocab size)
+ei
+The i-th entity node, ei ∈{1 · · · ce}
+ri
+The i-th relation edge, ri ∈{1 · · · cr}
+si, oi
+Subject/object index of i-th relation, si, oi ∈
+{1 · · · ne}, esi, eoi refer to subject/object
+Frozen GloVe embeddings
+Went
+Entity embedding matrix
+ce × d
+Wrel
+Relation embedding matrix
+cr × d
+Image-level labels parsed from GL
+Yent
+Yent[i, :] is the one-hot representation of ei
+ne × ce
+Yrel
+Yrel[i, :] is the one-hot representation of ri
+nr × cr
+Ycssub, Ycsobj
+Ycssub[i, :], Ycsobj[i, :] are one-hot repr of esi, eoi nr × ce
+Ycspred
+Alias of Yrel
+nr × cr
+Instance-level pseudo labels
+nt
+Number of iterations to improve g
+g(t), t ∈{0 · · · nt} Grounding vector, if E=[girl, banana], g=[10, 17]
+means proposal v10 is class girl and v17 is banana
+ne × 1
+Y (t)
+det, t ∈{0 · · · nt} Entity detection label, Ydet[i, j]=1 means the proposal
+vi involves the j-th entity class
+nv × ce
+Yrelsub, Yrelobj
+Relation detection label, Yrelsub[i, j]=1 means the
+proposal vi may serve as a subject, and can apply the
+j-th relation to an unknown object; Yrelobj[i, j]=1
+means the proposal vi may serve as an object, some un-
+known subject can apply the j-th relation to vi
+nv × cr
+Table 1. Overview of notation for the visual features, linguistic structure GL and supervision parsed from GL.
+R = {(“wear”, 2, 1), (“eat”, 2, 3), (“sit”, 2, 4))}. Given the
+GloVe embedding [36] of the entity and relation classes
+Went ∈Rce×d, Wrel ∈Rcr×d, and the one-hot representa-
+tion of entities and relations Yent ∈Rne×ce, Yrel ∈Rnr×cr
+(each row is a ce or cr-dim one-hot vector, and there are
+ne and nr rows, respectively), the initial entity and re-
+lation word embeddings can be represented as H(0)
+ent =
+YentWent ∈Rne×d and H(0)
+rel = YrelWrel ∈Rnr×d.
+Now we compute phrasal contextualized entity embed-
+dings ψ(E; GL) ∈Rne×d.
+Alg. 1 shows the process,
+and can be stacked several times. We update relation edge
+embeddings, then aggregate the relation features into the
+connected entity nodes, using linear layers φr and φα ap-
+plied on the concatenation of inputs. We use ψ(E; GL) =
+H(t)
+ent, (t > 1) in the next section, to localize visual entities.
+Algorithm 1: Message passing to utilize phrasal con-
+text. We use TF-GraphNets [4] to implement.
+Input : Text graph GL = (E, R)
+Initial entity features H(t)
+ent = [e1, . . . , ene]T
+Initial relation features H(t)
+rel = [r1, . . . , rnr]T
+Output: Updated H(t+1)
+ent
+, H(t+1)
+rel
+for i ←1 to nr do
+r′
+i ←φr(ri, esi, eoi) // Update edge, r′
+i ∈Rd×1
+αi ←φα(ri, esi, eoi) // Update edge weight, αi ∈R1
+for i ←1 to ne do
+e′
+i ←P
+j=1:nr,
+oj=i
+
+exp(αj)
+P
+k=1:nr,
+ok=i
+exp(αk)
+	
+r′
+j //Aggregate, e′
+i ∈Rd×1
+return H(t+1)
+ent
+= [e′
+1 · · · e′
+ne]T , H(t+1)
+rel
+= [r′
+1 · · · r′
+nr]T
+3.2. Associating text entities with visual boxes
+After getting the contextualized entity embeddings
+ψ(E; GL) ∈Rne×d, we seek their associated visual re-
+gions g(0) ∈Rne×1 (i.e., grounding vector), where each
+g(0)
+i
+ranges in {1 · · · nv} and vg(0)
+i
+denotes the visual box
+best describing the text entity ei. We obtain g using an
+attention mechanism. By optimizing the image-level pre-
+diction, we expect the model to learn to focus on the most
+informative and distinguishable regions, which can often be
+used as instance references for training object detectors.
+We ﬁrst project Vfeat ∈Rnv×dcnn to the d-dim visual-
+language space, resulting in attention and classiﬁcation
+heads Hatt, Hcls ∈Rnv×d. Then, we compute Ddot ∈
+Rne×nv, in which Ddot[i, j] measures the compatibility be-
+tween text entity ei and visual region vj.
+We softmax-
+normalize Ddot to get the attention matrix A(0) ∈Rne×nv,
+and obtain g(0) by selecting the max-valued entry.
+Hatt = VfeatWatt, Hcls = VfeatWcls
+Ddot = ψ(E; GL)HT
+att, A(0)[i, j] =
+exp(Ddot[i, j])
+Pnv
+k=1 exp(Ddot[i, k])
+g(0)
+i
+= arg max
+j∈{1···nv}
+A(0)[i, j]
+(1)
+We use image-level entity labels Yent ∈Rne×ce as su-
+pervision to learn proper attention scores.
+We ﬁrst ag-
+gregate the image-level weighted visual features F
+=
+[f1 · · · fne]T ∈Rne×d, where fi denotes the image-level
+feature encoded with proper attention to highlight text en-
+tity ei. For example, given ei = “glasses” in Fig. 2, the
+model needs to shift attention to the glasses visual region
+by adjusting the i-th row of A(0). The ﬁnal image-level en-
+tity classiﬁcation score is given by Pcls ∈Rne×ce, and the
+grounding module is trained using cross-entropy.
+F = A(0)Hcls, F ′ = FW T
+ent
+Pcls[i, j] =
+exp(F ′[i, j])
+Pce
+k=1 exp(F ′[i, k])
+(2)
+Lgrd = −
+ne
+X
+i=1
+ce
+X
+j=1
+Yent[i, j] log Pcls[i, j]
+(3)
+3.3. Initial scene graph generation
+Thus far, the text entity embeddings H(0)
+ent played a role
+in the grounding procedure, and so did the one-hot encoded
+8292
+label Yent extracted from the caption.
+Next, the model
+learns to predict the entities and relations without help from
+captions, which will not be available at inference time.
+To this end, given entities E = [e1 · · · ene]T , relations
+R = [(r1, s1, o1) · · · (rnr, snr, onr)]T , and grounded boxes
+[vg(0)
+1
+· · · vg(0)
+ne ]T , we ﬁrst parse the target instance labels.
+We extract Y (0)
+det ∈Rnv×ce and Yrelsub, Yrelobj ∈Rnv×cr
+using Eq. 4, in which all non-mentioned matrix entries are
+set to 0. Y (0)
+det [i, j] = 1 means visual region vi involves
+the j-th entity class. Yrelsub[i, j] = 1 denotes the poten-
+tial subject visual region vi (e.g. a “person” region) may
+apply the j-th relation (e.g. “ride”) to an unknown object.
+Yrelobj[i, j] = 1 denotes an unknown subject may apply
+the j-th relation to the potential object visual region vi (e.g.
+a “horse” region). We add rel to highlight Yrelsub, Yrelobj
+are relation instance-level labels, but are attached to the
+grounded subject and object visual boxes respectively.
+Y (0)
+det [i, j] = 1 if ∃k ∈{1 · · · ne}, s.t.(g(0)
+k
+= i, ek = j)
+Yrelsub[i, j] = 1 if ∃k ∈{1 · · · nr}, s.t.(g(nt)
+sk
+= i, rk = j)
+Yrelobj[i, j] = 1 if ∃k ∈{1 · · · nr}, s.t.(g(nt)
+ok
+= i, rk = j)
+(4)
+We next learn to predict the instance-level labels based
+on these targets, using entity detection head H(0)
+det ∈Rnv×d,
+and relation detection heads Hrelsub, Hrelobj ∈Rnv×d.
+Then, we matrix-multiply the three heads to the entity em-
+bedding Went ∈Rce×d and relation embedding Wrel ∈
+Rcr×d, and softmax-normalize, resulting in entity detection
+scores P (0)
+det ∈Rnv×ce and subject/object detection scores
+Prelsub, Prelobj
+∈Rnv×cr.
+We use cross-entropy loss
+terms L(0)
+det, Lrelsub, Lrelobj similar to Eq. 3 to approximate
+P (0)
+det ∼Y (0)
+det , Prelsub ∼Yrelsub, and Prelobj ∼Yrelobj.
+X ∈{det, relsub, relobj}, W ′ ∈{Went, Wrel}
+HX = VfeatWX, FX = HXW ′T
+PX[i, j] =
+exp(FX[i, j])
+P
+k exp(FX[i, k])
+(5)
+After training the aforementioned model, we can de-
+tect entities using P (0)
+det
+∈
+Rnv×ce and detect rela-
+tions using Prel
+∈
+Rnv×nv×cr, where Prel[i, j, k]
+=
+min(Prelsub[i, k], Prelobj[j, k]). Intuitively, we treat the re-
+lation as valid if it could be both implied from the subject
+and object visual regions. For example, if the model infers
+“ride” from the “person” region and estimates “ride” can
+also apply to object region “horse”, it determines that “ride”
+is the proper predicate bridging the two regions. [54, 57]
+proposed similar architectures to infer relation from a single
+region, [54] for optimizing runtime and [57] to avoid bad
+solutions. We use this idea because it is simple and effec-
+tive, in combination with our stronger module in Sec. 3.5.
+Test time post-processing. Given P (0)
+det, and Prel, we
+adopt the top-K predictions (in experiments, k=50, 100)
+denoted in Eq. 6 as the initial scene graph generation
+(SGGen) results.
+In Eq. 6, the universal set U
+=
+{(vsv
+i , vov
+i , se
+i, pr
+i , oe
+i)}i denotes all possible 5-tuple com-
+binations and B is a subset of U of size k. The goal is
+to seek the subset B(B ⊂U and |B| = k) such that the
+sum of log probabilities is maximized. Within a speciﬁc
+B, sv, ov ∈{1 · · · nv} are the indices of proposal boxes
+to represent the subject and object regions, respectively;
+se, oe ∈{1 . . . ce} are subject and object entity class IDs;
+pr ∈{1 . . . cr} is the relation class ID. To implement Eq. 6
+in practice, we use non-max suppression on P (0)
+det to reduce
+the search space (ruling out unlikely classes and boxes).
+SGinit = arg max
+B⊂U,|B|=k
+X
+(sv,ov,se,pr,oe)∈B
+
+log P (0)
+det[sv, se]
++ log Prel[sv, ov, pr] + log P (0)
+det[ov, oe]
+
+(6)
+3.4. ITERATIVE detection scores estimation
+Careful readers may notice the superscript (0) in ground-
+ing vector g(0), attention A(0), instance label Y (0)
+det , and in-
+stance prediction P (0)
+det. We use the superscript (0) to de-
+note these are initial grounding results, which could be im-
+proved by the WSOD iterative reﬁning technique proposed
+in [45]. Suppose loss L(t)
+det (t ≥0) brings P (t)
+det ∈Rnv×ce
+close to Y (t)
+det ∈Rnv×ce, where Y (t)
+det is the caption-guided
+target label and P (t)
+det is the prediction without help from
+captions. We could then incorporate the entity information
+E = [e1 · · · ene]T of the caption into P (t)
+det to turn it into
+a stronger instance-level label Y (t+1)
+det
+. The motivation is
+that the initial label Y (0)
+det extracted from attention (Eq. 1, 4)
+will be easily inﬂuenced by the noise in captions. Since the
+attention scores always sum to one, some region will be as-
+signed a higher score than others, regardless of whether the
+objects have consistent visual appearance. In an extreme
+case, mentioned but not visually present entities also have
+a matched proposal. Using P (t)
+det is an indirect way to also
+consider the visual model’s (Eq. 5) output, which encodes
+the objects’ consistent appearance.
+To turn P (t)
+det into Y (t+1)
+det
+, we ﬁrst extract A(t+1) ∈
+Rne×nv (same shape as the attention matrix A(0)). We sim-
+ply select the columns (denoted as [:, i]) from P (t)
+det accord-
+ing to E to achieve A(t+1), and compute g(t+1) and Y (t+1)
+det
+.
+A(t+1) =
+h
+P (t)
+det[:, e1] · · · P (t)
+det[:, ene]
+iT
+g(t+1) = arg max
+j∈{1···nv}
+A(t+1)[i, j]
+(7)
+Y (t+1)
+det
+[i, j] = 1 if ∃k ∈{1 · · · ne}, s.t.(g(t+1)
+k
+= i, ek = j)
+8293
+We reﬁne the model nt times, and in Eq. 4, we use g(nt)
+from the last iteration to compute Yrelsub and Yrelobj.
+3.5. Modeling SEQUENTIAL context
+We observed the model sometimes generates triplets that
+violate common sense, e.g., plate-on-pizza in Fig. 5 top, be-
+cause the aforementioned test time post-processing (Eq. 6)
+considers predictions from Pdet and Prel separately. When
+joined, the results may not form a meaningful triplet. To
+solve the problem, we propose a vision-language module to
+consider sequential patterns summarized from the dataset
+(Fig. 2 middle-bottom). The idea is inspired by [27], but
+different because: (1) we encode the language and vision
+priors within the same multi-modal RNN while [27] models
+vision and language separately, and (2) our label generation
+captures a language N-gram such that the later generated
+object and predicate will not contradict the subject.
+Speciﬁcally, we gather the grounded tuples Dgt
+=
+{(vgsi , vgoi , esi, ri, eoi)}nr
+i=1 within each training example
+to learn the sequential patterns. Compared to the SGGen 5-
+tuple (Eq. 6), the esi, ri, eoi here are from the ground-truth
+(E, R) and are always correct (e.g., no “cake-eat-person”).
+Since the module receives high-quality supervision from
+captions, it will assign low scores or adjust the prediction
+(Eq. 6) for imprecise 5-tuples at test time, using its estimate
+of what proper 5-tuples look like.
+Fig. 2 middle-bottom shows the idea. We use an RNN
+(LSTM in our implementation) to consume both word em-
+beddings and visual features of the subject and object. The
+training outputs are subject prediction Pcssub ∈Rnr×ce (cs
+for common sense), object prediction Pcsobj ∈Rnr×ce, and
+predicate prediction Pcspred ∈Rnr×cr. We now explain
+how to generate their i-th row (to match true esi-ri-eoi).
+First, we feed into the RNN a dummy /start/ embedding
+and the grounded subject visual feature vgsi . The subject
+prediction Pcssub[i, :] is achieved by a linear layer projec-
+tion (from RNN output to d-dim) and matrix multiplication
+(using Went ∈Rce×d). We predict the object Pcsobj[i, :]
+similarly, but using the grounded object visual feature vgoi
+concatenated with the subject word embedding esi as in-
+puts. If we do not consider the visual input, this step is
+akin to learning a subject-object 2-gram language model.
+Next, the RNN predicts predicate label Pcspred[i, :] (using
+Wrel ∈Rcr×d instead of Went), using object word embed-
+ding eoi and a dummy visual feature ∅as inputs.
+To learn Pcssub, Pcsobj, Pcspred,
+we extract labels
+Ycssub, Ycsobj, Ycspred (Eq. 8) and use cross-entropy losses
+Lcssub(Pcssub
+∼
+Ycssub), Lcsobj(Pcsobj
+∼
+Ycsobj),
+Lcspred(Pcspred ∼Ycspred) to optimize the RNN model.
+Ycssub =
+h
+Yent[esi, :]T · · · Yent[esnr , :]T iT
+(8)
+Ycsobj =
+h
+Yent[eoi, :]T · · · Yent[eonr , :]T iT
+, Ycspred = Yrel
+At test time, we feed to the RNN the visual features
+from SGinit (Eq. 6) and the /start/ embedding.
+We let
+the RNN re-label the subject-object-predicate using beam
+search. The ﬁnal score for each re-labeled 5-tuple is the sum
+of log probabilities of generating subject, object, and pred-
+icate. We generate the object before the predicate because
+objects are usually more distinguishable than predicates, so
+this order simpliﬁes inference, allowing the use of a smaller
+beam size. We re-rank the beam search results using the ﬁ-
+nal scores and keep the top ones to compute the Recall@k
+to evaluate (examples in Fig. 5, Fig. 6).
+Our ﬁnal model is trained using the following multi-
+task loss, where β is set to 0.5 since at the core of the task
+is the grounding of visual objects.
+L =Lgrd + β
+  nt
+X
+t=0
+L(t)
+det + Lrelsub + Lrelobj
++ Lcssub + Lcsobj + Lcspred
+
+(9)
+4. Experiments
+Datasets. We use the Visual Genome (VG) [22] and
+Common Objects in Context (COCO) [25] datasets, which
+both provide captions describing the visual contents. VG
+involves 108,077 images and 5.4 million region descrip-
+tions. The associated annotations of 3.8 million object in-
+stances and 2.3 million relationships enable us to evaluate
+the scene graph generation performance. To fairly com-
+pare to the counterpart weakly-supervised scene graph gen-
+eration methods [57, 54], we adopt the VG split used in
+Zareian et al. [54]: keeping the most frequent ce = 200
+entity classes and cr = 100 predicate classes, resulting
+in 99,646 images with subject-predicate-object annotations.
+We use the same 73,791/25,855 train/test split1. We also
+adopt the split in Xu et al. [48], more commonly used
+by fully-supervised methods.
+It contains 75,651/32,422
+train/test images and keeps ce = 150 entity and cr = 50
+predicate classes. Both VG splits are preprocessed by [54].
+For COCO data, we use the 2017 training split (118,287
+images). We rule out the duplicated images in the VG test
+set, resulting in 106,401 images for Zareian et al.’s split and
+102,786 images for Xu et al.’s.
+Learning tasks. The linguistic structure supervision for
+training is from the following three sources:
+• VG-GT-Graph imagines an ideal scenario (an upper
+bound with the noise in captions and parsers’ impacts
+isolated) where we have the ground-truth text graph
+annotations instead of a set of image-level subject-
+predicate-object triplets, for training on VG. To get these
+ground-truth graphs, we check the visual regions associ-
+ated with the entities (subjects and objects) and connect
+entities if their regions have IoU greater than 0.5. We do
+not use box annotations to improve detection results.
+1We follow [54], but [57] reports 73,801/25,857 train/test split
+8294
+Zareian et al.’s split (weakly sup)
+Method
+R@50 R@100
+VtranE-MIL [56]
+0.71
+0.90
+PPR-FCN-single [57] 1.08
+1.63
+PPR-FCN [57]
+1.52
+1.90
+VSPNet [54]
+3.10
+3.50
+BASIC
+2.20
+2.88
++ PHRASAL
+2.77
+3.62
++ ITERATIVE
+3.26
+4.15
++ SEQUENTIAL
+4.92
+5.84
+Xu et al.’s split (fully sup)
+Method
+R@50 R@100
+IMP [48]
+3.44
+4.24
+MotifNet [55]
+6.90
+9.10
+Asso.Emb. [34]
+9.70
+11.30
+MSDN [24]
+10.72
+14.22
+Graph R-CNN [49] 11.40
+13.70
+VSPNet (Full) [54] 12.60
+14.20
+BASIC
+3.82
+4.96
++ PHRASAL
+4.04
+5.21
++ ITERATIVE
+6.06
+7.60
++ SEQUENTIAL
+7.30
+8.73
+Table 2. SGGen recall (%) under VG-GT-Graph setting.
+We
+compare our method to the state-of-the-art methods. High recall
+(R@50, R@100) is good.
+• VG-Cap-Graph utilizes the VG region descriptions. We
+use [41] to extract text graphs from these descriptions,
+but we ignore the region coordinates and treat the graphs
+as image-level annotations.
+• COCO-Cap-Graph uses captions from COCO and ap-
+plies the same parsing technique as VG-Cap-Graph. The
+difference is that these captions are image-level, and de-
+scribe the objects and relations as a whole.
+Metrics. We measure how accurately the models gener-
+ate scene graphs, using the densely-annotated scene graphs
+in the VG test set. Following [48], a predicted triplet is con-
+sidered correct if the three text labels are correct and the
+boxes for subject/object have ≥0.5 IoU with ground-truth
+boxes. We then compute the Recall@50 and Recall@100 as
+the fraction of the ground-truth triplets that are successfully
+retrieved in the top-50 and top-100 predictions, respectively.
+Methods compared. We conduct ablation studies to ver-
+ify the beneﬁt of each component of our method.
+• BASIC model refers to our Sec. 3.2-3.3 without applying
+the phrasal contextualization. We set ψ(E, GL) = H(0)
+ent.
+• +PHRASAL context (Sec. 3.1) uses contextualized entity
+embeddings ψ(E, GL) instead of H(0)
+ent.
+• +ITERATIVE (Sec. 3.4) gradually improves the ground-
+ing vector g. We iterate nt = 3 times by default.
+• +SEQUENTIAL context (Sec. 3.5) revises the prediction
+presented in Eq. 6, using the RNN encoded with knowl-
+edge regarding sequential patterns.
+We compare to weakly-supervised scene graph genera-
+tion methods that published results on Zareian et al.’s split:
+VtransE-MIL [56], PPR-FCN-single [57], PPR-FCN [57]
+and VSPNet [54].
+We also compare to fully-supervised
+methods on Xu et al.’s split: Iterative Message Passing
+(IMP) [48], Neural Motif Network (MotifNet) [55], Asso-
+ciative Embedding (Asso.Emb.) [34], Multi-level Scene De-
+scription Network (MSDN) [24], Graph R-CNN [49], and
+fully-supervised VSPNet [54].
+VG-Cap-Graph
+COCO-Cap-Graph
+Eval split
+Zareian et al.’s
+Xu et al.’s
+Zareian et al.’s
+Xu et al.’s
+R@50 R@100 R@50 R@100 R@50 R@100 R@50 R@100
+BASIC
+0.81
+0.91
+0.99
+1.09
+1.20
+1.51
+2.09
+2.63
++ PHRASAL
+0.90
+1.04
+1.39
+1.69
+1.17
+1.47
+1.65
+2.16
++ ITERATIVE
+1.11
+1.32
+1.79
+2.22
+1.41
+1.75
+2.41
+3.02
++ SEQUENTIAL 1.83
+1.94
+3.85
+4.04
+1.95
+2.23
+3.28
+3.69
+Table 3. SGGen recall (%) under Cap-Graph settings. High recall
+(R@50, R@100) is good.
+4.1. Results on GT-Graph setting
+The GT-Graph setting allows our method to be fairly
+compared to the state-of-the-art methods because in this set-
+ting, the information ours and those methods receive is com-
+parable (sets of triplets, in our case connected). Further, the
+word distribution is the same for training/testing, while the
+caption setting causes a train-test shift (described shortly).
+In Tab. 2 left, we show our results on Zareian et al.’s
+VG split and baselines of weakly-supervised methods.
+Our BASIC method already surpasses VtransE-MIL, PPR-
+FCN-single, and PPR-FCN. This may be due to the low
+quality of the EdgeBox proposals used in them.
+Com-
+pared to VSPNet, which also uses Faster RCNN propos-
+als, our BASIC method is slightly worse, but our compo-
+nents greatly improve upon BASIC, and our ﬁnal model
+achieves 4.92, a 59% improvement over VSPNet (using
+R@50). +PHRASAL context improves BASIC by 26% (2.77
+v.s. 2.20), +ITERATIVE improves +PHRASAL by 18% (3.26
+v.s. 2.77), and +SEQUENTIAL gains 51% (4.92 v.s. 3.26).
+In Tab. 2 right, we compare to fully-supervised methods
+on Xu et al.’s split. We observe our method is very com-
+petitive even though we only use image-level annotations.
+In terms of Recall@50, our ﬁnal method (7.30) outper-
+forms IMP (3.44) and MotifNet (6.90). As for the relative
+improvement, +PHRASAL context improves BASIC by 6%
+(4.04 v.s. 3.82), +ITERATIVE gains 50% (6.06 v.s. 4.04),
+and +SEQUENTIAL gains 20% (7.30 v.s. 6.06).
+4.2. Results on Cap-Graph setting
+Our proposed Cap-Graph setting is an under-explored
+and challenging one, as the learned SGGen model depends
+on the captions’ exhaustiveness and the parser’s quality, but
+it allows learning from less expensive image-text data.
+In Tab. 3, we show the SGGen performance of mod-
+els learned from VG region captions (VG-Cap-Graph)
+and COCO image captions (COCO-Cap-Graph). We see
+the same trend as in GT-Graph setting: our components
+(+PHRASAL, +ITERATIVE, and +SEQUENTIAL) have pos-
+itive effects. Further, our ﬁnal models learned from both
+VG-Cap-Graph (R@50 1.83) and COCO-Cap-Graph (1.95)
+are better than all weakly-supervised methods except VSP-
+Net (in Tab. 2 left). Our models learned from captions are
+even comparable (VG-Cap-Graph 3.85, COCO-Cap-Graph
+3.28) to the fully-supervised IMP (R@50 3.44).
+8295
+0%
+10%
+20%
+30%
+40%
+on
+has
+in
+of
+wearing
+near
+with
+above
+holding
+behind
+under
+sitting on
+wears
+standing on
+in front of
+attached to
+at
+hanging from
+over
+for
+GT-Graph
+VG-Cap-Graph
+COCO-Cap-Graph
+Figure 3. Relation frequencies in the three settings.
+A man with a red helmet on a small moped on a dirt road.
+An airplane sits on the tarmac of an airport, with a disconnected boarding gate.
+w/o PHRASAL context
+w/ PHRASAL context
+Figure 4. Importance of PHRASAL context; best seen with zoom.
+Fig. 3 shows the relation frequencies in our settings. We
+observe that some relations (“has,” “near”) rarely appear
+in text descriptions but are often annotated in ground-truth
+scene graphs. Meanwhile, there are frequently mentioned
+prepositions in captions (“of,” “with,” “at”) which are rarely
+denoted as relations. These train/test discrepancies (train
+on captions, test on triplets) explain our methods’ relative
+performance in Tab. 3, where +PHRASAL helps under VG-
+Gap-Graph (more similar to GT-Graph) but hurts slightly
+under COCO-Cap-Graph (less similar to GT-Graph).
+4.3. Qualitative examples
+Fig. 4 compares using and not using PHRASAL con-
+text. Without out PHRASAL module (left), the grounding
+procedure gets stuck on the same distinguishable local re-
+gion (top-left: head of man) or erroneously attends to the
+whole image (bottom-left: boarding gate). When using the
+PHRASAL module (right), our model is better at localizing
+visual objects. It knows there should be a complete person
+in the scene (top-right) and the boarding gate is a concept
+related to the plane (bottom-right).
+Fig. 5 shows how the learned sequential patterns help
+correct imprecise predictions. For the corrections (beam
+size=5), we show the log-probability of the 5-tuple and in-
+dividual probabilities. Given that plate cannot be put on
+pizza, our model corrects it to plate-under-pizza. In the
+bottom example, our model corrects person-wear-person to
+person-wear-shirt and person-behind-person. In Fig. 6, we
+compare our BASIC and ﬁnal methods.
+plate-on-pizza
+-1.32 plate(91.6%)-under(31.9%)-pizza(91.3%)
+-1.91 plate(91.6%)-with(17.6%)-pizza(91.3%)
+-1.92 plate(91.6%)-have(17.5%)-pizza(91.3%)
+-2.05 plate(91.6%)-on(15.3%)-pizza(91.3%)
+-3.34 plate(91.6%)-of(4.25%)-pizza(91.3%)
+person-wear-person
+-2.25 person(80.3%)-wear(60.9%)-shirt(21.5%)
+-2.56 person(80.3%)-behind(23.9%)-person(40.5%)
+-2.71 person(80.3%)-wear(73.2%)-jacket(11.3%)
+-2.98 person(80.3%)-in(29.6%)-shirt(21.5%)
+-3.02 person(80.3%)-wear(82.2%)-pant(7.4%)
+Figure 5. Importance of SEQUENTIAL context.
+Basic
+Final
+Figure 6. BASIC v.s. our ﬁnal model; best viewed with zoom.
+4.4. Implementation details
+We pre-extract text graphs using [47]’s implementation
+of [41]. We use the same proposals (nv = 20 per image)
+and features (dcnn = 1536) as [54], extracted using Faster-
+RCNN [39] (InceptionResnet backbone [44]) pre-trained
+on OpenImage [23]. During training, we use GraphNets [4]
+to encode phrasal context. Went, Wrel are d = 300 frozen
+GloVe embeddings [36]. To train our model, we use a batch
+size of 32, learning rate 0.00001, the Adam optimizer [21],
+and Tensorﬂow distributed training [1]. We use weight de-
+cay of 1e-6 and the random normal initializer (mean=0.0,
+stdev=0.01) for all fully-connected layers. We use LSTM
+cell, 100 hidden units, and dropout 0.2, for the SEQUEN-
+TIAL module. For the non-max-suppression of Eq. 6, we
+use score threshold 0.01, IoU threshold 0.4, and limit the
+maximum instances per entity class to 4. We set beam size
+to 5 for the SEQUENTIAL module post-processing.
+5. Conclusion
+We introduced a method that leverages caption supervi-
+sion for scene graph generation. Captions are noisy, but
+can be obtained “for free,” and allow us to understand high-
+order relations between entities and triplets. To leverage
+caption supervision, we proposed to capture commonsense
+relations (phrasal and sequential context) and iteratively re-
+ﬁne detection scores. In the future, we will explicitly handle
+distribution shifts between captions and text graphs.
+Acknowledgements: This work was partly supported by
+National Science Foundation Grant No.
+1718262 and a
+Univ. of Pittsburgh Computer Science fellowship. We thank
+the reviewers and AC for their encouragement.
+8296
+References
+[1] Mart´ın Abadi, Paul Barham, Jianmin Chen, Zhifeng Chen,
+Andy Davis, Jeffrey Dean, Matthieu Devin, Sanjay Ghe-
+mawat, Geoffrey Irving, Michael Isard, Manjunath Kudlur,
+Josh Levenberg, Rajat Monga, Sherry Moore, Derek G. Mur-
+ray, Benoit Steiner, Paul Tucker, Vijay Vasudevan, Pete War-
+den, Martin Wicke, Yuan Yu, and Xiaoqiang Zheng. Ten-
+sorﬂow: A system for large-scale machine learning. In Pro-
+ceedings of the USENIX Conference on Operating Systems
+Design and Implementation (OSDI), November 2016. 8
+[2] Jacob Andreas, Marcus Rohrbach, Trevor Darrell, and Dan
+Klein.
+Neural module networks.
+In Proceedings of the
+IEEE Conference on Computer Vision and Pattern Recog-
+nition (CVPR), June 2016. 2
+[3] Gabor Angeli,
+Melvin Jose Johnson Premkumar,
+and
+Christopher D. Manning. Leveraging linguistic structure for
+open domain information extraction. In Proceedings of the
+Annual Meeting of the Association for Computational Lin-
+guistics (ACL), July 2015. 2
+[4] Peter W Battaglia, Jessica B Hamrick, Victor Bapst, Al-
+varo Sanchez-Gonzalez, Vinicius Zambaldi, Mateusz Ma-
+linowski, Andrea Tacchetti, David Raposo, Adam Santoro,
+Ryan Faulkner, et al. Relational inductive biases, deep learn-
+ing, and graph networks. arXiv preprint arXiv:1806.01261,
+2018. 4, 8
+[5] Hakan Bilen and Andrea Vedaldi. Weakly supervised deep
+detection networks. In Proceedings of the IEEE Conference
+on Computer Vision and Pattern Recognition (CVPR), June
+2016. 2
+[6] Kan Chen, Jiyang Gao, and Ram Nevatia. Knowledge aided
+consistency for weakly supervised phrase grounding. In Pro-
+ceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition (CVPR), June 2018. 2
+[7] Kai Chen, Hang Song, Chen Change Loy, and Dahua Lin.
+Discover and learn new objects from documentaries. In Pro-
+ceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition (CVPR), July 2017. 2
+[8] Tianshui Chen, Weihao Yu, Riquan Chen, and Liang Lin.
+Knowledge-embedded routing network for scene graph gen-
+eration. In Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition (CVPR), June 2019. 2
+[9] Luciano Del Corro and Rainer Gemulla. Clausie: clause-
+based open information extraction.
+In Proceedings of the
+International Conference on World Wide Web (WWW), 2013.
+2
+[10] Karan Desai and Justin Johnson. VirTex: Learning Visual
+Representations from Textual Annotations. In Proceedings
+of the IEEE Conference on Computer Vision and Pattern
+Recognition (CVPR), June 2021. 2
+[11] Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina
+Toutanova. Bert: Pre-training of deep bidirectional trans-
+formers for language understanding. In Proceedings of the
+Conference of the North American Chapter of the Associa-
+tion for Computational Linguistics (NAACL), June 2019. 1
+[12] Anthony Fader, Stephen Soderland, and Oren Etzioni. Iden-
+tifying relations for open information extraction.
+In Pro-
+ceedings of the Conference on Empirical Methods in Natural
+Language Processing (EMNLP), July 2011. 2
+[13] Omer Goldman, Veronica Latcinnik, Ehud Nave, Amir
+Globerson, and Jonathan Berant. Weakly supervised seman-
+tic parsing with abstract examples. In Proceedings of the
+Annual Meeting of the Association for Computational Lin-
+guistics (ACL), July 2018. 2
+[14] Jiuxiang Gu, Handong Zhao, Zhe Lin, Sheng Li, Jianfei Cai,
+and Mingyang Ling. Scene graph generation with external
+knowledge and image reconstruction. In Proceedings of the
+IEEE Conference on Computer Vision and Pattern Recogni-
+tion (CVPR), June 2019. 2
+[15] Max Jaderberg, Karen Simonyan, Andrew Zisserman, et al.
+Spatial transformer networks. In Advances in Neural Infor-
+mation Processing Systems (NeurIPS), 2015. 2
+[16] Achiya Jerbi, Roei Herzig, Jonathan Berant, Gal Chechik,
+and Amir Globerson.
+Learning object detection from
+captions via textual scene attributes.
+arXiv preprint
+arXiv:2009.14558, 2020. 2
+[17] Justin Johnson, Bharath Hariharan, Laurens van der Maaten,
+Judy Hoffman, Li Fei-Fei, C. Lawrence Zitnick, and Ross
+Girshick. Inferring and executing programs for visual rea-
+soning. In Proceedings of the IEEE International Conference
+on Computer Vision (ICCV), Oct 2017. 2
+[18] Justin Johnson, Ranjay Krishna, Michael Stark, Li-Jia Li,
+David Shamma, Michael Bernstein, and Li Fei-Fei. Image
+retrieval using scene graphs.
+In Proceedings of the IEEE
+Conference on Computer Vision and Pattern Recognition
+(CVPR), June 2015. 2
+[19] Andrej Karpathy, Armand Joulin, and Li F Fei-Fei. Deep
+fragment embeddings for bidirectional image sentence map-
+ping. In Advances in Neural Information Processing Systems
+(NeurIPS), 2014. 2
+[20] Eun-Sol Kim, Woo Young Kang, Kyoung-Woon On, Yu-
+Jung Heo, and Byoung-Tak Zhang.
+Hypergraph attention
+networks for multimodal learning.
+In Proceedings of the
+IEEE Conference on Computer Vision and Pattern Recog-
+nition (CVPR), June 2020. 2
+[21] Diederick P Kingma and Jimmy Ba. Adam: A method for
+stochastic optimization. In Proceedings of the International
+Conference on Learning Representations (ICLR), 2015. 8
+[22] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A Shamma, et al.
+Visual genome:
+Connecting language and vision using crowdsourced dense
+image annotations. International Journal of Computer Vi-
+sion (IJCV), 123(1), 2017. 6
+[23] Alina Kuznetsova, Hassan Rom, Neil Alldrin, Jasper Ui-
+jlings, Ivan Krasin, Jordi Pont-Tuset, Shahab Kamali, Stefan
+Popov, Matteo Malloci, Alexander Kolesnikov, et al. The
+open images dataset v4. International Journal of Computer
+Vision (IJCV), 2020. 8
+[24] Yikang Li, Wanli Ouyang, Bolei Zhou, Kun Wang, and Xi-
+aogang Wang. Scene graph generation from objects, phrases
+and region captions. In Proceedings of the IEEE Interna-
+tional Conference on Computer Vision (ICCV), Oct 2017. 2,
+7
+8297
+[25] Tsung-Yi Lin, Michael Maire, Serge Belongie, James Hays,
+Pietro Perona, Deva Ramanan, Piotr Doll´ar, and C Lawrence
+Zitnick. Microsoft coco: Common objects in context. In
+Proceedings of the European Conference on Computer Vi-
+sion (ECCV), 2014. 6
+[26] Xin Lin, Changxing Ding, Jinquan Zeng, and Dacheng Tao.
+Gps-net: Graph property sensing network for scene graph
+generation. In Proceedings of the IEEE Conference on Com-
+puter Vision and Pattern Recognition (CVPR), June 2020. 2
+[27] Cewu Lu, Ranjay Krishna, Michael Bernstein, and Li Fei-
+Fei. Visual relationship detection with language priors. In
+Proceedings of the European Conference on Computer Vi-
+sion (ECCV), 2016. 1, 2, 6
+[28] Jiayuan Mao, Chuang Gan, Pushmeet Kohli, Joshua B.
+Tenenbaum, and Jiajun Wu.
+The neuro-symbolic concept
+learner: Interpreting scenes, words, and sentences from nat-
+ural supervision. In Proceedings of the International Con-
+ference on Learning Representations (ICLR), May 2019. 2
+[29] Mausam, Michael Schmitz, Stephen Soderland, Robert Bart,
+and Oren Etzioni. Open language learning for information
+extraction. In Proceedings of the Joint Conference on Empir-
+ical Methods in Natural Language Processing and Compu-
+tational Natural Language Learning (EMNLP-CoNLL), July
+2012. 2
+[30] Antoine Miech, Jean-Baptiste Alayrac, Lucas Smaira, Ivan
+Laptev, Josef Sivic, and Andrew Zisserman.
+End-to-end
+learning of visual representations from uncurated instruc-
+tional videos. In Proceedings of the IEEE Conference on
+Computer Vision and Pattern Recognition (CVPR), June
+2020. 2
+[31] Antoine Miech, Dimitri Zhukov, Jean-Baptiste Alayrac,
+Makarand
+Tapaswi,
+Ivan
+Laptev,
+and
+Josef
+Sivic.
+Howto100m: Learning a text-video embedding by watching
+hundred million narrated video clips. In Proceedings of the
+IEEE International Conference on Computer Vision (ICCV),
+October 2019. 2
+[32] Ishan Misra, C. Lawrence Zitnick, Margaret Mitchell, and
+Ross Girshick.
+Seeing through the human reporting bias:
+Visual classiﬁers from noisy human-centric labels. In Pro-
+ceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition (CVPR), June 2016. 1
+[33] Arsha Nagrani, Chen Sun, David Ross, Rahul Sukthankar,
+Cordelia Schmid, and Andrew Zisserman. Speech2action:
+Cross-modal supervision for action recognition. In Proceed-
+ings of the IEEE Conference on Computer Vision and Pattern
+Recognition (CVPR), June 2020. 2
+[34] Alejandro Newell and Jia Deng. Pixels to graphs by asso-
+ciative embedding. In I. Guyon, U. V. Luxburg, S. Bengio,
+H. Wallach, R. Fergus, S. Vishwanathan, and R. Garnett, ed-
+itors, Advances in Neural Information Processing Systems
+(NeurIPS), 2017. 1, 2, 7
+[35] Maxime Oquab, Leon Bottou, Ivan Laptev, and Josef Sivic.
+Is object localization for free? - weakly-supervised learning
+with convolutional neural networks. In Proceedings of the
+IEEE Conference on Computer Vision and Pattern Recogni-
+tion (CVPR), June 2015. 2
+[36] Jeffrey Pennington, Richard Socher, and Christopher Man-
+ning. GloVe: Global vectors for word representation. In Pro-
+ceedings of the Conference on Empirical Methods in Natural
+Language Processing (EMNLP), Oct. 2014. 4, 8
+[37] Julia Peyre, Josef Sivic, Ivan Laptev, and Cordelia Schmid.
+Weakly-supervised learning of visual relations. In Proceed-
+ings of the IEEE International Conference on Computer Vi-
+sion (ICCV), Oct 2017. 2
+[38] Mengshi Qi, Weijian Li, Zhengyuan Yang, Yunhong Wang,
+and Jiebo Luo. Attentive relational networks for mapping
+images to scene graphs. In Proceedings of the IEEE Confer-
+ence on Computer Vision and Pattern Recognition (CVPR),
+June 2019. 2
+[39] Shaoqing Ren, Kaiming He, Ross Girshick, and Jian Sun.
+Faster r-cnn: Towards real-time object detection with region
+proposal networks. In Advances in Neural Information Pro-
+cessing Systems (NeurIPS), 2015. 3, 8
+[40] Anna Rohrbach, Marcus Rohrbach, Ronghang Hu, Trevor
+Darrell, and Bernt Schiele. Grounding of textual phrases in
+images by reconstruction. In Proceedings of the European
+Conference on Computer Vision (ECCV), 2016. 2
+[41] Sebastian Schuster, Ranjay Krishna, Angel Chang, Li Fei-
+Fei, and Christopher D. Manning.
+Generating semanti-
+cally precise scene graphs from textual descriptions for im-
+proved image retrieval. In Workshop on Vision and Language
+(VL15), Sept. 2015. 2, 3, 7, 8
+[42] Piyush Sharma, Nan Ding, Sebastian Goodman, and Radu
+Soricut. Conceptual captions: A cleaned, hypernymed, im-
+age alt-text dataset for automatic image captioning. In Pro-
+ceedings of the Annual Meeting of the Association for Com-
+putational Linguistics (ACL), July 2018. 2
+[43] D´ıdac Sur´ıs, Dave Epstein, Heng Ji, Shih-Fu Chang, and Carl
+Vondrick. Learning to learn words from visual scenes. In
+Proceedings of the European Conference on Computer Vi-
+sion (ECCV), 2020. 2
+[44] Christian Szegedy, Sergey Ioffe, Vincent Vanhoucke, and
+Alexander Alemi. Inception-v4, inception-resnet and the im-
+pact of residual connections on learning. In Proceedings of
+the AAAI Conference on Artiﬁcial Intelligence (AAAI), num-
+ber 1, 2017. 8
+[45] Peng Tang, Xinggang Wang, Xiang Bai, and Wenyu Liu.
+Multiple instance detection network with online instance
+classiﬁer reﬁnement. In Proceedings of the IEEE Confer-
+ence on Computer Vision and Pattern Recognition (CVPR),
+July 2017. 3, 5
+[46] Yu-Siang Wang, Chenxi Liu, Xiaohui Zeng, and Alan Yuille.
+Scene graph parsing as dependency parsing.
+In Proceed-
+ings of the Conference of the North American Chapter of the
+Association for Computational Linguistics (NAACL), June
+2018. 2
+[47] Hao Wu, Jiayuan Mao, Yufeng Zhang, Yuning Jiang, Lei Li,
+Weiwei Sun, and Wei-Ying Ma.
+Uniﬁed visual-semantic
+embeddings:
+Bridging vision and language with struc-
+tured meaning representations. In Proceedings of the IEEE
+Conference on Computer Vision and Pattern Recognition
+(CVPR), June 2019. 2, 8
+[48] Danfei Xu, Yuke Zhu, Christopher B. Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing. In Pro-
+ceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition (CVPR), July 2017. 2, 3, 6, 7
+8298
+[49] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi
+Parikh.
+Graph r-cnn for scene graph generation.
+In Pro-
+ceedings of the European Conference on Computer Vision
+(ECCV), September 2018. 1, 2, 7
+[50] Alexander Yates, Michele Banko, Matthew Broadhead,
+Michael Cafarella, Oren Etzioni, and Stephen Soderland.
+TextRunner: Open information extraction on the web.
+In
+Proceedings of the Annual Conference of the North Ameri-
+can Chapter of the Association for Computational Linguis-
+tics (NAACL), Apr. 2007. 2
+[51] Keren Ye, Mingda Zhang, Adriana Kovashka, Wei Li, Dan-
+feng Qin, and Jesse Berent. Cap2det: Learning to amplify
+weak caption supervision for object detection. In Proceed-
+ings of the IEEE International Conference on Computer Vi-
+sion (ICCV), October 2019. 1, 2
+[52] Kexin Yi, Jiajun Wu, Chuang Gan, Antonio Torralba, Push-
+meet Kohli, and Josh Tenenbaum.
+Neural-symbolic vqa:
+Disentangling reasoning from vision and language under-
+standing. In Advances in Neural Information Processing Sys-
+tems (NeurIPS), 2018. 2
+[53] Peter Young, Alice Lai, Micah Hodosh, and Julia Hocken-
+maier. From image descriptions to visual denotations: New
+similarity metrics for semantic inference over event descrip-
+tions.
+Transactions of the Association for Computational
+Linguistics (TACL), 2, 2014. 2
+[54] Alireza Zareian, Svebor Karaman, and Shih-Fu Chang.
+Weakly supervised visual semantic parsing. In Proceedings
+of the IEEE Conference on Computer Vision and Pattern
+Recognition (CVPR), June 2020. 1, 2, 3, 5, 6, 7, 8
+[55] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin
+Choi. Neural motifs: Scene graph parsing with global con-
+text. In Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition (CVPR), June 2018. 2, 7
+[56] Hanwang Zhang, Zawlin Kyaw, Shih-Fu Chang, and Tat-
+Seng Chua. Visual translation embedding network for visual
+relation detection. In Proceedings of the IEEE Conference
+on Computer Vision and Pattern Recognition (CVPR), July
+2017. 3, 7
+[57] Hanwang Zhang, Zawlin Kyaw, Jinyang Yu, and Shih-Fu
+Chang. Ppr-fcn: Weakly supervised visual relation detec-
+tion via parallel pairwise r-fcn. In Proceedings of the IEEE
+International Conference on Computer Vision (ICCV), Oct
+2017. 1, 2, 3, 5, 6, 7
+[58] Fang Zhao, Jianshu Li, Jian Zhao, and Jiashi Feng. Weakly
+supervised phrase localization with multi-scale anchored
+transformer network. In Proceedings of the IEEE Confer-
+ence on Computer Vision and Pattern Recognition (CVPR),
+June 2018. 2
+8299

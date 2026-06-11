@@ -1,0 +1,2410 @@
+EGTR: Extracting Graph from Transformer for Scene Graph Generation
+
+Jinbae Im1
+
+JeongYeon Nam1 Nokyung Park1,2,3* Hyungmin Lee2
+2NAVER 3Korea University
+
+1NAVER Cloud AI
+
+Seunghyun Park1
+
+{jinbae.im, jy.nam, nokyung.park99, hyungmin.lee, seung.park}@navercorp.com
+
+4
+2
+0
+2
+
+n
+u
+J
+
+4
+2
+
+]
+
+V
+C
+.
+s
+c
+[
+
+5
+v
+2
+7
+0
+2
+0
+.
+4
+0
+4
+2
+:
+v
+i
+X
+r
+a
+
+Abstract
+
+Scene Graph Generation (SGG) is a challenging task of
+detecting objects and predicting relationships between ob-
+jects. After DETR was developed, one-stage SGG mod-
+els based on a one-stage object detector have been ac-
+tively studied. However, complex modeling is used to pre-
+dict the relationship between objects, and the inherent re-
+lationship between object queries learned in the multi-head
+self-attention of the object detector has been neglected. We
+propose a lightweight one-stage SGG model that extracts
+the relation graph from the various relationships learned in
+the multi-head self-attention layers of the DETR decoder.
+By fully utilizing the self-attention by-products, the relation
+graph can be extracted effectively with a shallow relation
+extraction head. Considering the dependency of the rela-
+tion extraction task on the object detection task, we propose
+a novel relation smoothing technique that adjusts the re-
+lation label adaptively according to the quality of the de-
+tected objects. By the relation smoothing, the model is
+trained according to the continuous curriculum that focuses
+on object detection task at the beginning of training and
+performs multi-task learning as the object detection per-
+formance gradually improves. Furthermore, we propose
+a connectivity prediction task that predicts whether a re-
+lation exists between object pairs as an auxiliary task of
+the relation extraction. We demonstrate the effectiveness
+and efficiency of our method for the Visual Genome and
+Open Image V6 datasets. Our code is publicly available
+at https://github.com/naver-ai/egtr.
+
+1. Introduction
+
+Scene Graph Generation (SGG) [8] aims to generate a scene
+graph that represents objects as nodes and relationships be-
+tween objects as edges from an image as shown in Fig. 1b.
+SGG is a challenging task as it is required to go beyond
+simply detecting objects but predicting the relationships be-
+tween them based on a comprehensive understanding of the
+
+* Most work was done during the internship at NAVER Cloud AI.
+
+1
+
+(b) Scene Graph
+
+(a) Visual Genome example
+
+(c) Attention Graph
+
+Figure 1. Motivation. SGG task aims to predict scene graph
+(Fig. 1b) with objects as nodes and relations as edges. We draw
+a plausible attention graph (Fig. 1c) simply by connecting objects
+with high attention weights to edges from the self-attention lay-
+ers of the pre-trained DETR. It shows the potential for the self-
+attention from the object detector to contain rich information that
+aids in predicting the relations of the scene graph.
+
+scene. Since a scene graph provides structural informa-
+tion of the image, it can be used for various vision tasks
+that require a higher level of understanding and reasoning
+about images such as image captioning [5, 10, 44], image
+retrieval [8, 31], and visual question answering [14, 46].
+
+Most previous studies [16, 20, 36, 42, 45] took two-
+stage SGG approaches that detect objects first and then
+predict their relations. However,
+these approaches in-
+curred high computational costs and risks of error prop-
+agation from the object detection. To address the draw-
+backs of the two-stage approaches, one-stage SGG mod-
+els that perform object detection and relation prediction at
+once [3, 9, 17, 21, 28, 32, 38] have been studied recently,
+leveraging one-stage object detectors such as DETR [1].
+Since edges in a scene graph can be represented as subject-
+predicate-object triplets, many studies embraced triplet-
+based approaches as shown in Figs. 2a and 2b. However,
+object-triplet detection models [3, 17] required sophisti-
+cated triplet detectors to obtain necessary information for
+triplet queries from the object detector. Moreover, triplet
+detection models [9, 38] lacked the ability to detect objects
+without relation such as “tree” in Fig. 1b, by focusing solely
+on the triplet detection without an object detector. Consid-
+ering that objects without relations account for more than
+
+horsepanttreegirlonridingwearinghorsepanttreegirl0.260.11 
+ 
+ 
+ 
+ 
+ 
+(a) Object-Triplet Detection Models
+
+(b) Triplet Detection Models
+
+(c) Relation Extraction Models
+
+Figure 2. Comparison with existing one-stage SGG models. (a) Object-Triplet Detection Models introduce additional triplet queries
+and a triplet detector to the object detector. The triplet detector requires additional modules to incorporate information from the object
+detector into the triplet queries.
+(b) Triplet Detection Models focus on detecting triplets directly without an object detector. Objects
+without relations may not be detected. (c) Relation Extraction Models extract relations from the object detector without a separate triplet
+detector. In particular, ours extracts relations more effectively by utilizing by-products from the self-attention of the object detector.
+
+42% in Visual Genome [12] data, their priority lies in de-
+tecting a sub-graph rather than the complete scene graph.
+
+To address the shortcomings of the existing one-stage
+SGG models, we focus on the relationships between ob-
+jects inherent in the object detector. As shown in Fig. 1a,
+objects are related to each other. For instance, when a
+horse appears in a scene, a person is likely to appear in the
+scene, and clothing such as hats, jackets, and pants often
+depicts the person’s current situation. From this intuition,
+there has been a long belief [2, 7, 23] that modeling re-
+lationship or context between objects would be beneficial
+to object detection task. Accordingly, recent one-stage ob-
+ject detectors [1, 35, 50] have incorporated self-attention
+layers [39] to implicitly model the relationships among the
+object queries. We hypothesize that self-attention between
+object queries learned in a one-stage object detector might
+contain valuable information for predicting triplet outputs.
+In our preliminary investigation, we are able to extract a
+plausible attention graph by simply connecting two object
+queries with high attention weights from the pre-trained
+DETR, as shown in Fig. 1c. It shows the potential that the
+attention weights between object queries can be interpreted
+as relations between them.
+
+From the findings, we propose a lightweight one-stage
+scene graph generator EGTR, which stands for Extracting
+Graph from TRansformer. We design the model to compre-
+hensively leverage the by-products of the object detector,
+eliminating the need for a separate triplet detector, as de-
+picted in Fig. 2c. From the multi-head self-attention layers
+of the object detector, we regard an attention query and key,
+where their relations are learned in the attention weights,
+as the subject entity and object entity, respectively. Subse-
+quently, we leverage a shallow classifier to predict relations
+between them. Due to the abundant information about the
+relationships among the objects present in the by-products
+derived from all layers of self-attention, we can effectively
+extract the scene graph.
+
+Since the relation extraction task is dependent on the ob-
+ject detection task, we speculate that performing relation ex-
+
+traction without sufficiently learned representations of the
+object queries might be harmful. Therefore, we devise a
+novel adaptive smoothing technique that smooths the value
+of the ground truth relation label based on the object detec-
+tion performance. With the adaptive smoothing, the model
+is trained with a continuous curriculum that initially focuses
+on object detection and gradually performs multi-task learn-
+ing. Furthermore, we propose a connectivity prediction task
+as an auxiliary task for relation extraction, aiming to predict
+the existence of any relationship between a subject entity
+and an object entity. This auxiliary task facilitates the ac-
+quisition of representations for the relation extraction.
+
+To verify the effectiveness of the proposed method, we
+conduct experiments on two representative SGG datasets:
+Visual Genome [12] and Open Images V6 [13]. By ac-
+tively utilizing the by-products of the object detector, EGTR
+shows the best object detection performance and compara-
+ble triplet detection performance, with the fewest parame-
+ters and the fastest inference speed.
+
+Our main contributions can be summarized as follows:
+• We propose EGTR that generates scene graphs efficiently
+and effectively by utilizing the multi-head self-attention
+by-products derived from the object detector.
+
+• We present adaptive smoothing, enabling effective multi-
+task learning for both object detection and relation extrac-
+tion. In addition, the proposed connectivity prediction of-
+fers clues to the relation extraction.
+
+• Our comprehensive experiments show the superiority of
+the proposed model framework and the effectiveness of
+the devised training techniques.
+
+2. Related Work
+
+SGG models can be categorized into two groups:
+two-
+stage models and one-stage models. For two-stage mod-
+els [4, 11, 15, 16, 20, 25–27, 33, 36, 40, 42, 45, 49], sep-
+arate object detection model and relation prediction model
+are trained sequentially. They usually detect N objects from
+the off-the-shelf object detector such as Faster R-CNN [29],
+
+2
+
+Object DetectorObject QueriesTripletDetectorTriplet QueriesObjectsDetected ObjectsDetected TripletsScene GraphTripletsOutputTriplet Detection HeadsObject Detection HeadsTripletDetectorTriplet QueriesScene GraphTripletsOutputDetected TripletsTriplet Detection HeadsScene GraphObject DetectorObject QueriesExtractedRelationsObjectsRelationsOutputDetected ObjectsRelation Extraction HeadObject Detection Headsand then all possible combinations of the detected objects
+are fed into the relation prediction model to predict the rela-
+tions between each object pair. Although they showed high
+relation extraction performance, they have the inherent limi-
+tation that the object detector that helps with relation extrac-
+tion is trained separately, resulting in a significant increase
+in model complexity.
+
+As for the one-stage models [3, 9, 17, 21, 28, 32, 38],
+the object detection and relation prediction are trained in
+an end-to-end manner. Early studies [21, 28] proposed
+fully convolutional SGG models and took pixel-based ap-
+proaches. After DETR [1] brought a huge success as a
+Transformer [39]-based one-stage object detector, many
+one-stage SGG studies are based on one-stage object de-
+tectors [1, 35, 50]. They efficiently modeled SGG by intro-
+ducing object queries or triplet queries. We categorize them
+into three distinct groups: (a) object-triplet detection mod-
+els, (b) triplet prediction models, and (c) relation extraction
+models, as shown in Fig. 2.
+
+Object-Triplet Detection Models. Object-triplet detection
+models are characterized by introducing additional triplet
+queries and building a triplet predictor on top of the object
+detector as shown in Fig. 2a. RelTR [3] introduced paired
+subject queries and object queries, and SGTR [17] intro-
+duced compositional queries decoupled into subjects, ob-
+jects, and predicates. As the introduced queries are initial-
+ized without prior cues from the object detector, the triplet
+predictor requires modules to incorporate information from
+the outputs of the object detector and modules for triplet
+queries to exchange information with each other. It led to
+the triplet predictor having an intricate structure. In con-
+trast, we refrain from introducing additional queries and re-
+gard the attention queries and attention keys, whose rela-
+tionships are learned in the object detector, as subject and
+object queries, respectively.
+
+Triplet Detection Models. Triplet detection models di-
+rectly detect triplets using triplet queries without an object
+detector, as shown in Fig. 2b. Iterative SGG [9] introduced
+subject, object, and predicate queries and modeled the con-
+ditional dependencies among them with separate subject,
+object, and predicate multi-layer Transformer decoders. In-
+spired by Sparse R-CNN [35], Structured Sparse R-CNN
+(SSR-CNN) [38] designed triplet queries consisting of sub-
+ject box, object box, subject, object, and predicate queries.
+Since it was difficult to train the model only with sparse
+triplet annotations, SSR-CNN introduced somewhat intri-
+cate training details: it detected object pairs with a Siamese
+Sparse RCNN model and auxiliary queries and performed
+additional triplet matching using the detected object pairs
+as a pseudo label. Although they show excellent triplet de-
+tection performance, the model architecture became even
+more intricate to detect subjects and objects separately since
+
+an explicit object detector is not used. Last but not least,
+the triplet prediction models focus on detecting a sub-graph
+composed only of objects with relations, overlooking ob-
+jects in an image that lack explicit relations.
+
+Relation Extraction Models. Relation extraction models
+extract a scene graph using a lightweight relation predic-
+tor without separate triplet queries or triplet detector. Re-
+lationformer [32] added a special “[rln]” token to capture
+global information in conjunction with object queries. They
+concatenated the final hidden representations of the object
+query pairs and the relation token, followed by a shallow
+fully connected network for relation prediction.
+In this
+work, in conjunction with the final hidden representations,
+we use the inherent relationship information among the ob-
+ject queries learned in the multi-head self-attention layer of
+the object detector. Furthermore, we propose training tech-
+niques to boost multi-task learning, leading to significantly
+improved performance with architectural simplicity.
+
+3. Method
+
+3.1. Preliminaries
+
+In this section, we first introduce the formulation of the
+SGG task and then provide a brief review of the one-stage
+object detector that serves as the basis for our study.
+
+3.1.1 Formulation
+
+Scene graph generation is a task of generating a scene graph
+G = {V, E} from an image, where V denotes the node set
+consisting of objects and E denotes the edge set that rep-
+resents the relation between objects. Each object entity
+vi ∈ V has an object category label vc
+i from a set of ob-
+ject categories Cv and box coordinates vb
+i . Each relation
+ej ∈ E represents the j-th triplet (sj, pj, oj), where subject
+sj and object oj indicate related object entities and predi-
+cate pj has a relation category label pc
+j from a set of predi-
+cate categories Cp. Generating V and E correspond to object
+detection and relation extraction, respectively.
+
+3.1.2 One-stage Object Detector
+
+Our model framework is deeply influenced by DETR [1], a
+one-stage object detector. In DETR, representations for in-
+put images are learned through CNN and Transformer [39]
+encoder. Transformer decoder enhances object queries by
+utilizing self- and cross-attention mechanisms. The final
+object detection heads predict object category labels and
+box coordinates from the contextualized object queries.
+
+Backbone. CNN backbone generates C-dimensional fea-
+ture map F ∈ RC×HF ×WF from an input image ximg ∈
+R3×H0×W0. For ResNet-50 backbone, HF and WF are set
+to H0/32 and W0/32, respectively.
+
+3
+
+Figure 3. The overall architecture of EGTR. We present a novel lightweight relation extractor, EGTR, which fully utilizes the self-
+attention of the DETR decoder. We extract query and key representations from each self-attention layer and concatenate them pairwise
+to represent relations between them. Additionally, we leverage the last hidden representation in same manner. To effectively aggregate
+information, we apply a gated sum and then predict relation with a shallow relation head.
+
+Transformer Encoder. Transformer encoder enhances im-
+age representations based on multi-head self-attention. Af-
+ter applying a 1 × 1 convolution to reduce dimension from
+C to dmodel, the feature map is flattened to get an input se-
+quence with length HF WF for the Transformer encoder.
+Additional positional encodings are used to reflect the spa-
+tial information of the feature maps.
+
+Transformer Decoder. Transformer decoder takes N ob-
+ject queries as input and returns their representations. Each
+object query detects an individual object, and N is usually
+set large enough to cover all objects in the image. Through
+alternating self-attention and cross-attention layers, object
+queries learn features of object candidates in the input im-
+age. Note that causal attention mask is not applied to the
+self-attention layer; therefore, fully connected N ×N atten-
+tion weights among the N object queries are learned from
+the multi-head self-attention as follows:
+
+Al
+
+h = f (Ql
+
+h, K l
+
+h) = softmax(Ql
+
+hK l
+h
+
+T
+
+(cid:112)
+/
+
+dhead),
+
+(1)
+
+where Al
+the h-th head in the l-th layer. Ql
+RN ×dhead are attention queries and keys, respectively.
+
+h ∈ RN ×N denotes the attention weights from
+h ∈
+
+h ∈ RN ×dhead and K l
+
+Object Detection Heads. Object detection heads detect
+N object candidates {ˆvi}N
+i=1 from the last layer represen-
+tations of the object queries Z L. For each object query,
+a linear layer is used to predict the object category label
+i ∈ RN ×|Cv|, and three-layer perceptron with ReLU acti-
+ˆvc
+vation is used to obtain the box coordinates ˆvb
+
+i ∈ RN ×4.
+
+i=1 and M ground truth objects {vi}M
+
+Object Detection Loss. To match N detected object can-
+didates {ˆvi}N
+i=1, Car-
+ion et al. [1] pad the ground truth objects with ϕ (no object)
+and find the best permutation of predicted objects that min-
+imizes total bipartite matching costs. From the permutated
+
+predictions {ˆv′
+
+i}N
+
+i=1, the loss is calculated as follows:
+
+Lod = ΣN
+
+i=1[λcLc(ˆv′c
+
+i , vc
+
+i ) + 1vc
+
+i ̸=ϕ(λbLb(ˆv′b
+
+i , vb
+
+i ))],
+
+(2)
+
+where Lc and Lb denote loss function for category labels
+and box coordinates, respectively.
+
+3.2. EGTR
+
+We propose a novel lightweight relation extractor, EGTR,
+which exploits the self-attention of DETR decoder, as de-
+picted in Fig. 3. Since the self-attention weights in Eq. (1)
+contain N × N bidirectional relationships among the N ob-
+ject queries, our relation extractor aims to extract the pred-
+icate information from the self-attention weights in the en-
+tire L layers, by considering the attention queries and keys
+as subjects and objects, respectively.
+
+In order to preserve rich information learned in the self-
+attention layer, we devise another relation function f be-
+tween the attention queries and keys instead of the dot prod-
+uct attention in Eq. (1). As concatenation preserves repre-
+sentations completely, we concatenate the representations
+on all N × N pairs of attention queries and keys as shown
+in Fig. 3 (a) to get the relation representations of the l-th
+a ∈ RN ×N ×2dmodel . Before pairwise concatenation,
+layer Rl
+to help queries and keys play the role of subjects and ob-
+jects, a linear projection is added as follows:
+
+Rl
+
+a = [QlW l
+
+S; K lW l
+
+O],
+
+(3)
+
+where Ql ∈ RN ×dmodel and K l ∈ RN ×dmodel refer to atten-
+tion queries and keys of the l-th layer, and [ · ; · ] denotes the
+pairwise concatenation. W l
+O are linear weights of
+shape Rdmodel×dmodel .
+
+S and W l
+
+We also utilize the last layer representations of the ob-
+ject queries Z L ∈ RN ×dmodel , which are used for the object
+
+4
+
+…CNNImage…DETREncoderDETR Decoder1!"Self-Attention2#$Self-Attention𝐿"%Self-Attention…Object Queries…Object Detection Heads𝑍$𝑅!"𝑅!#𝑅!$𝑅%Relation Representations(b) Gated SumRelation HeadRelationGraph(𝑁,𝑁,2𝑑!"#$%)horsepanttreegirlonridingwearing(𝑁,𝑁,2𝑑!"#$%)(𝑁,𝑁,𝐶&)Scene Graph(a) Pairwiseconcat𝑅!"𝑄"𝑊#"(𝑁,𝑑!"#$%)(𝑁,𝑁,2𝑑!"#$%)𝐾"𝑊)"(𝑁,𝑑!"#$%)(b) Gated Sum𝑅!*𝑅!+𝑅,𝑔,𝑔!*𝑔!+(𝑁,𝑁,2𝑑!"#$%)…+***(a) Pairwiseconcat…(𝑁,𝑑!"#$%)detection in the same manner:
+
+Rz = [Z LWS; Z LWO],
+
+(4)
+
+where WS, WO are linear weights of shape Rdmodel×dmodel. To
+effectively use the various information learned in all layers,
+we introduce a gating mechanism as follows:
+
+a = σ(Rl
+gl
+
+aWG), gz = σ(RzWG),
+
+(5)
+
+a and gz ∈ RN ×N ×1 represent the gate values ob-
+where gl
+tained through a single linear layer WG ∈ R2dmodel×1 for Rl
+a
+and Rz, respectively. Finally, we extract the relation graph
+from the gated summation of the relation representations
+across all layers as follows:
+
+ˆG = σ(MLPrel(ΣL
+
+l=1(gl
+
+a ∗ Rl
+
+a) + gz ∗ Rz)),
+
+(6)
+
+where ˆG ∈ RN ×N ×|Cp| denotes predicted relation graph
+and MLPrel is a three-layer perceptron with ReLU activa-
+tion. Note that we use sigmoid function σ so that multiple
+relationships can exist between objects.
+
+3.3. Learning and Inference
+
+To train EGTR, we perform multi-task learning. In addition
+to object detection and relation extraction, we devise con-
+nectivity prediction, an auxiliary task for relation extraction.
+The overall loss for the framework is as follows:
+
+L = Lod + λrelLrel + λconLcon,
+
+(7)
+
+where Lod is object detection loss in Eq. (2). Lrel and Lcon
+are loss functions for the relation extraction and connectiv-
+ity prediction, respectively. Since explicit object detection
+loss is used, EGTR has the capability to detect all nodes in
+the scene graph. The details of the loss for each task are
+provided below.
+
+3.3.1 Relation Extraction
+
+We use binary cross-entropy loss for the relation extraction.
+To match predicted graph ˆG ∈ RN ×N ×|Cp| and ground
+truth triplet set E, we first encode E as a one-hot ground
+truth graph G ∈ RN ×N ×|Cp| by padding the regions that do
+not correspond to relations between the ground truth objects
+as zero. Then, we permutate indices of the predicted graph
+using the permutation found in the object detection. From
+the permutated graph ˆG′, the loss for the relation extraction
+is calculated as Lrel = Lr( ˆG′, G).
+
+However, since the size of the graph is proportional to
+the square of N , the sparsity of the ground truth graph G is
+too severe. For instance, the density is only 10−14 when N
+is set to 200 for the Visual Genome [12] validation dataset.
+Therefore, we divide G into three regions: (1) GT region,
+
+Figure 4. Example of graph G region. The target graph has a
+shape of N × N × |Cp|. The graph is severely sparse since the
+number of object queries N is set large enough to cover objects
+in the image. We split G into GT, negative, and non-matching
+regions.
+
+(2) negative region, and (3) non-matching region, as shown
+in Fig. 4. The GT region indicates the ground truth triplets
+where the value of G is 1. The negative region consists of
+the triplets in which both subjects and objects are composed
+of the ground truth objects, but no relation exists between
+them. The non-matching region represents the zero-padded
+region. It is paired with a region consisting of the object
+candidates that do not match the ground truth objects and
+match ϕ in Eq. (2). For each region, we apply different
+techniques to effectively train the relation extraction with
+object detection as subsequently described.
+
+i and ˆv′
+
+Adaptive Smoothing. We propose a novel adaptive
+smoothing for the GT region. For Gijk belonging to the
+GT region, the model is trained to predict the k-th pred-
+icate category between subject entity vi and object entity
+vj. However, since ˆv′
+j, which match vi and vj re-
+spectively, do not have enough representations about the
+corresponding ground truth object at the beginning of the
+training, it may not be appropriate to predict the probabil-
+ity of the predicate as 1. Moreover, even when the object
+detection performance is reasonably assured, the detection
+performance may still vary for individual object candidates.
+Therefore, we reflect the detection performance of each ob-
+ject candidate on the relation label via adaptive smoothing.
+We first measure the uncertainty of each object candidate
+with the corresponding bipartite matching cost. For object
+candidate ˆv′
+i, we define the uncertainty as follows:
+ui = σ(costi − costmin + σ−1(α)),
+
+(8)
+
+where costi denotes the matching cost and costmin indicates
+the matching cost when ˆv′
+i perfectly matches vi. α is a non-
+negative hyperparameter representing the minimum uncer-
+tainty. We set the value of Gijk to (1 − ui)(1 − uj) taking
+the uncertainty into account. By using the relation label ad-
+justed by the uncertainty, the multi-task learning of object
+
+5
+
+onwearing(subject -predicate -object)girl-on -horsegirl-riding -horsegirl-wearing -pantriding!!|#!|GT regionnegative regionnon-matching regiongirlhorsewearingridingontreepantdetection and relation extraction is dynamically regulated
+according to the quality of the detected objects.
+
+Negative and Non-matching Sampling. Rather than em-
+ploying all negatives, we sample them from the negative
+region. Inspired by the hard negative mining introduced by
+Liu et al. [22], we sort all negatives based on the predicted
+relation score ˆG′
+ijk and choose the top kneg × |E| most chal-
+lenging negatives. Similarly, we extract knon ×|E| hard sam-
+ples from the non-matching region. As the non-matching
+region typically encompasses a substantial part of the graph
+G, this approach notably diminishes sparsity.
+
+3.3.2 Connectivity Prediction
+
+Influenced by Graph-RCNN [43] that predicted a related-
+ness to prune object pairs, we propose a connectivity pre-
+diction that predicts whether at least one edge between two
+object nodes exists for the relation extraction. We get a
+connectivity graph ˆE ∈ RN ×N ×1 in a similar way to get
+the relation graph in Eq. (6) with the same relation source
+representations. Instead of MLPrel for multi-label predic-
+tion, we use another MLPcon for binary classification. We
+calculate the binary cross entropy loss from the permutated
+connectivity graph as follows: Lcon = Lr( ˆE′, E).
+
+3.3.3 Inference
+
+For model inference, we get triplet scores by multiplying
+predicate score ˆGijk by the corresponding class scores of
+j . Note that we set ˆGiik to 0 to prevent self-
+i and ˆvc
+ˆvc
+connections in which the subject and object are the same
+entity. In addition, we enhance the triplet scores by utilizing
+the connectivity score ˆEijk. By multiplying the connectiv-
+ity score, we can effectively filter out the triplets that are not
+likely to have a relation between the subject and object.
+
+4. Experiments
+
+4.1. Datasets and Evaluation Settings
+
+We conduct experiments on two SGG datasets. We describe
+the datasets and evaluation settings for each dataset. De-
+tailed settings for each dataset are presented in the supple-
+mentary materials.
+
+Visual Genome. Visual Genome [12] is the most repre-
+sentative SGG dataset, consisting of 57K training images,
+5K validation images, and 26K test images. We follow
+the popular Visual Genome split, retaining the most fre-
+quent 150 object categories and 50 relation categories. We
+adopt Scene Graph Detection (SGDet) evaluation settings
+and report Recall@k (R@k) which is class agnostic and
+mean Recall@k (mR@k) that aggregates the recalls for
+each predicate category. Following Motifs [45], these met-
+rics are measures with graph constraint, which means each
+
+object pair can have a single predicate category. Since they
+are only related to triplet detection of the scene graph, we
+report AP50 that evaluates the detection performance of all
+objects appearing in the scene. Furthermore, we report the
+number of model parameters and Frames Per Second (FPS)
+to measure efficiency.
+
+Open Image V6. Open Image V6 [13] is also widely used
+dataset, comprising of 126K images for training, 2K for val-
+idation, and 5K for test set. It includes 601 object categories
+and 30 relation categories. For evaluation, we adopt both
+recall and weighted mean AP (wmAP) following standard
+settings. For recall evaluation, micro-R@50 is adopted. The
+wmAP is evaluated with two settings: wmAPrel for predict-
+ing boxes of subject entity and object entity separately and
+wmAPphr for predicting a union box of them. The final
+score is calculated by 0.2×micro-R@50+0.4×wmAPrel +
+0.4 × wmAPphr.
+
+4.2. Implementation Details
+
+We employ Deformable DETR [50] that improves the con-
+vergence speed of the DETR with ResNet-50 [6] as a back-
+bone.
+It is worth noting that our approach can be ex-
+tended to any object detector that incorporates self-attention
+mechanisms between object features, including models like
+DETR [1], Sparse R-CNN [35], and others. We follow
+the configurations of the original Deformable DETR, ex-
+cept that we use only 200 object queries. To speed up con-
+vergence, we first train the object detector with the target
+dataset and subsequently train the SGG task using the pre-
+trained object detector, similar to prior work [17]. To cal-
+culate the overall loss in Equation 7, λrel is set to 15. λcon
+is set to 30 and 90 for the Visual Genome and Open Image
+V6, respectively. We set α as 10−14 for adaptive smoothing
+and both kneg and knon are set to 80.
+
+4.3. Results
+
+We present quantitative results and perform a compara-
+tive analysis of our proposed framework with representative
+SGG models. Additional experimental results are included
+in the supplementary materials.
+
+Visual Genome.
+Visual Genome results are shown
+in Tab. 1. Our proposed method demonstrates compet-
+itive performance with the current one-stage SGG mod-
+els that have 1.5 to 6.5 times larger parameters with the
+fastest inference speed. In particular, our method achieves
+the highest object detection performance and shows com-
+parable performance in the triplet detection compared to
+SSR-CNN [38], the state-of-the-art method. The results
+demonstrate that our method can generate scene graphs in
+an efficient and effective way by exploiting the by-products
+of the object detector. By applying logit adjustment [38],
+a technique for predicting tail predicate classes well, our
+
+6
+
+Model
+
+# params (M)
+
+FPS
+
+AP50
+
+R@20
+
+R@50
+
+R@100
+
+mR@20
+
+mR@50
+
+mR@100
+
+e
+g
+a
+t
+s
+-
+o
+w
+
+t
+
+e
+g
+a
+t
+s
+-
+e
+n
+o
+
+IMP (EBM) [34, 42]
+VTransE [47]
+Motifs [45]
+VCTree [36]
+VCTree (TDE) [36, 37]
+VCTree (EBM) [34, 36]
+GPS-Net [20]
+BGNN [16]
+
+FCSGG [21]
+RelTR [7]
+SGTR [17]
+Relationformer [32]
+Iterative SGG [9]
+SSR-CNN [38]
+SSR-CNN [38] LA,τ =0.3
+
+EGTR (Ours)
+EGTR (Ours) LA,τ =0.7
+EGTR (Ours) LA,τ =0.5
+EGTR (Ours) LA,τ =0.3
+
+322.2
+312.3
+369.9
+361.5
+361.3
+372.5
+-
+341.9
+
+87.1
+63.7
+117.1
+92.9
+93.5
+274.3
+274.3
+
+42.5
+42.5
+42.5
+42.5
+
+2.0
+3.5
+1.9
+0.8
+0.8
+-
+-
+1.7
+
+6.0
+13.4
+6.2
+8.5
+6.0
+4.0
+4.0
+
+14.7
+14.7
+14.7
+14.7
+
+28.1
+-
+28.1
+28.1
+28.1
+28.1
+-
+29.0
+
+28.5
+26.4
+25.4
+26.3
+27.7†
+23.8†
+23.8†
+
+30.8
+30.8
+30.8
+30.8
+
+18.1
+24.5
+25.1
+24.8
+14.0
+24.2
+-
+23.3
+
+16.1
+21.2
+-
+22.2
+-
+25.8
+18.4
+
+23.5
+15.7
+19.7
+22.4
+
+25.9
+31.3
+32.1
+31.8
+19.4
+31.4
+31.1
+31.0
+
+21.3
+27.5
+24.6
+28.4
+29.7
+32.7
+23.3
+
+30.2
+18.7
+24.2
+28.2
+
+31.2
+35.5
+36.9
+36.1
+23.2
+35.9
+35.9
+35.8
+
+25.1
+-
+28.4
+31.3
+32.1
+36.9
+26.5
+
+34.3
+20.5
+26.7
+31.7
+
+2.8
+5.1
+4.1
+4.9
+6.9
+5.7
+-
+7.5
+
+2.7
+6.8
+-
+4.6
+-
+6.1
+13.5
+
+5.5
+12.1
+11.0
+8.8
+
+4.2
+6.8
+5.5
+6.6
+9.3
+7.7
+6.7
+10.7
+
+3.6
+10.8
+12.0
+9.3
+8.0
+8.4
+17.9
+
+7.9
+17.8
+17.1
+14.0
+
+5.4
+8.0
+6.8
+7.7
+11.1
+9.1
+8.6
+12.6
+
+4.2
+-
+15.2
+10.7
+8.8
+10.0
+21.4
+
+10.1
+21.7
+21.4
+18.3
+
+Table 1. Graph-Constraint results on the test set of Visual Genome dataset. We report the results of representative two-stage SGG
+models based on the Faster R-CNN [29] object detector with a ResNeXt-101-FPN [18, 41] backbone and concurrent one-stage SGG
+models. Among the one-stage models, the best is highlighted in bold, and the second-best is indicated with underlining. LA denotes logit
+adjustment proposed in SSR-CNN [38]. † represents that we concatenate the predicted subjects and objects and then apply non-maximum-
+suppression with a threshold of 0.3. Italic indicates the evaluation of metrics using publicly available model checkpoints. FPS is measured
+with a single V100 for images resized to a minimum of 600 for the shortest side and a maximum of 1000 for the longest side.
+
+Model
+
+score
+
+micro-R@50
+
+wmAPrel
+
+wmAPphr
+
+Motifs [45]
+VCTree [36]
+GPS-Net [20]
+BGNN [16]
+
+RelTR [7]
+SGTR [17]
+SSR-CNN [38]
+
+EGTR (Ours)
+
+38.9
+40.2
+41.7
+42.1
+
+43.0
+42.3
+49.4
+
+48.6
+
+71.6
+74.1
+74.8
+75.0
+
+71.7
+59.9
+76.7
+
+75.0
+
+29.9
+34.2
+32.9
+33.5
+
+34.2
+37.0
+41.5
+
+42.0
+
+31.6
+33.1
+34.0
+34.2
+
+37.5
+38.7
+43.6
+
+41.9
+
+Table 2. Results on test set of Open Image V6. The score is a
+weighted sum of micro-R@50, wmAPrel, and wmAPphr.
+
+method performs favorably in the trade-off between R@k
+and mR@k, showing superiority over existing state-of-the-
+art models. Note that for triplet detection models [9, 38]
+without an explicit object detector, AP50 is measured by
+applying non-maximum-suppression (NMS) to the union of
+predicted subjects and objects set. AP50 performance is
+discussed further in the section 4.5.
+
+Open Image V6. As depicted in Tab. 2, the experiments
+conducted on the Open Image V6 dataset also demon-
+strate competitive performance, underscoring the effective-
+ness and robustness of our method across different datasets.
+
+4.4. Ablation Studies
+
+We analyze the effects of our model components. All of the
+ablation studies are done with the Visual Genome dataset.
+
+Relation Sources. In Tab. 3, we investigate the source of
+
+relations used for the relation extractor. To verify the ben-
+efits of using attention queries and keys, we change Ql and
+K l in Eq. (3) to Z l, the hidden states of each layer. Re-
+markably, when simply using the hidden states of all layers,
+the triplet detection performance decreases. Surprisingly,
+the performance is lower than that of using only Rz from
+the last layer. On the other hand, when only attention by-
+products are used as a relation source, the performance is
+similar to that of using only hidden states of the last layer,
+the most contextualized representations for detecting ob-
+jects.
+Incorporating both attention by-products and final
+hidden states yields improved performance by amalgamat-
+ing varied information. The results underscore that the at-
+tention by-products of the object detectors contain rich in-
+formation for relation extraction.
+
+Training Techniques. In Tab. 4, we ablate proposed tech-
+niques. Without any techniques, our model framework
+shows low performance. When each technique is applied,
+it substantially improves both R@50 and mR@50, and the
+best performance is achieved when all techniques are com-
+bined. The results demonstrate that our proposed tech-
+niques help to train the model framework effectively. Addi-
+tional experimental results are provided in the supplemen-
+tary materials.
+
+Sampling Methodology. In Tab. 5, we investigate the im-
+pact of hard sampling methods for the negative and non-
+matching regions. Hard negatives and hard non-matchings
+show a trade-off that improves the performance of R@50
+
+7
+
+Rl
+
+a source
+Ql & Kl
+Zl
+-
+Ql & Kl
+
+Rl
+a
+✓
+✓
+
+✓
+
+Rz
+
+✓
+✓
+✓
+
+R@50
+
+mR@50
+
+Model
+
+30.2
+29.6
+29.9
+29.8
+
+7.9
+7.4
+7.6
+7.7
+
+Iterative SGG [9]†
+SSR-CNN [38]†
+EGTR (Ours)
+
+AP50
+
+27.7
+23.8
+30.8
+
+AP50rel
+
+AP50no-rel
+
+24.3
+20.2
+24.3
+
+7.8
+7.4
+10.7
+
+Table 3. Ablation study on relation source.
+
+adaptive smoothing
+
+Lcon
+
+sampling
+
+R@50
+
+mR@50
+
+✓
+
+✓
+
+✓
+
+✓
+
+✓
+✓
+
+26.6
+28.3
+29.6
+28.9
+30.2
+
+5.3
+6.5
+7.0
+7.1
+7.9
+
+Table 4. Ablation study on proposed techniques.
+
+hard negative
+
+hard non-matching
+
+R@50
+
+mR@50
+
+✓
+✓
+
+✓
+
+✓
+
+30.2
+30.0
+29.6
+
+7.9
+7.1
+7.7
+
+Table 5. Ablation study on sampling methods.
+
+and mR@50, respectively, and additional performance im-
+provements are achieved for both measures when they are
+used together. For hard negatives, we speculate that R@50
+performance is improved by selecting negatives for the tail
+predicate class, which is likely to exist in reality but is not
+in the annotation. For hard non-matchings, mR@50 per-
+formance seems to have improved by choosing object can-
+didates that are akin to the ground truth objects but un-
+matched with them. This encourages the model to pre-
+dict diverse predicate classes by preventing duplicate ob-
+ject pairs, which are likely to predict head predicate classes,
+from being predicted.
+
+4.5. Discussion
+
+Regarding the highest AP50 score, we posit that it is be-
+cause our proposed method focuses on not only objects with
+relations but also objects without any relations. To validate
+this, we calculate AP50 for two subsets of the ground-truth
+objects:
+those with relations and those without relations.
+We compare our method with two triplet detection-based
+models. Tab. 6 illustrates that our method achieves signif-
+icantly high AP50no-rel. Considering that triplet detection
+performance is related to AP50rel, while triplet detection-
+based models only focus on objects with relations to detect
+triplets well, our method is capable of extracting the com-
+plete scene graph, including objects without relations.
+
+For further analysis, we visualize bounding boxes for
+subjects and objects from the top 20 predictions in Fig. 5.
+For SSR-CNN [38], which directly predicts triplets, we ob-
+serve a significant number of overlapping bounding boxes.
+On the other hand, our proposed model leverages predic-
+
+Table 6. AP50 for two subsets of objects. AP50rel and AP50no-rel
+denote scores evaluated only on objects having at least one edge
+and no edge, respectively. Note that each measure operates on its
+unique scale since the ground-truth objects used for each measure
+differ. † indicates that additional NMS is applied to the union of
+subjects and objects set.
+
+(a) SSR-CNN [38]
+
+(b) EGTR (Ours)
+
+Figure 5. Comparison of detected subjects and objects. We
+select the top 20 predictions of SSR-CNN and EGTR and visualize
+bounding boxes of detected subjects and objects.
+
+tions from an explicit object detector, reducing redundant
+predictions. Furthermore, our method detects various sub-
+jects and objects that appear in the scene rather than focus-
+ing on objects that are more likely to have relations.
+
+5. Conclusion
+
+In this study, we propose the lightweight one-stage scene
+graph generator EGTR. We significantly reduce the model
+complexity by harnessing the relationships among the ob-
+ject queries learned from the self-attention layers of the
+object decoder. Furthermore, we devise a novel adaptive
+smoothing technique that helps multi-task learning of ob-
+ject detection and relation extraction by adjusting the re-
+lation label according to the object detection performance.
+As an auxiliary task of relation extraction, connectivity pre-
+diction contributes to the effective learning of EGTR. We
+conduct extensive experiments and ablation studies, and the
+results demonstrate that EGTR achieves the highest object
+detection performance and competitive triplet detection ca-
+pabilities with the fastest inference speed.
+
+Acknowledgements. We thank Taeho Kil, Geewook Kim,
+and the anonymous reviewers for their insightful comments
+and suggestions.
+
+8
+
+Authors’ Contribution
+
+Jinbae Im initiated and led the project, proposed the
+main ideas, and made significant contributions throughout
+the process, including implementation, experiments, and
+manuscript writing. JeongYeon Nam implemented exper-
+imental ideas, conducted a major part of the experiments,
+and made significant contributions to the manuscript writ-
+ing and the development of the paper’s direction. Nokyung
+Park managed the reproduction and validation of other
+models, conducted performance evaluations and compar-
+isons, and contributed to enhancing the model’s perfor-
+mance and manuscript writing. Hyungmin Lee designed
+and conducted a proof of concept experiment associated
+with the model architecture and implemented and con-
+ducted experiments mainly related to relation prediction.
+Seunghyun Park co-initiated the project, advised it from
+its inception, participated in manuscript writing, and signif-
+icantly contributed to shaping the project’s direction as a
+senior researcher.
+
+References
+
+[1] Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas
+Usunier, Alexander Kirillov, and Sergey Zagoruyko. End-
+to-end object detection with transformers. In ECCV, pages
+213–229, 2020. 1, 2, 3, 4, 6, 11
+
+[2] Zhe Chen, Shaoli Huang, and Dacheng Tao. Context refine-
+ment for object detection. In ECCV, pages 71–86, 2018. 2
+[3] Yuren Cong, Michael Ying Yang, and Bodo Rosenhahn.
+Reltr: Relation transformer for scene graph generation. IEEE
+TPAMI, 2023. 1, 3, 11, 15
+
+[4] Naina Dhingra, Florian Ritter, and Andreas Kunz. Bgt-net:
+Bidirectional gru transformer network for scene graph gen-
+eration. In CVPR, pages 2150–2159, 2021. 2
+
+[5] Lizhao Gao, Bo Wang, and Wenmin Wang. Image captioning
+with scene-graph based semantic concepts. In ICMLC, pages
+225–229, 2018. 1
+
+[6] Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun.
+In CVPR,
+
+Deep residual learning for image recognition.
+pages 770–778, 2016. 6, 11
+
+[7] Han Hu, Jiayuan Gu, Zheng Zhang, Jifeng Dai, and Yichen
+Wei. Relation networks for object detection. In CVPR, pages
+3588–3597, 2018. 2, 7
+
+[8] Justin Johnson, Ranjay Krishna, Michael Stark, Li-Jia Li,
+David Shamma, Michael Bernstein, and Li Fei-Fei. Image
+In CVPR, pages 3668–3678,
+retrieval using scene graphs.
+2015. 1
+
+[9] Siddhesh Khandelwal and Leonid Sigal.
+
+Iterative scene
+
+graph generation. In NeurIPS, 2022. 1, 3, 7, 8, 15
+
+[10] Dong-Jin Kim, Jinsoo Choi, Tae-Hyun Oh, and In So
+Kweon. Dense relational captioning: Triple-stream networks
+In CVPR, pages 6271–
+for relationship-based captioning.
+6280, 2019. 1
+
+[11] Rajat Koner, Suprosanna Shit, and Volker Tresp. Relation
+
+transformer network. ECCV, pages 422–439, 2022. 2, 15
+
+[12] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A Shamma, et al. Visual genome:
+Connecting language and vision using crowdsourced dense
+image annotations. IJCV, 123:32–73, 2017. 2, 5, 6
+
+[13] Alina Kuznetsova, Hassan Rom, Neil Alldrin, Jasper Ui-
+jlings, Ivan Krasin, Jordi Pont-Tuset, Shahab Kamali, Stefan
+Popov, Matteo Malloci, Alexander Kolesnikov, et al. The
+open images dataset v4: Unified image classification, object
+detection, and visual relationship detection at scale. IJCV,
+128(7):1956–1981, 2020. 2, 6
+
+[14] Linjie Li, Zhe Gan, Yu Cheng, and Jingjing Liu. Relation-
+aware graph attention network for visual question answering.
+In ICCV, pages 10313–10322, 2019. 1
+
+[15] Lin Li, Guikun Chen, Jun Xiao, Yi Yang, Chunping Wang,
+and Long Chen. Compositional feature augmentation for
+In ICCV, pages 21685–
+unbiased scene graph generation.
+21695, 2023. 2
+
+[16] Rongjie Li, Songyang Zhang, Bo Wan, and Xuming He.
+Bipartite graph network with adaptive message passing for
+In CVPR, pages 11109–
+unbiased scene graph generation.
+11119, 2021. 1, 2, 7, 11
+
+[17] Rongjie Li, Songyang Zhang, and Xuming He. Sgtr: End-
+to-end scene graph generation with transformer. In CVPR,
+pages 19486–19496, 2022. 1, 3, 6, 7, 11, 13, 15
+
+[18] Tsung-Yi Lin, Piotr Dollar, Ross Girshick, Kaiming He,
+Bharath Hariharan, and Serge Belongie. Feature pyramid
+networks for object detection. In CVPR, pages 2117–2125,
+2017. 7
+
+[19] Tsung-Yi Lin, Priya Goyal, Ross Girshick, Kaiming He, and
+Piotr Doll´ar. Focal loss for dense object detection. In CVPR,
+pages 2980–2988, 2017. 11
+
+[20] Xin Lin, Changxing Ding, Jinquan Zeng, and Dacheng Tao.
+Gps-net: Graph property sensing network for scene graph
+generation. In CVPR, pages 3746–3753, 2020. 1, 2, 7
+[21] Hengyue Liu, Ning Yan, Masood Mortazavi, and Bir Bhanu.
+Fully convolutional scene graph generation. In CVPR, pages
+11546–11556, 2021. 1, 3, 7, 15
+
+[22] Wei Liu, Dragomir Anguelov, Dumitru Erhan, Christian
+Szegedy, Scott Reed, Cheng-Yang Fu, and Alexander C
+Berg. Ssd: Single shot multibox detector. In ECCV, pages
+21–37, 2016. 6
+
+[23] Yong Liu, Ruiping Wang, Shiguang Shan, and Xilin Chen.
+Structure inference net: Object detection using scene-level
+In CVPR, pages
+context and instance-level relationships.
+6985–6994, 2018. 2
+
+[24] Ilya Loshchilov and Frank Hutter. Decoupled weight decay
+
+regularization. In ICLR, 2019. 12
+
+[25] Cewu Lu, Ranjay Krishna, Michael Bernstein, and Li Fei-
+Fei. Visual relationship detection with language priors. In
+ECCV, pages 852–869, 2016. 2
+
+[26] Yichao Lu, Himanshu Rai, Jason Chang, Boris Knyazev,
+Guangwei Yu, Shashank Shekhar, Graham W Taylor, and
+Maksims Volkovs. Context-aware scene graph generation
+In ICCV, pages 15931–15941,
+with seq2seq transformers.
+2021.
+
+9
+
+[42] Danfei Xu, Yuke Zhu, Christopher B Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing.
+In
+CVPR, pages 5410–5419, 2017. 1, 2, 7, 11
+
+[43] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi
+Parikh. Graph r-cnn for scene graph generation. In ECCV,
+pages 670–685, 2018. 6
+
+[44] Xu Yang, Kaihua Tang, Hanwang Zhang, and Jianfei Cai.
+Auto-encoding scene graphs for image captioning. In CVPR,
+pages 10685–10694, 2019. 1
+
+[45] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin
+Choi. Neural motifs: Scene graph parsing with global con-
+text. In CVPR, pages 5831–5840, 2018. 1, 2, 6, 7, 11, 15
+[46] Cheng Zhang, Wei-Lun Chao, and Dong Xuan. An empirical
+study on leveraging scene graphs for visual question answer-
+ing. In BMVC, 2019. 1
+
+[47] Hanwang Zhang, Zawlin Kyaw, Shih-Fu Chang, and Tat-
+Seng Chua. Visual translation embedding network for visual
+relation detection. In CVPR, page 3107–3115, 2017. 7
+[48] Ji Zhang, Kevin J Shih, Ahmed Elgammal, Andrew Tao,
+and Bryan Catanzaro. Graphical contrastive losses for scene
+graph parsing. In CVPR, pages 11535–11543, 2019. 11
+[49] Chaofan Zheng, Xinyu Lyu, Yuyu Guo, Pengpeng Zeng,
+Jingkuan Song, and Lianli Gao. Learning to generate scene
+graph from head to tail. In ICME, pages 1–6. IEEE, 2022. 2
+[50] Xizhou Zhu, Weijie Su, Lewei Lu, Bin Li, Xiaogang Wang,
+and Jifeng Dai. Deformable detr: Deformable transformers
+for end-to-end object detection. In ICLR, 2021. 2, 3, 6, 11,
+15
+
+[27] Yukuan Min, Aming Wu, and Cheng Deng. Environment-
+invariant curriculum relation learning for fine-grained scene
+graph generation. In ICCV, pages 13296–13307, 2023. 2
+[28] Alejandro Newell and Jia Deng. Pixels to graphs by associa-
+
+tive embedding. NeurIPS, 30, 2017. 1, 3
+
+[29] Shaoqing Ren, Kaiming He, Ross Girshick, and Jian Sun.
+Faster r-cnn: Towards real-time object detection with region
+proposal networks. NeurIPS, 28, 2015. 2, 7
+
+[30] Hamid Rezatofighi, Nathan Tsoi, JunYoung Gwak, Amir
+Sadeghian, Ian Reid, and Silvio Savarese. Generalized in-
+tersection over union: A metric and a loss for bounding box
+regression. In CVPR, pages 658–666, 2019. 11
+
+[31] Sebastian Schuster, Ranjay Krishna, Angel Chang, Li Fei-
+Fei, and Christopher D Manning. Generating semantically
+precise scene graphs from textual descriptions for improved
+image retrieval. In Proceedings of the fourth workshop on
+vision and language, pages 70–80. Association for Compu-
+tational Linguistics, 2015. 1
+
+[32] Suprosanna Shit, Rajat Koner, Bastian Wittmann, Johannes
+Paetzold, Ivan Ezhov, Hongwei Li, Jiazhen Pan, Sahand
+Sharifzadeh, Georgios Kaissis, Volker Tresp, et al. Relation-
+former: A unified framework for image-to-graph generation.
+In ECCV, pages 422–439, 2022. 1, 3, 7, 13
+
+[33] Gopika Sudhakaran, Devendra Singh Dhami, Kristian Kerst-
+ing, and Stefan Roth. Vision relation transformer for unbi-
+ased scene graph generation. In ICCV, pages 21882–21893,
+2023. 2
+
+[34] Mohammed Suhail, Abhay Mittal, Behjat Siddiquie, Chris
+Broaddus, Jayan Eledath, Gerard Medioni, and Leonid Sigal.
+Energy-based learning for scene graph generation. In CVPR,
+pages 13936–13945, 2021. 7
+
+[35] Peize Sun, Rufeng Zhang, Yi Jiang, Tao Kong, Chenfeng
+Xu, Wei Zhan, Masayoshi Tomizuka, Lei Li, Zehuan Yuan,
+Changhu Wang, and Ping Luo. Sparse r-cnn: End-to-end
+object detection with learnable proposals. In CVPR, pages
+14454–14463, 2021. 2, 3, 6, 14, 15
+
+[36] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan Luo,
+and Wei Liu. Learning to compose dynamic tree structures
+for visual contexts. In CVPR, pages 6619–6628, 2019. 1, 2,
+7, 11
+
+[37] Kaihua Tang, Yulei Niu, Jianqiang Huang, Jiaxin Shi, and
+Hanwang Zhang. Unbiased scene graph generation from bi-
+ased training. In CVPR, pages 3716–3725, 2020. 7
+
+[38] Yao Teng and Limin Wang. Structured sparse r-cnn for di-
+rect scene graph generation. In CVPR, pages 19437–19446,
+2022. 1, 3, 6, 7, 8, 11, 15
+
+[39] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszko-
+reit, Llion Jones, Aidan N Gomez, Łukasz Kaiser, and Illia
+Polosukhin. Attention is all you need. NeurIPS, 30, 2017. 2,
+3
+
+[40] Sanghyun Woo, Dahun Kim, Donghyeon Cho, and In So
+Kweon. Linknet: Relational embedding for scene graph.
+NeurIPS, 31, 2018. 2
+
+[41] Saining Xie, Ross Girshick, Piotr Dollar, Zhuowen Tu, and
+Kaiming He. Aggregated residual transformations for deep
+neural networks. In CVPR, pages 1492–1500, 2017. 7, 15
+
+10
+
+EGTR: Extracting Graph from Transformer for Scene Graph Generation
+
+Overview of Supplementary Material
+
+2. Evaluation Details
+
+Supplementary Material
+
+This supplementary material provides detailed information
+not covered in the main manuscript due to space constraints.
+First, Sec. 1 describes the bipartite matching and the de-
+tailed loss function for object detection. Then, in Sec. 2,
+we introduce the evaluation methods for each dataset used
+in our study: Visual Genome and Open Image V6. Sec. 3
+provides the implementation details. Finally, Sec. 4 shows
+the results of various additional experiments.
+
+1. Method Details
+
+1.1. Bipartite Matching
+
+We apply the bipartite matching used in DETR [1] to match
+N predicted objects set {ˆvi}N
+i=1 and M ground truth ob-
+jects set {vi}M
+i=1. Since N is set large enough to handle
+all objects appearing in the image, we pad the ground truth
+objects with ϕ (no object). Subsequently, we find the best
+permutation σ of N predicted objects that minimizes the
+bipartite matching costs as follows:
+
+σ = argmin
+
+ˆσ∈SN
+
+N
+(cid:88)
+
+i=1
+
+Lmatch(vi, ˆvˆσ(i)),
+
+(9)
+
+i}N
+
+i , ˆv′c
+
+match(vc
+
+i ) + λbLb
+
+i=1, where ˆv′
+
+where SN denotes all possible permutations of N pre-
+dicted objects. From the best permutation σ, we denote
+the permutated predictions as {ˆv′
+i = ˆvσ(i).
+The matching cost Lmatch is defined as Lmatch(vi, ˆv′
+i) =
+λcLc
+match(vb
+i ) with class matching
+cost Lc
+match and box matching cost Lb
+match. Note that the
+is ϕ. Lc
+matching cost is not considered when vc
+i
+match
+is defined as negative likelihood and Lb
+match is defined as
+Lb
+i ) = λIoULIoU(vb
+i ||1, where
+LIoU indicates generalized intersection over union (IoU)
+loss [30]. Note that Lc
+match is changed to fit the focal
+loss [19] for Deformable DETR [50].
+
+i ) + λL1||vb
+
+match(vb
+
+i , ˆv′b
+
+i , ˆv′b
+
+i , ˆv′b
+
+i , ˆv′b
+
+1.2. Object Detection Loss
+
+We use the bipartite matching loss proposed in DETR for
+object detection. From the permutated predictions {ˆv′
+i=1,
+we compute the loss for N matched pairs of the predicted
+objects and the ground truth objects as follows:
+
+i}N
+
+Lod =
+
+N
+(cid:88)
+
+i=1
+
+[λcLc(vc
+
+i , ˆv′c
+
+i ) + 1vc
+
+i ̸=ϕ(λbLb(vb
+
+i , ˆv′b
+
+i ))],
+
+(10)
+
+where the loss consists of class loss Lc and box loss Lb
+that is the same as box matching cost Lb
+match. For Lc, cross-
+entropy loss is used for DETR, and focal loss is used for
+Deformable DETR.
+
+11
+
+2.1. Visual Genome
+
+Among various evaluation methods for the scene graph
+generation task, including scene graph detection (SGDET),
+scene graph classification (SGCLS), and predicate classi-
+fication (PRDCLS) [42], we adopt the SGDET evaluation
+protocol due to its rigorous and comprehensive nature com-
+pared to other methods. Unlike SGCLS or PRDCLS, where
+ground truth categories or box coordinates of objects are
+given, SGDET evaluates the performance of entity cate-
+gories and box coordinates for each subject and object, as
+well as predicate categories collectively. We use the widely
+adopted value of 50% as the thresholding parameter for IoU
+incorporated in SGDET. We also adopt the graph constraint
+evaluation method proposed in Zellers et al. [45], which en-
+forces a limit of one predicted predicate between a given
+subject and object entity. We select the top 1 predicate for
+each object pair, as determined by multiplying the predicate
+score ˆGijk by the connectivity score ˆEij and multiplying
+the corresponding class scores of the subject ˆvc
+i and object
+entity ˆvc
+j . We use recall at k (R@k) and mean recall at k
+(mR@k) [36] as evaluation metrics. mR@k is a balanced
+version of R@k in that mR@k can compensate for the bias
+of predicate categories by aggregating for all predicate cat-
+egories.
+
+2.2. Open Image V6
+
+Open Image V6 is also assessed in the SGDET setting.
+We adopt recall and weighted mean AP (wmAP) follow-
+ing the standard settings proposed in Zhang et al. [48].
+For recall, micro-R@50 is used following previous stud-
+ies [3, 16, 17, 38]. For wmAP considering the ratio of
+each predicate category as the weight, wmAP of rela-
+tionships (wmAPrel) and wmAP of phrases (wmAPphr) are
+adopted. wmAPrel evaluates whether both the subject en-
+tity and object entity boxes have IoU greater than 50% with
+the corresponding ground truth boxes. wmAPrel evaluates
+the single box that encloses the boxes of the subject en-
+tity and the object entity. The final score is calculated by
+0.2 × micro-R@50 + 0.4 × wmAPrel + 0.4 × wmAPphr.
+During model inference, we select the top 2 predicates for
+each object pair following previous works [17, 38].
+
+3. Implementation Details
+
+Our object detector backbone is based on Deformable
+DETR [50] with ResNet-50 [6]. To shorten the conver-
+gence time, we pre-train the object detector backbone us-
+
+f type
+
+# Params(M)
+
+R@50
+
+mR@50
+
+dot product attention
+dot product
+Hadamard product
+sum
+concat
+
+41.3
+41.3
+41.5
+41.5
+41.6
+
+25.9
+27.4
+29.1
+29.5
+29.9
+
+6.2
+6.8
+7.2
+7.3
+7.9
+
+λrel
+
+R@50
+mR@50
+
+5
+
+29.1
+7.3
+
+10
+
+29.1
+7.3
+
+15
+
+29.4
+7.3
+
+20
+
+28.8
+7.0
+
+Table 3. Experiments for relation extraction loss coefficient
+λrel. We fix λcon to 0 and conduct experiments on λrel first.
+
+Table 1. Ablation for relation function. Since concat repre-
+sents the relationship between the attention query and attention
+key without loss of information, it shows the best performance
+among all f variants.
+
+λcon
+
+R@50
+mR@50
+
+0
+
+29.4
+7.3
+
+15
+
+29.7
+7.4
+
+30
+
+30.2
+7.9
+
+45
+
+29.6
+7.4
+
+Lcon
+
+✓
+✓
+
+connectivity score
+
+R@50
+
+mR@50
+
+✓
+
+29.4
+29.4
+30.2
+
+7.3
+7.6
+7.9
+
+Table 2. Ablation for connectivity loss and score. Lcon denotes
+whether the model is trained with loss for connectivity prediction.
+connectivity score denotes whether we use connectivity score for
+sorting predicted relation triplets in evaluation. Results show that
+using connectivity loss and score both improve performance.
+
+ing 8 V100 GPUs with a batch size of 32, employing
+AdamW [24] optimizer with a default learning rate of 10−4
+and a decreased learning rate of 10−5 for ResNet-50. EGTR
+is trained on 8 V100 GPUs with a batch size of 64, using
+a learning rate of 2 × 10−4 for the relation extractor and
+scaling down the learning rates for the object detector and
+ResNet-50 by 100 and 1000 times, respectively. Following
+the original DETR training scheme, we adopt a learning rate
+schedule that reduces the learning rate by a factor of 10 af-
+ter the model has trained to some extent. Instead of a fixed
+learning schedule, we apply an adaptive schedule through
+early stopping. For the object detector pretraining, we set
+the maximum number of epochs to 150 for the first schedule
+and 50 for the second schedule. In the main EGTR training,
+we configure the first schedule for 50 epochs and the sec-
+ond schedule for 25 epochs. For the hyperparameters of the
+bipartite matching and object detection loss, we follow the
+configurations of the original Deformable DETR. λc, λb,
+λIoU, and λL1 are set to 2, 1, 2, and 5, respectively. For
+Open Images V6, we only apply hard negative sampling,
+which is assumed to contribute to mAP performance.
+
+4. Additional Results
+
+4.1. Ablation Studies
+
+Relation Function. We conduct an ablation study on the re-
+lation function f , as presented in Tab. 1. To evaluate the im-
+pact of different relation functions, we conduct experiments
+
+Table 4. Experiments for connectivity prediction loss coeffi-
+cient λcon. λrel is set to the optimal value 15 from Tab. 3.
+
+S and W l
+
+a; ...; RL
+using only the self-attention relation sources [R1
+a ]
+without the final relation source Rz. Furthermore, we do not
+use linear weights W l
+O for relation source represen-
+tations; therefore, using the dot product attention function
+entails utilizing the self-attention weights in their original
+form. Surprisingly, using only the attention weights of the
+object detector shows consistently high results, supporting
+our hypothesis that self-attention contains information rele-
+vant to relations. Additionally, excluding only the softmax
+function from dot product attention significantly improves
+performance. We also explore different element-wise func-
+tions for the relation function, including Hadamard product,
+sum, and concat. Among these, concat, which preserves the
+representations of attention query and key, exhibits the best
+performance.
+Connectivity Prediction. We perform ablation studies on
+the connectivity loss Lcon used during training and the con-
+nectivity score employed during inference. As outlined
+in Tab. 2, both connectivity loss and connectivity score con-
+tribute to the performance improvements. These findings
+indicate that connectivity loss serves as a hint loss for the re-
+lation extraction loss, and the connectivity score effectively
+filters out candidates of object pairs that are less likely to
+have relations.
+
+4.2. Model Selection
+
+Loss Function. Due to the vast search space for the hy-
+perparameters of the loss function, we first set the connec-
+tivity prediction loss coefficient λcon to 0 and explore the
+relation extraction loss coefficient λrel in increments of 5,
+which is the bounding box L1 loss coefficient λL1, as shown
+in Tab. 3. Then we explore λcon in multiplies of tuned λrel
+as shown in Tab. 4. Since the relation tensor is sparse, rela-
+tively high loss coefficients improve the performance.
+Adaptive Smoothing. To choose a hyperparameter α rep-
+resenting the minimum uncertainty for adaptive smoothing,
+
+12
+
+mR@50
+
+kneg
+
+knon
+
+R@50
+
+mR@50
+
+α
+
+10−13
+10−14
+10−15
+
+R@50
+
+30.1
+30.2
+30.0
+
+7.8
+7.9
+7.8
+
+Table 5. Experiments for adaptive smoothing hyperparame-
+ter α. We set the hyperparameter range of α with the validation
+uncertainty of the initialized model. Hyperparameters within the
+range have similar performances; however, 10−14 shows the best
+performance.
+
+kneg
+
+10
+20
+40
+80
+160
+
+knon
+
+10
+20
+40
+80
+160
+
+R@50
+
+mR@50
+
+29.6
+29.9
+30.0
+30.2
+29.9
+
+8.2
+8.2
+8.1
+7.9
+7.7
+
+Table 6. Experiments for sampling hyperparameter kneg and
+knon. We choose kneg and knon as 80 which shows the best R@50.
+
+we first set the hyperparameter range for α. Since the un-
+certainty measured through the bipartite matching is sen-
+sitive to related configurations such as the number of ob-
+ject queries N and weights used to calculate matching cost
+Lmatch, we devise the method to explore the hyperparame-
+ter range in advance. We find the hyperparameter range by
+measuring the validation uncertainty when the model is ini-
+tialized. To reflect the situation in which the model is initial-
+ized with random weights, the hyperparameter range is cho-
+sen so that the valid uncertainty can cover a wide range be-
+tween 0 and 1. We experiment with α of 10−13, 10−14, and
+10−15 corresponding to valid uncertainties of 0.844, 0.487,
+and 0.135, respectively. Results shown in Tab. 5 demon-
+strate that the performance is relatively robust regardless
+of the hyperparameters. Judging from the fact that 10−14
+where initial valid uncertainty is 0.487 performs the best,
+setting initial valid uncertainty close to 0.5 might be suit-
+able for the situation where the model weights are randomly
+initialized.
+Sampling Methodology. We explore hyperparameters kneg
+and knon for negative sampling and non-matching sampling,
+respectively. To narrow down the hyperparameter range, we
+set kneg equal to knon. Results in Tab. 6 illustrate a trade-
+off, where increasing the sampling coefficients enhances
+the amount of information on triplets not representing the
+ground truth relations, and decreasing the coefficient re-
+duces the sparsity of the ground truth relation graph. We
+select kneg and knon as 80, yielding the best R@50.
+
+In addition to sampling hyperparameters, we perform
+comprehensive experiments on sampling options, as pre-
+
+13
+
+0
+80
+-
+
+80
+80
+80
+
+-
+-
+0
+
+80
+80
+80
+
+0
+80
+-
+
+0
+-
+-
+
+29.4
+30.2
+30.0
+
+29.7
+30.2
+29.8
+
+29.7
+29.7
+29.2
+
+7.4
+7.9
+7.9
+
+6.8
+7.9
+7.2
+
+7.0
+7.2
+6.8
+
+Table 7. Experiments for sampling options. “-” denotes that we
+use the whole region without sampling. 0 indicates that the region
+is not considered. Sampling from both negative and non-matching
+regions shows the best performance.
+
+sented in Tab. 7. For the negative region and non-matching
+region, we explore the following three options: one that
+considers the entire region without sampling (-), another
+that considers only a portion of it through sampling (80),
+and a third that does not consider the region (0). The re-
+sults indicate that considering the entire region or ignoring
+it is suboptimal, and sampling in both regions is crucial for
+performance.
+
+4.3. Analysis
+
+Backbone. To observe whether the performance improves
+with a heavier backbone, we conduct experiments using
+ResNet-101 as the backbone instead of ResNet-50. It shows
+improved object detection performance and relation extrac-
+tion performance: AP50 32.3 (+1.5), R@50 30.8 (+0.6),
+and mR@50 8.1 (+0.2). However, the improvement in
+the relation extraction performance is relatively lower com-
+pared to the enhancement in the object detection perfor-
+mance. We speculate that the capacity of the Transformer
+decoder might be more crucial than the CNN backbone for
+the performance of the relation extraction.
+Adaptive Smoothing. Since proposed adaptive smoothing
+can be applied to any one-stage SGG model that utilizes
+the explicit object detector, we apply the technique to Rela-
+tionformer [32] and SGTR [17], where object detection loss
+is used and detected objects are related to relation extrac-
+tion. We conduct experiments using publicly available code
+and adapt the technique based on the characteristics of each
+model. Since Relationformer uses softmax cross-entropy
+with an additional “no relation” class for the relation ex-
+traction, we apply smoothing for the ground truth relation
+class and compensate the target value of the “no relation”
+class by the same amount. In our reproduced experiments,
+it shows improved performance: R@50 26.61(+0.12),
+mR@50 8.54(+0.71), and ng-R@50 28.84(+0.76) where
+
+Figure 1. The comparison of predicate category distribution based on graph regions. We compare the predicate categories of GT, hard
+negatives, and hard non-matchings for the validation dataset using histograms. We sort the predicate categories based on their frequency
+in the training dataset.
+
+ng denotes no graph constraints. Since SGTR matches de-
+tected objects with triplets through graph assembling, we
+apply relation smoothing on predicate labels based on the
+uncertainties of the detected objects matching the subjects
+and objects in triplets. Our smoothing method enhances
+overall performance: R@50 24.36(+0.04) and mR@50
+12.88(+0.75). The results demonstrate the generality of the
+adaptive smoothing. Exploring the possibility of applying
+the adaptive smoothing based on matching costs of subjects
+and objects for triplet detection models that do not use an
+explicit object detector could be an interesting avenue for
+future research.
+Sampling Methodology. We compare the distribution
+of predicate categories for hard negatives and hard non-
+matchings with that of the GT as shown in Fig. 1. Since the
+non-matching region is composed of object candidates that
+do not match with the ground truth objects and object candi-
+dates that closely resemble ground truth objects are selected
+as hard non-matchings, hard non-matchings exhibit a preva-
+lence of the head predicate categories similar to the GT. On
+the contrary, hard negatives exhibit a relatively lower pro-
+portion of the head categories, and tail categories are more
+frequently selected. As the negative region is constructed
+from object candidates that match the ground truth objects,
+it seems that hard negatives are selected from tail classes
+that are likely to exist in reality but are not annotated.
+Gated Sum. We examine the utilization of relation source
+representations from each layer in the gating mechanism
+on Fig. 2. Remarkably, the gate values for the first self-
+
+Figure 2. Aggregated gate values from all layers. We aggregate
+the N × N shaped gate matrices for each layer and report the
+average over the entire validation dataset.
+
+attention source representations, which precede the cross-
+attention layer and do not utilize any image information,
+are close to 1.0. Since object queries are trained to reflect
+the diverse distribution of objects in the training data [35],
+the relationship information between object queries appears
+to be utilized as a primary bias, reflecting the various ob-
+ject relationships in the training data. After passing through
+the cross-attention layer once, the gate values of the second
+self-attention source representations are very low. However,
+they gradually increase as the model incorporates image in-
+
+14
+
+onwearswalking onbetweenwalking inflying inPredicate category (sorted by the frequency in the train set)0.00.10.20.30.4ProportionGThard negativehard non-matchingg1ag2ag3ag4ag5ag6agzGates from all layers0.00.20.40.60.81.0Aggregated valuesBackbone
+
+# of params (M)
+
+FPS MACs (G)
+
+Models
+
+AP50
+
+R@50
+
+mR@50
+
+Model
+
+FCSGG [21]
+
+RelTR [3]
+
+SGTR [17]
+Iterative SGG [9]
+
+Relationformer [11]
+EGTR (Ours)
+
+-
+
+DETR-50
+
+DETR-101
+DETR-101
+
+DDETR-50
+DDETR-50
+
+SSR-CNN [38]
+
+SRCNN-X101-FPN
+
+87.1
+
+63.7
+
+117.1
+93.5
+
+92.9
+42.5
+
+274.3
+
+6.0
+
+13.4
+
+6.2
+6.0
+
+8.5
+14.7
+
+4.0
+
+655.7
+
+67.6
+
+127.0
+130.3
+
+336.7
+132.4
+
+297.7
+
+Table 8. Efficiency of one-stage SGG models.
+In addition to
+FPS, we measure MACs, which account for theoretical complex-
+ity. “-50” represents ResNet50, “-101” denotes ResNet-101, and
+“-X101-FPN” signifies ResNeXt-101-FPN [41]. “DDETR” corre-
+sponds to Deformable DETR [50], and “SRCNN” corresponds to
+Sparse-RCNN [35]. For a fair comparison, the image size is set to
+a minimum of 600 for the shortest side and a maximum of 1000
+for the longest side. FPS is measured in a single V100.
+
+formation well. In particular, from the fourth self-attention
+source representations, the gate values are higher than those
+of the relation source representations in the final layer.
+
+4.4. Efficiency
+
+As depicted in Tab. 8, we report Multiply-ACcumulation
+(MACs) to assess efficiency in addition to the number of pa-
+rameters and frames per second (FPS). MACs quantify the
+number of multiply and accumulate operations performed
+by a neural network during the inference phase. It is worth
+noting that MACs are estimated to be roughly half the num-
+ber of Floating Point Operations (FLOPs). For a fair com-
+parison, the image size is set to a minimum of 600 for the
+shortest side and a maximum of 1000 for the longest side.
+
+It seems that EGTR has relatively high MACs, consider-
+ing the superior efficiency in terms of the number of param-
+eters and FPS. However, it is noteworthy that our MACs
+are primarily attributed to the Deformable DETR back-
+bone, and additional MACs from our relation extractor are
+only 16.8G. With 100 object queries, Deformable DETR-50
+shows 115.0G MACs, compared to DETR-50 with 56.1G.
+Although Deformable DETR has more than twice the the-
+oretical complexity compared to DETR, we opt for De-
+formable DETR due to its notably enhanced convergence
+speed [50]. Leveraging Deformable DETR as a backbone,
+we use a lightweight relation extractor composed of only
+2.5M parameters, resulting in the fastest inference speed.
+
+4.5. PredCls & SGCls
+
+To assess how well the model can capture the structure of
+the scene given the ground truth objects information, we
+provide results for PredCls and SGCls. As they were in-
+troduced in the two-stage SGG models to measure relation
+prediction given ground truth objects, measuring them in
+
+FCSGG [21]
+RelTR [3]
+EGTR (Ours)
+
+28.5
+26.4
+30.8
+
+41.0 / 23.5 / 21.3
+36.0 / 30.5 / 25.2
+54.3 / 39.8 / 30.2
+
+6.3 / 3.7 / 3.6
+10.8 / 9.3 / 8.5
+16.6 / 11.9 / 7.9
+
+Table 9. Comparison with one-stage SGG models on Visual
+Genome test set. We report results for PredCls, SGCls, and
+SGDet settings, separated by “/”. Italic denotes that we remea-
+sured the score with a publicly available model checkpoint for a
+fair comparison: the ground truth objects are utilized rather than
+ground truth triplets in the original RelTR report.
+
+Figure 3. Qualitative Analysis. For visualization, we select
+the same number of predicted triplets as the ground truth triplets
+within the Visual Genome validation dataset.
+
+one-stage SGG models may involve some arbitrariness. We
+reviewed one-stage studies [3, 21] that had reported Pred-
+Cls and SGCls, and carefully designed measurements for
+one-stage SGG models. We perform bipartite matching for
+object queries with ground truth objects and replace the pre-
+diction of the matched object queries with the correspond-
+ing ground truth objects’ labels. Note that the representa-
+tions of object queries used for the relation prediction re-
+main unchanged. As shown in Tab. 9, EGTR performs well
+in both PredCls and SGCls settings. It demonstrates that
+SGDet performance of EGTR does not solely depend on
+high object detection performance but also relation extrac-
+tion performance.
+
+4.6. Zero-shot Performance
+
+We have noticed that popular technique frequency base-
+line [45] directly influences the zero-shot performance in
+our model. Without the frequency baseline, EGTR demon-
+strates a commendable zR@50 performance with a score of
+2.1 despite a decrease of 0.2 points in R@50 and 0.6 points
+in mR@50.
+
+4.7. Qualitative Results
+
+In Fig. 3, we present qualitative examples of the Visual
+Genome validation dataset. The depicted results illustrate
+the capability of our methodology to generate relationships
+that are both plausible and semantically rich.
+
+15
+
+elephantelephantshortracketearelephantelephanttrunkleghatshirtmanhandlefacetreetreenearnearnearhashasofhashashandhandracketmanarmarmheadshirtshortonhashasonhashashasonhasinholdingwearingonwearingwearingGround Truth Model Predictionholding

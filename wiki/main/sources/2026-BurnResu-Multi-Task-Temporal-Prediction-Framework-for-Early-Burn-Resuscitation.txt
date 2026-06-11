@@ -1,0 +1,1065 @@
+Expert Systems With Applications
+ 
+BurnResu: A Multi-Task Temporal Prediction Framework for Early Burn Resuscitation
+--Manuscript Draft--
+ 
+Manuscript Number:
+ESWA-D-26-21224
+Article Type:
+Full length article
+Section/Category:
+1.2 AI in biology and medicine
+Keywords:
+Burn shock;  Fluid resuscitation;  deep learning;  Personalized medicine;  clinical
+decision support
+Corresponding Author:
+Xiaoguang Lin
+Chinese Academy of Sciences Chongqing Institute of Green and Intelligent
+Technology
+chongqi, CHINA
+First Author:
+Xinyu Liu
+Order of Authors:
+Xinyu Liu
+Jingyuan Lang
+Xiaoguang Lin
+Haisheng Li
+Ranran sun
+Xueliang Zhao
+Qihan Wu
+Zhiqiang Yuan
+Ning Li
+Gaoxing Luo
+Abstract:
+Burn shock is a leading cause of early mortality in patients with severe burns, and fluid
+resuscitation requires balancing the competing risks of hypoperfusion and fluid
+overload. Although empirical formulas are widely used for initial guidance, they provide
+population-level estimates and fail to adapt to the evolving hemodynamic status of
+individual patients. In this study, we developed and internally validated BurnResu, a
+hierarchical temporal deep learning framework that jointly predicts fluid type and
+infusion rate for the first 72 hours after injury. Using retrospective data from 364
+patients with severe burns, the model integrates baseline characteristics, hourly vital
+signs, and fluid-administration histories in a rolling prediction paradigm: at each time
+point, all information available up to that point is used to predict clinician resuscitation
+decisions in the subsequent hour. BurnResu employs multi-scale temporal encoding to
+capture both rapid hemodynamic responses and gradual volume shifts, conditions
+these representations on patient-specific baseline features, and couples classification
+and regression heads to jointly determine fluid selection and dosing. The training
+objective enforces cumulative dose fidelity and penalizes physiologically implausible
+infusion trajectories, reflecting the clinical priority of overall volume adequacy over
+pointwise accuracy. On an independent test cohort, BurnResu achieved an AUC of
+0.816 for fluid-type prediction, with dose-estimation performance of MAE = 27.44 mL/h,
+R² = 0.820, and RMSE = 60.04 mL/h.
+Powered by Editorial Manager® and ProduXion Manager® from Aries Systems Corporation
+May 26, 2026
+Institute of Burn Research, State Key Laboratory of Trauma,
+Burns and Combined Injury, Southwest Hospital,
+Third Military Medical University (Army Medical University)
+No. 30 Gaotanyan Main Street, Shapingba District,
+Chongqing 400038, China
+www.xnyy.cn
+Chongqing Institute of Green and Intelligent Technology,
+Chinese Academy of Sciences
+No. 266 Fangzheng Avenue, Shuitu Hi-tech Industrial Park,
+Shuitu Town, Beibei District, Chongqing 400700, China
+www.cigit.cas.cn
+Editorial Office
+Expert Systems with Applications
+Dear Editors,
+This letter accompanies the submission of our manuscript entitled “BurnResu: A Multi-Task
+Temporal Prediction Framework for Early Burn Resuscitation”, which we wish to submit for consideration
+as a research article in Expert Systems with Applications.
+Early fluid resuscitation after severe burns is a representative real-world expert decision-making
+problem. During the first 72 hours after injury, clinicians must continuously determine both the type and
+rate of fluid infusion by integrating burn severity, physiological responses, urine output, and prior fluid-
+administration history. Although empirical formulas such as Parkland and Brooke provide useful initial
+guidance, they are population-level estimates and do not fully adapt to patient-specific hemodynamic
+evolution. This makes early burn resuscitation a meaningful scenario for developing intelligent expert
+systems that combine data-driven temporal learning with domain knowledge.
+From the perspective of expert systems and applied artificial intelligence, this task presents several
+challenges. The data are heterogeneous and sequential, including baseline characteristics, hourly vital
+signs, urine output, and historical fluid administration. The decision target is structured: the system
+needs to infer both categorical fluid-type selection and continuous infusion-rate estimation. In addition,
+clinically acceptable predictions require temporal coherence and physiological plausibility, because
+abrupt or inconsistent infusion recommendations may be difficult to interpret or apply in practice.
+To address these challenges, we propose BurnResu, a hierarchical temporal deep learning framework
+for early burn resuscitation. BurnResu learns from real-world clinician treatment records while incorpo-
+rating clinically guided temporal regularization to improve decision plausibility. The model integrates
+patient baseline characteristics, hourly physiological observations, and previous fluid-administration his-
+tories in a rolling prediction paradigm. At each time point, only information available up to that time is
+used to predict clinician resuscitation decisions in the subsequent hour. The framework jointly predicts
+i
+Cover Letter
+the resuscitation fluid type, including crystalloid, colloid, and glucose, and the corresponding infusion
+rate.
+Methodologically, BurnResu captures multi-scale temporal dependencies through patient-specific
+baseline encoding, multi-scale temporal modeling, and conditioned decoding. The temporal encoder
+captures both rapid hemodynamic responses and gradual volume shifts, while patient-specific condition-
+ing adapts temporal representations according to baseline characteristics such as burn severity, age, and
+inhalation injury. The decision-first training objective couples instantaneous prediction accuracy with
+cumulative dose fidelity and temporal regularization, encouraging smoother and more physiologically
+plausible infusion trajectories.
+We evaluated BurnResu using retrospective data from 364 patients with severe burns. Data splitting
+was performed at the patient level, and all preprocessing procedures were fitted exclusively on the training
+set to avoid information leakage. On an independent test cohort, BurnResu achieved a macro-AUC of
+0.816 for fluid-type prediction, with an MAE of 27.44 mL/h, an R2 of 0.820, and an RMSE of 60.04 mL/h
+for infusion-rate estimation. The proposed framework showed advantages over traditional formula-based
+references, representative machine-learning models, and deep-learning baselines.
+We also emphasize that this study should be interpreted as clinician-decision modeling rather than
+a treatment-effectiveness study. The prediction targets were derived from real-world clinician actions
+rather than randomized treatment comparisons.
+Therefore, the model reflects current resuscitation
+practice patterns and expert decision behavior, but does not by itself establish causal treatment benefit or
+prove superiority over expert care. This distinction is explicitly discussed in the manuscript.
+We believe this work is well aligned with the scope of Expert Systems with Applications. The
+manuscript addresses a complex real-world decision-support problem involving heterogeneous tempo-
+ral data, multi-task prediction, expert decision modeling, and domain-constrained intelligent systems.
+More broadly, BurnResu demonstrates how expert knowledge and data-driven temporal learning can
+be integrated to support sequential decision-making in high-stakes application scenarios. We therefore
+believe that the manuscript will be of interest to researchers working on expert systems, applied artificial
+intelligence, clinical decision support, temporal data modeling, and intelligent healthcare applications.
+For correspondence regarding this manuscript, please contact the corresponding authors:
+Haisheng Li; Tel.: +86 17725160081; Email: lihaisheng@tmmu.edu.cn
+Xiaoguang Lin; Tel.: +86 13638393886; Email: lxg@cigit.ac.cn
+Sincerely yours,
+Xinyu Liu, Jingyuan Lang, Xiaoguang Lin, Haisheng Li, Ranran Sun,
+Xueliang Zhao, Qihan Wu, Zhiqiang Yuan, Ning Li, Gaoxing Luo
+ii
+Title Page 
+BurnResu: A Multi-Task Temporal Prediction Framework for Early Burn 
+Resuscitation 
+Authors 
+Xinyu Liu2,#, Jingyuan Lang1,#, Xiaoguang Lin2,*, Haisheng Li1,*, Ranran Sun1, Xueliang Zhao2, Qihan Wu2, 
+Zhiqiang Yuan1, Ning Li1, Gaoxing Luo1 
+Affiliations 
+1Institute of Burn Research, State Key Laboratory of Trauma, Burns and Combined Injury, Southwest 
+Hospital, Third Military Medical University (Army Medical University), Chongqing 400038, China 
+2Chongqing Institute of Green and Intelligent Technology, Chinese Academy of Sciences, Chongqing 
+400799, China 
+#These authors contributed equally to this work. 
+*Corresponding authors. 
+Corresponding Authors 
+Haisheng Li, M.D. 
+Institute of Burn Research, State Key Laboratory of Trauma, Burns and Combined Injury, Southwest 
+Hospital, Third Military Medical University (Army Medical University), Chongqing 400038, China 
+Tel.: +86 17725160081; Email: lihaisheng@tmmu.edu.cn 
+Xiaoguang Lin, Ph.D. 
+Chongqing Institute of Green and Intelligent Technology, Chinese Academy of Sciences, Chongqing 
+400799, China 
+Tel.: +86 13638393886; Email: lxg@cigit.ac.cn 
+Author Contributions 
+Xinyu Liu: Methodology, Software, Formal analysis, Writing -- original draft. 
+Jingyuan Lang: Data curation, Investigation, Validation. 
+Xiaoguang Lin: Conceptualization, Supervision, Project administration, Writing -- review & editing. 
+Haisheng Li: Conceptualization, Supervision, Project administration, Writing -- review & editing. 
+Ranran Sun: Data curation, Investigation. 
+Xueliang Zhao: Resources, Software. 
+Qihan Wu: Investigation, Validation. 
+Zhiqiang Yuan: Investigation, Visualization. 
+Ning Li: Resources, Supervision. 
+Gaoxing Luo: Conceptualization, Supervision, Funding acquisition. 
+Author Biographical Notes 
+Xinyu Liu is a postgraduate student at the Chongqing Institute of Green and Intelligent Technology, Chinese 
+Academy of Sciences. His research interests include deep learning, temporal modeling, and clinical decision-
+support systems. 
+Jingyuan Lang is an M.D. student at Southwest Hospital, Army Medical University. His major is clinical 
+medicine, and his research focuses on the clinical treatment of burn injuries. 
+Xiaoguang Lin Ph.D., is a Senior Engineer at the Chongqing Institute of Green and Intelligent Technology, 
+Chinese Academy of Sciences. His research interests include artificial intelligence, intelligent systems, and 
+biomedical data analysis. 
+Haisheng Li M.D., is an Associate Chief Physician, Associate Professor, and Deputy Director of the 
+Institute of Burn Research at Southwest Hospital, Army Medical University. He specializes in burn care and 
+critical care medicine. 
+Ranran Sun is an M.D. student at Southwest Hospital, Army Medical University. Her major is clinical 
+medicine, and her research focuses on the clinical treatment of burn injuries. 
+Xueliang Zhao Ph.D., is a Senior Engineer at the Chongqing Institute of Green and Intelligent Technology, 
+Chinese Academy of Sciences. His research interests focus on artificial intelligence. 
+Qihan Wu is a postgraduate student at the Chongqing Institute of Green and Intelligent Technology, Chinese 
+Academy of Sciences, with a background in computer science. 
+Zhiqiang Yuan M.D., is an Associate Chief Physician, Associate Professor, and Deputy Director of the 
+Institute of Burn Research at Southwest Hospital, Army Medical University. He specializes in burn care and 
+critical care medicine. 
+Ning Li is a Chief Nurse and Head Nurse at Southwest Hospital, Army Medical University. She specializes 
+in burn care and critical care nursing. 
+Gaoxing Luo M.D., is a Chief Physician, Professor, and Director of the Institute of Burn Research at 
+Southwest Hospital, Army Medical University. He specializes in burn care and critical care medicine. 
+Highlights
+BurnResu: A Multi-Task Temporal Prediction Framework for Early Burn Resuscitation
+• BurnResu models multi-scale physiology for early burn resuscitation.
+• Patient conditioning personalizes fluid decisions using baseline risk factors.
+• A decision-first loss aligns short-term actions with cumulative dose fidelity.
+• BurnResu achieves 0.816 AUC and 0.820 𝑅2 on 364 severe burn patients.
+Manuscript without author details
+Click here to view linked References
+BurnResu: A Multi-Task Temporal Prediction Framework for Early
+Burn Resuscitation
+A R T I C L E I N F O
+Keywords:
+Burn shock
+Fluid resuscitation
+Deep learning
+Personalized medicine
+Clinical decision support
+A B S T R A C T
+Burn shock is a leading cause of early mortality in patients with severe burns, and fluid
+resuscitation requires balancing the competing risks of hypoperfusion and fluid overload.
+Although empirical formulas are widely used for initial guidance, they provide population-level
+estimates and fail to adapt to the evolving hemodynamic status of individual patients. In this
+study, we developed and internally validated BurnResu, a hierarchical temporal deep learning
+framework that jointly predicts fluid type and infusion rate for the first 72 hours after injury. Using
+retrospective data from 364 patients with severe burns, the model integrates baseline character-
+istics, hourly vital signs, and fluid-administration histories in a rolling prediction paradigm: at
+each time point, all information available up to that point is used to predict clinician resuscitation
+decisions in the subsequent hour. BurnResu employs multi-scale temporal encoding to capture
+both rapid hemodynamic responses and gradual volume shifts, conditions these representations
+on patient-specific baseline features, and couples classification and regression heads to jointly
+determine fluid selection and dosing. The training objective enforces cumulative dose fidelity
+and penalizes physiologically implausible infusion trajectories, reflecting the clinical priority
+of overall volume adequacy over pointwise accuracy. On an independent test cohort, BurnResu
+achieved an AUC of 0.816 for fluid-type prediction, with dose-estimation performance of MAE
+= 27.44 mL/h, 𝑅2 = 0.820, and RMSE = 60.04 mL/h.
+1. Introduction
+Burn injuries represent a major global health burden, occurring in civilian, industrial, and mass casualty settings
+and causing substantial physical, psychological, and economic burden(James et al., 2020). In patients with severe burns
+(total body surface area, TBSA > 30%), extensive capillary leakage leads to marked intravascular fluid loss and burn
+shock—a leading cause of early mortality(Cartotto et al., 2022). Effective fluid resuscitation within the first 48 hours
+after injury is critical to prevent hypoperfusion and organ failure; however, inadequate or excessive fluid administration
+can deepen burn wounds, prolong the shock phase, and increase mortality(Guilabert et al., 2016; Greenhalgh, 2019).
+In clinical practice, resuscitation is typically guided by empirical formulas (e.g., Parkland, Brooke) that estimate
+fluid requirements from body weight and burn size(Baxter and Shires, 1968; Diver, 2008). While simple and widely
+applicable, these formulas do not account for inter-patient variability or evolving hemodynamics, and their accuracy
+depends on TBSA estimation, which is often error-prone in non-specialist settings(Kahn et al., 2010; Parvizi et al.,
+2014). In resource-limited settings where burn specialists are unavailable, delayed or suboptimal resuscitation can lead
+to shock progression and poor clinical outcomes(Zhu et al., 2020). These limitations motivate data-driven decision-
+support systems that integrate dynamic physiological information for individualized fluid management(Alvarado et al.,
+2009; Burn and Trauma Branch of Chinese Geriatrics Society, 2020).
+Preprint submitted to Elsevier
+Page 1 of 17
+BurnResu: Multi-Task Prediction for Early Burn Resuscitation
+Prior computational efforts, including rule-based decision-support systems and urine-output–driven titration
+models, have shown promise for standardizing resuscitation; however, these approaches do not leverage modern deep
+learning to jointly model the full complexity of multimodal temporal data, nor do they capture patient-specific temporal
+dynamics at scale.
+Recent advances in temporal deep learning—including temporal convolutional networks, Transformers, and multi-
+task architectures—have shown considerable potential for modeling complex, non-stationary physiological time
+series in critical care(Benes et al., 2014; Chiao et al., 2018). By learning from multimodal data (vital signs, fluid
+administration histories, baseline characteristics), deep learning models can capture subtle inter-individual variability
+that formula-based methods miss. In burn resuscitation, fluid requirements evolve over time in response to multiple
+interacting physiological factors, making the problem well-suited for such approaches. In this study, we developed
+BurnResu, a hierarchical temporal deep learning framework that jointly predicts fluid types and infusion rates for
+individualized early burn resuscitation by modeling physiological dynamics at multiple time scales and conditioning
+predictions on patient-specific baseline characteristics. The main contributions of this study are as follows:
+• Construction of a real-world, multimodal dataset specifically designed for early burn resuscitation;
+• Development of BurnResu, a hierarchical temporal prediction framework for fluid-type classification and dose
+prediction;
+• Evaluation showing that the model achieves favorable performance relative to traditional resuscitation formulas
+and representative machine-learning and deep-learning methods.
+2. Related Works
+2.1. Computational Fluid Resuscitation
+Computational approaches to burn fluid resuscitation remain limited. The open-loop CDSS of Salinas et al.(Salinas
+et al., 2011) models crystalloid infusion with exponential decay curves and urine-output–guided adjustments but lacks
+patient-specific temporal modeling of dynamic physiological trajectories. Luo et al.(Luo et al., 2015) proposed a
+urine-output–driven titration model, demonstrating that adaptive, physiology-responsive strategies can improve fluid
+management. Prior to these efforts, several empirical resuscitation formulas have been developed and widely adopted,
+including the Parkland, Brooke, Evans, and TMMU formulas(Baxter and Shires, 1968; Diver, 2008; Kahn et al., 2010),
+which estimate fluid requirements from body weight and burn size but do not incorporate real-time physiological
+feedback. Table 1 summarizes the most commonly used burn resuscitation formulas and their fluid-type–specific dosing
+strategies across the first 48 hours post-injury.
+Preprint submitted to Elsevier
+Page 2 of 17
+BurnResu: Multi-Task Prediction for Early Burn Resuscitation
+Table 1
+Common burn resuscitation formulas
+First 24 hours
+Second 24 hours
+Formula
+Crystalloid
+Colloid
+Glucose
+Crystalloid
+Colloid
+Glucose
+Evans-F
+1.0
+1.0
+2k
+0.5
+0.5
+2k
+Brooke-F
+1.5
+0.5
+2k
+0.75
+0.25
+2k
+Parkland-F
+4.0
+–
+–
+–
+–
+*
+Monafo-F
+2.0
+–
+–
+1.0
+–
+–
+TMMU-F
+1.0
+0.5
+2k
+0.5
+0.25
+2k
+RJH-F
+0.75
+0.75
+3–4k
+0.375
+0.375
+3–4k
+PLA-304F
+0.9–1.0
+0.9–1.0
+3–4k
+0.7–0.75
+0.7–0.75
+3k
+TMMU-DRF
+1.3
+1.3
+2k
+0.5
+0.25
+2k
+a Glucose refers to a 50 g/L glucose solution; “k” denotes ×1000; “*” indicates maintaining urine output at 30–50 mL/h.
+b Electrolytes include lactated Ringer’s solution (Brooke, Parkland, Ruijin) or 30 g/L NaCl with 250 mmol/L sodium citrate (Monafo).
+c Units: crystalloid and colloid volumes are expressed in mL⋅kg−1⋅%TBSA−1, except for the colloid component in Parkland-F, which
+is reported in mL. Glucose volumes are expressed in mL.
+d “*” in Parkland-F indicates adjusting fluids to maintain urine output at 30–50 mL/h.
+Despite these advances, existing computational methods are primarily rule-based or regression-driven and do not
+leverage deep learning to jointly model multimodal temporal data. No prior approach has addressed the simultaneous
+prediction of fluid-type selection and infusion-rate estimation from multivariate time-series data in burn resuscitation.
+2.2. Multi-Task Learning for Joint Classification and Regression in Healthcare
+Clinical prediction tasks frequently involve coupled decisions—for instance, determining whether to administer
+a treatment (classification) and at what dose (regression). Multi-task learning(Caruana, 1997) provides a principled
+framework for jointly optimizing such heterogeneous objectives by sharing representations across related tasks, which
+can improve generalization compared with training independent single-task models. In healthcare, joint classification–
+regression architectures have been applied to problems such as predicting mortality risk alongside length of stay,
+detecting arrhythmia type while estimating its severity, and identifying the need for mechanical ventilation together
+with expected duration. These formulations reflect the clinical reality that treatment decisions are interdependent: the
+choice of intervention and its intensity are governed by overlapping physiological determinants and should be modeled
+accordingly. In burn resuscitation, fluid-type selection (crystalloid, colloid, or glucose) and infusion-rate estimation are
+inherently coupled, as the clinical rationale for choosing a particular fluid directly informs the expected dosing range.
+Our work extends the joint classification–regression paradigm to this domain, where shared temporal representations
+capture the physiological context driving both decisions.
+Preprint submitted to Elsevier
+Page 3 of 17
+BurnResu: Multi-Task Prediction for Early Burn Resuscitation
+3. Methods
+3.1. Study Design and Population
+This retrospective study used de-identified clinical data from the Institute of Burn Research, Southwest Hospital,
+Third Military Medical University (Army Medical University), Chongqing, China, for patients admitted between July
+1, 2016 and December 31, 2023. Eligible patients had total burn surface area (TBSA) greater than 30%; burn injuries
+caused by flames, explosions, hydrothermal fluids, or electricity; and admission within 48 hours after injury. Patients
+with incomplete medical records or those not admitted to the ICU were excluded. After screening, 364 cases met the
+inclusion criteria. The study protocol was approved by the Ethics Committee of Southwest Hospital (KY2025135),
+and all procedures complied with the Declaration of Helsinki and relevant national regulations.
+3.2. Dataset Construction
+To construct a dataset tailored for burn shock resuscitation, we implemented a systematic data-processing pipeline
+consisting of data acquisition, annotation and processing, and final dataset assembly. During data acquisition, multi-
+source medical data were collected and integrated. These included baseline patient information (e.g., TBSA, clinical
+interventions, treatment protocols), electronic medical records (EMRs), and high-frequency vital-sign monitoring data
+such as heart rate, blood pressure, and oxygen saturation. For temporal modeling, each patient contributed multiple
+hourly prediction windows within the first 72 hours post-injury, yielding a substantially larger number of time-indexed
+training samples. Data splitting was performed at the patient level to ensure that all prediction windows from a given
+patient were assigned exclusively to the training, validation, or test set.
+3.3. Dataset Annotation and Integration
+As shown in Fig. 1, annotation and structuring were carried out using a human–machine collaborative approach.
+Target information was extracted from the integrated EMRs and subsequently processed through data cleaning, error
+filtering, and imputation. A team of experienced burn specialists standardized key clinical parameters, including
+infusion rates and resuscitation fluid volumes. A fine-tuned ChatGLM3-6B model was deployed to assist automated
+named-entity recognition, extracting medication names, dosages, and administration times from unstructured clinical
+notes. All LLM-extracted entities were verified by two independent clinicians before inclusion. To ensure data quality,
+a double-blind annotation verification process was performed. Baseline vital-sign time-series were then temporally
+aligned, and outliers were corrected.
+In the final dataset generation stage, multimodal data-fusion techniques were used to integrate structured clinical
+data with high-frequency vital-sign monitoring data along a unified timeline. This process produced a cohesive
+spatiotemporal dataset suitable for downstream modeling. The resulting dataset supports efficient timestamp-based
+Preprint submitted to Elsevier
+Page 4 of 17
+BurnResu: Multi-Task Prediction for Early Burn Resuscitation
+Figure 1: Workflow of dataset annotation, integration, and generation.
+retrieval and analysis and provides a foundation for algorithm development and clinical research in burn shock
+resuscitation.
+3.4. Fluid Resuscitation Prediction Model Development
+All predictor variables were limited to information available up to the prediction time point. Baseline features
+were recorded at admission, while time-varying physiological measurements and fluid administration histories were
+temporally aligned and truncated to prevent information leakage. Outcomes were defined exclusively based on clinician
+actions occurring after the prediction time point, ensuring strict temporal separation between predictors and outcomes.
+Missing values in real-world time-series data were handled using a separate neural network–based imputation model
+trained solely on the training set and applied in a forward-only manner using past and contemporaneous observations.
+To model the dynamic and patient-specific nature of burn shock resuscitation, we developed a hierarchical temporal
+architecture that mirrors the clinical reasoning process: establishing a patient-specific physiological baseline, tracking
+hemodynamic evolution across multiple time scales, and modulating fluid decisions based on both immediate dynamics
+and the patient’s overall trajectory. The framework (Fig. 2) receives multivariate time-series inputs 𝐗∈ℝ𝐻×𝐷𝑇and
+static baseline features 𝐛∈ℝ𝐷𝐵, and comprises three stages—a Baseline Encoder, a Multi-Scale Temporal Encoder,
+and a Conditioned Decoder—that jointly predict fluid type and infusion rate.
+Preprint submitted to Elsevier
+Page 5 of 17
+BurnResu: Multi-Task Prediction for Early Burn Resuscitation
+Figure 2: Overview of the BurnResu framework for personalized burn resuscitation.
+Static demographic and injury-severity variables serve as foundational predictors in burn resuscitation. Baseline
+inputs are transformed through two feed-forward layers with layer normalization to obtain a latent embedding 𝐛′ ∈ℝ𝑑,
+which provides patient-specific initialization and conditioning for downstream temporal inference.
+Burn physiology evolves across multiple time scales: rapid hemodynamic responses to fluid boluses occur within
+minutes, while compartmental fluid shifts and third-spacing develop over hours. To capture this hierarchy, the temporal
+encoder employs a dual-pathway design. A dilated convolutional pathway with exponentially growing receptive
+fields encodes fine-grained local dynamics, producing latent temporal states {𝐡𝑡}. In parallel, a causal self-attention
+pathway models long-range, cross-feature interactions with strict temporal ordering to prevent information leakage
+from future time steps. The two pathways produce complementary representations—local reactivity and global trend—
+that are fused into a unified temporal state, enabling the model to track both acute bolus effects and gradual volume
+redistribution.
+Static baseline characteristics—such as burn severity, age, and inhalation injury status—determine a patient’s
+overall fluid responsiveness and should modulate how temporal patterns are interpreted. We introduce a patient-specific
+conditioning mechanism that learns to adaptively scale and shift temporal representations as a function of the baseline
+embedding. Let 𝜸, 𝜷∈ℝ𝑑denote modulation parameters derived from 𝐛′ via learned affine transformations. The
+conditioned temporal features are computed as
+̃𝐡𝑡= (1 + tanh(𝜸)) ⊙𝐡𝑡+ 𝜷,
+(1)
+Preprint submitted to Elsevier
+Page 6 of 17
+BurnResu: Multi-Task Prediction for Early Burn Resuscitation
+enabling the same temporal pattern to produce different infusion responses depending on patient-specific clinical
+context. The conditioned representation is further refined via a lightweight causal convolutional layer and decoded
+through two parallel output heads. A classification head predicts the fluid type (crystalloid, colloid, or glucose), and
+a zero-inflated log-normal (ZILN) regression head estimates the corresponding infusion rate. The ZILN formulation
+explicitly models the clinical reality that most time points involve zero fluid administration, while non-zero doses
+follow a heavy-tailed, positively skewed distribution.
+The baseline encoder maps static features to a latent dimension of 𝑑= 128 through two feed-forward layers with
+layer normalization. The dual-path dilated TCN comprises four stacked residual blocks with kernel size 3 and dilation
+rates of {1, 2, 4, 8}, encoding temporal patterns at exponentially growing receptive fields. The causal Transformer
+consists of two layers with four attention heads and a feed-forward dimension of 256. All intermediate representations
+maintain the dimension 𝑑= 128, and the final classification and regression heads each consist of a single linear
+projection from this shared representation.
+3.5. Loss Function
+Standard per-step regression objectives are ill-suited to burn resuscitation: they penalize small timing mismatches
+as harshly as clinically meaningful dose errors, and they ignore the cumulative trajectory that determines patient
+outcomes. We address this with a decision-first training objective that evaluates predictions at the trajectory level,
+coupling instantaneous accuracy with cumulative dose fidelity—reflecting how clinicians titrate fluids by tracking
+overall volume adequacy rather than optimizing each hourly adjustment in isolation.
+At each time step 𝑡and for each fluid type 𝑐∈{crystalloid, colloid, glucose}, the model outputs a class logit 𝑧𝑡,𝑐
+and a non-negative conditional scale 𝑠𝑡,𝑐= softplus(⋅). The probability of fluid administration is 𝑝𝑡,𝑐= 𝜎(𝑧𝑡,𝑐), and the
+expected instantaneous infusion rate is ̂𝑟𝑡,𝑐= 𝑝𝑡,𝑐𝑠𝑡,𝑐.
+The overall training objective integrates classification, regression, and temporal regularization:
+= 𝜆clscls + reg + tem,
+(2)
+where cls is the Tversky loss(Tversky, 1977) to balance precision and recall under class imbalance, and reg =
+𝜆cumcum + 𝜆pospos supervises infusion accuracy at two levels: cum penalizes deviations between predicted and
+observed cumulative volumes within a clinically acceptable tolerance, preventing per-step accuracy from masking
+trajectory-level drift; pos applies a log-transformed Huber loss exclusively at time points where infusion occurs,
+preventing zero-infusion periods from dominating the gradient. Temporal regularization tem = 𝜆cpcp + 𝜆tvtv +
+𝜆prepre enforces physiologically plausible dynamics via change-point penalties at infusion onset and offset, total-
+variation constraints to suppress oscillations, and preconditioning to stabilize early predictions.
+Preprint submitted to Elsevier
+Page 7 of 17
+BurnResu: Multi-Task Prediction for Early Burn Resuscitation
+Loss weights were set to 𝜆cls = 1.0, 𝜆cum = 0.5, 𝜆pos = 1.0, 𝜆cp = 0.1, 𝜆tv = 0.05, and 𝜆pre = 0.05, determined
+via grid search on the validation set.
+3.6. Model Training and Evaluation
+The model was implemented in PyTorch 1.13 and trained on an NVIDIA A100 GPU using the Adam optimizer
+with an initial learning rate of 1 × 10−3 and a StepLR decay schedule every 100 epochs. Models were trained for up to
+500 epochs with early stopping based on validation performance. Patient-level data were randomly split into training,
+validation, and test sets (70%/15%/15%), and all preprocessing—including robust per-class scaling and a separate
+neural imputation model—was fitted exclusively on the training set to prevent leakage.
+During validation, temperature scaling and decision-threshold optimization were applied, and the resulting
+thresholds were fixed for testing. Cumulative targets were computed causally, and instantaneous predictions were
+clipped at a clinically defined maximum infusion rate. Robustness was assessed using alternative Focal loss(Lin et al.,
+2017) and cosine warm-restart schedules.
+Model evaluation used Macro-F1 as the primary classification metric and area under the receiver operating
+characteristic curve (AUC), precision, and recall as secondary metrics. Regression performance was assessed via mean
+absolute error (MAE), coefficient of determination (𝑅2), and root mean squared error (RMSE), computed over positive-
+flow periods. The dataset comprised longitudinal treatment sequences from 364 patients. On an NVIDIA A100 GPU,
+average inference time was under 5 seconds per patient for a full 72-hour trajectory.
+3.7. Statistical Analysis
+Continuous variables were summarized as median values with interquartile ranges (IQRs), and categorical variables
+were presented as frequencies and percentages. Group differences were assessed using the Mann–Whitney U test for
+continuous variables and the chi-square test or Fisher’s exact test for categorical variables, as appropriate. Associations
+between baseline characteristics and total infused fluid volume were assessed via Pearson and Spearman correlation,
+with results reported as standardized effect sizes in Table 2. Categorical variables describing fluid types (e.g.,
+crystalloid, colloid, glucose) were summarized descriptively by administration frequency.
+4. Results
+As illustrated in Fig. 3, 451 patient records were initially screened and 364 cases were included in the final dataset.
+4.1. Demographics
+As shown in Table 2, male patients accounted for 74.66% of all included patients. The median age was 45.0 years
+and the median BMI was 22.9 kg/m2. The median burn area was 45.0% and the median BSA3rd was 2.0%. In addition,
+Preprint submitted to Elsevier
+Page 8 of 17
+BurnResu: Multi-Task Prediction for Early Burn Resuscitation
+Figure 3: Flow chart of patient selection.
+14.6% of patients were complicated by inhalation injury. Other vital signs and fluid-resuscitation data are listed in
+Table 2.
+4.2. Comparative Performance Evaluation
+We compared BurnResu against classical machine-learning models, representative deep-learning sequence models,
+and an open-loop CDSS modeled after Salinas et al. (Salinas et al., 2011). All methods used identical patient-level
+splits with decision thresholds fixed on the validation set. The rule-based CDSS applies exponential-decay curves with
+TBSA/weight modifiers and urine-output–guided adjustments; since it regulates only infusion rate and does not select
+fluid type, classification metrics are not reported for this baseline.
+Preprint submitted to Elsevier
+Page 9 of 17
+BurnResu: Multi-Task Prediction for Early Burn Resuscitation
+Table 2
+Demographics and clinical features.
+Variable
+Statistics
+Missing rate(%)
+Effect
+𝑝-value
+Demographics and Burn Information
+Age [years]
+45, (28,6)
+–
+0.275
+*
+BMI [kg/m2]
+22.9, (20.2,25.3)
+–
+0.380
+*
+Male [n, (%)]
+271, (74.66)
+–
+-0.107
+*
+TBSA [%]
+45, (36,62.5)
+–
+0.491
+*
+BSA3rd
+2, (0.0,31)
+–
+0.591
+*
+BSAdeep-2nd
+23, (15,32)
+–
+0.062
+0.242
+BSAsuper-2nd
+4, (0.0,12)
+–
+-0.208
+*
+Inhalation Injury [n, (%)]
+53, (14.6)
+–
+0.067
+*
+Vital Signs
+Heart Rate [bpm]
+103, (89,120)
+0.56
+-0.06
+*
+SBP [mmHg]
+132, (121,143)
+0.59
+0.04
+*
+DBP [mmHg]
+76, (69,84)
+0.59
+0.14
+*
+Oxygen Saturation [%]
+100, (99,100)
+0.56
+-0.04
+*
+CVP [cmH2O]
+9, (7,11)
+0.97
+0.13
+*
+Respiratory Rate [/min]
+103, (89,120)
+0.55
+-0.10
+*
+Temperature [◦C]
+37.1, (36.7,37.5)
+0.73
+0.17
+*
+Urine Output [mL⋅kg−1⋅h−1]
+0.87, (0.53, 1.75)
+–
+0.18
+*
+Fluid Management
+Oral Intake [mL⋅kg−1⋅h−1]
+150, (80,260)
+–
+0.01
+*
+Glucose Rate [mL/h]
+150, (100,250)
+–
+–
+–
+Crystalloid Rate [mL/h]
+100, (100,500)
+–
+–
+–
+Colloid Volume [mL]
+110, (100,200)
+–
+–
+–
+Glucose [n, (%)]
+4742 (18.7)
+–
+–
+–
+Crystalloid [n, (%)]
+8942 (35.4)
+–
+–
+–
+Colloid [n, (%)]
+8190 (32.4)
+–
+–
+–
+Total Input Volume [mL/h]
+230, (100,500)
+–
+–
+–
+a Data are expressed as number (proportion) or median (IQR [range]). BMI, body mass index;
+b TBSA, total body surface area; BSA3rd, third-degree burned surface area; BSAdeep-2nd, deep second-degree burned surface
+area; BSAsuper-2nd, superficial second-degree burned surface area; CVP, central venous pressure; SBP, systolic blood pressure;
+DBP, diastolic blood pressure; bpm, beats per minute.
+c Effect: standardized association (Pearson/Spearman correlation or Cohen’s 𝑑) between each variable and total infused fluid
+volume.
+d * indicates p < 0.05, means statistically significant difference.
+Fig. 4 compares ROC–AUC curves across all models. Traditional machine-learning methods exhibit relatively
+flat curves (AUC 0.72–0.80). Deep-learning models perform consistently better, and BurnResu achieves the steepest
+initial rise and the largest AUC (0.816), indicating superior sensitivity–specificity balance and robustness to threshold
+selection.
+4.3. Clinical Effectiveness Evaluation
+To further assess clinical utility, we compared the model’s predicted fluid volumes against those estimated by
+standard resuscitation formulas including the TMMU formula, using MAE and relative error percentage.
+Figure 5 illustrates the relative error (%) of fluid-volume predictions for crystalloid, colloid, and glucose types, as
+well as total fluid volume, across Day 1 (0–24 h), Day 2 (24–48 h), and the overall period. Specifically, BurnResu’s mean
+Preprint submitted to Elsevier
+Page 10 of 17
+BurnResu: Multi-Task Prediction for Early Burn Resuscitation
+Table 3
+Comparative Performance of Machine Learning and Deep Learning Models.
+Model
+Acc
+Recall
+F1
+AUC
+MAE
+𝑅2
+RMSE
+Machine Learning Models
+Regression
+0.723
+0.743
+0.670
+0.763
+73.03
+0.233
+124.0
+Random Forest
+0.665
+0.918
+0.686
+0.653
+72.45
+0.274
+111.4
+SVM
+0.724
+0.743
+0.671
+0.763
+73.03
+0.233
+124.1
+XG-Boost
+0.694
+0.890
+0.699
+0.645
+71.45
+0.326
+107.6
+GBR
+0.727
+0.761
+0.672
+0.763
+30.62
+0.759
+69.42
+Open-loop CDSS Model
+Salinas et al.
+–
+–
+–
+–
+76.8
+0.18
+129.7
+Deep Learning Models
+LSTM
+0.736
+0.768
+0.687
+0.798
+73.86
+0.286
+119.6
+CNN
+0.747
+0.781
+0.688
+0.803
+27.78
+0.810
+61.59
+Transformer
+0.744
+0.747
+0.690
+0.804
+30.90
+0.795
+63.98
+BurnResu w/o Baseline Enc.
+0.499
+0.921
+0.652
+0.735
+74.32
+0.272
+120.8
+BurnResu w/o Temporal Enc.
+0.633
+0.908
+0.629
+0.703
+72.42
+0.392
+110.5
+BurnResu (Full)
+0.742
+0.813
+0.743
+0.816
+27.44
+0.820
+60.04
+a Classification metrics report micro-averaged accuracy (Acc), recall, and F1 score. Per-class macro-averaged metrics are provided
+in Table 5. “–” indicates the Salinas CDSS does not perform fluid-type classification. Regression metrics include mean absolute
+error (MAE) and coefficient of determination (𝑅2).
+relative errors remain within 40% for all categories, demonstrating strong agreement with ground-truth clinical records
+and greater individualization than traditional formula-based estimates. This trend is especially pronounced on Day 2,
+when formula predictions diverge most owing to dynamic physiological changes during burn shock resuscitation,
+highlighting the model’s ability to adapt to time-varying patient states.
+Figure 6 shows representative patients’ 72-hour cumulative fluid intake, including crystalloid, colloid, and glucose
+components. BurnResu closely matches recorded clinical dosing patterns across all phases, capturing both early
+high-volume resuscitation and later controlled reduction. The model also maintains realistic component proportions,
+demonstrating its ability to follow individualized fluid strategies beyond fixed formula assumptions.
+4.4. Ablation Analysis of Model Components
+To assess the contribution of individual components, we performed comprehensive ablation experiments under
+identical training and evaluation settings. The analysis covered (1) input-modality ablation and (2) architectural
+ablation.
+We compared three configurations to evaluate the roles of baseline characteristics and temporal physiological
+signals: BurnResu w/o Temporal Enc., which uses demographic and injury-severity information only without temporal
+physiological input; BurnResu w/o Baseline Enc., which uses time-series physiological data only without static
+baseline features; and the full model, which combines temporal streams and baseline features with FiLM fusion.
+Preprint submitted to Elsevier
+Page 11 of 17
+BurnResu: Multi-Task Prediction for Early Burn Resuscitation
+Figure 4: ROC–AUC comparison of machine-learning and deep-learning models.
+We further ablated core modules: BurnResu w/o self-attention, using only the temporal convolutional backbone;
+BurnResu w/o TCN, using only the Transformer encoder; and BurnResu w/o Flim, replacing FiLM-based conditioning
+with simple additive fusion.
+Preprint submitted to Elsevier
+Page 12 of 17
+BurnResu: Multi-Task Prediction for Early Burn Resuscitation
+Figure 5: Comparison of Errors Between Rule-Based Formulas and the Proposed Model.
+Table 4
+Ablation Analysis of Model Inputs and Architectural Modules.
+Models
+AUC
+F1
+MAE
+RMSE
+BurnResu w/o Temporal Enc.
+0.703
+0.629
+72.42
+110.5
+BurnResu w/o Baseline Enc.
+0.735
+0.652
+74.32
+120.8
+BurnResu w/o self-attention
+0.814
+0.633
+74.67
+112.7
+BurnResu w/o TCN
+0.810
+0.693
+27.63
+60.59
+BurnResu w/o Flim
+0.806
+0.683
+28.88
+64.12
+BurnResu (Full)
+0.816
+0.743
+27.44
+60.04
+All metrics are micro-averaged for classification.
+As shown in Table 4, the full model achieves the best performance across all metrics. Removing the temporal
+encoder causes the largest degradation, confirming that sequential physiological dynamics are the dominant infor-
+mation source. Excluding baseline features, self-attention, the TCN backbone, or FiLM conditioning each reduces
+performance, demonstrating that long-range dependencies, local temporal patterns, and patient-specific adaptation all
+contribute meaningfully.
+In the fluid-type classification task, our method effectively distinguishes major resuscitation strategies, particularly
+crystalloid versus colloid selection. Prediction for free-glucose infusion shows higher variability, which aligns with
+clinical practice: free-glucose use during early burn resuscitation is relatively uncommon and strongly influenced
+Preprint submitted to Elsevier
+Page 13 of 17
+BurnResu: Multi-Task Prediction for Early Burn Resuscitation
+Figure 6: Example 72-hour fluid administration trajectories on the test set.
+Table 5
+Per-class classification performance of BurnResu.
+Fluid Type
+Precision
+Recall
+F1
+AUC
+Crystalloid
+0.685
+0.836
+0.752
+0.794
+Colloid
+0.668
+0.798
+0.727
+0.834
+Glucose
+0.492
+0.801
+0.609
+0.820
+Macro Average
+0.615
+0.812
+0.696
+0.816
+by crystalloid balance and renal status. Prior burn-care studies also report its sporadic and context-dependent
+nature(Guilabert et al., 2016; Pisano et al., 2021).
+5. Discussion
+This study demonstrates that temporal deep learning can predict fluid resuscitation requirements from real-world
+burn-care data despite irregular sampling, missing values, and substantial patient heterogeneity. The proposed model
+achieved competitive classification and regression performance, indicating that multi-scale temporal architectures can
+capture the evolving physiological dynamics that drive fluid needs.
+Treating resuscitation as a continuous sequence rather than as independent time points was critical to model perfor-
+mance. The ablation results show that removing temporal encoding caused the largest drop across all metrics (Table 4),
+Preprint submitted to Elsevier
+Page 14 of 17
+BurnResu: Multi-Task Prediction for Early Burn Resuscitation
+confirming that sequential physiological dynamics—not static baseline features alone—drive fluid requirements. This
+aligns with the clinical trajectory of burn shock, where hemodynamic status evolves over hours and resuscitation must
+track these changes.
+From an architectural perspective, three design choices proved important. The dual-path dilated TCN captured
+multi-resolution temporal features that pure LSTM or Transformer baselines could not match on this moderate-sized
+clinical cohort(Bai et al., 2018; Hochreiter and Schmidhuber, 1997). FiLM-based conditioning(Perez et al., 2018)
+enabled patient-specific adaptation without substantially increasing parameters, yielding consistent gains over simple
+feature concatenation. The joint classification–regression formulation leveraged the inherent coupling between fluid-
+type selection and dose estimation, consistent with findings that multi-task learning improves generalization when
+tasks are semantically related(Caruana, 1997).
+Nevertheless, the present study should be interpreted as a clinician-decision modeling study rather than a treatment-
+effectiveness study. The model learns from retrospective clinician actions recorded in real-world care and therefore
+reflects practice patterns rather than proven optimal therapy. Consequently, although the model shows favorable
+predictive performance, these results do not establish superiority over expert care or prove causal benefit for patient
+outcomes. Prospective studies remain necessary before any clinical deployment.
+Several limitations should be acknowledged. First, the current model is purely supervised and depends heavily
+on the availability and quality of labeled data. In clinical contexts, generating high-quality annotations can be time-
+consuming and costly. Future work may therefore explore self-supervised or reinforcement-learning-based approaches
+to mitigate data scarcity and better align model behavior with long-term patient outcomes. Second, this study relied
+on retrospective single-center data, which limits generalizability. Incorporating multi-center datasets and introducing
+multi-resolution temporal representations, uncertainty estimation, and domain knowledge (e.g., clinical guidelines
+and expert heuristics) could enhance interpretability, robustness, and reliability. Extending the dataset to include
+multimodal sources such as imaging, laboratory, and physiological signals will also be important for validating the
+model across diverse patient populations.
+6. Conclusions
+BurnResu provides a data-driven framework for early burn resuscitation that jointly predicts fluid type and infusion
+rate from multimodal temporal data. On a retrospective cohort of 364 patients, the model captured dynamic patient-
+state evolution and delivered accurate predictions for both classification and regression endpoints. These results
+demonstrate that temporally aware deep learning can manage the complexity and irregularity of real-world clinical
+time series, supporting the integration of such models into critical-care decision-support systems. The source code
+Preprint submitted to Elsevier
+Page 15 of 17
+BurnResu: Multi-Task Prediction for Early Burn Resuscitation
+and implementation details for BurnResu are publicly available at https://github.com/Aveouter/BurnResu to
+support reproducibility.
+Acknowledgements
+We thank all contributors and supporting institutions for their assistance in data preparation, technical support, and
+constructive discussions. Their contributions were essential to the completion of this work.
+Declaration of competing interests
+The authors declare that they have no known competing financial interests or personal relationships that could have
+appeared to influence the work reported in this paper.
+Data availability
+The data used in this study are not publicly available due to institutional and ethical restrictions but may be made
+available upon reasonable request to the corresponding author, subject to institutional review board approval.
+Abbreviations
+TBSA: total body surface area
+SBP: systolic blood pressure
+NER: named entity recognition
+CVP: central venous pressure
+DBP: diastolic blood pressure
+BPM: beats per minute
+BMI: body mass index
+EMR / EMRs: electronic medical record(s)
+IQR: interquartile range
+References
+Alvarado, R., Chung, K.K., Cancio, L.C., Wolf, S.E., 2009. Burn resuscitation. Burns 35, 4–14.
+Bai, S., Kolter, J.Z., Koltun, V., 2018. An empirical evaluation of generic convolutional and recurrent networks for sequence modeling. arXiv
+preprint arXiv:1803.01271 .
+Baxter, C.R., Shires, T., 1968. Physiological response to crystalloid resuscitation of severe burns. Annals of the New York Academy of Sciences
+150, 874–94.
+Preprint submitted to Elsevier
+Page 16 of 17
+BurnResu: Multi-Task Prediction for Early Burn Resuscitation
+Benes, J., Giglio, M., Brienza, N., Michard, F., 2014. The effects of goal-directed fluid therapy based on dynamic parameters on post-surgical
+outcome: a meta-analysis of randomized controlled trials. Critical Care 18, 1–11.
+Burn and Trauma Branch of Chinese Geriatrics Society, 2020. National experts consensus on prevention and treatment of burn shock (2020 version).
+Chinese Journal of Burns 36, 786–92. doi:10.3760/cma.j.cn501120-20200623-00323.
+Cartotto, R., Burmeister, D.M., Kubasiak, J.C., 2022. Burn shock and resuscitation: review and state of the science. Journal of Burn Care & Research
+43, 567–85.
+Caruana, R., 1997. Multitask learning. Machine Learning 28, 41–75.
+Chiao, H.Y., Chou, C.Y., Tzeng, Y.S., Wang, C.H., Chen, S.G., Dai, N.T., 2018. Goal-directed fluid resuscitation protocol based on arterial waveform
+analysis of major burn patients in a mass burn casualty. Annals of Plastic Surgery 80, S21–5.
+Diver, A.J., 2008. The evolution of burn fluid resuscitation. International Journal of Surgery 6, 345–50.
+Greenhalgh, D.G., 2019. Management of burns. New England Journal of Medicine 380, 2349–59.
+Guilabert, P., Usúa, G., Martín, N., Abarca, L., Barret, J., Colomina, M., 2016. Fluid resuscitation management in patients with burns: update. BJA:
+British Journal of Anaesthesia 117, 284–96.
+Hochreiter, S., Schmidhuber, J., 1997. Long short-term memory. Neural Computation 9, 1735–1780.
+James, S.L., Lucchesi, L.R., Bisignano, C., Castle, C.D., Dingels, Z.V., Fox, J.T., et al., 2020. Epidemiology of injuries from fire, heat and hot
+substances: global, regional and national morbidity and mortality estimates from the global burden of disease 2017 study. Injury Prevention 26,
+i36–45.
+Kahn, S.A., Schoemann, M., Lentz, C.W., 2010. Burn resuscitation index: a simple method for calculating fluid resuscitation in the burn patient.
+Journal of Burn Care & Research 31, 616–23.
+Lin, T.Y., Goyal, P., Girshick, R., He, K., Dollár, P., 2017. Focal loss for dense object detection, in: Proceedings of the IEEE International Conference
+on Computer Vision, pp. 2980–8.
+Luo, Q., Li, W., Zou, X., Dang, Y., Wang, K., Wu, J., et al., 2015. Modeling fluid resuscitation by formulating infusion rate and urine output in
+severe thermal burn adult patients: A retrospective cohort study. BioMed Research International 2015, 1–8. doi:10.1155/2015/508043.
+Parvizi, D., Kamolz, L.P., Giretzlehner, M., Haller, H.L., Trop, M., Selig, H., et al., 2014. The potential impact of wrong tbsa estimations on fluid
+resuscitation in patients suffering from burns: things to keep in mind. Burns 40, 241–5.
+Perez, E., Strub, F., de Vries, H., Dumoulin, V., Courville, A., 2018. Film: Visual reasoning with a general conditioning layer, in: Proceedings of
+the AAAI Conference on Artificial Intelligence, pp. 3942–3951.
+Pisano, C., Fabia, R., Shi, J., Wheeler, K., Giles, S., Puett, L., et al., 2021. Variation in acute fluid resuscitation among pediatric burn centers. Burns
+47, 545–50. doi:10.1016/j.burns.2020.04.013.
+Salinas, J., Chung, K.K., Mann, E.A., Cancio, L.C., Kramer, G.C., Serio-Melvin, M.L., et al., 2011. Computerized decision support system improves
+fluid resuscitation following severe burns: An original study. Critical Care Medicine 39, 2031–8. doi:10.1097/CCM.0b013e31821cb790.
+Tversky, A., 1977. Features of similarity. Psychological Review 84, 327–52. doi:10.1037/0033-295X.84.4.327.
+Zhu, F., Zheng, X., Wu, G., 2020. Rethinking of adult burn shock and resuscitation. Chinese Medical Journal 100, 1372–5.
+Preprint submitted to Elsevier
+Page 17 of 17
+Here is key points summarising the key messages of my article 
+I．BurnResu models multi-scale physiology for early burn resuscitation. 
+II．Patient conditioning personalizes fluid decisions using baseline risk factors. 
+III．A decision-first loss aligns short-term actions with cumulative dose fidelity. 
+IV．BurnResu achieves 0.816 AUC and 0.820 R2 on 364 severe burn patients. 
+ 
+Manuscript without author details
+Declaration of Interest Statement 
+Dear Editors: 
+The authors declare that they have no known competing 
+financial interests or personal relationships that could have 
+appeared to influence the work reported in this paper. 
+Haisheng Li 
+ORCID Information 
+Manuscript title: BurnResu: A Multi-Task Temporal Prediction Framework for Early Burn 
+Resuscitation 
+Journal: Expert Systems with Applications 
+The ORCID iDs of the authors are listed below. ORCID iDs not provided at the time of submission are 
+marked as “Not provided”. 
+No. 
+Author 
+Affiliation 
+ORCID iD 
+1 
+Xinyu Liu 
+Chongqing Institute of Green and Intelligent Technology, 
+Chinese Academy of Sciences 
+0009-0009-4543-
+4308 
+2 
+Jingyuan Lang 
+Institute of Burn Research, Southwest Hospital, Army Medical 
+University 
+Not provided 
+3 
+Xiaoguang Lin 
+Chongqing Institute of Green and Intelligent Technology, 
+Chinese Academy of Sciences 
+0000-0001-9533-
+0931 
+4 
+Haisheng Li 
+Institute of Burn Research, Southwest Hospital, Army Medical 
+University 
+Not provided 
+5 
+Ranran Sun 
+Institute of Burn Research, Southwest Hospital, Army Medical 
+University 
+Not provided 
+6 
+Xueliang Zhao 
+Chongqing Institute of Green and Intelligent Technology, 
+Chinese Academy of Sciences 
+Not provided 
+7 
+Qihan Wu 
+Institute of Burn Research, Southwest Hospital, Army Medical 
+University 
+Not provided 
+8 
+Zhiqiang Yuan 
+Institute of Burn Research, Southwest Hospital, Army Medical 
+University 
+Not provided 
+9 
+Ning Li 
+Institute of Burn Research, Southwest Hospital, Army Medical 
+University 
+Not provided 
+10 
+Gaoxing Luo 
+Institute of Burn Research, Southwest Hospital, Army Medical 
+University 
+Not provided 
+Note: If any author has an ORCID iD, please replace “Not provided” with the corresponding 16-digit 
+ORCID identifier in the format 0000-0000-0000-0000. 

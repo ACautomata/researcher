@@ -1,0 +1,1934 @@
+Predicate Debiasing in Vision-Language Models Integration for Scene
+Graph Generation Enhancement
+
+Yuxuan Wang and Xiaoyuan Liu
+Nanyang Technological University
+
+5
+2
+0
+2
+
+r
+p
+A
+9
+2
+
+]
+
+V
+C
+.
+s
+c
+[
+
+3
+v
+4
+8
+1
+6
+1
+.
+3
+0
+4
+2
+:
+v
+i
+X
+r
+a
+
+Abstract
+
+Scene Graph Generation (SGG) provides basic
+language representation of visual scenes, re-
+quiring models to grasp complex and diverse
+semantics between objects. This complexity
+and diversity in SGG leads to underrepresen-
+tation, where parts of triplet labels are rare or
+even unseen during training, resulting in impre-
+cise predictions. To tackle this, we propose inte-
+grating the pretrained Vision-language Models
+to enhance representation. However, due to
+the gap between pretraining and SGG, direct
+inference of pretrained VLMs on SGG leads to
+severe bias, which stems from the imbalanced
+predicates distribution in the pretraining lan-
+guage set. To alleviate the bias, we introduce
+a novel LM Estimation to approximate the
+unattainable predicates distribution. Finally,
+we ensemble the debiased VLMs with SGG
+models to enhance the representation, where
+we design a certainty-aware indicator to score
+each sample and dynamically adjust the en-
+semble weights. Our training-free method ef-
+fectively addresses the predicates bias in pre-
+trained VLMs, enhances SGG’s representation,
+and significantly improve the performance.
+
+1
+
+Introduction
+
+Scene Graph Generation (SGG) is a fundamen-
+tal vision-language task that has attracted much
+effort. It bridges natural languages with scene rep-
+resentations and serves various applications, from
+robotic contextual awareness to helping visually
+impaired people. The key challenge in SGG is to
+grasp complex semantics to understand inter-object
+relationships in a scene.
+
+Existing researches in SGG focus primarily on
+refining model architectures that are trained from
+scratch with datasets like Visual Genome (Krishna
+et al., 2017) or Open Images (Kuznetsova et al.,
+2020). However, SGG tasks inherently face an-
+other challenge of underrepresentation. Due to
+
+Figure 1: Illustration of the underrepresentation issue
+in Visual Genome. We highlight the relation class “car-
+rying" from the top-right imbalanced class distribution.
+We present various samples with their training repre-
+sentation levels and confidence scores for the ground
+truth class, where lower scores indicate poorer predic-
+tion quality. We find that samples less represented by
+the training set tend to have lower-quality predictions.
+
+the inherent complexities of SGG, there exists ex-
+ponential variability of triplets combined by the
+subject, object, and relation (predicate). It is ex-
+tremely challenging for a training set to cover such
+diversity. As a result, a part of the test distribution
+is underrepresented in training, leading to poor pre-
+diction quality. In a severe case, some triplet labels
+that appear in the test set are unseen in training.
+
+In Figure 1, we highlight the relation class “car-
+rying” from Visual Genome, showing samples and
+their confidence scores of the ground truth class
+from a baseline model’s predictions. While well-
+represented samples score higher, the samples la-
+beled with unseen triplets like “woman carrying
+towel" score fairly low. Furthermore, one “woman
+carrying umbrella" scores only 0.15 due to the um-
+brella being closed, while its counterpart with an
+open umbrella scores markedly higher (0.65). Al-
+though the triplet is seen in training set, the closed
+“umbrella” is still short of representation.
+
+A straightforward solution to this issue is to
+
+unseenFrequentRareAll “A carrying B” Triplets in TestRepresentation Level of TrainingWell RepresentedLess RepresentedUnseen TripletsWomancarryingBag0.87WomancarryingSurfboard0.71MancarryingBanana0.81WomancarryingUmbrella0.65WomancarryingUmbrella0.15WomancarryingBag0.12WomancarryingTowel0.05GirlcarryingKite0.07All Relation ClassesFrequency“carrying”“on” 
+ 
+ 
+ 
+ 
+ 
+expand the model’s knowledge by integrating ad-
+vanced vision-language models (VLMs) pretrained
+on extensive datasets (Kim et al., 2021; Li et al.,
+2020, 2019; Qi et al., 2020; Yu et al., 2022; Radford
+et al., 2021), using their comprehensive knowledge
+to compensate for underrepresented samples. Em-
+ploying the Masked Language Modeling (MLM)
+prompt format, such as “woman is [MASK] towel,”
+allows for direct extraction of relation predictions
+from the fill-in answers provided by zero-shot
+VLMs, which fully preserve the pretraining knowl-
+edge. Nonetheless, this direct inference of zero-
+shot models on SGG introduces significant predi-
+cate bias due to disparities in data distribution and
+objectives between pretraining and SGG tasks.
+
+This predicate bias originates from the imbal-
+anced frequency of predicates in the pretraining lan-
+guage set, causing the VLMs to favor the predicates
+that are prevalent in the pretraining data. Unfortu-
+nately, existing debiasing methods rely on explicit
+training distribution, which is often unattainable
+for pretrained VLMs: (1) The pretraining data are
+often confidential. (2) Since the pretraining objec-
+tives are different with SGG, there is no direct label
+correspondence from pretraining to SGG.
+
+To alleviate the predicate bias, we introduce a
+novel approach named Lagrange-Multiplier Es-
+timation (LM Estimation) based on constrained
+optimization. Since there is no explicit distribution
+of relation labels in the pretraining data, LM Esti-
+mation seeks to estimate a surrogate distribution of
+SGG predicates within VLMs. Upon obtaining the
+estimated distribution, we proceed with predicates
+debiasing via post-hoc logits adjustment. Our LM
+Estimation, as demonstrated by comprehensive ex-
+periments, is proved to be exceedingly effective in
+mitigating the bias for zero-shot VLMs.
+
+Finally, we ensemble the debiased VLMs with
+the SGG models to address their underrepresenta-
+tion issue. We observe that some samples are better
+represented by the zero-shot VLM, while others
+align better with the SGG model. Therefore, we
+propose to dynamically ensemble the two models.
+For each sample, we employ a certainty-aware
+indicator to score its representation level in the
+pretrained VLM and the SGG model, which sub-
+sequently determines the ensemble weights. Our
+contributions can be summarized as follows:
+• While existing methods primarily focuses on
+refining model architecture, we are among the
+pioneers in addressing the inherent underrepre-
+sentation issue in SGG using pretrained VLMs.
+
+• Towards the predicates bias underlying in the
+pretraining language set, we propose our LM
+Estimation, a concise solution to estimate the
+unattainable words’ distribution in pretraining.
+• We introduce a plug-and-play method that dy-
+namically ensemble the zero-shot VLMs. Need-
+ing no further training, it minimizes the compu-
+tational and memory burdens. Our method effec-
+tively enhances the representation in SGG, re-
+sulting in significant performance improvement.
+
+2 Related Work
+
+Scene Graph Generation (SGG) is a fundamental
+task for understanding the relationships between
+objects in images. Various of innovations (Tang
+et al., 2019; Gu et al., 2019; Li et al., 2021; Lin
+et al., 2022a, 2020, 2022b; Zheng et al., 2023; Xu
+et al., 2017) have been made in supervised SGG
+from the Visual Genome benchmark (Krishna et al.,
+2017). A typical approach involves using a Faster
+R-CNN (Sun et al., 2018) to identify image regions
+as objects, followed by predicting their interrela-
+tions with a specialized network that considers their
+attributes and spatial context. Existing efforts (Li
+et al., 2021; Lin et al., 2022a,b; Zheng et al., 2023)
+mainly focus on enhancing this prediction network.
+For instance, (Lin et al., 2022b) introduced a regu-
+larized unrolling approach, and (Zheng et al., 2023)
+used a prototypical network for improved represen-
+tation. These models specially tailored for SGG
+has achieved a superior performance.
+Unbiased Learning has been a long-standing chal-
+lenge in classification tasks (Zhu et al., 2022,
+In the specific field of
+2023b, 2024, 2023a).
+SGG, started by (Tang et al., 2020), the debias-
+ing methods (Dong et al., 2022; Li et al., 2021; Yan
+et al., 2020; Li et al., 2022b,a) seek to removing
+the relation label bias stemming from the imbal-
+anced relation class distribution. These works have
+achieved more balanced performance across all re-
+lation classes. However, these methods rely on the
+interfere during training and are not feasible to the
+predicate bias in pre-trained VLMs.
+Pre-trained Vision-Language models (VLMs)
+have been widely applied in diverse vision-
+language tasks (Su et al., 2019; Radford et al., 2021;
+Kim et al., 2021; Li et al., 2020) and have achieved
+substantial performance improvements with the
+vast knowledge base obtained during pre-training.
+Recently works start to adapt the comprehensive
+pre-trained knowledge in VLMs to relation recog-
+nition and scene graph generation (He et al., 2022;
+
+Figure 2: Illustration of our proposed architecture. left: the visual-language inputs processed from image regions
+xi,j and object labels (zi, zj), either provided or predicted by Faster R-CNN detector. middle: the fixed zero-shot
+VLM fzs and the trainable task-specific models fsg, which we use a fine-tuned VLM as example. right: the relation
+label debias process and the certainty-aware ensemble.
+
+Gao et al., 2023; Li et al., 2023; Yu et al., 2023;
+Zhang et al., 2023; Zhao et al., 2023). Through
+prompt-tuning, (He et al., 2022) is the first employ-
+ing VLMs to open-vocabulary scene graph genera-
+tion. Then more approaches (Zhang et al., 2023; Yu
+et al., 2023; Gao et al., 2023) are designed towards
+this task. These works demonstrate the capability
+of VLMs on recognizing relation, inspiring us to
+utilize VLMs to improve the SGG representation.
+
+3 Methodology
+
+3.1 Setup
+
+Given an image data (x, G) from a SGG dataset
+Dsg, the image x is parsed into a scene graph
+G = {V, E}, where V is the object set and E is the
+relation set. Specifically, each object v ∈ V con-
+sists of a corresponding bounding box b and a cat-
+egorical label z either from annotation or predicted
+by a trained Faster R-CNN detector; each ei,j ∈ E
+denotes the relation for the subject-object pair vi
+and vj, represented by a predicate label y ∈ Ce.
+The predicate relation space Ce = {0}∪Cr includes
+one background class 0, indicating no relation, and
+K non-background relations Cr = [K]. The objec-
+tive is to learn a model f that, given the predicted
+objects zi and zj for each pair with their cropped
+image region xi,j = x(bi ∪ bj), produces logits o
+for all relations y ∈ Ce, i.e., o = f (zi, zj, xi,j).
+
+3.2 Method Overview
+
+As depicted in Figure 2, our framework f compris-
+ing two branches: a fixed zero-shot VLM fzs and a
+task-specific SGG model fsg trained on Dsg. Here,
+
+we employ a SGG fine-tuned VLM as fsg, where
+we forward the image region xi,j to the visual en-
+coder and use the prompt template “what is the
+relationship between the {zi} and the {zj}?” as the
+text input. Then, a classifier head is added to the
+[CLS] token to generate logits osg of all relations
+y ∈ Ce. Our experiments also adopt SGG models
+from recent works as fsg.
+
+Another zero-shot model, represented as fzs,
+leverages pretrained knowledge to the SGG task
+without fine-tuning. By providing prompts to zero-
+shot VLMs in the form “{zi} is [MASK] {zj}”, one
+can derive the predicted logits ok
+zs of K relation
+categories from the fill-in answers. In SGG, the
+background class is defined when a relation is out-
+side Cr = [K]. Predicting the background relation
+is challenging for fzs: In pretraining phase, the
+model has not been exposed to the specific defini-
+tion of background. Therefore, we rely solely on
+fsg to produce the logits of background class:
+
+(cid:40)
+
+ok
+zs = fzs(zi, zj, xi,j) ∈ RK
+sg] = fsg(zi, zj, xi,j) ∈ RK+1,
+sg, ok
+
+[o0
+
+(1)
+
+The two branches’ prediction reflect the label dis-
+tribution of their training sets, leading to potential
+predicates bias in output logits if the target distribu-
+tion differs. To address this, we conduct predicate
+debiasing using our Lagrange-Multiplier Estima-
+tion (LM Estimation) method along with logits
+adjustment, generating the debiased logits ˆok
+zs and
+ˆok
+sg. The details are demonstrated in Section 3.3.
+To mitigate the underrepresentation issue, we
+ensemble the debiased two branch to yield the final
+
+Text Prompt (MLM): [CLS] woman is [MASK] bench.Text  Prompt (VQA): [CLS] what is the rela2onship between the woman and the bench?Text Prompt (MLM): [CLS] man is [MASK] bench.Text Prompt (VQA): [CLS] what is the rela2onship between the man and the bench?Fine-tuned VLM (𝑓!") 🔥VL TransformerVisual Tokens…Textual Tokens (VQA)…ClassiﬁerTraining Set FrequencyZero-shot VLM (𝑓#!)❄VL TransformerMLM Head……Visual Tokens…Textual Tokens (MLM)…Lagrange Mul<plier Es<ma<onRela5on Label DebiasText Prompt (MLM): [CLS] woman is [MASK] man.Text Prompt (VQA): [CLS] what is the rela2onship between the woman and the man?𝐱$,&(𝑧$,𝑧&)𝐨!"𝒌log	𝛑$%[𝐨"&';𝐨"&𝒌][𝐨"&';0𝐨"&𝒌]Rela5on Label Debias0𝐨!"𝒌log	𝛑"&Certainty-aware Ensemble∗𝑾()*∗(𝟏−𝑾()*)𝑷)+"=𝑾()*∗9𝑷"&(𝒓|𝑧,,𝑧-,𝐱,,-)+𝟏−𝑾()*∗9𝑷!"(𝒓|𝑧,,𝑧-,𝐱,,-)improved prediction, where we employ a certainty-
+aware indicator to dynamically adjust the ensem-
+ble weights, which is discussed in Section 3.4.
+
+3.3 Predicate Debiasing
+
+Problem Definition. For each subject-object pair
+that has a non-background relation, we denote its
+relation label as r ∈ Cr. Given the logits ok of K
+non-background relation classes, the conditional
+probability on the training set Dtr is computed by:
+
+Ptr(r|zi, zj, xi,j) = softmax(ok)(r), r ∈ Cr (2)
+
+In our task, the training set Dtr can be either the
+SGG dataset Dsg or the pretraining dataset Dpt, on
+which the SGG model fsg and the zero-shot model
+fzs are respectively trained.
+
+In the evaluation phase, our goal is to estimate
+the target test probability Pta rather than Ptr. By
+Bayes’ Rule, we have the following:
+
+P (r|zi, zj, xi,j) ∝ P (zi, zj, xi,j|r) · P (r)
+
+(3)
+
+where P ∈ {Ptr, Pta}. The relation-conditional
+probability term P (zi, zj, xi,j|r) can be assumed
+as the same in training and testing. By changing
+variables and omitting the constant factor, we have:
+
+Ptr(r|zi, zj, xi,j)
+Ptr(r)
+
+=
+
+Pta(r|zi, zj, xi,j)
+Pta(r)
+
+(4)
+
+In a case where training distribution Ptr(r) not
+equals to the target distribution Pta(r), known as
+label shift, the misalignment results in the model’s
+predicted probability Ptr(r|zi, zj, xi,j) not equals
+to the actual test probability, Pta(r|zi, zj, xi,j).
+
+In our framework in Figure 2, fzs is trained on
+Dpt and fsg on Dsg, whose training label distribu-
+tions Ptr(r) are πpt ∈ RK and πsg ∈ RK, respec-
+tively. The prevalent evaluation metric, Recall, is
+designed to assess performance when the test label
+distribution Pta(r) is the same as the training dis-
+tribution πsg. In contrast, the mean recall metric
+seeks to evaluate performance in a uniform test
+distribution where Pta(r) = 1/K. The Ptr(r) and
+Pta(r) in each case can be summarized as follow:
+
+(cid:40)
+
+(cid:40)
+
+Ptr(r) =
+
+πsg,
+πpt,
+
+, Pta(r) =
+
+if fsg
+if fzs
+
+training
+uniform
+(5)
+From Equation 5, we observe that the inequality
+Pta(r) ̸= Ptr(r) holds in the following scenarios:
+
+πsg,
+1
+K ,
+
+• For the SGG model fsg with Ptr(r) = πsg, a
+label shift will be revealed when the test target is
+a uniform distribution evaluated by mean Recall.
+In this scenario, the target distribution Pta(r) =
+1/K diverges from the imbalanced distribution
+πsg in Dsg shown in top right of Figure 1.
+
+• For the zero-shot VLM fzs with Ptr(r) = πpt,
+the Pta(r) ̸= Ptr(r) holds in both training and
+uniform targets. Firstly, the label distribution
+πpt in the pretraining set Dpt differs from πsg,
+resulting in Ptr(r) ̸= πsg under the training-
+aligned target. Secondly, the imbalanced pred-
+icates distribution in Dpt also leads to Ptr(r) ̸=
+1/K under the uniform target distribution.
+
+Post-hoc Logits Adjustments.
+The first case,
+where Ptr(r) = πsg but Pta(r) = 1/K, is a long-
+existing issue with many effective approaches pro-
+posed in SGG. However, existing methods are not
+feasible in the second case for their debiasing in
+the training stage, while the pretraining stage of
+fzs are not accessible. A feasible debiasing method
+for already-trained models is the post-hoc logit ad-
+justment (Menon et al., 2020). Denoting the initial
+prediction logits as ok and the debiased logits as
+ˆok, one can recast Equation 4 into a logits form:
+
+ˆok(r) = ok(r) − log Ptr(r) + log Pta(r)
+
+(6)
+
+It suggests that given the target label distribution,
+the unbiased logits ˆok(r) can be obtained through a
+post-hoc adjustment on the initial prediction logits
+ok(r), following the terms’ value in Equation 5.
+While πsg can be obtained simply by counting the
+label frequencies in Dsg, πpt is the predicates distri-
+bution hidden in the pretraining stage.
+Lagrange Multiplier Estimation. To accurately
+estimate the πpt hidden in the pretraining domain,
+we propose to utilize constrained optimization. Our
+initial step involves collecting all samples that have
+non-background relation labels r ∈ Cr from the
+training or validation set of Dsg. Leveraging the col-
+lected data, our optimization objective is to solve
+the optimal πpt that minimizes the cross-entropy
+loss between the adjusted logits ˆok
+zs (following
+Equation 5 and 6 using πpt) and the ground truth
+relation labels r.
+
+Since the data are collected from Dsg, we des-
+ignate the term Pta(r) to πsg to offset the interfer-
+ence of its label distribution and ensure the solved
+Ptr(r) = πpt. This approach allows us to estimate
+πpt by solving a constrained optimization problem,
+
+where we set the constraints to ensure the solved
+πpt representing a valid probability distribution:
+
+πpt = argmin
+
+πpt
+
+Rce(ok − log πpt + log πsg, r),
+
+s.t. πpt(r) ≥ 0, for r ∈ Cr,
+
+(cid:88)
+
+r∈Cr
+
+πpt(r) = 1 (7)
+
+where Rce is the cross-entropy loss. Equation 7 can
+be solved using the Lagrange-Multiplier method:
+
+πpt = argmin
+
+πpt
+
+max
+λr≥0,v
+
+Rce −
+
+(cid:88)
+
+r
+
+λrπpt(r)
+
++ v(1 −
+
+(cid:88)
+
+r
+
+πpt(r))
+
+(8)
+
+After obtaining πpt and πsg, we can then apply
+the post-hoc logits adjustments for predicates debi-
+asing following Equation 5 and 6, which produces
+two sets of unbiased logits from the initial predic-
+tion of fzs and fsg, denoted as ˆok
+
+zs and ˆok
+sg.
+
+Upon mitigating the predicates bias inside fzs,
+we can leverage the model to address the underrep-
+resentation issue in fsg. From the debiased logits
+ˆok
+zs and ˆok
+sg, we compute the probabilities towards
+r ∈ Cr, where we adopt a τ -calibration outlined in
+(Kumar et al., 2022) to avoid over-confidence:
+
+(cid:40) ˆPzs(r|zi, zj, xi,j) = softmax(ˆok
+ˆPsg(r|zi, zj, xi,j) = softmax(ˆok
+
+zs/τ )r
+sg/τ )r
+
+(9)
+
+3.4 Certainty-aware Ensemble
+
+Considering that each model may better represent
+different samples, we compute a dynamic confi-
+dence score inspired by (Hendrycks and Gimpel,
+2016) for each sample as its certainty in the two
+models, which determines the proportional weight
+Wcer of the two models in ensemble:
+
+
+
+
+conf = max
+r∈Cr
+
+P (r|zi, zj, xi,j), P ∈ { ˆPzs, ˆPsg}
+
+
+
+Wcer ∝ sigmoid(confsg − confzs)
+
+(10)
+The weights are then used to obtain the ensembled
+prediction on Cr:
+
+Pens(r|zi, zj, xi,j) = Wcer ∗ ˆPsg(r|zi, zj, xi,j)
+
++ (1 − Wcer) ∗ ˆPzs(r|zi, zj, xi,j) (11)
+
+Since fzs cannot predict the background relation,
+we rely solely on fsg to compute the background
+probability. Denoting osg = [o0
+sg] as the initial
+
+sg, ok
+
+Figure 3: The relation label distributions on Visual
+Genome. The upper figure illustrates the distribution
+across all classes, while the lower one shows the prob-
+ability distribution on some typical categories. Train
+Set: The class distribution πsg in training set. ViLT and
+Oscar: The estimated distribution πpt using LM Estima-
+tion in the two pre-training stages.
+
+logits predicted by fsg without debiasing (Equa-
+tion 1), the background and non-background prob-
+ability can be calculated by softmax function:
+
+(cid:40)
+
+Psg(y ̸= 0|zi, zj, xi,j) = 1 − softmax(osg)0
+Psg(y = 0|zi, zj, xi,j) = softmax(osg)0
+
+(12)
+
+Finally, the ensembled prediction on Ce is:
+
+Pens(y|zi, zj, xi,j) = [Psg(y = 0|zi, zj, xi,j),
+Psg(y ̸= 0|zi, zj, xi,j) · Pens(r|zi, zj, xi,j)]
+
+(13)
+
+which serves as the final representation-improved
+prediction of our proposed framework.
+
+3.5 Summary
+
+We integrate VLMs to mitigate the underrepre-
+sentation challenge inherent to SGG, where we
+propose the novel LM Estimation to approximate
+the unattainable pretraining distribution of predi-
+cates, πpt, and conduct predicate debiasing for each
+model. Unlike previous SGG methods that are op-
+timized for one target distribution per training, our
+method enables seamlessly adaptation between dif-
+ferent targets without cost, outperforming existing
+SGG approaches under each target distribution.
+
+4 Experiment
+
+We conduct comprehensive experiments on SGG
+to assess our efficacy. In Section 4.2, we show
+
+0.050.100.200.400.0onwearingofinnearbehindwithholdingriding0.100.00.200.300.050.150.250.35Relation categoriesTrain SetViLTOscarTrain SetViLTOscarModels
+
+Predicate Classification
+
+Scene Graph Classification
+
+mRecall@20 mRecall@50 mRecall@100 mRecall@20 mRecall@50 mRecall@100
+
+VTransE(Zhang et al., 2017)
+SG-CogTree(Yu et al., 2020)
+BGNN(Li et al., 2021)
+PCPL(Yan et al., 2020)
+Motifs-Rwt(Zellers et al., 2018)
+Motifs-GCL(Dong et al., 2022)
+VCTree-TDE(Tang et al., 2020)
+VCTree-GCL(Dong et al., 2022)
+PENET-Rwt†(Zheng et al., 2023)
+Oscar ft-la
+Oscar ft-la + Ours
+ViLT ft-la
+ViLT ft-la + Ours
+PENET-Rwt†
+PENET-Rwt + Ours
+
+13.6
+22.9
+-
+-
+-
+30.5
+18.4
+31.4
+31.0
+30.4
+31.2(+0.8)
+31.2
+32.3(+1.1)
+31.4
+31.8(+0.4)
+
+17.1
+28.4
+30.4
+35.2
+33.7
+36.1
+25.4
+37.1
+38.8
+38.4
+39.4(+1.0)
+40.5
+42.3(+1.8)
+38.8
+39.9(+1.1)
+
+18.6
+31.0
+32.9
+37.8
+36.1
+38.2
+28.7
+39.1
+40.7
+41.3
+42.7(+1.4)
+44.5
+46.5(+2.0)
+40.7
+42.3(+1.6)
+
+6.6
+13.0
+-
+-
+-
+18.0
+8.9
+19.5
+18.9
+17.9
+18.3(+0.4)
+17.4
+17.9(+0.5)
+18.9
+19.2(+0.3)
+
+8.2
+15.7
+14.3
+18.6
+17.7
+20.8
+12.2
+22.5
+22.2
+22.6
+23.4(+0.8)
+22.5
+23.5(+1.0)
+22.2
+23.0(+0.8)
+
+8.7
+16.7
+16.5
+19.6
+19.1
+21.8
+14.0
+23.5
+23.5
+23.8
+25.0(+1.2)
+24.3
+25.5(+1.2)
+23.5
+24.5(+1.0)
+
+Table 1: The mean Recall results on Visual Genome comparing with state-of-the-art models and debiasing methods.
+The results and performance gain applying our method is below the row of corresponding baseline. ft: The model is
+fine-tuned on Visual Genome. la: The prediction logits is debiased by logits adjustment with πsg. †: Due to the
+absence of part of the results, we re-implement by ourselves.
+
+our significant performance improvement through
+a comparative analysis with previous methods. Sec-
+tion 4.3 provides an illustrative analysis of the pred-
+icates distribution estimated by our LM Estimation.
+Subsequently, Section 4.4 offers an ablation study,
+analysing the contribution of individual compo-
+nents in our design to the overall performance.
+
+4.1 Experiment Settings
+
+Datasets. The Visual Genome (VG) dataset con-
+sists of 108,077 images with average annotations
+of 38 objects and 22 relationships per image. For
+Visual Genome, we adopted a split with 108,077
+images focusing on the most common 150 object
+and 50 predicate categories, allocating 70% for
+training and 30% for testing, alongside a validation
+set of 5,000 images extracted from the training set.
+Evaluation Protocol.
+For the Visual Genome
+dataset, we focus on two key sub-tasks: Predicate
+Classification (PredCls) and Scene Graph Classifi-
+cation (SGCls). We skip the Scene Graph Detection
+(SGDet) here and provide a discussion in supple-
+mentary, considering its substantial computational
+demands when employing VLMs and limited rele-
+vance to our method’s core objectives. Our primary
+evaluation metrics are Recall@K and mean Re-
+call@K (mRecall@K). Additionally, we propose
+another task of relation classification that calculates
+the top-1 predicate accuracy (Acc) for samples la-
+beled with non-background relations, where we
+focus on the ability of model on predicting the re-
+lation given a pair of objects in the scene.
+Baselines and Implementation. Here we utilize
+
+two prominent zero-shot vision-language models,
+ViLT (Kim et al., 2021) and Oscar (Li et al., 2020),
+as fzs. For the task-specific branch fsg, we em-
+ploy three baseline models trained in SGG: (1) To
+explore the fine-tuning performance of VLMs on
+SGG, we fine-tune ViLT and Oscar using the Pred-
+Cls training data and establish them as our first two
+baselines. (2) To show our methods’ compatibility
+with existing SGG models, we undertake PENET
+(Zheng et al., 2023), a cutting-edge method with
+In
+superior performance, as our third baseline.
+our ensemble strategy, we explore three combina-
+tions: "fine-tuned ViLT + zero-shot ViLT", "fine-
+tuned Oscar + zero-shot Oscar", and "PENET +
+zero-shot ViLT", where each model is debiased by
+our methods. Following previous settings, an in-
+dependently trained Faster R-CNN is attached to
+the front of each VLM model for object recogni-
+tion. During pre-training, both ViLT and Oscar
+employ two main paradigms: Masked Language
+Modeling (MLM) and Visual Question Answering
+(VQA). In MLM, tokens in a sentence can be re-
+placed by [MASK], with the model predicting the
+original token using visual and language prompts.
+In VQA, the model, given a question and visual in-
+put, predicts an answer via an MLP classifier using
+the [CLS] token. For our task, we use MLM for
+the fixed branch fzs with the prompt “zi is [MASK]
+zj.” and VQA for fine-tuning fsg, where we intro-
+duce a MLP with the query "[CLS] what is the
+relationship between the zi and the zj?", where
+the embedding of [CLS] token is forwarded to the
+
+Models
+
+Predicate Classification
+
+Scene Graph Classification
+
+Recall@20 Recall@50 Recall@100 Recall@20 Recall@50 Recall@100
+
+KERN(Chen et al., 2019)
+R-CAGCN(Yang et al., 2021)
+GPS-Net(Lin et al., 2020)
+VTransE(Zhang et al., 2017)
+VCTree(Tang et al., 2019)
+MOTIFS(Zellers et al., 2018)
+SGGNLS(Zhong et al., 2021)
+RU-Net(Lin et al., 2022b)
+PENET†(Zheng et al., 2023)
+Oscar ft
+Oscar ft + Ours
+ViLT ft
+ViLT ft + Ours
+PENET†
+PENET + Ours
+
+-
+60.2
+60.7
+59.0
+60.1
+59.5
+58.7
+61.9
+61.7
+59.1
+60.5(+1.4)
+57.1
+58.0(+0.9)
+61.7
+62.0(+0.3)
+
+65.8
+66.6
+66.9
+65.7
+66.4
+66.0
+65.6
+68.1
+68.2
+65.7
+67.4(+1.8)
+65.7
+66.7(+1.0)
+68.2
+69.0(+0.8)
+
+67.6
+68.3
+68.8
+67.6
+68.1
+67.9
+67.4
+70.1
+70.1
+67.6
+69.3(+1.7)
+68.4
+69.8(+1.4)
+70.1
+71.1(+1.0)
+
+-
+35.4
+36.1
+35.4
+35.2
+35.8
+36.5
+38.2
+37.9
+36.7
+37.3(+0.6)
+34.9
+35.3(+0.4)
+37.9
+38.1(+0.2)
+
+36.7
+38.3
+39.2
+38.6
+38.1
+39.1
+40.0
+41.2
+41.3
+40.3
+41.4(+1.1)
+40.2
+41.2(+1.0)
+41.3
+41.8(+0.5)
+
+37.4
+39.0
+40.1
+39.4
+38.8
+39.9
+40.8
+42.1
+42.3
+41.3
+42.3(+1.0)
+41.8
+42.9(+1.1)
+42.3
+42.9(+0.6)
+
+Table 2: The Recall results on Visual Genome dataset comparing with state-of-the-art models and debiasing methods.
+The results and performance gain applying our method is below the row of corresponding baseline. ft: The model is
+fine-tuned on Visual Genome. †: Due to the absence of part of the results, we re-implemented by ourselves.
+
+MLP classification head.
+
+4.2 Efficacy Analysis
+
+To assess the efficacy of our method, in this section,
+we compare our method with recent studies through
+a detailed result analysis on Visual Genome. The
+Recall and mean Recall results are presented in Ta-
+ble 2, which showcases a performance comparison
+with a variety of cutting-edge models and debiasing
+methods. We ensure to compare against previous
+methods under their best-performance metric. For
+baseline models without debiasing strategies, we
+compare with their superior Recall metrics and ex-
+clude their lower mean Recall performances. Simi-
+larly, for the debiased SGG models, we only focus
+on their mean Recall outcomes.
+Baseline Performance.
+Our analysis begins
+with the three fsg baselines: fine-tuned ViLT, fine-
+tuned Oscar, and PENET. Specifically, for scenar-
+ios where the desired target is a uniform distribu-
+tion assessed by mean Recall, we apply the post-
+hoc logits adjustment to the two fine-tuned base-
+lines following Equations 5 and 6. For PENET,
+we implement a reweighting loss strategy (PENET-
+Rwt) following (Zheng et al., 2023) to train a debi-
+ased version tailored for the uniform target distri-
+bution, which achieved optimal performance.
+
+Our main experiment results are presented in
+Table 1 and Table 2. As shown in Table 2, without
+task-specific designs, the two fine-tuned VLMs fall
+behind the SGG models on Recall and scored 67.6
+and 68.4 on R@100, while PENET takes the lead.
+
+However, as shown in Table 1, when evaluated
+under the uniform target distribution and adjusted
+using simple post-hoc logits adjustment, the fine-
+tuned VLMs surpass all the cutting-edge debiased
+SGG models in mean Recall, achieving 41.3 and
+44.5 of mR@100.
+
+Our Improvements. Subsequently, we employ
+our certainty-aware ensemble to integrate debiased
+zero-shot VLMs fzs into the fsg baselines, where
+each fzs is debiased by our LM Estimation.
+In
+Table 2, for each fsg baseline, we observed a no-
+table performance boost after applying our meth-
+ods (+1.4 / + 2.0 / + 1.6 in mR@100 and +1.7
+/ +1.4 / + 1.0 in R@100). In both mRecall and
+Recall, our methods achieve the best performance
+(46.5 on mR@100 and 71.1 on R@100), while
+the improvement on mean Recall is particularly
+striking and surpasses the gains observed on Re-
+call (+1.4/+2.0/+1.6 vs. +1.7/+1.4/+1.0). The re-
+sults show that our methods achieve a significant
+improvement in each baseline, achieving the best
+performance compared to all existing methods.
+
+Our results indicate the effectiveness of our meth-
+ods, leading to a marked boost in performance.
+Moreover, the improvement in PENET baselines
+shows the adaptability of our method to existing
+SGG-specialized models. In addition, we observe
+that our representation improvements leads to a
+more significant gain in mean recall than in re-
+call, suggesting the underrepresentation problem is
+more common in tail relation classes.
+
+Models
+
+ViLT-ft
+ViLT-zs
+ViLT-ens
+Ens. Gain
+Oscar-ft
+Oscar-zs
+Oscar-ens
+Ens. Gain
+
+All mAcc
+Initial Debiased
+46.53
+
+All Acc
+Initial Debiased
+68.92
+
+Unseen mAcc
+Initial Debiased
+14.98
+
+Unseen Acc
+Initial Debiased
+17.72
+
+21.88
+46.86
++0.33
+
+17.18
+42.02
++0.03
+
+37.42
+48.70
++2.17
+
+41.99
+
+33.96
+44.28
++3.29
+
+57.15
+68.95
++0.03
+
+45.78
+67.77
++0.61
+
+67.09
+70.75
++1.83
+
+67.16
+
+57.31
+69.03
++1.87
+
+8.99
+15.66
++0.68
+
+6.68
+14.83
++0.98
+
+16.92
+20.07
++5.09
+
+13.85
+
+16.01
+19.56
++5.71
+
+18.81
+20.01
++2.29
+
+19.11
+20.97
++2.96
+
+20.93
+21.73
++4.01
+
+18.01
+
+20.05
+22.08
++4.07
+
+Table 3: Top-1 accuracy and class-wise mean accuracy of relation classification on Visual Genome. All: The test
+results for all triplets with non-background relation labels. Unseen: The test results for triplets that are absent
+from the training set. Initial: The initial zero-shot VLMs without debiasing. Debiased: The zero-shot VLMs after
+debiasing using our LM Estimation. ens: Ensemble of the fine-tuned VLMs and Initial or Debiased zero-shot
+model. Ens. Gain: the performance gain of ensemble compared to the fine-tuned model.
+
+4.3 Estimated Distribution Analysis
+
+In Figure 3, we depict the predicate distributions
+of zero-shot ViLT and Oscar solved by LM Estima-
+tion, comparing them with the distribution in VG
+training set. The upper chart in Figure 3 depicts
+the distributions across all relations, where we find
+that all three distributions exhibit a significant im-
+balance. Furthermore, we extract the distribution
+of typical relations in the lower chart, where we
+see a substantial discrepancy among the three dis-
+tributions. This variation affirms the two scenarios
+of Pta(r) ̸= Ptr(r) discussed in Section 3.3, pre-
+cluding the direct application of zero-shot VLMs
+without debiasing, indicating the necessity of our
+LM Estimation and subsequent debiasing method.
+
+4.4 Ablation Study
+
+In this section, we conduct an ablation study on
+Visual Genome dataset. Initially, we assess the
+effectiveness of our LM Estimation in addressing
+the predicates bias of zero-shot VLMs. Further-
+more, we evaluate the capability of our method to
+enhance representation by focusing on the unseen
+triplets, which are entirely absent during training.
+To precisely evaluate the performance in rela-
+tion recognition and eliminate any influence from
+the background class, we require the model to per-
+form relation classification exclusively on samples
+labeled with non-background relations. Subse-
+quently, we calculate the top-1 accuracy (Acc) and
+class-wise mean accuracy (mAcc) as new metrics
+to accurately gauge the model’s effectiveness in this
+context. Our findings are comprehensively detailed
+in Table 3, which details on two sample splits: one
+encompassing all triplets and the other exclusively
+focusing on unseen triplets. For each splits, we ex-
+amine the performance of the two fine-tuned VLMs,
+
+fsg, their initial and debiased zero-shot models, fzs,
+and the ensemble of corresponding models.
+Predicate Debiasing. In Section 3.3, we introduce
+our LM Estimation method for predicate debias-
+ing. Here, we further evaluate the efficacy of our
+debiasing. We initially analysis on the relation clas-
+sification accuracy of the zero-shot VLMs before
+and after debiasing. As presented in Table 3 (the
+ViLT-zs and Oscar-zs rows), without debiasing, the
+accuracies of initial predictions are lower either
+in all triplets or unseen triplets. However, after
+debiasing through LM Estimation, there is a no-
+table enhancement in the zero-shot performance.
+For unseen triplets, the debiased zero-shot VLMs
+even surpass the performance of their fine-tuned
+counterparts, suggesting our method effectively ad-
+dresses the predicate bias and smoothly adapts the
+pretraining knowledge to the SGG task.
+
+Furthermore, from the ensemble performance
+in Table 3 (the ViLT-ens and Oscar-ens rows), we
+notice that ensembling the initial fzs hardly im-
+proves the performance, only achieving a slight
+gain of +0.33/+0.03 on all triplets and +0.68/+2.29
+on unseen triplets. In contrast, ensembling the debi-
+ased fzs achieves a significantly more pronounced
+improvement, achieving +2.17/+1.83 gain on all
+triplets and +5.09/+4.01 on unseen triplets.
+
+To keep consistent with previous settings, we
+present the Recall and mean Recall ablation results
+in Table 4. We observe a substantial improvement
+in both mean Recall and Recall when ensembling
+with our debiased zero-shot VLMs (the highlighted
+row in each group), while directly ensembling the
+initial zero-shot VLMs even harm to the perfor-
+mance (the middle row in each group). These re-
+sults starkly underlines the necessity and efficacy
+of our LM Estimation in predicate debiasing.
+
+Models
+ViLT-ft
+ViLT-ens (Initial)
+ViLT-ens (Debiased)
+Oscar-ft
+Oscar-ens (Initial)
+Oscar-ens (Debiased)
+
+Models
+ViLT-ft
+ViLT-ens (Initial)
+ViLT-ens (Debiased)
+Oscar-ft
+Oscar-ens (Initial)
+Oscar-ens (Debiased)
+
+mR@20
+31.2
+30.9(-0.3)
+32.3(+0.9)
+30.4
+30.3(-0.1)
+31.2(+0.8)
+
+R@20
+57.1
+56.9(-0.2)
+58.0(+0.9)
+59.1
+59.2(+0.1)
+60.5(+1.4)
+
+mR@50
+40.5
+40.5(+0.0)
+42.3(+1.8)
+38.4
+38.5(+0.1)
+39.4(+1.0)
+
+R@50
+65.7
+65.7(+0.0)
+66.7(+1.0)
+65.7
+65.9(+0.2)
+67.4(+1.7)
+
+mR@100
+44.5
+44.6(+0.1)
+46.5(+2.0)
+41.3
+41.6(+0.3)
+42.7(+1.4)
+
+R@100
+68.4
+68.8(+0.4)
+69.8(+1.4)
+67.6
+67.9(+0.3)
+69.3(+1.7)
+
+Table 4: The mean Recall and Recall ablation results
+on Visual Genome. Initial: The initial zero-shot VLMs
+without debiasing. Debiased: The zero-shot VLMs after
+predicates debiasing. ens: Ensemble of the fine-tuned
+VLMs and Initial or Debiased zero-shot model.
+
+Representation Enhancement. To validate the
+enhancement of representation, we specifically ex-
+amine the samples labeled with unseen triplets.
+These triplets are present in the test set but ab-
+sent from the training set, which is the worst tail
+distribution in the underrepresentation issue.
+
+Table 3 reveals that, across all triplets, the accura-
+cies of both zero-shot VLMs (fzs) fall short of their
+fine-tuned counterparts (fsg). For example, the de-
+biased zero-shot Oscar model achieves 33.96/57.31
+of mAcc/Acc, which are lower than the fine-tuned
+Oscar (41.99/67.16). However, within the subset of
+unseen triplets, the debiased zero-shot fzs outper-
+forms the fine-tuned fsg: The debiased zero-shot
+Oscar achieves 16.01/20.05 of mAcc/Acc, outper-
+forming the fine-tuned model (13.85/18.01).
+
+These findings substantiate our hypothesis that
+zero-shot models, with their pretraining knowledge
+fully preserved, are better at handling underrepre-
+sented samples compared to SGG-specific models.
+This advantage is particularly evident in the con-
+text of unseen triplets, where comprehensive pre-
+training knowledge of zero-shot models confers a
+significant performance benefit.
+
+Moreover, we find that the gain of ensemble is
+significantly higher for unseen triplets (Debiased
+ViLT: +5.09/+4.01, Debiased Oscar: +5.71/4.07)
+than for all triplets (Debiased ViLT: +2.17/+1.83,
+Debiased Oscar: +3.29/1.87). This indicates that
+the underrepresented samples are improved much
+more than the well-represented samples, receiving
+higher gains than average. Considering the pro-
+portion of unseen triplets in all triplets, we infer
+the overall performance gain mainly comes from
+
+the improvement on unseen triplets. Since unseen
+triplets composing the worst case of underrepre-
+sentation, their performance gain can confirm our
+enhancement on representation.
+
+5 Conclusion
+
+In conclusion, our study has made significant
+strides in efficiently and effectively integrate pre-
+trained VLMs to SGG. By introducing the novel
+LM Estimation, we effectively mitigate the predi-
+cate bias inside pre-trained VLMs, allowing their
+comprehensive knowledge to be employed in SGG.
+Besides, our certainty-aware ensemble strategy,
+which ensembles the zero-shot VLMs with SGG
+model, effectively addresses the underrepresenta-
+tion issue and demonstrates a significant improve-
+ment in SGG performance. Our work contributes to
+the field of SGG, suggesting potential pathways for
+reducing language bias of pretraining and leverage
+them in more complex language tasks.
+
+6 Limitation
+
+Though our methods does not require any train-
+ing, comparing with original fsg, our ensemble
+framework still adds computational cost from fzs’s
+inference. This inference can be costly in an ex-
+treme case that one scene has too many objects to
+predict their relations. Besides, even after we solve
+the word bias inside VLMs, the final ensemble per-
+formance relies highly on the pre-training quality,
+which requires the fzs to be pre-trained on compre-
+hensive data to improve SGG’s representation. An-
+other limitation arises from the forwarding pattern
+in VLM, where we adopt a pair-wise forwarding
+that taking a pair of objects along with their image
+region and text prompt. In this way, each possible
+object pair requires an entire forwarding of VLM.
+This process is rapid when the object is certainly
+detected. However, in the scenario of Scene Graph
+Detection, the large amounts of proposals can bring
+unavoidable time cost to our pipeline. We provide
+a more detailed discussion in appendix.
+
+References
+
+Tianshui Chen, Weihao Yu, Riquan Chen, and Liang
+Lin. 2019. Knowledge-embedded routing network
+for scene graph generation. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, pages 6163–6171.
+
+Xingning Dong, Tian Gan, Xuemeng Song, Jianlong
+Wu, Yuan Cheng, and Liqiang Nie. 2022. Stacked
+
+hybrid-attention and group collaborative learning for
+unbiased scene graph generation. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, pages 19427–19436.
+
+Liunian Harold Li, Mark Yatskar, Da Yin, Cho-Jui
+Hsieh, and Kai-Wei Chang. 2019. Visualbert: A sim-
+ple and performant baseline for vision and language.
+arXiv preprint arXiv:1908.03557.
+
+Kaifeng Gao, Long Chen, Hanwang Zhang, Jun Xiao,
+and Qianru Sun. 2023. Compositional prompt tuning
+with motion cues for open-vocabulary video relation
+detection. arXiv preprint arXiv:2302.00268.
+
+Jiuxiang Gu, Handong Zhao, Zhe Lin, Sheng Li, Jianfei
+Cai, and Mingyang Ling. 2019. Scene graph genera-
+tion with external knowledge and image reconstruc-
+tion. In Proceedings of the IEEE/CVF conference
+on computer vision and pattern recognition, pages
+1969–1978.
+
+Tao He, Lianli Gao, Jingkuan Song, and Yuan-Fang Li.
+2022. Towards open-vocabulary scene graph genera-
+tion with prompt-based finetuning. In European Con-
+ference on Computer Vision, pages 56–73. Springer.
+
+Dan Hendrycks and Kevin Gimpel. 2016. A baseline for
+detecting misclassified and out-of-distribution exam-
+ples in neural networks. In International Conference
+on Learning Representations.
+
+Wonjae Kim, Bokyung Son, and Ildoo Kim. 2021. Vilt:
+Vision-and-language transformer without convolu-
+In International Con-
+tion or region supervision.
+ference on Machine Learning, pages 5583–5594.
+PMLR.
+
+Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin John-
+son, Kenji Hata, Joshua Kravitz, Stephanie Chen,
+Yannis Kalantidis, Li-Jia Li, David A Shamma, et al.
+2017. Visual genome: Connecting language and vi-
+sion using crowdsourced dense image annotations.
+International journal of computer vision, 123:32–73.
+
+Ananya Kumar, Tengyu Ma, Percy Liang, and Aditi
+Raghunathan. 2022. Calibrated ensembles can mit-
+igate accuracy tradeoffs under distribution shift. In
+Uncertainty in Artificial Intelligence, pages 1041–
+1051. PMLR.
+
+Alina Kuznetsova, Hassan Rom, Neil Alldrin, Jasper Ui-
+jlings, Ivan Krasin, Jordi Pont-Tuset, Shahab Kamali,
+Stefan Popov, Matteo Malloci, Alexander Kolesnikov,
+et al. 2020. The open images dataset v4: Unified
+image classification, object detection, and visual re-
+lationship detection at scale. International Journal
+of Computer Vision, 128(7):1956–1981.
+
+Rongjie Li, Songyang Zhang, Bo Wan, and Xuming He.
+2021. Bipartite graph network with adaptive message
+passing for unbiased scene graph generation. In Pro-
+ceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pages 11109–11119.
+
+Wei Li, Haiwei Zhang, Qijie Bai, Guoqing Zhao, Ning
+Jiang, and Xiaojie Yuan. 2022b. Ppdl: Predicate
+probability distribution based loss for unbiased scene
+graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recog-
+nition, pages 19447–19456.
+
+Xiujun Li, Xi Yin, Chunyuan Li, Pengchuan Zhang,
+Xiaowei Hu, Lei Zhang, Lijuan Wang, Houdong
+Hu, Li Dong, Furu Wei, et al. 2020. Oscar: Object-
+semantics aligned pre-training for vision-language
+tasks. In Computer Vision–ECCV 2020: 16th Euro-
+pean Conference, Glasgow, UK, August 23–28, 2020,
+Proceedings, Part XXX 16, pages 121–137. Springer.
+
+Xin Lin, Changxing Ding, Jinquan Zeng, and Dacheng
+Tao. 2020. Gps-net: Graph property sensing net-
+work for scene graph generation. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, pages 3746–3753.
+
+Xin Lin, Changxing Ding, Yibing Zhan, Zijian Li, and
+Dacheng Tao. 2022a. Hl-net: Heterophily learning
+network for scene graph generation. In proceedings
+of the IEEE/CVF conference on computer vision and
+pattern recognition, pages 19476–19485.
+
+Xin Lin, Changxing Ding, Jing Zhang, Yibing Zhan, and
+Dacheng Tao. 2022b. Ru-net: Regularized unrolling
+network for scene graph generation. In Proceedings
+of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, pages 19457–19466.
+
+Aditya Krishna Menon,
+
+Jayasumana,
+Ankit Singh Rawat, Himanshu Jain, Andreas
+Veit, and Sanjiv Kumar. 2020. Long-tail learning via
+logit adjustment. arXiv preprint arXiv:2007.07314.
+
+Sadeep
+
+Di Qi, Lin Su, Jia Song, Edward Cui, Taroon Bharti,
+and Arun Sacheti. 2020. Imagebert: Cross-modal
+pre-training with large-scale weak-supervised image-
+text data. arXiv preprint arXiv:2001.07966.
+
+Lin Li, Long Chen, Yifeng Huang, Zhimeng Zhang,
+Songyang Zhang, and Jun Xiao. 2022a. The devil is
+in the labels: Noisy label correction for robust scene
+graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recog-
+nition, pages 18869–18878.
+
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya
+Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sas-
+try, Amanda Askell, Pamela Mishkin, Jack Clark,
+et al. 2021. Learning transferable visual models from
+natural language supervision. In International confer-
+ence on machine learning, pages 8748–8763. PMLR.
+
+Lin Li, Jun Xiao, Guikun Chen, Jian Shao, Yueting
+Zhuang, and Long Chen. 2023. Zero-shot visual re-
+lation detection via composite visual cues from large
+language models. arXiv preprint arXiv:2305.12476.
+
+Weijie Su, Xizhou Zhu, Yue Cao, Bin Li, Lewei Lu,
+Furu Wei, and Jifeng Dai. 2019. Vl-bert: Pre-training
+of generic visual-linguistic representations. arXiv
+preprint arXiv:1908.08530.
+
+Xudong Sun, Pengcheng Wu, and Steven CH Hoi. 2018.
+Face detection using deep learning: An improved
+faster rcnn approach. Neurocomputing, 299:42–50.
+
+Kaihua Tang, Yulei Niu, Jianqiang Huang, Jiaxin Shi,
+and Hanwang Zhang. 2020. Unbiased scene graph
+generation from biased training. In Proceedings of
+the IEEE/CVF conference on computer vision and
+pattern recognition, pages 3716–3725.
+
+Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan
+Luo, and Wei Liu. 2019. Learning to compose dy-
+namic tree structures for visual contexts. In Proceed-
+ings of the IEEE/CVF conference on computer vision
+and pattern recognition, pages 6619–6628.
+
+Danfei Xu, Yuke Zhu, Christopher B Choy, and Li Fei-
+Fei. 2017. Scene graph generation by iterative mes-
+sage passing. In Proceedings of the IEEE conference
+on computer vision and pattern recognition, pages
+5410–5419.
+
+Shaotian Yan, Chen Shen, Zhongming Jin, Jianqiang
+Huang, Rongxin Jiang, Yaowu Chen, and Xian-
+Sheng Hua. 2020. Pcpl: Predicate-correlation per-
+ception learning for unbiased scene graph generation.
+In Proceedings of the 28th ACM International Con-
+ference on Multimedia, pages 265–273.
+
+Gengcong Yang, Jingyi Zhang, Yong Zhang, Baoyuan
+Wu, and Yujiu Yang. 2021. Probabilistic modeling
+of semantic ambiguity for scene graph generation. In
+Proceedings of the IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition, pages 12527–
+12536.
+
+Jiahui Yu, Zirui Wang, Vijay Vasudevan, Legg Ye-
+ung, Mojtaba Seyedhosseini, and Yonghui Wu. 2022.
+Coca: Contrastive captioners are image-text founda-
+tion models. arXiv preprint arXiv:2205.01917.
+
+Jing Yu, Yuan Chai, Yujing Wang, Yue Hu, and
+Qi Wu. 2020. Cogtree: Cognition tree loss for
+unbiased scene graph generation. arXiv preprint
+arXiv:2009.07526.
+
+Qifan Yu, Juncheng Li, Yu Wu, Siliang Tang, Wei Ji, and
+Yueting Zhuang. 2023. Visually-prompted language
+model for fine-grained scene graph generation in an
+open world. arXiv preprint arXiv:2303.13233.
+
+Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin
+Choi. 2018. Neural motifs: Scene graph parsing
+with global context. In Proceedings of the IEEE con-
+ference on computer vision and pattern recognition,
+pages 5831–5840.
+
+Hanwang Zhang, Zawlin Kyaw, Shih-Fu Chang, and
+Tat-Seng Chua. 2017. Visual translation embedding
+network for visual relation detection. In Proceed-
+ings of the IEEE conference on computer vision and
+pattern recognition, pages 5532–5540.
+
+Yong Zhang, Yingwei Pan, Ting Yao, Rui Huang, Tao
+Mei, and Chang-Wen Chen. 2023. Learning to gener-
+ate language-supervised and open-vocabulary scene
+
+graph using pre-trained visual-semantic space. In
+Proceedings of the IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition, pages 2915–
+2924.
+
+Long Zhao, Liangzhe Yuan, Boqing Gong, Yin Cui, Flo-
+rian Schroff, Ming-Hsuan Yang, Hartwig Adam, and
+Ting Liu. 2023. Unified visual relationship detec-
+tion with vision and language models. arXiv preprint
+arXiv:2303.08998.
+
+Chaofan Zheng, Xinyu Lyu, Lianli Gao, Bo Dai, and
+Jingkuan Song. 2023. Prototype-based embedding
+network for scene graph generation. In Proceedings
+of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, pages 22783–22792.
+
+Yiwu Zhong, Jing Shi, Jianwei Yang, Chenliang Xu, and
+Yin Li. 2021. Learning to generate scene graph from
+natural language supervision. In Proceedings of the
+IEEE/CVF International Conference on Computer
+Vision, pages 1823–1834.
+
+Beier Zhu, Yulei Niu, Yucheng Han, Yue Wu, and Han-
+wang Zhang. 2023a. Prompt-aligned gradient for
+prompt tuning. In Proceedings of the IEEE/CVF In-
+ternational Conference on Computer Vision, pages
+15659–15669.
+
+Beier Zhu, Yulei Niu, Xian-Sheng Hua, and Hanwang
+Zhang. 2022. Cross-domain empirical risk minimiza-
+tion for unbiased long-tailed classification. In Pro-
+ceedings of the AAAI conference on artificial intelli-
+gence, volume 36, pages 3589–3597.
+
+Beier Zhu, Yulei Niu, Saeil Lee, Minhoe Hur, and Han-
+wang Zhang. 2023b. Debiased fine-tuning for vision-
+language models by prompt regularization. In Pro-
+ceedings of the AAAI Conference on Artificial Intelli-
+gence, volume 37, pages 3834–3842.
+
+Beier Zhu, Kaihua Tang, Qianru Sun, and Hanwang
+Zhang. 2024. Generalized logit adjustment: Cali-
+brating fine-tuned models by removing label bias in
+foundation models. Advances in Neural Information
+Processing Systems, 36.
+
+A More Theoretical Justifications
+
+In the main paper, we introduce the post-hoc logits
+adjustment methods (Menon et al., 2020) for label
+debiasing, which is first proposed in long-tail clas-
+sification. In the main paper, we skipped part of
+the derivation due to the limit of length. Here, we
+provide a detailed derivation for easier understand-
+ing.
+
+Taking (zi, zj, xi,j) as input for a subject-object
+pair, the conditional probability for the relations is
+P (r|zi, zj, xi,j). From the Bayes’ Rule, the condi-
+tional probability can be expressed as:
+
+P (r|zi, zj, xi,j) =
+
+P (zi, zj, xi,j|r)P (r)
+P (zi, zj, xi,j)
+
+(14)
+
+We further denote the empirical probability fitted
+to the training set as Ptr and the target test proba-
+bility as Pta. We further rewrite Equation 14 with
+the two probabilities as:
+
+Ptr(r|zi, zj, xi,j) =
+
+Pta(r|zi, zj, xi,j) =
+
+Ptr(zi, zj, xi,j|r)Ptr(r)
+Ptr(zi, zj, xi,j)
+Pta(zi, zj, xi,j|r)Pta(r)
+Pta(zi, zj, xi,j)
+
+(15)
+
+(16)
+
+Then let us look into each term. Firstly, the
+P (zi, zj, xi,j) is irrelavant with r and thus has no
+effect on the relation label bias. Therefore, the nu-
+merator term can be replaced by a constant C and
+omitted in further computation. Secondly, when fo-
+cusing on the label bias, according to the prevalent
+label-shift hypothesis proposed in long-tail classi-
+fication, one can assume P (zi, zj, xi,j|r) to be the
+same in the training and testing domains. Based on
+this equality, we connect the two probabilities by:
+
+Ptr(r|zi, zj, xi,j)
+Ptr(r)
+
+· Ctr =
+
+Pta(r|zi, zj, xi,j)
+Pta(r)
+
+· Cte
+
+(17)
+Taking the logarithm form for both sides, we
+derive the final form of post-hoc logits adjust-
+ments (Menon et al., 2020):
+
+log Pta(r|zi, zj, xi,j) = log Ptr(r|zi, zj, xi,j)
+
+− log Ptr(r) + log Pta(r) + log
+
+Ctr
+Cte
+
+(18)
+
+In our main paper, the last term of constant is omit-
+ted since the softmax function will naturally erase
+any constant term that irrelavant to r. Given the tar-
+get distribution Pta. From Equation 18, by taking
+softmax operation on both sides, we can derive:
+
+Pta(r|zi, zj, xi,j ) = softmax(log Ptr(r|zi, zj, xi,j)
+
+− log Ptr(r) + log Pta(r)) (19)
+
+After adjusting using our strategy, the final pre-
+dicted label is determined by an argmax operation:
+
+r = argmax
+
+(softmax(log Ptr(r|zi, zj, xi,j)
+
+r∈Cr
+
+− log Ptr(r) + log Pta(r)))
+
+(20)
+
+Then from Equation 19, we can rewrite Equation 20
+as:
+
+r = argmax
+
+(Pta(r|zi, zj, xi,j))
+
+r∈Cr
+
+(21)
+
+it is called a Bayes optimal classifier. According
+to the definition of Bayes optimal classifier, on av-
+erage no other classifier using the same hypothesis
+
+and prior knowledge can outperform it. Thus, when
+considering only label bias, our strategy is not only
+effective, but also optimal among all adjustments.
+
+B More Experiment Analysis
+
+B.1 Scene Graph Detection
+
+In our main paper, we skipped the SgDet sub-task,
+considering its substantial computational demands
+when employing VLMs and limited relevance to
+our method’s core objectives. In this section, we
+provides a discussion and a brief corresponding
+experiments results.
+
+Existing SGG models usually employs a Faster
+R-CNN (Sun et al., 2018) detector and fix the num-
+ber of generated proposals to be 80 per image for a
+fair comparison. However, unlike the existing rela-
+tion recognition networks that processes all pairs
+of proposals in an image simutaniously, the atten-
+tion module in VLMs requires a one-by-one pair as
+input. In this case, inferencing one image requires
+80×80 times of forwarding.
+
+This huge inference cost make it less practical to
+compare with existing methods under the current
+prevalent settings. However, it does not suggest
+using VLMs in SGG is meaningless. We strongly
+believe that the main concern of SGG task is to
+correctly recognize the relation given a pairs of
+objects, instead of the object detection, given the
+fact that the detector could be trained separately
+while achieving the same good performance. And
+by equipping with more efficient and effective de-
+tectors, the performance in Scene Graph Detection
+and Scene Graph Classification should be closed to
+Predicate Classification.
+
+B.2 Analysis on Tail Categories
+
+In this section, we conducted an additional experi-
+ment to demonstrate the performance enhancement
+for tail relation classes. We divided the relation
+categories into three splits, frequent, medium, and
+rare, based on the frequency in the training set.
+Subsequently, we evaluated and reported the en-
+semble gain on mean Recall@100 for each split
+brought by our methods. We opted for mean Re-
+call@100 as the metric due to its superior represen-
+tation of rare relations and reduced susceptibility
+to background class interference. Across all three
+baselines, we observed a substantial improvement
+in performance for rare relation categories, which
+confirms our hypothesis that the underrepresenta-
+tion issue is more severe in rare relation classes.
+
+Ensemble Gain on mRecall@100.
+
+Models
+ViLT ft-la + Ours
+Oscar ft-la + Ours
+PENET + Ours
+
+frequent medium rare
++4.13
++3.15
++3.49
+
++0.12
++0.04
++0.06
+
++1.78
++1.04
++1.27
+
+Table 5: The performance gain of mRecall@100 on
+PredCls sub-task achieved by our methods compared
+with each baseline, where the rare categories achieve
+significantly higher improvement.
+
+C More Details of Implementation
+
+This section shows more details of our implemen-
+tation. In existing models designed for SGG, the
+object detector is attached in front of the relation
+recognition network and jointly trained with the ob-
+jectives of SGG tasks. However, when fine-tuning
+VLMs on SGG tasks, this paradigm could be time-
+consuming and less flexible, given the higher train-
+ing cost of VLM comparing with existing models.
+Therefore, we decide to take the Faster R-CNN
+detector out and train it separately without the
+main network. This implementation is proved
+to be effective when we take the detector out of
+PENET (Zheng et al., 2023) and train it separately
+with the PENET relation network. We observe
+that the independently trained detector achieved
+the same performance with that jointly trained with
+the PENET. Hence, all fine-tuned VLMs in this
+paper used a separately-trained Faster R-CNN de-
+tector. In the fine-tuning stage on Visual Genome,
+we employ two different paradigms for ViLT (Kim
+et al., 2021) and Oscar (Li et al., 2020) for a more
+general comparison. We freeze the ViLT backbone
+while training the MLP head for 50 epochs. In
+another way, we use an end-to-end fine-tuning for
+70k steps on Oscar. We keep the fine-tuning cost
+comparable to the existing SGG models, which
+ensures its practical feasibility.
+
+Why don’t we debias on the triplets’ distribu-
+tion instead of the relation words distribution?
+In the paper, we declare the relation words bias
+caused by different frequency of relation labels.
+And the underrepresentation issue caused by dif-
+ferent representation level of samples. One can
+infer that the representation level is largely effect
+by the frequency of triplets. In other words, the
+samples of frequent triplets are usually better rep-
+resented in training compared with those samples
+of rare triplets. Therefore, one intuitive thinking
+is to debias directly on the triplets’ distribution by
+substracting log P (zi, zj, r) instead of the relation
+
+words distribution log P (r). This thought is indeed
+the most throughly debiasing strategy. However,
+one need to consider that the conditional prior of
+log P (r|zi, zj) could largely help the prediction of
+relationship (Tang et al., 2020). For example, in
+natural world, the relation between a “man" and a
+“horse" is more likely to be “man riding horse" than
+“man carrying horse". Directly debiasing on the
+triplets’ distribution would erase all these helpful
+conditional priors, resulting in a drastically drop in
+performance.
+
+D Other Discussions
+
+Question 1: Is our improvement from repre-
+sentation improvement or simply parameter in-
+crease from ensembled VLMs?
+Because of
+the predicates biases in pretraining data, integrat-
+ing large pretrained models does not guarantee
+improvement. In Table 2 of the main paper, we
+showed that ensembling the original VLMs without
+debiasing cannot bring any improvements. Only by
+integrating the VLM debiased by our LM Estima-
+tion can enhancements be brought.
+
+By integrating our debiased VLM, the under-
+representation issue is alleviated since underrepre-
+sented samples are improved much more than well-
+represented samples. In Table 2 in the main paper,
+we show that unseen triplets are improved higher
+than all triplets’ average. Integrating our debiased
+VLMs indeed brings a slight overall improvement,
+but most are from addressing the representation
+improvement.
+Question 2: Is it fair for us to use distinct Pta
+to measure Recall and mRecall and compare
+with existing methods? Unlike previous methods
+in SGG, our framework accepts a user-specified
+target distributions Pta as input. In SGG settings,
+measuring both Recall and mRecall is to evaluate
+under two distinct test distributions, as discussed
+in Section 3.3 of our main paper. For our method,
+using the same Pta under these two distinct distri-
+butions will input a wrong distribution Pta that is
+far from the actual target. This goes against our
+original intention.
+
+Previous methods are measured by both metrics
+without any change because once trained, unless
+by time-costing re-training, they cannot be trans-
+ferred from one target distribution Pta to another
+P ′
+ta. However, our method achieves this transfer
+instantaneously by simply + log (P ′
+ta/Pta) to the
+logits. So it is fair to compare with previous meth-
+
+ods since our transfer adds no extra time cost.
+Question 3: Is underrepresentation issue a spe-
+cific characteristic problem for SGG? The prob-
+lem of this inadequate sample representation is a
+typical and specific characteristics of SGG and is
+far more severe than that in other related fields, like
+long-tailed classification in Computer Vision. In
+SGG, a sample’s representation includes two ob-
+jects’ attributes and their high-level relationship.
+Due to this unique complexity, it is extremely hard
+for SGG datasets to adequately represent all triplets
+combinations. For instance, there are 375k triplets
+combinations in Visual Genome (Krishna et al.,
+2017), much more than the label sets of any classi-
+fication dataset in Computer Vision. This inevitably
+leads to the majority of triplets having only a few
+samples in training.
+
+

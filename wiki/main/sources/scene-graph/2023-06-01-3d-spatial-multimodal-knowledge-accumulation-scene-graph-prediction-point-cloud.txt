@@ -1,0 +1,1481 @@
+3D Spatial Multimodal Knowledge Accumulation for Scene Graph
+Prediction in Point Cloud
+
+Mingtao Feng1* Haoran Hou1∗ Liang Zhang1† Zijie Wu2† Yulan Guo3 Ajmal Mian4
+
+1Xidian University,
+
+2Hunan University,
+
+3Sun Yat-Sen University,
+
+4The University of Western Australia
+
+Abstract
+In-depth understanding of a 3D scene not only involves
+locating/recognizing individual objects, but also requires to
+infer the relationships and interactions among them. How-
+ever, since 3D scenes contain partially scanned objects
+with physical connections, dense placement, changing sizes,
+and a wide variety of challenging relationships, existing
+methods perform quite poorly with limited training sam-
+ples. In this work, we find that the inherently hierarchical
+structures of physical space in 3D scenes aid in the au-
+tomatic association of semantic and spatial arrangements,
+specifying clear patterns and leading to less ambiguous
+predictions. Thus, they well meet the challenges due to
+the rich variations within scene categories. To achieve
+this, we explicitly unify these structural cues of 3D phys-
+ical spaces into deep neural networks to facilitate scene
+graph prediction. Specifically, we exploit an external knowl-
+edge base as a baseline to accumulate both contextual-
+ized visual content and textual facts to form a 3D spa-
+tial multimodal knowledge graph. Moreover, we propose
+a knowledge-enabled scene graph prediction module bene-
+fiting from the 3D spatial knowledge to effectively regular-
+ize semantic space of relationships. Extensive experiments
+demonstrate the superiority of the proposed method over
+current state-of-the-art competitors. Our code is available
+at https://github.com/HHrEtvP/SMKA.
+
+1. Introduction
+
+In recent years, much success has been achieved on
+3D point cloud scene understanding such as semantic seg-
+mentation [9, 11, 15, 16, 21, 28, 29, 49] and object detec-
+tion [10, 22, 25, 27, 43]. However, the 3D world is not only
+defined by objects but also by the relationships between ob-
+jects. A 3D scene graph can abstract the environment as a
+graph where nodes represent objects and edges character-
+ize the relationships between object pairs, which has already
+been recognized in recent seminal works [1,30,37,38,41,46].
+However, relationship graphs predicted by current methods
+are far from satisfactory due to the noisy, cluttered and par-
+
+*Equal contribution
+†Corresponding author
+
+Figure 1. A brief overview of our method.
+
+tial nature of real 3D scans. Moreover, these data-driven
+methods treat sophisticated relationships in 3D space in-
+dependently for classification using the geometric features
+proximity or fit, and are ignorant of commonsense or other
+useful 3D spatial cues beyond visual information. 3D objects
+in real scenes commonly have strongly structured regulari-
+ties [33,39], whose semantic and spatial arrangements follow
+clear patterns, but still exhibit rich structural variations even
+within the scene category.
+
+The key observation is that 3D scene structures are in-
+herently hierarchical [20]. By definition, an instance can
+have multiple supports, lamps are standing on a table, chairs
+are supported by the floor and only the floor does not have
+any support, and it is unlikely that a pillow is supporting a
+couch. Although relationships themselves cast no light on
+the human eyes, a growing body of works [14, 31] suggest
+that even very complex relationship information is reasoned
+hierarchically and systemically according to the role of the
+prefrontal cortex. Relationships, such as support, can be
+extracted rapidly, are hard to ignore, and influence other
+relationships in the perceptual process. For example, a TV
+and a sofa are related since they together serve the function
+of ‘watching TV’, but these two objects can be far apart in a
+scene. Relationships of this kind are much more difficult, if
+not possible, to infer based on geometric analysis alone. The
+model can relate the table easily which supports the TV and
+use the table as a bridge to predict the ‘front’ relationship
+with sofa, where table and sofa are all supported by the floor
+and relationships within them is intuitive.
+
+ThisCVPRpaperistheOpenAccessversion,providedbytheComputerVisionFoundation.Exceptforthiswatermark,itisidenticaltotheacceptedversion;thefinalpublishedversionoftheproceedingsisavailableonIEEEXplore.9182The underlying hierarchical structures in 3D scenes are
+label free and reliable, and can hence play an essential role in
+scene understanding at no additional cost. Existing 3D scene
+graph prediction models [1, 30, 37, 38, 41, 46] are oblivious
+to the underlying structures in the point cloud scenes. The
+question is how to take this prior knowledge into consid-
+eration to make the 3D scene graph achieve higher accu-
+racy? KISG [47] proposes a graph auto-encoder to learn a
+closed set and ground truth prior knowledge from relation-
+ship triplets in data for 3D scene graph prediction. Although
+KISG [47] takes note of knowledge, it captures relevant
+prior knowledge from text-only ground truth labels, which
+merely contain facts expressed by label descriptions while
+lacking complex but indispensable multimodal knowledge
+for 3D scene graph prediction. In addition, noises contained
+in the manually annotated labels are easily included in the
+knowledge base and affects the prediction of relationships.
+To address the above problems, we show that the implicit
+hierarchical structure correlations between object pairs and
+their relationships can be explicitly represented by a knowl-
+edge base. As shown in Fig. 1, we propose a 3D spatial mul-
+timodal knowledge accumulation module to explicitly merge
+the hierarchical structures of 3D scenes into the network to
+strengthen the 3D scene graph prediction process. Firstly,
+we filter the external commonsense knowledge base, classify
+the hierarchical tokens for each node, and add new support
+edges to form the hierarchical symbolic knowledge graph
+for 3D scenes. Secondly, we retrieve the hierarchical token
+from the reconstructed symbolic knowledge graph for object
+instances in 3D scenes to build a visual graph, and extract
+contextual features for nodes and edges using a region-aware
+graph network. Finally, to bridge the heterogeneous gap
+between the symbolic knowledge and visual information, we
+propose a graph reasoning network to correlate 3D spatial vi-
+sual contents of scenes with textual facts. Conditioned on the
+learned vision-relevant 3D spatial multimodal knowledge,
+we incorporate this network into the relationships prediction
+stage as extra guidance, which can effectively regularize the
+distribution of possible relationships of object pairs and thus
+make the predictions less ambiguous.
+
+Our main contributions are: 1) We are the first to explic-
+itly unify the regular patterns of 3D physical spaces with the
+deep architecture to facilitate 3D scene graph prediction. 2)
+We propose a hierarchical symbolic knowledge construction
+module that exploits extra knowledge as the baseline to admit
+the hierarchical structure cues of 3D scene. 3) We introduce
+a knowledge-guided visual context encoding module to con-
+struct hierarchical visual graph and learn the contextualized
+features by a region-aware graph network. 4) We propose a
+3D spatial multimodal knowledge accumulation module to
+regularize the semantic space of relationship prediction. Re-
+sults show that the learned knowledge and proposed modules
+consistently boost 3D scene graph prediction performance.
+
+2. Related Work
+2D Image-based Scene Graph Generation. Scene graph
+was first proposed for image retrieval [17], and subsequently
+received increasing attention in the vision community to
+produce graphical abstractions of images. Mainstream ap-
+proaches [5, 36, 42, 44, 45] follow a two-step pipeline that
+first detects objects followed by classification of the rela-
+tionship for each object pair. However, research on scene
+graphs has focused primarily on 2D images, ignoring 3D
+spatial characteristics such as position and geometry, and
+with limited spatial coverage. Our proposed method extends
+2D scene graphs to 3D spaces, where the scene representa-
+tion, network architecture and training mechanism all have
+to be altered in fundamental ways to meet the challenges
+arising from learning 3D scene structures and relationships.
+More detailed discussions can be found in the survey [4].
+Knowledge Representation has been extensively studied
+to incorporate prior knowledge, e.g. DBPedia [2], Concept-
+Net [35], WordNet [24], VisualGenome [19] and hasPart [3],
+to aid numerous vision tasks [23]. Gao et al. [12] incorpo-
+rated commonsense knowledge to learn the internal-external
+correlations among room and object entities for an agent to
+take proper decisions at each viewpoint. Zhang et al. [48]
+addressed the explainability of visual reasoning by introduc-
+ing the explicit integration of external knowledge. Ding et
+al. [8] extracted the multimodal knowledge triplet to boost
+the performance of visual question answering. Chen et al. [6]
+constructed the prior knowledge of statistical correlations
+between object pairs and their relationships to address the
+issue of the uneven distribution over different relationships.
+Although previous studies have taken notice of knowledge
+in different vision tasks, they only implicitly mine the ex-
+tra knowledge base or count the frequency of relationship
+pairs in datasets to strengthen the iterative message propa-
+gation between relationships and objects while ignoring the
+intrinsic properties of the data.
+Scene Graph Prediction in Point Clouds. With the re-
+cently proposed 3DSSG datasets containing 3D scene graph
+annotations [37], the community started to explore semantic
+relationship prediction in 3D real world data. SGPN [37, 38]
+is the first work to build a 3D scene graph using both objects
+and their interrelations as graph nodes. It then performs
+message propagation using graph convolutional networks.
+Kimera [30] proposed a 3D dynamic scene graph that cap-
+tures metric and semantic aspects of a dynamic environment,
+where nodes represent spatial concepts at different levels of
+abstraction, and edges represent spatial-temporal relations
+among the nodes. EdgeGCN [46] exploits multi-dimensional
+edge features for explicit relationship modeling and explores
+two associated twinning interaction mechanisms for the in-
+dependent evolution of scene graph representations. Wu et
+al. [41] proposed a method to incrementally build semantic
+scene graphs from a 3D environment given a sequence of
+
+9183Figure 2. Method pipeline. (a) A hierarchical symbolic knowledge is firstly reconstructed to exploit external knowledge as the baseline and
+admit the hierarchical structure cues of 3D scene. (b) We then build a hierarchical visual graph and learn the contextualized features by the
+region-aware graph network. (c) Finally, a 3D spatial multimodal knowledge is accumulated to strengthen relationship predictions.
+
+RGB-D frames. KISG [47] uses the ground truth relation-
+ship triplets in the dataset to extract the prior knowledge
+and then fuses it in the scene graph prediction stage. One
+limitation of KISG [47] is that its relevant prior knowledge
+depends on the text-only dataset label while ignoring hierar-
+chical and indispensable structures in the 3D scene for visual
+understanding. Our method differentiates itself from these
+related studies by exploring the 3D implicit structure pattern
+and introducing 3D spatial multimodal knowledge, which
+enables our model to predict relationships more accurately.
+
+3. Methodology
+Problem Formulation: The goal of 3D scene graph gener-
+ation is to describe a given 3D point cloud scene I with a
+semantic scene graph G = {V, R}, where V and R repre-
+sent instance object nodes and their inner relationship edges
+respectively. G forms a structured representation of the se-
+mantic content of the 3D scene. The nodes V consist of a set
+of objects O = {o1, o2, · · · , on} with object oi assigned to a
+certain class label C, a corresponding set of bounding boxes
+B = {b1, b2, · · · , bn} with bi ∈ R6, and a set of relation-
+ship edges R = {r1, r2, · · · , rn} with each ri represents a
+predicate between a pair of objects. Our proposed model can
+be decomposed as:
+
+P (G|I) = P (Ks|I)P (Gv|Ks, I)P (R, Km|Gv, Ks, I)
+
+(1)
+In this equation, the component P (Ks|I) collects all the
+symbolic entities from the datasets, filters the extra knowl-
+edge bases, and combines the hierarchical structure patterns
+of 3D scenes to construct the hierarchical symbolic knowl-
+edge Ks. The component P (Gv|Ks, I) builds visual graphs
+for scenes under the guidance of knowledge Ks, where con-
+textual features for each node are extracted. Conditioned
+on the knowledge Ks and visual graph Gv, the component
+P (R, Km|Gv, Ks, I) accumulates the 3D spatial multimodal
+knowledge by correlating the knowledge Ks with visual
+content and predicts relationships simultaneously. Fig. 2
+illustrates the overall pipeline of the proposed model.
+
+3.1. Hierarchical Symbolic Knowledge Initializa-
+
+tion
+
+Unlike KISG [47], we do not use a closed set or ground
+truth relationship triplets from labels to learn prior knowl-
+edge. Hence, we must make an additional choice of what
+knowledge sources to use and how to clean them. Prior
+knowledge of object classes can be reliable predictors of the
+likelihoods of physical support relationships. For instance, it
+is unlikely that a cup is supported by a wall while tables are
+almost always supported by the floor. Therefore, given a set
+of objects, we can classify each object based on whether it
+is directly supported by the floor. The result is a three-layer
+hierarchical structure about objects in the 3D scene. In par-
+ticular, the first layer only contains the floor since it does not
+have any support. The second layer contains objects directly
+supported by the floor, e.g. bed, table, and sofa. The third
+layer contains the remaining objects usually supported by
+objects in the second layer, e.g. pillow, cup, and cushion.
+
+To exploit the regular structure patterns in 3D spaces and
+construct the scene graph hierarchically, we construct a hier-
+archical symbolic knowledge graph to guide the 3D spatial
+knowledge reasoning. Knowledge sources, such as Concept-
+Net [35] and DBPedia [2], are a valuable tool containing
+commonsense knowledge about the real world. In this work,
+we use ConceptNet as our external knowledge base which
+gives us more spatial relationships and common pairwise ob-
+jects. While ConceptNet contains very useful information, it
+also includes some knowledge that is irrelevant to our model.
+To mitigate this issue, we limit the ConceptNet to commmon
+object categories in 3D point cloud scenes. We collect object
+categories from two widely-used 3D point cloud datasets,
+SUNRGBD [34] and Scannet [7], and then include edges
+that only include these objects. After filtering, we have a
+total of about 5,000 edges and 760 nodes.
+
+We denote the external knowledge graph as Ke =
+{Ve, Ee} where Ve and Ee represent nodes and edges respec-
+tively. To merge the hierarchical structures in 3D spaces into
+the external knowledge graph and construct the hierarchical
+
+9184symbolic knowledge graph Ks, we first use a pre-trained
+multi-layer perceptron (MLP) to classify the hierarchical
+tokens for each node in the external knowledge graph to
+distinguish the discrepancy among different layers of nodes.
+The hierarchical token of each node denotes its correspond-
+ing layer in the hierarchical structure. Each node is then
+initialized as the concatenation of its trainable hierarchical
+token and the word2vec (GloVe [26]) representation of the
+object category. Since the hierarchical structure of 3D spaces
+is built based on the physical support relationships between
+objects, we add additional edges representing support rela-
+tionships between nodes to the external knowledge graph Ke.
+Specifically, we define a new edge type: given two nodes si
+and sj, we connect si to sj using a support edge to represent
+the physical support relationship between si and sj. By defi-
+nition, each node in the hierarchical structure is supported by
+the node in neighboring layers. Therefore, we add a support
+edge between two correlated nodes in neighboring layers.
+Each edge is initialized as the trainable GloVe representation
+of its edge type. Finally, we formulate the updated external
+knowledge graph as hierarchical symbolic knowledge graph
+Ks. Additional details can be found in supplementary.
+3.2. Knowledge-guided Visual Context Encoding
+
+As shown in Fig. 2, taking a scene point cloud with ob-
+ject instance annotations as input, we build a hierarchical
+visual graph Gv = {Vv, Ev} where Vv and Ev denotes object
+instances and edges of object pairs respectively, under the
+guidance of the hierarchical symbolic knowledge graph Ks.
+Then, a region-aware graph network is employed to propa-
+gate node messages through the visual graph Gv to learn the
+contextualized feature representation.
+Visual graph construction. We use Point Cloud Trans-
+former [13] to extract spatial-aware visual features fv for
+each object instance. To encode the spatial features ft of
+each bounding box, we use an MLP to lift the parameters
+of each bounding box (i.e., center and size) to feature space.
+We assign the semantic features fw for each object using an
+embedding table initialized by GloVe [26]. Each node in the
+visual graph is initialized as the concatenation of features
+fv, ft andfw. To capture the implicit structure of the point
+cloud scene, we route each node in the visual graph Gv into
+its corresponding layer according to the hierarchical tokens
+in hierarchical symbolic knowledge graph Ks. Then, we
+complete the edge set Ev of visual graph Gv by extracting po-
+tential physical relationships between nodes in the adjacent
+layers. Specifically, we add an edge representing physical
+support relationship between node pair in the visual graph
+Gv if a support edge also exists between the correspond-
+ing nodes in the hierarchical symbolic knowledge graph Ks.
+Similar to [46], we model the spatial interactions between
+node pairs and encode the initial edge embedding for node
+pairs using an MLP.
+Contextualized features encoding. Objects sharing the
+
+same physical support are correlated since they have simi-
+lar functional role in the environment and are generally in
+close proximity to each other. For instance, both pillow and
+clothes are usually supported by a bed. Therefore, we pro-
+pose a region-aware graph network to jointly highlight the
+interrelated regions of each node in the visual graph Gv and
+encode the hierarchical contexts of the input scene.
+
+i of each node vi and he,t
+
+Given the initial representations of nodes and edges in the
+visual graph Gv, the region-aware graph network iteratively
+updates the hidden state ho,t
+ij of each
+edge (vi, vj) at each time step t via message passing. Since
+the contextual regions around each node in the visual graph
+Gv can be defined as other nodes sharing the same physical
+support with it, each node first gathers information from
+nodes within the same contextual region to enrich its current
+hidden state before propagating messages along the edges in
+the visual graph Gv. Specifically, the enriched hidden state
+˜ho,t
+
+i of each node is:
+
+˜ho,t
+i = ho,t
+
+i +
+
+(cid:88)
+
+ψ(ho,t
+j )
+
+(2)
+
+j∈Nr(i)
+
+Nr(i) contains nodes that share the same level support with
+node vi and ψ is a feed forward network for non-linear
+transformation. For edge (vi, vj), its enriched hidden state
+˜he,t
+
+ij is computed by:
+
+˜he,t
+ij = he,t
+
+ij +
+
+(cid:88)
+
+ψ(ho,t
+
+k ) +
+
+(cid:88)
+
+ψ(ho,t
+s )
+
+(3)
+
+k∈Nr(i)
+
+s∈Nr(j)
+
+After the feature representation enhancements, the message
+passing of nodes and edges can be formulated as:
+
+ho,t+1
+i
+
+= GRU (˜ho,t
+
+i
+
+, mo,t
+i )
+
+= GRU (˜he,t
+
+ij , me,t
+ij )
+
+he,t+1
+ij
+and me,t
+
+i
+
+where mo,t
+ij are the incoming messages for updat-
+ing each node and edge. The calculation of the message for
+each node is:
+
+mo,t
+
+i =
+
+(cid:88)
+
+j∈Nv(i)
+
+(φn(˜ho,t
+
+j ) + φe(˜he,t
+
+ij ))
+
+(6)
+
+where Nv(i) denotes the neighbor nodes of vi in the visual
+graph Gv, φn and φe are two non-linear transformation for
+associated nodes and edges. For each edge, we transform the
+hidden state of subject and object node by two MLPs before
+fusing them to obtain the message:
+
+me,t
+
+ij = φs(˜ho,t
+
+i ) + φo(˜ho,t
+j )
+
+(7)
+
+We take the final hidden states of nodes and edges as the
+contextual feature co
+ij for each
+edge (vi, vj) ∈ Ev.
+
+i for each node vi ∈ Vv and ce
+
+(4)
+
+(5)
+
+91853.3. Spatial Multimodal Knowledge Accumulation
+Though our hierarchical symbolic knowledge graph Ks
+can provide high-quality knowledge about the hierarchical
+structures of point cloud scene, this information is largely
+limited to symbolic knowledge that can only be explicitly
+expressed by text-relevant labels for relationship triplets.
+Therefore, we propose a novel schema to accumulate 3D
+spatial multimodal knowledge Km progressively from the
+visual context via a graph reasoning network. We then in-
+corporate the learned multimodal knowledge Km and the
+contextual features to predict the possible relationships.
+Reasoning on knowledge graph.
+Since the contextual
+features encode the implicit hierarchical structure patterns
+in 3D spaces, we design a graph reasoning network which
+utilizes the visual contextual features and textual facts from
+the hierarchical symbolic knowledge graph Ks to accumu-
+late 3D spatial multimodal knowledge Km by aligning the
+entities in the symbolic knowledge graph with related visual
+contextual features.
+
+The graph reasoning network generates context for 3D
+spatial multimodal knowledge Km, which is in the form of
+embeddings that capture the regular structure patterns in 3D
+scenes for each node and edge in the hierarchical symbolic
+knowledge graph Ks. Given the contextual features of nodes
+and edges in visual graph Gv, each node and edge in the
+graph reasoning network receives three inputs: (1) the train-
+able node or edge embedding in the hierarchical symbolic
+knowledge graph Ks, (2) a 0/1 indicator of whether this
+node or edge appears in the visual graph Gv, (3) the contex-
+tual feature co
+ij in the visual graph Gv corresponding
+to this node or edge, missing nodes and edges are padded
+with zero vectors. The graph reasoning network uses mes-
+sage passing to perform reasoning on hierarchical symbolic
+knowledge graph Ks. Specifically, at each time step t, to
+calculate the hidden states do,t
+for all nodes si ∈ Vs and de,t
+ij
+for all edges (si, sj) ∈ Es, each node and edge first gather
+messages from their neighbors through the graph structure
+then update their hidden states:
+
+i and ce
+
+i
+
+do,t+1
+i
+
+= GRU (do,t
+
+i
+
+, mo,t
+
+i ),
+
+= GRU (de,t
+
+ij , me,t
+ij ),
+
+de,t+1
+ij
+and me,t
+
+where mo,t
+and edges. The incoming message for each node is
+
+ij are the incoming messages for nodes
+
+i
+
+mo,t
+
+i =
+
+(cid:88)
+
+(φn(do,t
+
+j ) + φe(de,t
+
+ij )),
+
+(10)
+
+j∈Nk(i)
+
+where Nk(i) denotes the neighbor nodes of node si in the
+knowledge graph Ks. Similar to Eq. (7), the incoming mes-
+sage for each edge is
+
+me,t
+
+ij = φs(do,t
+
+i ) + φo(do,t
+j ).
+
+(11)
+
+(8)
+
+(9)
+
+We take the sum of the stacked hidden states as the 3D spatial
+multimodal knowledge embedding bo
+i for all nodes and be
+ij
+for all edges in the symbolic knowledge graph Ks.
+Knowledge-enabled Scene Graph Prediction. To incor-
+porate the 3D spatial multimodal knowledge Km into scene
+graph inference, we propose fusing the multimodal knowl-
+edge embedding with the contextual features in the visual
+graph to facilitate 3D scene graph prediction. Towards this
+goal, we utilize an MLP as object detection head to predict
+confident initial class guesses given the contextual node fea-
+tures. We then select the three most confident multimodal
+knowledge embeddings for each node. For edges in the
+visual graph, we select the three most confident object cat-
+egories for the subject and object node based on the initial
+guesses. We then retrieve the multimodal knowledge embed-
+ding using the predicted subject and object categories. Since
+the multimodal knowledge embedding and the contextual
+features are in different feature spaces, we transform them
+by two MLPs φb and φc respectively before fusing them.
+For each node in the visual graph, we fuse the retrieved mul-
+timodal knowledge embedding (cid:8)bk(cid:9)
+k=1,2,3 and the con-
+textual node feature co
+i to obtain the knowledge-enabled
+contextual feature f o
+i :
+
+i = ϕ(φc(co
+f o
+
+i ) + φb(
+
+3
+(cid:88)
+
+bk)).
+
+(12)
+
+k=1
+
+For each edge in the visual graph, the multimodal knowledge
+embedding is fused with its contextual feature in the same
+way as the node.
+
+i for nodes and f e
+
+Equipped with the 3D spatial multimodal knowledge-
+enabled contextual features f o
+ij for edges in
+the visual graph, we generate the scene graph by decoding
+the contextual features using a standard graph convolution
+network (GCN) [18]. We assume that each object pair can
+have a relationship (including none) and fully connect them
+as a graph where relationships are represented as edges. Each
+node is initialized by its contextual node feature f o
+i , and each
+edge is initialized either by the contextual edge feature f e
+ij
+or the contextual features of its subject and object nodes if
+the edge is not presented in the visual graph. The last part
+of the GCN consists of two detection heads for object and
+relationship classification. The object detection head takes
+the decoded node features as input to predict the object clas-
+sification possibilities. The relationship prediction head first
+fuses the decoded subject and object node features with the
+decoded edge features, then predicts a discrete distribution
+over all possible relationship classes.
+Loss Function. We adopt the standard cross entropy loss
+for object and relationship classification in our model. Since
+the contextual node feature co
+i is used to predict the initial
+class guesses, we use a cross entropy loss Lo
+init for the initial
+detection. For the final prediction, we use two cross entropy
+
+9186Methods
+
+R@50/100
+
+mR@50/100
+
+R@50/100
+
+mR@50/100
+
+R@50/100
+
+mR@50/100
+
+PredCls
+
+SGCls
+
+SGDet
+
+3D+IMP [42]
+3D+MOTIFS [45]
+3D+VCTree [36]
+3D+KERN [6]
+3D+Schemata [32]
+3D+HetH [40]
+
+48.15 / 48.72
+52.43 / 53.37
+53.12 / 54.38
+54.74 / 56.53
+58.13 / 59.11
+58.24 / 58.75
+
+21.56 / 21.85
+24.35 / 24.52
+24.75 / 24.91
+25.21 / 25.83
+42.11 / 42.83
+42.53 / 42.74
+
+17.41 / 17.89
+18.34 / 18.57
+19.93 / 20.24
+21.41 / 21.78
+28.72 / 28.97
+28.83 / 29.05
+
+9.06 / 9.23
+9.74 / 9.86
+10.34 / 10.55
+11.02 / 11.36
+26.72 / 27.05
+26.68 / 26.85
+
+24.54 / 24.57
+26.58 / 26.59
+27.58 / 27.62
+27.75 / 27.78
+28.12 / 28.13
+28.17 / 28.18
+
+21.71 / 21.72
+24.12 / 24.17
+24.92 / 24.94
+24.03 / 24.05
+25.29 / 25.30
+25.31 / 25.32
+
+Ours
+
+68.32 / 69.49
+
+66.54 / 66.92
+
+31.50 / 31.64
+
+30.29 / 30.56
+
+29.41 / 29.44
+
+25.35 / 25.36
+
+Table 1. Comparison with state-of-the-art 2D scene graph prediction methods re-implemented to work on 3DSSG dataset.
+
+Methods
+
+R@50/100
+
+mR@50/100
+
+R@50/100
+
+mR@50/100
+
+R@50/100
+
+mR@50/100
+
+PredCls
+
+SGCls
+
+SGDet
+
+SGPN [37]
+EdgeGCN [46]
+KISG [47]
+
+57.71 / 58.05
+58.42 / 59.11
+64.47 / 64.93
+
+38.12 / 38.67
+38.84 / 39.35
+63.19 / 63.52
+
+28.39 / 28.74
+28.58 / 28.93
+29.46 / 29.65
+
+22.23 / 22.57
+22.67 / 23.33
+28.20 / 28.64
+
+- / -
+- / -
+- / -
+
+- / -
+- / -
+- / -
+
+Ours
+
+68.32 / 69.49
+
+66.54 / 66.92
+
+31.50 / 31.64
+
+30.29 / 30.56
+
+29.41 / 29.44
+
+25.35 / 25.36
+
+Table 2. Comparison with 3D scene graph prediction methods on the 3DSSG dataset.
+
+losses Lo
+sification:
+
+f inal and Lr
+
+f inal for the object and relationship clas-
+
+Lf inal = woLo
+
+f inal + wrLr
+
+f inal
+
+(13)
+
+where wo and wr are the weights for object and relation loss.
+In our experiment, we set wo to 0.75 and wr to 1. Our final
+loss function can be formulated as:
+
+L = Lo
+
+init + Lf inal
+
+(14)
+
+4. Experiments
+4.1. Experimental Configuration
+
+We evaluate our model on 3DSSG dataset [37]. Follow-
+ing [47], we select 160 object categories and 27 relationship
+classes for detection. We compare our model with others in
+three standard tasks proposed in [42]. (1) Predicate Classifi-
+cation (PredCls): Given the ground truth 3D bounding boxes
+and their corresponding semantic labels, our model classifies
+the relationship between each object pair. (2) Scene Graph
+Classification (SGCls): Given the ground truth 3D bounding
+boxes, our model predicts the relationships as well as the ob-
+ject categories jointly. (3) Scene Graph Generation (SGDet):
+Given the raw point cloud, our model detects 3D objects,
+their semantic information, as well as their relationships in
+an end-to-end manner. Following existing 2D and 3D scene
+graph generation works, we adopt the constrained evaluation
+metric recall@K (R@K) and mean recall@K (mR@K).
+
+Our model is implemented in PyTorch, and trained using
+one NVIDIA GTX TITAN X GPU for 40 epochs with the
+ADAM optimizer. We use an initial learning rate of 0.0001,
+weight decay of 0.5, and mini-batch of 4. After 15, 25,
+and 40 epochs, we multiply the learning rate by 0.1. We
+adopt VoteNet [27] as the 3D object detection backbone to
+generate an initial set of 256 object candidates in the SGDet
+task. The Point Cloud Transformer is pre-trained on the
+3DSSG dataset using the same settings in [13].
+
+4.2. Comparison to State-of-the-Art
+
+We first compare our model with the following state-of-
+art 2D image scene graph generation models, modified to
+fit the 3DSSG dataset: IMP [42], MOTIFS [45] and VC-
+Tree [36] which creatively devise various message passing
+methods for improving graph representations. KERN [6],
+Schemata [32], and HetH [40] incorporate statistical priors
+and learning-based commonsense knowledge into the scene
+graph prediction. Therefore, we include these models to
+illustrate the superiority of the 3D spatial multimodal knowl-
+edge about the implicit hierarchical structure correlations
+between object pairs in the 3D scene.
+
+Our results in Tab. 1 lead to a few key observations:
+(1) Our model consistently outperforms all the existing ap-
+proaches on all metrics and achieve 3.57% boost on mR@50
+in SGCls task and 10.08% boost on R@50 in PredCls task.
+This indicates that leveraging regular patterns of 3D physi-
+cal spaces is beneficial for scene graph prediction. (2) Our
+model outperforms traditional message passing model IMP
+and MOTIFS. Furthermore, our method achieves consider-
+able improvement when compared to VCTree. (3) Compared
+to Schemata, our model achieves an improvement of 2.78%
+and 10.19% on R@50 in SGCls and PredCls, suggesting
+that our multimodal knowledge embedding is a better ap-
+proach compared to the class-level prototypical represen-
+tations learned from perceptual outputs in Schemata. (4)
+Compared with KERN and HetH, our proposed hierarchical
+structure of 3D spaces is superior to the graph structure they
+adopted to represent the input as our model outperforms
+them with a significant margin. (5) The performance has
+been saturated in the SGDet task. This is mainly because
+object detection performance on this dataset is a bottleneck
+that limits the performance.
+
+We also compare the performance of our model with the
+state-of-the-art 3D point cloud-based scene graph predic-
+
+9187Methods
+
+R@50/100
+
+mR@50/100
+
+Knowledge Ks
+
+w/o Hierarchical Tokens
+w/o Support Edge
+w/o Both
+
+30.47 / 30.67
+30.55 / 30.74
+28.41 / 28.47
+
+28.94 / 29.19
+29.17 / 29.47
+27.13 / 27.52
+
+Visual Context Encoding
+
+Gv replaced w/ Gf c
+w/o RaGN
+RaGN replaced w/ GCN
+
+28.17 / 28.32
+26.43 / 26.57
+31.03 / 31.21
+
+26.28 / 26.29
+24.23 / 24.36
+29.67 / 29.88
+
+Knowledge Km
+
+w/o bo
+w/o co
+
+i and be
+ij
+i and ce
+ij as input
+
+26.27 / 26.35
+
+22.93 / 23.18
+
+28.14 / 28.31
+
+25.05 / 25.31
+
+Ours
+
+31.50 / 31.64
+
+30.29 / 30.56
+
+Table 3. Quantitative results of different module configurations on
+the SGCls task.
+
+tion models to demonstrate the effectiveness of 3D spatial
+multimodal knowledge. We include several existing works
+such as SGPN [37], EdgeGCN [46] and KISG [47] since
+they all report competitive results. SGPN and EdgeGCN
+exploit multi-dimensional edge features for explicit rela-
+tionship modeling whereas KISG learns a group of class-
+dependent prototypical representations for each semantic
+class. As shown in Tab. 2, our model dominantly surpasses
+all methods. Benefiting from the hierarchical structure of
+3D spaces, our model is able to reason complex relation-
+ship hierarchically and systematically. Compared to SGPN
+and EdgeGCN, our model improves the R@50 by 2.92%
+and 9.90% in SGCls and PredCls tasks. We can also see
+that our method outperforms KISG by 2.04% on R@50
+in SGCls. KISG captures class-related priors in the scene
+from text-only ground truth labels. Such knowledge cannot
+efficiently represent diverse relationships and complex 3D
+environments. In contrast, our model extracts indispensable
+3D spatial multimodal knowledge which benefits the scene
+graph prediction.
+
+4.3. Ablation Study
+
+We only report the performance results in the Recall and
+mean Recall metrics on the SGCls task for ablation studies.
+The results are shown in Tab. 3.
+Hierarchical symbolic knowledge. We first look at the
+hierarchical symbolic knowledge graph Ks to investigate
+its effectiveness. Specifically, we find that using Concept-
+Net without classifying the hierarchical tokens or adding
+support edges leads to sub-optimal performance. Further-
+more, using ConceptNet without any augmentation drops
+the performance significantly, indicating that both the hierar-
+chical tokens and support edges are crucial elements of the
+hierarchical structures in 3D scene.
+Knowledge-guided visual context encoding. Next, we
+analyse the knowledge-guided visual context encoding mod-
+
+Variants
+
+Gr
+Gt
+
+Gv(original)
+
+PredClS
+R@50 mR@50
+
+SGClS
+R@50 mR@50
+
+62.74
+68.41
+
+68.32
+
+58.25
+66.59
+
+66.54
+
+28.17
+31.59
+
+31.50
+
+27.28
+30.35
+
+30.29
+
+Table 4. Comparison of different variants of the visual graph.
+
+Methods
+
+Head
+
+Body
+
+Tail
+
+SGPN [37]
+EdgeGCN [46]
+KISG [37]
+
+39.42
+39.51
+40.36
+
+23.64
+23.85
+24.56
+
+13.03
+13.15
+13.61
+
+Ours
+
+44.23
+
+26.27
+
+14.73
+
+Table 5. The R@50 metric of biased relationship prediction on the
+SGCls task.
+
+ule. We can see that replacing the hierarchical visual graph
+Gv with a fully-connected graph Gf c decreases the perfor-
+mance by a margin of 3.33% on R@50, indicating that the
+hierarchical structure is superior to a plain fully-connected
+graph in terms of modeling context. Furthermore, remov-
+ing the subsequent region-aware graph network (RaGN) and
+directly fusing the multimodal knowledge embedding with
+the initial representation of each node and edge in the visual
+graph negatively impacts the performance on all metrics.
+Replacing the region-aware graph network with a standard
+graph convolution network also hurts the performance.
+3D spatial multimodal knowledge accumulation. Lastly,
+we examine the accumulated multimodal knowledge Km
+to learn about how Km and rest of the model interact. We
+first see how much of the improvement comes from the 3D
+spatial multimodal knowledge Km. As shown in Tab. 3, the
+multimodal knowledge embedding significantly improves
+the R@50 and mR@50 by 5.23% and 7.36% respectively. In
+addition, dropping the contextual feature input co
+i for nodes
+and ce
+ij for edges in the graph reasoning network decreases
+the performance by a margin of 3.36% and 5.24% on R@50
+and mR@50 in SGCls. This drop in performance indicates
+that the contextual feature plays a pivotal role in bridging
+the heterogeneous gap between the symbolic knowledge and
+visual information.
+
+4.4. Further Analysis
+Analysis on the hierarchical structure of 3D spaces. To
+validate the potential of the hierarchical visual graph Gv in
+capturing the inherent hierarchical structure of a 3D scene,
+we design two visual graph variants and compare them to
+the hierarchical visual Gv: (1) Instead of using the hierar-
+chical symbolic knowledge graph Ks, we build a ground
+truth graph Gt based on the ground truth labels for support
+relations. In particular, each edge in Gt represents the ground
+truth support relationship of the input scene. (2) We also
+design a randomly connected graph Gr, where we keep all
+of the nodes the same but randomize the edges that connect
+them. As shown in Tab. 4, both Gv and Gt outperform Gr
+
+9188Figure 3. Comparison of our model and KISG on the SGCls task
+when trained with noisy labels.
+
+with a significant margin on all metrics. More importantly,
+we observe that Gt and Gv perform mostly similar while Gt
+slightly outperforms Gv. The results confirm that the hierar-
+chical visual graph Gv is one of the more optimal ways of
+extracting the hierarchical structure patterns of 3D spaces.
+Robustness of 3D spatial multimodal knowledge. Ad-
+ditionally, we investigate the robustness of the 3D spatial
+multimodal knowledge Km by training our model with noisy
+labels. Specifically, we add different proportions of noises
+into the 3DSSG training set by replacing part of ground
+truth relationships with the randomly selected wrong rela-
+tionships for input scenes. The performance of our model
+and KISG [47] on the SGCls task is reported in Fig. 3. We
+can see that, the performance of KISG decreases drastically
+while ours decreases slowly with increasing noise rate. Un-
+der the 30% noise rate condition, our model improves the
+R@50 metric by about 6.89% over KISG, which indicates
+that our model achieves improved robustness over KISG.
+The main reason is that KISG captures relevant prior knowl-
+edge from text-only ground truth labels and noises contained
+in the labels are easily included in their knowledge base and
+affects the prediction of relationships. Different with KISG,
+our model leverages the inherently hierarchical structures of
+3D scenes and accumulates multimodal knowledge which is
+both label free and reliable.
+Long-tail analysis. We also investigate how our model per-
+forms on the long-tail part of the dataset. To do this, we
+order all the relationships based on the frequency of each
+relationship category occurring in triplets. We select the
+5 most common relationship categories as the head, the 5
+least common relationship categories as the tail, and the
+rest of the categories as the body. Tab. 5 reports the R@50
+metric on each long-tail category groups of our model. More-
+over, our model achieves best performance when evaluating
+the R@50 metric on the tail relationship categories, which
+shows that our model has the ability to mitigate the effect of
+sample imbalance. The main reason is that the hierarchical
+structures can be extracted accurately which influence other
+relationships in the prediction process.
+4.5. Qualitative Results
+
+We visualize intermediate results in Fig. 4(a-c). We can
+see that both the hierarchical visual graph Gv and 3D scene
+
+Figure 4. Visualizations of our predicted scene graph on 3DSSG
+dataset. Red indicates the misclassified objects or relationships.
+
+graph G are well constructed. However, our model incor-
+rectly classifies the relationship between Window1 and Floor.
+This is mainly because our model fails to extract discrimi-
+native features for Window1 as there are few points within
+its bounding box. The token of Window1 is classified incor-
+rectly in the second layer while it should be in the third layer.
+We provide more visualization samples in the supplementary.
+
+5. Conclusion
+
+We proposed a method for 3D scene graph prediction
+from raw point clouds. Our method explores the regular pat-
+terns of 3D physical spaces into the deep network to facilitate
+3D scene graph prediction. Hierarchical symbolic knowl-
+edge is first reconstructed via exploiting external knowledge
+as the baseline to admit the hierarchical structure cues of
+a 3D scene. A knowledge-guided visual context encoding
+module then builds a hierarchical visual graph and learns
+the contextualized features by a region-aware graph network.
+Finally, a 3D spatial multimodal knowledge accumulation
+module is proposed to regularize the semantic space of rela-
+tionship prediction. Extensive experiments on the 3DSSG
+dataset show that our method outperforms existing state-of-
+the-art and can mitigate the effect of data imbalance and
+label noises. In the future, we plan to exploit the attributes of
+3D objects to build richer knowledge graphs to improve the
+prediction performances of attribute-focused relationships,
+such as same symmetric as and same texture as.
+
+6. Acknowledgments
+
+This work was supported in part by the National Nat-
+ural Science Foundation of China under Grant 62003253,
+Grant 61973106, Grant U2013203, Grant U21A20482 and
+Grant U20A20185. Professor Ajmal Mian is the recipient of
+an Australian Research Council Future Fellowship Award
+(project number FT210100268) funded by the Australian
+Government.
+
+9189References
+
+[1] Iro Armeni, Zhi-Yang He, JunYoung Gwak, Amir R Zamir,
+Martin Fischer, Jitendra Malik, and Silvio Savarese. 3d scene
+graph: A structure for unified semantics, 3d space, and cam-
+era. In Proceedings of the IEEE/CVF International Confer-
+ence on Computer Vision, pages 5664–5673, 2019. 1, 2
+[2] S¨oren Auer, Christian Bizer, Georgi Kobilarov, Jens Lehmann,
+Richard Cyganiak, and Zachary Ives. Dbpedia: A nucleus
+for a web of open data. In The semantic web, pages 722–735.
+2007. 2, 3
+
+[3] Sumithra Bhakthavatsalam, Kyle Richardson, Niket Tandon,
+and Peter Clark. Do dogs have whiskers? a new knowledge
+base of haspart relations. arXiv preprint arXiv:2006.07510,
+2020. 2
+
+[4] Xiaojun Chang, Pengzhen Ren, Pengfei Xu, Zhihui Li, Xiao-
+jiang Chen, and Alexander G Hauptmann. A comprehensive
+survey of scene graphs: Generation and application. IEEE
+Transactions on Pattern Analysis and Machine Intelligence,
+2021. 2
+
+[5] Long Chen, Hanwang Zhang, Jun Xiao, Xiangnan He, Shil-
+iang Pu, and Shih-Fu Chang. Counterfactual critic multi-agent
+training for scene graph generation. In Proceedings of the
+IEEE/CVF International Conference on Computer Vision,
+pages 4613–4623, 2019. 2
+
+[6] Tianshui Chen, Weihao Yu, Riquan Chen, and Liang Lin.
+Knowledge-embedded routing network for scene graph gen-
+In Proceedings of the IEEE/CVF Conference on
+eration.
+Computer Vision and Pattern Recognition, pages 6163–6171,
+2019. 2, 6
+
+[7] Angela Dai, Angel X Chang, Manolis Savva, Maciej Hal-
+ber, Thomas Funkhouser, and Matthias Nießner. Scannet:
+In
+Richly-annotated 3d reconstructions of indoor scenes.
+Proceedings of the IEEE conference on computer vision and
+pattern recognition, pages 5828–5839, 2017. 3
+
+[8] Yang Ding, Jing Yu, Bang Liu, Yue Hu, Mingxin Cui, and
+Qi Wu. Mukea: Multimodal knowledge extraction and ac-
+cumulation for knowledge-based visual question answering.
+In Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pages 5089–5098, 2022. 2
+
+[9] Zijin Du, Hailiang Ye, and Feilong Cao. A novel local-global
+graph convolutional method for point cloud semantic segmen-
+tation. IEEE Transactions on Neural Networks and Learning
+Systems, 2022. 1
+
+[10] Mingtao Feng, Syed Zulqarnain Gilani, Yaonan Wang, Liang
+Zhang, and Ajmal Mian. Relation graph network for 3d
+object detection in point clouds. IEEE Transactions on Image
+Processing, 30:92–107, 2020. 1
+
+[11] Mingtao Feng, Liang Zhang, Xuefei Lin, Syed Zulqarnain
+Gilani, and Ajmal Mian. Point attention network for seman-
+tic segmentation of 3d point clouds. Pattern Recognition,
+107:107446, 2020. 1
+
+[12] Chen Gao, Jinyu Chen, Si Liu, Luting Wang, Qiong Zhang,
+and Qi Wu. Room-and-object aware knowledge reasoning
+for remote embodied referring expression. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 3064–3073, 2021. 2
+
+[13] Meng-Hao Guo, Jun-Xiong Cai, Zheng-Ning Liu, Tai-Jiang
+Mu, Ralph R Martin, and Shi-Min Hu. Pct: Point cloud
+transformer. Computational Visual Media, 7(2):187–199,
+2021. 4, 6
+
+[14] Alon Hafri and Chaz Firestone. The perception of relations.
+
+Trends in Cognitive Sciences, 2021. 1
+
+[15] Qingyong Hu, Bo Yang, Linhai Xie, Stefano Rosa, Yulan
+Guo, Zhihua Wang, Niki Trigoni, and Andrew Markham.
+Randla-net: Efficient semantic segmentation of large-scale
+point clouds. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 11108–
+11117, 2020. 1
+
+[16] Maximilian Jaritz, Tuan-Hung Vu, Raoul De Charette, ´Emilie
+Wirbel, and Patrick P´erez. Cross-modal learning for domain
+adaptation in 3d semantic segmentation. IEEE Transactions
+on Pattern Analysis and Machine Intelligence, 2022. 1
+[17] Justin Johnson, Ranjay Krishna, Michael Stark, Li-Jia Li,
+David Shamma, Michael Bernstein, and Li Fei-Fei. Image
+In Proceedings of the IEEE
+retrieval using scene graphs.
+conference on computer vision and pattern recognition, pages
+3668–3678, 2015. 2
+
+[18] Thomas N Kipf and Max Welling. Semi-supervised classi-
+fication with graph convolutional networks. arXiv preprint
+arXiv:1609.02907, 2016. 5
+
+[19] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A Shamma, et al. Visual genome:
+Connecting language and vision using crowdsourced dense
+image annotations. International journal of computer vision,
+123(1):32–73, 2017. 2
+
+[20] Manyi Li, Akshay Gadi Patil, Kai Xu, Siddhartha Chaud-
+huri, Owais Khan, Ariel Shamir, Changhe Tu, Baoquan Chen,
+Daniel Cohen-Or, and Hao Zhang. Grains: Generative recur-
+sive autoencoders for indoor scenes. ACM Transactions on
+Graphics (TOG), 38(2):1–16, 2019. 1
+
+[21] Mengtian Li, Yuan Xie, Yunhang Shen, Bo Ke, Ruizhi Qiao,
+Bo Ren, Shaohui Lin, and Lizhuang Ma. Hybridcr: Weakly-
+supervised 3d point cloud semantic segmentation via hybrid
+contrastive regularization. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 14930–14939, 2022. 1
+
+[22] Ze Liu, Zheng Zhang, Yue Cao, Han Hu, and Xin Tong.
+Group-free 3d object detection via transformers. In Proceed-
+ings of the IEEE/CVF International Conference on Computer
+Vision, pages 2949–2958, 2021. 1
+
+[23] Kenneth Marino, Xinlei Chen, Devi Parikh, Abhinav Gupta,
+and Marcus Rohrbach. Krisp: Integrating implicit and sym-
+bolic knowledge for open-domain knowledge-based vqa. In
+Proceedings of the IEEE/CVF Conference on Computer Vi-
+sion and Pattern Recognition, pages 14111–14121, 2021. 2
+[24] George A Miller. Wordnet: a lexical database for english.
+Communications of the ACM, 38(11):39–41, 1995. 2
+[25] Xuran Pan, Zhuofan Xia, Shiji Song, Li Erran Li, and Gao
+Huang. 3d object detection with pointformer. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 7463–7472, 2021. 1
+
+[26] Jeffrey Pennington, Richard Socher, and Christopher D Man-
+In
+ning. Glove: Global vectors for word representation.
+
+9190[39] Kai Wang, Yu-An Lin, Ben Weissmann, Manolis Savva, An-
+gel X Chang, and Daniel Ritchie. Planit: Planning and in-
+stantiating indoor scenes with relation graph and spatial prior
+networks. ACM Transactions on Graphics (TOG), 38(4):1–15,
+2019. 1
+
+[40] Wenbin Wang, Ruiping Wang, Shiguang Shan, and Xilin
+Chen. Sketching image gist: Human-mimetic hierarchical
+scene graph generation. In European Conference on Com-
+puter Vision, pages 222–239. Springer, 2020. 6
+
+[41] Shun-Cheng Wu, Johanna Wald, Keisuke Tateno, Nassir
+Navab, and Federico Tombari. Scenegraphfusion: Incre-
+mental 3d scene graph prediction from rgb-d sequences. In
+Proceedings of the IEEE/CVF Conference on Computer Vi-
+sion and Pattern Recognition, pages 7515–7525, 2021. 1,
+2
+
+[42] Danfei Xu, Yuke Zhu, Christopher B Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing.
+In
+Proceedings of the IEEE conference on computer vision and
+pattern recognition, pages 5410–5419, 2017. 2, 6
+
+[43] Qiangeng Xu, Yiqi Zhong, and Ulrich Neumann. Behind the
+curtain: Learning occluded shapes for 3d object detection. In
+Proceedings of the AAAI Conference on Artificial Intelligence,
+volume 36, pages 2893–2901, 2022. 1
+
+[44] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi
+Parikh. Graph r-cnn for scene graph generation. In Proceed-
+ings of the European conference on computer vision (ECCV),
+pages 670–685, 2018. 2
+
+[45] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin Choi.
+Neural motifs: Scene graph parsing with global context. In
+Proceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition, pages 5831–5840, 2018. 2, 6
+
+[46] Chaoyi Zhang, Jianhui Yu, Yang Song, and Weidong Cai.
+Exploiting edge-oriented reasoning for 3d point-based scene
+graph analysis. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 9705–
+9715, 2021. 1, 2, 4, 6, 7
+
+[47] Shoulong Zhang, Aimin Hao, Hong Qin, et al. Knowledge-
+inspired 3d scene graph prediction in point cloud. Advances
+in Neural Information Processing Systems, 34, 2021. 2, 3, 6,
+7, 8
+
+[48] Yifeng Zhang, Ming Jiang, and Qi Zhao. Explicit knowl-
+edge incorporation for visual reasoning. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 1356–1365, 2021. 2
+
+[49] Na Zhao, Tat-Seng Chua, and Gim Hee Lee. Few-shot
+3d point cloud semantic segmentation. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 8873–8882, 2021. 1
+
+Proceedings of the 2014 conference on empirical methods
+in natural language processing (EMNLP), pages 1532–1543,
+2014. 4
+
+[27] Charles R Qi, Or Litany, Kaiming He, and Leonidas J Guibas.
+Deep hough voting for 3d object detection in point clouds. In
+Proceedings of the IEEE/CVF International Conference on
+Computer Vision, pages 9277–9286, 2019. 1, 6
+
+[28] Charles R Qi, Hao Su, Kaichun Mo, and Leonidas J Guibas.
+Pointnet: Deep learning on point sets for 3d classification
+and segmentation. In Proceedings of the IEEE conference
+on computer vision and pattern recognition, pages 652–660,
+2017. 1
+
+[29] Charles R Qi, Li Yi, Hao Su, and Leonidas J Guibas. Point-
+net++ deep hierarchical feature learning on point sets in a
+metric space. In Proceedings of the 31st International Con-
+ference on Neural Information Processing Systems, pages
+5105–5114, 2017. 1
+
+[30] Antoni Rosinol, Andrew Violette, Marcus Abate, Nathan
+Hughes, Yun Chang, Jingnan Shi, Arjun Gupta, and Luca
+Carlone. Kimera: From slam to spatial perception with 3d
+dynamic scene graphs. The International Journal of Robotics
+Research, 40(12-14):1510–1546, 2021. 1, 2
+
+[31] Morteza Sarafyazd and Mehrdad Jazayeri. Hierarchical rea-
+soning by neural circuits in the frontal cortex. Science,
+364(6441), 2019. 1
+
+[32] Sahand Sharifzadeh, Sina Moayed Baharlou, and Volker
+Tresp. Classification by attention: Scene graph classification
+with prior knowledge. In Proceedings of the AAAI Conference
+on Artificial Intelligence, volume 35, pages 5025–5033, 2021.
+6
+
+[33] Nathan Silberman, Derek Hoiem, Pushmeet Kohli, and Rob
+Fergus. Indoor segmentation and support inference from rgbd
+images. In European conference on computer vision, pages
+746–760. Springer, 2012. 1
+
+[34] Shuran Song, Samuel P Lichtenberg, and Jianxiong Xiao.
+Sun rgb-d: A rgb-d scene understanding benchmark suite. In
+Proceedings of the IEEE conference on computer vision and
+pattern recognition, pages 567–576, 2015. 3
+
+[35] Robyn Speer, Joshua Chin, and Catherine Havasi. Conceptnet
+5.5: An open multilingual graph of general knowledge. In
+Thirty-first AAAI conference on artificial intelligence, 2017.
+2, 3
+
+[36] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan Luo,
+and Wei Liu. Learning to compose dynamic tree structures for
+visual contexts. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 6619–
+6628, 2019. 2, 6
+
+[37] Johanna Wald, Helisa Dhamo, Nassir Navab, and Federico
+Tombari. Learning 3d semantic scene graphs from 3d indoor
+reconstructions. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 3961–
+3970, 2020. 1, 2, 6, 7
+
+[38] Johanna Wald, Nassir Navab, and Federico Tombari. Learning
+3d semantic scene graphs with instance embeddings. Inter-
+national Journal of Computer Vision, pages 1–22, 2022. 1,
+2
+
+9191

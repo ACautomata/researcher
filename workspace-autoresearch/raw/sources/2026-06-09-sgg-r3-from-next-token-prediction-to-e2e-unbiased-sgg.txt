@@ -1,0 +1,2944 @@
+SGG-R3: From Next-Token Prediction to End-to-End Unbiased Scene
+Graph Generation
+Jiaye Feng1, Qixiang Yin2, Yuankun Liu1, Tong Mo1*, Weiping Li1
+1School of Software and Microelectronics, Peking University, Beijing, China
+2Zhongguancun Academy, Beijing, China
+{jyfeng25, liuyk}@stu.pku.edu.cn,
+buptyqx@bupt.edu.cn, {motong, wpli}@ss.pku.edu.cn
+*Corresponding author
+Abstract
+Scene Graph Generation (SGG) structures vi-
+sual scenes as graphs of objects and their rela-
+tions. While Multimodal Large Language Mod-
+els (MLLMs) have advanced end-to-end SGG,
+current methods are hindered by both a lack of
+task-specific structured reasoning and the chal-
+lenges of sparse, long-tailed relation distribu-
+tions, resulting in incomplete scene graphs char-
+acterized by low recall and biased predictions.
+To address these issues, we introduce SGG-
+R3, a structured reasoning framework that in-
+tegrates task-specific Chain-of-Thought (CoT)-
+guided Supervised Fine-Tuning (SFT) and Re-
+inforcement Learning (RL) with Group Se-
+quence Policy Optimization (GSPO), designed
+to engage in three sequential stages to achieve
+end-to-end unbiased scene graph generation.
+During the SFT phase, we propose a relation
+augmentation strategy by leveraging an MLLM
+and refined via embedding similarity filtering
+to alleviate relation sparsity. Subsequently, a
+stage-aligned reward scheme optimizes the pro-
+cedural reasoning during RL. Specifically, we
+propose a novel dual-granularity reward which
+integrates fine-grained and coarse-grained re-
+lation rewards, simultaneously mitigating the
+long-tail issue via frequency-based adaptive
+weighting of predicates and improving relation
+coverage through semantic clustering. Experi-
+ments on two benchmarks show that SGG-R3
+achieves superior performance compared to ex-
+isting methods, demonstrating the effectiveness
+and generalization of the framework.
+1
+Introduction
+Scene Graph Generation (SGG) aims to parse im-
+ages into structured semantic graphs that represent
+objects and their interrelationships, providing a
+crucial bridge between vision and language that fa-
+cilitates downstream applications including visual
+question answering (Kenfack et al., 2020), image
+retrieval (Schroeder and Tripathi, 2020), and em-
+bodied navigation (Zhu et al., 2021; Gadre et al.,
+Image
+MLLM
+Prompt
+Scene Descriptions
+Object Detection Network Relation Prediction Network
+Figure 1: Pipeline comparison of Scene Graph Gener-
+ation between the two-stage classification framework
+and the end-to-end generative MLLM method.
+2022; Huang et al., 2025a). Traditional SGG meth-
+ods (Xu et al., 2017; Zellers et al., 2018; Tang et al.,
+2019) predominantly follow a two-stage paradigm,
+decoupling the task into object detection followed
+by relation prediction, with efforts concentrated on
+refining the latter module. To improve efficiency
+and mitigate error propagation, end-to-end SGG
+approaches (Lin et al., 2020; Li et al., 2022; Cong
+et al., 2023; Hayder and He, 2024) have emerged,
+which are often based on Transformer (Vaswani
+et al., 2017) architectures that unify object extrac-
+tion and relation analysis. However, such methods
+tend to produce predictions that are biased toward
+high-frequency relations and have limited gener-
+alization to unseen concepts due to overfitting on
+annotated data.
+Recently, Multimodal Large Language Models
+(MLLMs) (Liu et al., 2023; Wang et al., 2024b;
+Bai et al., 2025) have advanced rapidly, demon-
+strating considerable capabilities in object ground-
+ing and relational reasoning. Unlike conventional
+classification-based SGG methods that treat rela-
+tion prediction as discrete labeling over fixed ob-
+ject proposals, MLLMs facilitate the end-to-end
+generation of scene descriptions in an open-ended
+manner. As illustrated in Figure 1, guided by the
+task prompt, the model directly generates a tex-
+tual representation of the scene graph, eliminating
+the need for the two-stage generation process re-
+arXiv:2603.07961v3  [cs.CV]  23 Apr 2026
+
+---PAGE BREAK---
+quired by conventional methods. However, apply-
+ing MLLM to end-to-end SGG presents two criti-
+cal challenges. First, the absence of SGG-specific
+structured reasoning pipeline compels model to
+navigate an excessively vast search space. For in-
+stance, using generic directives like “think step-
+by-step in <think></think> tags” without granu-
+lar procedural guidance makes it difficult to form
+a valid Chain-of-Thought (CoT), leading to hal-
+lucinations and low recall. Second, the inherent
+sparsity and long-tailed distribution of relation data
+(detailed analysis in Appendix B.1) drive fine-tuned
+models to predict incomplete graphs with biased re-
+lations. While existing research (Chen et al., 2025;
+Li et al., 2025b) utilizes Supervised Fine-Tuning
+(SFT) and Reinforcement Learning (RL) to opti-
+mize output, these efforts often struggle with pre-
+cise object grounding and unbiased relational mod-
+eling due to the absence of a specialized structured
+reasoning process.
+Notably, SGG fundamentally differs from typi-
+cal visual question answering, as it requires dense
+and sequential prediction of both objects and their
+relations, thus necessitating a tailored CoT process.
+To this end, we introduce SGG-R3, a structured rea-
+soning framework that integrates CoT-guided SFT
+and RL paradigm. To alleviate relation sparsity and
+the long-tailed distribution issue, we first generate
+relation-augmented data by leveraging Qwen2.5-
+VL-32B (Bai et al., 2025). This dataset is then
+filtered by computing the cosine similarity between
+Sentence-BERT (Reimers and Gurevych, 2019) em-
+beddings of the generated relations and the origi-
+nal dataset relations, thereby maintaining semantic
+alignment and yielding higher-quality samples for
+SFT. To establish foundational reasoning capabili-
+ties, the model is supervised fine-tuned on relation-
+augmented data formatted as CoT, explicitly engag-
+ing in three sequential steps of object category de-
+tection, object instance grounding, and multi-type
+relation extraction. The RL phase further enhances
+the model’s capabilities in visual grounding and
+relational reasoning. We introduce a novel dual-
+granularity reward that integrates fine-grained and
+coarse-grained relation rewards, which adaptively
+weights predicates based on their frequency to alle-
+viate the long-tail issue, while also enhancing over-
+all relation coverage by using DBSCAN-based (Es-
+ter et al., 1996) semantic clustering to group and
+match similar relations. Our main contributions are
+summarized as follows:
+• We propose a structured reasoning framework
+for end-to-end unbiased scene graph genera-
+tion, which enhances controllability and logi-
+cal coherence by decomposing the generation
+into three sequential stages.
+• We introduce a relation augmentation method
+for SFT and a novel dual-granularity reward
+for RL, jointly mitigating the long-tailed dis-
+tribution issue and promoting the generation
+of unbiased scene graphs.
+• Extensive experiments on two benchmarks
+show that SGG-R3 outperforms previous
+methods across multiple metrics, demonstrat-
+ing its superior capability in visual grounding
+and relation identification.
+2
+Related Works
+2.1
+VLM for Scene Graph Generation
+Vision-Language Models (VLMs) provide a
+promising approach for SGG by leveraging cross-
+modal alignment. Current works (Zhang et al.,
+2023; Li et al., 2024b; Chen et al., 2024) typically
+retrieve objects and relations through global or re-
+gional feature matching for open-vocabulary SGG.
+(Yu et al., 2023) tackles the long-tailed distribu-
+tion by mining fine-grained predicates via a VLM
+and an adaptive semantic clustering loss. Mean-
+while, MLLMs are fine-tuned to generate scene
+graphs in an end-to-end manner via SFT and RL.
+(Chen et al., 2025) pioneers the application of RL to
+end-to-end SGG by designing a graph-constrained
+reward to optimize structured outputs, while (Li
+et al., 2025b) incorporates a cognitive CoT mech-
+anism to improve relation recognition. However,
+both approaches still fail to address the sparsity and
+long-tail issues of relations.
+2.2
+Chain of Thought in Visual Reasoning
+The success of CoT in Large Language Mod-
+els (Wei et al., 2022) has motivated its adaptation to
+visual reasoning tasks. By breaking down complex
+problems into sequences of intermediate reasoning
+steps, CoT guides models to produce incremental
+solutions rather than direct answers. Several related
+methods (Shao et al., 2024a; Huang et al., 2025b;
+Liu et al., 2025; Chu et al., 2025; Yuan et al., 2026)
+integrate explicit visual evidence during generation
+to bridge the gap between visual perception and log-
+ical reasoning. (Xu et al., 2025) adopt structured
+
+---PAGE BREAK---
+Sentence-BERT
+iou (pred, gt) + L1 (pred, gt)
+＆
+node recall
+F1 score (pred, gt)
+fine-grained
+output format      or
+coarse-grained
+TP TN
+FP FN
+Stage 1: Scene Context Description​
+Stage 2: Multi-type Relation Extraction 
+Chain of Thought Prompt for
+Relation Augmentation
+Original data sample
+Qwen-2.5-VL-32B
+Reinforcement Learning 
+Supervised Fine-tuning
+I'm learning to give high quality responses！
+Relation Augmentation
+on
+has
+wearing
+snow.1
+glass.1
+person.1
+pole.2
+pole.1
+arm.1
+ski.1
+cosine
+similarity
+<subject, preidicate, object> 
+embeddings
+sim > threshold
+fine-grained
+output format      or
+coarse-grained
+Combination Patterns of Triplets
+Two-stage Post-training 
+Three stage structured reasoning
+<CATEGORY>#JSON#</CATEGORY>
+<OBJECT>#JSON#</OBJECT>
+<RELATION>#JSON#</RELATION>
+ Format Reward
+Dual-Granularity Reward
+ Stage 1: Object Category Detection​
+ Stage 2: Object Instance Grounding​
+  Stage 3: Multi-type Relation Extraction
+Chain of Thought  Prompt for 
+Scene Graph Generation
+<subject, preidicate, object>
+embeddings
+IoU + L1
+ ＆
+  node recall
+Instance Grounding Reward
+F1 score 
+TP
+TN
+FP
+FN
+Category Detection Reward
+<person, walking in, sidewalk>
+<building, has, window>
+<car, parked on, road>
+ pattern 1
+...
+...
+structured reasoning
+reward alignment
+I'm learning to give well-
+structured responses！
+Augmented data sample
+type 1
+type 2
+type 3
+wearing
+holding
+holding
+has
+wearing
+on
+snow.1
+glass.1
+person.1
+pole.2
+pole.1
+arm.1
+ski.1
+...
+...
+ pattern 2
+ pattern n
+Figure 2: Overview of the SGG-R3 framework. The “R3” denotes three key contributions: Relation augmentation,
+structured Reasoning, and Reward alignment. First, candidate relations generated by the Qwen2.5-VL-32B with CoT
+prompt are filtered via Sentence-BERT embedding similarity against the original data. The model is then supervised
+fine-tuned on the CoT-formatted augmented data with CoT prompt, followed by reward-driven reinforcement
+learning aligned with the original dataset.
+sequential stages to achieve marked improvements
+on reasoning-intensive tasks. Unlike general visual
+reasoning, SGG’s dense prediction nature necessi-
+tates a tailored structured reasoning process.
+3
+Methodology
+This section begins with a formal definition of
+the SGG task, followed by the introduction of our
+three-stage progressive reasoning process. Further-
+more, we present a type-aware relation augmenta-
+tion strategy designed for the SFT phase. Finally,
+we detail the stage-aligned reward functions and
+the RL algorithm integrated in our framework. The
+overall architecture is illustrated in Figure 2.
+3.1
+Problem Formulation
+The goal of SGG is to convert an input image I
+into a structured graph representation G = (V, E).
+Here, V denotes the set of object nodes, where
+each node v ∈V corresponds to an object instance
+represented by a tuple (b, c). The vector b ∈R4 de-
+scribes the object’s bounding box coordinates, and
+c is its category label. The set E comprises relation
+triplets of the form (vs, p, vo), where vs, vo ∈V
+represent the subject and object of the triplet, re-
+spectively, and p is the predicate describing their
+interaction. In a closed-set setting, all object cate-
+gories c and predicate categories p are drawn from
+predefined sets C and P, respectively.
+3.2
+Three-stage Structured Reasoning
+The model acquires structured reasoning capabil-
+ities via visual instruction tuning in a prompt-
+response format. Guided by the theory of prompt
+space complexity (Zhang et al., 2025), we de-
+sign a CoT prompt that enforces explicit task con-
+straints and a three-stage cognitive process (see
+Appendix A.4). During SFT, the response is struc-
+tured to systematize the unordered SGG process
+into a rigorous, sequential three-stage pipeline (de-
+tails in Appendix A.6). The structured reasoning
+stages are defined as follows.
+Stage 1: Object Category Detection. Direct
+bounding box detection for predefined object cat-
+egories is prone to error propagation, resulting in
+imprecise localization, hallucination artifacts, and
+suppressed recall. To mitigate this, our model first
+identifies only the categories present in the image,
+effectively narrowing the search space to relevant
+object categories.
+Stage 2: Object Instance Grounding. Based
+on the category set from Stage 1, the model per-
+forms instance grounding by sequentially process-
+ing each identified category. Specifically, it detects
+and localizes all object instances belonging to the
+current category before proceeding to the next one.
+
+---PAGE BREAK---
+Stage 3: Multi-type Relation Extraction. This
+stage focuses on extracting (subject-predicate-
+object) relation triplets.
+To capture the seman-
+tic and visual diversity of predicates, the model
+explores latent inter-object associations across
+three predefined predicate types.
+For example,
+in VG150 (Xu et al., 2017) we consider spa-
+tial, possessive, and interactive relations, while
+in PSG (Yang et al., 2022) we distinguish spa-
+tial, static-interactive, and dynamic-interactive re-
+lations, with details in Appendix A.3. The output
+order of relations within each type adheres to the
+subject instance sequence in Stage 2.
+To
+maintain
+structural
+integrity
+dur-
+ing
+reasoning,
+SGG-R3
+explicitly
+marks
+each
+stage
+with
+dedicated
+tags:
+<CATEGORY></CATEGORY>, <OBJECT></OBJECT>,
+and
+<RELATION></RELATION>.
+These
+tags
+correspond to the start and end of each stage
+respectively, with outputs standardized in JSON
+format.
+All stages are completed in a single
+inference pass.
+3.3
+Type-aware Relation Augmentation
+SFT enables the model to learn structured outputs
+and the target data distribution, yet its generaliza-
+tion is often constrained by the sparsity and long-
+tailed nature of relation annotations. To address
+this, we propose a type-aware relation augmenta-
+tion strategy based on Qwen2.5-VL-32B (Bai et al.,
+2025) to increase the number of relation instances
+for each predefined predicate type.
+Following the CoT prompt (see Appendix A.5),
+the strategy first generates an image description
+conditioned on ground-truth entities. This descrip-
+tion, alongside predefined predicate types, guides
+the subsequent generation of relation triplets. To
+ensure validity, rule-based heuristics enforce that
+subjects and objects align with ground-truth annota-
+tions and predicates strictly belong to the available
+category set. This approach substantially increases
+training examples and introduces semantic diver-
+sity (detailed analyses in Appendix B.1 and B.3).
+To mitigate the generation of implausible relations,
+we maintain augmentation quality by encoding
+each generated triplet t into an embedding et via
+Sentence-BERT (Reimers and Gurevych, 2019).
+A triplet t is retained exclusively when its cosine
+similarity with any ground-truth triplet embedding
+exceeds a threshold θ ∈[0, 1]:
+A(t) = I
+h
+∃tgt ∈Tgt : sim(et, etgt) ≥θ
+i
+(1)
+where Tgt denotes the set of ground-truth triplets.
+This filtering mechanism improves the quality of
+SFT data, facilitating a generalizable model that
+provides robust initialization for subsequent RL.
+3.4
+Reward Modeling
+Reward modeling is central to reinforcement learn-
+ing with verifiable rewards (RLVR). We introduce
+a composite reward scheme meticulously aligned
+with the CoT pipeline, incorporating both process
+rewards to guide reasoning at each stage and for-
+mat rewards to standardize structured output. This
+joint optimization simultaneously enhances visual
+grounding and relation extraction, facilitating ro-
+bust end-to-end SGG.
+3.4.1
+Format Reward
+The format reward Rformat optimizes structural in-
+tegrity by verifying the completeness of required
+tags and correctness of JSON syntax at each stage.
+3.4.2
+Category Detection Reward
+The category recognition reward Rcategory is mea-
+sured on the F1 score between predicted and
+ground-truth category sets, encouraging compre-
+hensive detection while penalizing over-prediction
+to mitigate reward hacking. Here, P = TP/(TP +
+FP) and R = TP/(TP + FN), where TP, FP,
+and FN denote true positives, false positives, and
+false negatives, respectively.
+Rcategory = 2PR
+P + R
+(2)
+3.4.3
+Instance Grounding Reward
+The instance grounding reward Rnode including
+Rbox and Rrecall is computed via bipartite match-
+ing between predicted and ground-truth object
+pairs, as detailed in the Appendix A.7. Following
+prior work (Chen et al., 2025), Rbox combines IoU
+and L1 distance to measure bounding box accuracy.
+Recognizing the limitations of MLLMs in object
+detection recall (Li et al., 2025a), we introduce a
+recall-oriented reward Rrecall to explicitly incen-
+tivize high-recall matching. For a ground-truth
+object vj = (bj, cj) matched to a predicted object
+vi = (bi, ci), the per-pair recall rj is formulated as:
+rj =
+
+
+
+
+
+1.0,
+IoU(bj, bi) > 0.5 ∧(cj = ci)
+0.5,
+IoU(bj, bi) > 0.5 ⊕(cj = ci)
+0.0,
+otherwise
+(3)
+The overall instance grounding reward is then de-
+fined as the average of these per-pair scores across
+all ground-truth instances.
+
+---PAGE BREAK---
+no match
+person walking on sidewalk
+woman on sidewalk
+tree in front of building  
+building with tree
+man wears shirt
+man wears shoes
+man has hand
+man on road
+match
+match
+match
+woman wears shirt
+predicted relation triplet 
+ground-truth semantic cluster
+semantic cluster center
+no match
+building near street
+Semantic Embedding Space
+man standing on road
+Figure 3: Coarse-grained semantic clustering reward. A
+triplet is matched if its semantic embedding aligns with
+any ground-truth cluster centroid beyond a threshold,
+relaxing the strict matching requirement.
+3.4.4
+Dual-granularity Reward
+The dual-granularity reward combines fine-grained
+and coarse-grained rewards to jointly optimize re-
+lation recall and semantic coverage, leveraging
+Sentence-BERT to obtain the relation embeddings.
+The fine-grained reward incorporates frequency-
+based adaptive weighting of predicates to allevi-
+ate long-tail bias in relation extraction. For each
+ground-truth triplet tj and its matched prediction ti,
+let et and ep denote the embeddings of the triplet
+and its predicate, respectively. The similarity simj
+is calculated as:
+simj = simt(etj, eti) × simp(epj, epi)
+(4)
+where simt and simp denote the cosine similarities
+of triplet and predicate embeddings, respectively
+(with simj = 0 for unmatched triplets). The fine-
+grained reward is formulated as:
+Rfine =
+P
+tj∈Tgt simj × w(pj)
+P
+tj∈Tgt w(pj)
+(5)
+where w(p) is an adaptive weight based on the
+frequency of ground-truth predicate, defined as:
+w(p) = wbase + winc · α(p)
+(6)
+α(p) =
+log(1/fp) −log(1/fmax)
+log(1/fmin) −log(1/fmax)
+(7)
+Here, fp, fmax, and fmin denote the frequency of
+predicate p, the maximum and the minimum pred-
+icate frequency in the training data. Meanwhile,
+wbase and winc represent the base weight and the
+incremental weight.
+The coarse-grained reward Rcoarse is designed to
+enhance model generalization beyond the limited
+sparse annotated data. It employs a cluster algo-
+rithm to encourage the model to generate relation
+triplets that are semantically proximate to ground-
+truth, without requiring exact subject and object
+matching, as illustrated in Figure 3. First, ground-
+truth triplets are embedded and clustered into se-
+mantic prototypes CGT using DBSCAN. Each re-
+sulting cluster cj ∈CGT is represented by the mean
+embedding ecj of its member triplets. The reward
+is decomposed into two complementary metrics.
+Cluster coverage Ncovered measures the number of
+ground-truth clusters that are matched by at least
+one predicted triplet ti, where the similarity thresh-
+old is set as τ ∈(0, 1):
+Ncovered =
+X
+cj∈CGT
+I
+
+∃ti ∈Tpred : sim
+ eti, ecj
+
+≥τ
+
+(8)
+where Tpred is the set of predicted triplets. Clus-
+ter density ρcovered assesses the concentration of
+predictions within the matched clusters:
+ρcovered =
+P
+cj∈Ccovered N
+cj
+pred
+P
+cj∈Ccovered N
+cj
+gt
+(9)
+Here, Ncj
+pred and Ncj
+gt denote the number of pre-
+dicted and ground-truth triplets in cluster cj, respec-
+tively, and Ccovered is the subset of ground-truth
+clusters that are successfully matched. Finally, the
+coarse-grained reward combines coverage and den-
+sity to form a unified metric:
+Rcoarse =
+Ncovered
+|CGT|
+
+× ρcovered
+(10)
+3.5
+Reinforcement Learning with Group
+Sequence Policy Optimization
+We adopt Group Sequence Policy Optimization
+(GSPO) (Zheng et al., 2025) as the online algorithm
+for the RL phase. To address the high-variance
+training noise and instability associated with token-
+level importance sampling in large-scale RL, the
+GSPO objective JGSPO extends GRPO (Shao et al.,
+2024b) by adopting a sequence-level importance ra-
+tio si(θ), replacing the original token-level version,
+which is formulated as:
+JGSPO(θ) = Ex∼D, {yi}G
+i=1∼πθold (·|x)
+ 1
+G
+G
+X
+i=1
+min
+
+si(θ) b
+Ai, clip
+ si(θ), 1 −ε, 1 + ε
+ b
+Ai
+
+(11)
+Here, the sequence-level importance ratio si(θ)
+is defined as the geometric mean of the policy ratio
+πθ/πθold over the entire output sequence yi for nu-
+merical stability. This sequence-level formulation
+
+---PAGE BREAK---
+enhances optimization robustness for the genera-
+tion of long-form, structured JSON outputs.
+si(θ) = exp
+
+1
+|yi|
+|yi|
+X
+t=1
+log πθ(yi,t|x, yi,<t)
+πθold(yi,t|x, yi,<t)
+
+
+(12)
+The group-normalized advantage bAi is retained
+as the advantage, and estimated by normalizing the
+reward r(x, yi) using the mean and standard devia-
+tion of rewards within the current group, without
+relying on a learned value function V :
+b
+Ai = r(x, yi) −mean
+ {r(x, yi)}G
+i=1
+
+std ({r(x, yi)}G
+i=1)
+(13)
+4
+Experiments
+4.1
+Experiment Setup
+Datasets. We evaluate our method on two standard
+SGG benchmarks. The first is the widely adopted
+Visual Genome (VG150) dataset (Xu et al., 2017),
+which includes 150 object categories and 50 rela-
+tion categories, and follows the prior work (Chen
+et al., 2024, 2025) to split image-graph pairs with
+56,224 training, 5,000 validation, and 14,700 test-
+ing. The second is the Panoptic Scene Graph (PSG)
+dataset (Yang et al., 2022), constructed based on
+COCO (Lin et al., 2014), containing 80 thing cat-
+egories, 53 stuff categories, and 56 relation cate-
+gories. It provides 46,563 training pairs and 2,186
+test pairs for evaluation.
+Evaluation Metrics.
+We follow the standard
+SGDET (Xu et al., 2017) evaluation protocol for
+SGG, in which models must generate scene graphs
+directly from images without ground-truth object
+bounding boxes. The main evaluation metrics are
+Recall, mean Recall (mRecall), and zero-shot Re-
+call (zsRecall). A triplet is correct only if both the
+subject and object bounding boxes have IoU ≥0.5
+with their matched ground-truth boxes, and the
+subject, object, and predicate categories are all cor-
+rectly predicted. Recall is computed among all
+predicate categories, mRecall averages the recall
+per predicate category, and zsRecall specifically
+measures the model’s generalization to relation
+triplets that are unseen during training. We adopt
+K = 100 for all recall calculations.
+Implementation Details. Our implementation is
+built upon the TRL (von Werra et al., 2020) library,
+with vLLM (Kwon et al., 2023) for accelerated
+sampling during the RL stage. The training is con-
+ducted on 8 NVIDIA A800 (40GB) GPUs. Imple-
+mentation details are provided in the Appendix A.1.
+Method
+Params
+VG150 Dataset
+Recall
+mRecall Mean
+zsRecall
+Non-VLM Methods
+MOTIFS
+–
+30.3
+6.6
+18.5
+0.2
+VCTree
+–
+31.3
+8.0
+19.7
+0.7
+GPS-Net
+–
+31.7
+9.8
+20.8
+–
+PE-Net
+–
+35.2
+14.5
+24.9
+3.6
+RelTR
+–
+30.7
+12.6
+21.7
+2.4
+SGTR
+–
+28.4
+15.2
+21.8
+5.8
+SGTR+
+–
+30.1
+17.0
+23.6
+5.8
+HiLo
+–
+29.2
+17.6
+23.4
+–
+Pair-Net
+–
+29.3
+15.4
+22.4
+–
+DSGG
+–
+38.5
+17.3
+27.9
+3.9
+EGTR
+–
+34.3
+10.1
+22.2
+–
+VLM-based Methods
+VS3
+–
+40.9
+7.8
+24.4
+–
+OvSGTR
+–
+41.3
+8.8
+25.1
+–
+PGSG
+–
+23.6
+12.7
+18.2
+7.6
+OwSGG†
+72B
+3.2
+3.4
+3.3
+2.0
+R1-SGG†
+7B
+27.6
+10.9
+19.3
+4.4
+Ours
+SGG-R3‡ (SFT)
+3B
+17.5
+8.2
+12.9
+2.4
+SGG-R3‡ (SFT + RL)
+3B
+36.0
+14.8
+25.4
+6.1
+Table 1: Performance (%) comparison of our proposed
+method against non-VLM and VLM-based baselines
+on the VG150 test set. Bold text indicates best per-
+formance, underlined text indicates second best. The
+“Mean” denotes the average of Recall and mean Recall.
+† and ‡ denote Qwen2-VL and Qwen2.5-VL as the base
+model respectively.
+4.2
+Comparisons with State-of-the-Arts
+We benchmark our framework on the VG150 and
+PSG test sets against a comprehensive suite of
+baselines, including traditional non-VLM meth-
+ods (Zellers et al., 2018; Tang et al., 2019; Lin et al.,
+2020; Yang et al., 2022; Li et al., 2022; Zheng et al.,
+2023; Cong et al., 2023; Zhou et al., 2023; Im et al.,
+2024; Li et al., 2024a; Wang et al., 2024a; Hayder
+and He, 2024) and VLM-based approaches (Zhang
+et al., 2023; Chen et al., 2024; Li et al., 2024b;
+Wang et al., 2024c; Xu et al., 2025; Dutta et al.,
+2025; Chen et al., 2025; Li et al., 2025b), as sum-
+marized in Table 1 and Table 2.
+We adopt Qwen2.5-VL-3B (Bai et al., 2025)
+as the base model and conduct experiments un-
+der two settings: one trained solely with SFT, and
+another further optimized via RL. Initially, it can
+be observed that the model’s performance after
+SFT is lower than that of previous methods on
+both datasets. However, after further RL training
+initialized with the SFT model, the model shows
+substantial improvements across all metrics, with
+qualitative comparison provided in Appendix B.4.
+This indicates that RL significantly enhances the
+capability for relation extraction.
+On VG150 shown in Table 1, our method
+achieves the highest mRecall among all VLM-
+based approaches while maintaining a competitive
+
+---PAGE BREAK---
+Method
+Params
+PSG Dataset
+Recall
+mRecall Mean
+zsRecall
+Non-VLM Methods
+MOTIFS
+–
+22.0
+9.1
+15.6
+–
+VCTree
+–
+20.6
+9.7
+15.2
+–
+GPS-Net
+–
+20.6
+7.2
+13.9
+–
+PSGFormer
+–
+21.0
+19.8
+20.4
+4.9
+PSGTR
+–
+35.3
+21.5
+28.4
+6.4
+SGTR
+–
+32.0
+23.5
+27.8
+3.6
+HiLo
+–
+51.4
+40.9
+46.2
+–
+Pair-Net
+–
+42.4
+29.7
+36.1
+–
+DSGG
+–
+50.0
+43.4
+46.7
+–
+VLM-based Methods
+OvSGTR
+–
+41.4
+28.3
+34.9
+–
+PGSG
+–
+33.4
+22.1
+27.8
+8.9
+ASMv2
+13B
+14.8
+11.8
+13.3
+–
+LLaVA-SpaceSGG
+13B
+15.4
+13.2
+14.3
+–
+OwSGG†
+72B
+14.0
+13.7
+13.9
+6.4
+R1-SGG†
+7B
+43.5
+33.2
+38.4
+7.7
+Relation-R1‡
+3B
+25.9
+21.3
+23.6
+–
+Ours
+SGG-R3‡ (SFT)
+3B
+33.3
+26.1
+29.7
+0.0
+SGG-R3‡ (SFT + RL)
+3B
+52.5
+44.3
+48.4
+7.7
+Table 2: Performance (%) comparison of our proposed
+method against non-VLM and VLM-based baselines on
+the PSG test set. Bold text indicates best performance,
+underlined text indicates second best. The “Mean” de-
+notes the average of Recall and mean Recall. † and ‡
+denote Qwen2-VL and Qwen2.5-VL as the base model
+respectively.
+Recall. Although our mRecall outperforms most
+baselines, it lags slightly behind some non-VLM
+methods (Zhou et al., 2023; Wang et al., 2024a;
+Hayder and He, 2024). We attribute this gap to the
+exhaustive object-pair coverage inherent in clas-
+sification frameworks, which remains a persistent
+challenge for generative models. Notably, the mean
+of our Recall and mRecall ranks second among all
+evaluated methods. Our approach also surpasses
+all non-VLM models in zsRecall, demonstrating
+superior generalization and the ability to recognize
+diverse relations.
+Furthermore, our method demonstrates leading
+performance on the PSG dataset, as detailed in Ta-
+ble 2. It significantly outperforms all multimodal
+methods and marginally exceeds non-VLM ap-
+proaches in terms of Recall and mRecall, indicating
+a substantial reduction in relation bias. The average
+of our Recall and mRecall metrics also ranks first
+among all evaluated methods, substantially surpass-
+ing most baselines. In terms of zsRecall, our model
+achieves highly competitive performance, although
+it falls slightly short of (Li et al., 2024b). In sum-
+mary, our framework achieves leading overall per-
+formance against both non-VLM and VLM-based
+baselines on the two benchmarks.
+SFT
+SFT + RL
+Training Method
+0
+10
+20
+30
+40
+50
+60
+70
+Average Relations per Image
+VG150 Dataset
+20.3
+65.3
+7.3
+59.5
+w/ RA
+w/o RA
+SFT
+SFT + RL
+Training Method
+PSG Dataset
+20.8
+69.7
+9.4
+60.0
+w/ RA
+w/o RA
+Figure 4: Quantitative analysis of the average number
+of relations generated per image on the VG150 and
+PSG test sets: SFT, SFT + RL; with/without relation
+augmentation (RA).
+4.3
+Comparisons with MLLM-based Methods
+Relation Recognition Evaluation.
+As shown
+in Table 3, we compare our proposed method
+with state-of-the-art MLLM-based baselines (Chen
+et al., 2025), which directly generate objects and
+relations without a structured reasoning process.
+Following the baselines, we use the Failure Rate
+metric to assess the structural integrity and validity
+of the generated JSON format. For a fair com-
+parison, we report results based on both Qwen2-
+VL (Wang et al., 2024b) and Qwen2.5-VL, evaluat-
+ing the performance with and without our relation
+augmentation. Furthermore, a detailed analysis of
+MLLM zero-shot performance in SGG is provided
+in Appendix B.2.
+When trained on equivalent data volumes, our
+2B and 3B SFT models demonstrate superior ro-
+bustness over baselines. Specifically, the 2B model
+achieves a 57.23% reduction in VG150 failure
+rates, validating the CoT framework’s efficacy in
+improving instruction following ability and struc-
+tural correctness. While relation sparsity on PSG
+initially limits gains, subsequent RL optimization
+enables the 3B model to surpass the 7B baseline
+across all metrics, with mRecall increasing by
+1.25% on VG150 and 4.62% on PSG. These results
+indicate that for models of comparable capacity,
+refined post-training is the primary performance
+driver.
+During the SFT phase, relation augmentation
+further reduces the output failure rate. For instance,
+our 2B SFT model achieves a 26.17% lower failure
+rate than the 7B baseline on VG150, suggesting a
+synergistic effect between the increased quantity
+of relational data and our structured reasoning pro-
+cess, which in turn enhances the structural integrity
+of the generated outputs. Specifically, our 2B and
+3B SFT models demonstrate superior Recall and
+
+---PAGE BREAK---
+Method
+Training
+Params
+VG150 Dataset
+PSG Dataset
+Failure Rate
+Recall
+mRecall
+Mean
+Failure Rate
+Recall
+mRecall
+Mean
+Baselines
+R1-SGG†
+SFT
+2B
+75.01
+4.82
+1.04
+2.93
+9.79
+21.83
+13.79
+17.81
+R1-SGG‡
+SFT
+3B
+63.16
+6.60
+1.61
+4.11
+6.30
+22.63
+14.60
+18.62
+R1-SGG†
+SFT
+7B
+39.54
+9.62
+3.30
+6.46
+0.96
+24.73
+17.11
+20.92
+R1-SGG†
+SFT + RL
+2B
+0.10
+21.09
+7.48
+14.29
+2.70
+38.49
+31.21
+34.85
+R1-SGG†
+SFT + RL
+7B
+0.12
+23.75
+11.43
+17.59
+0.00
+43.48
+33.71
+38.60
+Ours (w/o RA)
+SGG-R3†
+SFT
+2B
+17.78
+9.93
+2.08
+6.01
+0.23
+22.66
+12.25
+17.46
+SGG-R3‡
+SFT
+3B
+6.24
+11.98
+2.36
+7.17
+0.18
+22.27
+11.45
+16.86
+SGG-R3‡
+SFT + RL
+3B
+0.12
+27.85
+12.68
+20.27
+0.00
+47.63
+38.33
+42.98
+Ours (w/ RA)
+SGG-R3†
+SFT
+2B
+13.37
+13.90
+8.08
+10.99
+0.05
+33.06
+24.67
+28.87
+SGG-R3‡
+SFT
+3B
+3.30
+14.88
+8.80
+11.84
+0.05
+33.31
+26.13
+29.72
+SGG-R3‡
+SFT + RL
+3B
+0.06
+30.66
+14.52
+22.59
+0.00
+52.49
+44.30
+48.40
+Table 3: Performance (%) comparison with MLLM-based end-to-end SGG baselines on the VG150 validation set
+and PSG test set. The “Mean” denotes the average of Recall and mean Recall. † and ‡ denote Qwen2-VL and
+Qwen2.5-VL as the base model, respectively.
+mRecall on both datasets. Subsequent RL training
+successfully maintains this performance advantage.
+Notably, our 3B model maintains a substantial lead
+over the 7B baseline: on VG150, it outperforms
+the baseline by 6.91% in Recall and 3.09% in mRe-
+call, while on the PSG dataset, these gains are even
+more pronounced at 9.01% and 10.59%, respec-
+tively. Qualitative visualizations of our SGG results
+are provided in Appendix B.5.
+Object Detection Evaluation. In SGG, we adopt
+Recall and mean Recall as the primary metrics for
+evaluating object detection, rather than the standard
+Average Precision (AP). This choice stems from the
+task’s requirement to identify all plausible objects
+(even unlabeled ones) to support relation prediction.
+Here, a predicted object is considered a match if
+its IoU with a ground-truth box ≥0.5 and their
+categories match.
+As reported in Table 4, our SFT models signif-
+icantly outperforms the baselines across all met-
+rics on both datasets. For instance, the 3B model
+achieves gains of 19.14% in Recall and 14.35%
+in mRecall on the VG150 dataset, demonstrating
+superior object detection capabilities. Notably, RL
+optimization yields a substantial boost over the
+3B SFT model, it simultaneously enhances both
+Recall and mRecall, surpassing the 7B baseline by
+10.58% in Recall and 9.31% in mRecall on VG150.
+Meanwhile, the zero-shot performance of Qwen2.5-
+VL-32B falls short of both the baseline and our
+proposed approach. These results indicate that our
+CoT framework improves both the precision and
+coverage of object recognition. Furthermore, the
+category and instance grounding rewards during
+RL effectively guide the model toward identify-
+Method
+Training
+Params
+VG150
+PSG
+Recall
+mRecall
+Recall
+mRecall
+Open-sourced MLLMs
+Qwen2.5-VL zero-shot
+32B
+24.84
+25.39
+35.66
+39.52
+Baselines
+R1-SGG†
+SFT
+2B
+10.72
+14.76
+47.43
+46.72
+R1-SGG‡
+SFT
+3B
+14.98
+18.89
+51.97
+49.94
+R1-SGG†
+SFT + RL
+7B
+39.49
+38.26
+52.08
+52.94
+Ours
+SGG-R3†
+SFT
+2B
+32.04
+31.15
+56.52
+53.78
+SGG-R3‡
+SFT
+3B
+34.12
+33.24
+56.50
+53.46
+SGG-R3‡
+SFT + RL
+3B
+50.07
+47.57
+61.32
+59.27
+Table 4: Object detection performance (%) comparison
+of our method against the baselines on the VG150 and
+PSG test sets. † and ‡ indicate the use of Qwen2-VL
+and Qwen2.5-VL as the base models.
+ing a more exhaustive set of valid object instances,
+thereby establishing a robust foundation for com-
+prehensive scene graph generation.
+4.4
+Ablation Study
+To verify the efficacy of the proposed relation
+augmentation (RA) and dual-granularity reward
+(DGR), we conduct extensive ablation studies.
+Specifically, we categorize predicates into Head,
+Body, and Tail classes based on training frequency
+to evaluate each module’s contribution to long-tail
+relation recognition. Details regarding these parti-
+tions are provided in Appendix A.2.
+Effectiveness of Relation Augmentation. Table 5
+shows that RA significantly boosts performance in
+both SFT and RL stages. Specifically, RA enhances
+the SFT model’s ability to recognize body and tail
+predicates, yielding gains of 8.77% and 4.43% on
+VG150, and 18.12% and 14.80% on PSG. Build-
+ing on this RA-enhanced initialization, RL further
+elevates Recall and mRecall, with tail performance
+increasing by 3.37% on VG150 and 9.37% on PSG.
+
+---PAGE BREAK---
+Setup
+VG150 Dataset
+PSG Dataset
+RA
+DGR
+Training
+Recall
+mRecall
+zsRecall
+Head
+Body
+Tail
+Recall
+mRecall
+zsRecall
+Head
+Body
+Tail
+Relation Augmentation (RA) Ablation
+✕
+✕
+SFT
+12.88
+2.41
+0.90
+13.99
+1.13
+0.53
+22.27
+11.45
+0.00
+22.32
+14.92
+1.21
+✓
+✕
+SFT
+17.74
+8.23
+2.35
+18.67
+9.90
+4.96
+33.31
+26.13
+0.00
+32.24
+33.04
+16.01
+✕
+✓
+SFT + RL
+31.57
+12.62
+5.03
+32.95
+14.90
+4.76
+47.63
+38.33
+0.00
+46.98
+43.10
+24.77
+✓
+✓
+SFT + RL
+35.95
+14.78
+6.11
+36.98
+15.58
+8.13
+52.49
+44.30
+7.69
+50.95
+50.84
+34.14
+Dual-granularity Reward (DGR) Ablation
+✓
+✕
+SFT + RL
+34.55
+13.94
+5.01
+35.58
+15.07
+7.22
+50.40
+42.26
+7.21
+49.25
+46.61
+32.33
+✓
+✓
+SFT + RL
+35.95
+14.78
+6.11
+36.98
+15.58
+8.13
+52.49
+44.30
+7.69
+50.95
+50.84
+34.14
+Table 5: Performance (%) comparison for ablation studies of relation augmentation (RA) and dual-granularity
+reward (DGR) modules. ✓indicates the component is enabled, ✕indicates the component is disabled.
+These findings suggest that RA provides a supe-
+rior foundation for RL to explore long-tail rela-
+tions. Notably, while RL training without RA fails
+to achieve any zsRecall on PSG, its incorporation
+yields a 7.69% improvement, which underscores
+RA’s pivotal role in facilitating a generalized “cold
+start”.
+Additionally, Figure 4 compares the average vol-
+ume of generated relations per image with and
+without RA. Experimental results demonstrate that
+while the inherent sparsity of the raw data limits
+relation density, RA significantly promotes relation
+generation. Specifically, RA-enhanced models out-
+put an additional 13.0 and 11.4 relations per image
+on VG150 and PSG after SFT. Furthermore, RL
+training further stimulates reasoning depth, lead-
+ing to a continued increase in the total number of
+relations. Throughout the RL phase, the model
+initialized with RA consistently maintains a higher
+relation density than its non-RA counterpart across
+both datasets.
+Impact of Dual-granularity Reward. We eval-
+uate the impact of DGR by comparing it against
+a baseline utilizing a standard relation recall re-
+ward. As shown in Table 5, with the RA-enhanced
+SFT model as initialization, DGR yields consis-
+tent gains across both Recall and mRecall. For in-
+stance, on the PSG dataset, DGR improves Recall
+by 2.09% and mRecall by 2.04%, demonstrating its
+effectiveness in mitigating the long-tail distribution
+of relations. Specifically, DGR facilitates balanced
+improvements across all predicate types, thereby
+mitigating generative bias. Furthermore, by lever-
+aging semantic clustering to guide the optimization
+process, DGR enhances the model’s generalization
+to novel or rare relational contexts, as evidenced by
+a 1.10% increase in zsRecall on the VG150 dataset.
+5
+Conclusion
+This paper presents SGG-R3, a structured rea-
+soning framework that aligns next-token predic-
+tion with end-to-end unbiased scene graph gener-
+ation via a two-phase training pipeline. We pro-
+pose a structured reasoning process encompass-
+ing category detection, instance grounding, and
+multi-type relation extraction. To generate com-
+prehensive and unbiased scene graphs, we employ
+a relation-augmentation strategy to mitigate the
+cold-start challenge during SFT and introduce a
+dual-granularity reward scheme during RL. Empiri-
+cal evaluations on the VG150 and PSG benchmarks
+demonstrate that SGG-R3 achieves superior capa-
+bilities of visual grounding and relation extraction,
+exhibiting significant potential for diverse down-
+stream applications.
+Limitations
+The proposed framework has limitations in effi-
+ciency, data fidelity, and label coverage. First, the
+use of MLLMs leads to non-negligible inference
+latency, which may constrain its use in real-time
+applications. Second, although we use filtering
+strategies, the relation augmentation process cannot
+guarantee entirely accurate triples; some erroneous
+or hallucinated data may still persist. The quality
+of this augmented data essentially sets the upper
+bound for model performance. Finally, our train-
+ing is currently limited to a closed-set vocabulary,
+which may restrict the model’s ability to recognize
+novel relations in the wild. Future work will focus
+on extending this framework to open-vocabulary
+settings to improve its generalization across diverse,
+real-world scenarios.
+Acknowledgements
+This work was supported in part by the National
+Key Research and Development Program of China
+
+---PAGE BREAK---
+(Grant No. 2023YFC3304902).
+References
+Shuai Bai, Keqin Chen, Xuejing Liu, Jialin Wang, Wen-
+bin Ge, Sibo Song, Kai Dang, Peng Wang, Shijie
+Wang, Jun Tang, and 1 others. 2025. Qwen2.5-vl
+technical report. arXiv preprint arXiv:2502.13923.
+Zuyao Chen, Jinlin Wu, Zhen Lei, Marc Pollefeys,
+and Chang Wen Chen. 2025.
+Compile scene
+graphs with reinforcement learning. arXiv preprint
+arXiv:2504.13617.
+Zuyao Chen, Jinlin Wu, Zhen Lei, Zhaoxiang Zhang,
+and Chang Wen Chen. 2024. Expanding scene graph
+boundaries: Fully open-vocabulary scene graph gen-
+eration via visual-concept alignment and retention.
+In European Conference on Computer Vision, pages
+108–124. Springer.
+Xu Chu, Xinrong Chen, Guanyu Wang, Zhijie Tan, Kui
+Huang, Wenyu Lv, Tong Mo, and Weiping Li. 2025.
+Qwen look again: Guiding vision-language reason-
+ing models to re-attention visual information. arXiv
+preprint arXiv:2505.23558.
+Yuren Cong, Michael Ying Yang, and Bodo Rosenhahn.
+2023. Reltr: Relation transformer for scene graph
+generation. IEEE Transactions on Pattern Analysis
+and Machine Intelligence, 45(9):11169–11183.
+Amartya Dutta, Kazi Sajeed Mehrab, Medha Sawhney,
+Abhilash Neog, Mridul Khurana, Sepideh Fatemi,
+Aanish Pradhan, M Maruf, Ismini Lourentzou, Arka
+Daw, and 1 others. 2025. Open world scene graph
+generation using vision language models.
+arXiv
+preprint arXiv:2506.08189.
+Martin Ester, Hans-Peter Kriegel, Jörg Sander, Xiaowei
+Xu, and 1 others. 1996. A density-based algorithm
+for discovering clusters in large spatial databases with
+noise. In kdd, pages 226–231.
+Samir Yitzhak Gadre, Kiana Ehsani, Shuran Song, and
+Roozbeh Mottaghi. 2022. Continuous scene repre-
+sentations for embodied ai. In Proceedings of the
+IEEE/CVF conference on computer vision and pat-
+tern recognition, pages 14849–14859.
+Zeeshan Hayder and Xuming He. 2024. Dsgg: Dense
+relation transformer for an end-to-end scene graph
+generation. In Proceedings of the IEEE/CVF Confer-
+ence on Computer Vision and Pattern Recognition,
+pages 28317–28326.
+Jiani Huang, Amish Sethi, Matthew Kuo, Mayank Ke-
+oliya, Neelay Velingker, JungHo Jung, Ser-Nam Lim,
+Ziyang Li, and Mayur Naik. 2025a. Esca: Contextu-
+alizing embodied agents via scene-graph generation.
+arXiv preprint arXiv:2510.15963.
+Jing Huang, Zhiya Tan, Shutao Gong, Fanwei Zeng,
+Joey Tianyi Zhou, Changtao Miao, Huazhe Tan,
+Weibin Yao, and Jianshu Li. 2025b.
+Lav-cot:
+Language-aware visual cot with multi-aspect reward
+optimization for real-world multilingual vqa. arXiv
+preprint arXiv:2509.10026.
+Jinbae Im, JeongYeon Nam, Nokyung Park, Hyungmin
+Lee, and Seunghyun Park. 2024. Egtr: Extracting
+graph from transformer for scene graph generation.
+In Proceedings of the IEEE/CVF conference on com-
+puter vision and pattern recognition, pages 24229–
+24238.
+Franklin Kenghagho Kenfack, Feroz Ahmed Siddiky,
+Ferenc Balint-Benczedi, and Michael Beetz. 2020.
+Robotvqa—a scene-graph-and deep-learning-based
+visual question answering system for robot manipula-
+tion. In 2020 IEEE/RSJ International Conference on
+Intelligent Robots and Systems (IROS), pages 9667–
+9674. IEEE.
+Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, Ying
+Sheng, Lianmin Zheng, Cody Hao Yu, Joseph Gon-
+zalez, Hao Zhang, and Ion Stoica. 2023. Efficient
+memory management for large language model serv-
+ing with pagedattention. In Proceedings of the 29th
+symposium on operating systems principles, pages
+611–626.
+Jincheng Li, Chunyu Xie, Ji Ao, Dawei Leng, and Yuhui
+Yin. 2025a. Lmm-det: Make large multimodal mod-
+els excel in object detection. In Proceedings of the
+IEEE/CVF International Conference on Computer
+Vision, pages 308–318.
+Lin Li, Wei Chen, Jiahui Li, Kwang-Ting Cheng, and
+Long Chen. 2025b. Relation-r1: Progressively cogni-
+tive chain-of-thought guided reinforcement learning
+for unified relation comprehension. arXiv preprint
+arXiv:2504.14642.
+Rongjie Li, Songyang Zhang, and Xuming He. 2022.
+Sgtr: End-to-end scene graph generation with trans-
+former. In proceedings of the IEEE/CVF conference
+on computer vision and pattern recognition, pages
+19486–19496.
+Rongjie Li, Songyang Zhang, and Xuming He. 2024a.
+Sgtr+: End-to-end scene graph generation with trans-
+former. arXiv preprint arXiv:2401.12835.
+Rongjie Li, Songyang Zhang, Dahua Lin, Kai Chen,
+and Xuming He. 2024b.
+From pixels to graphs:
+Open-vocabulary scene graph generation with vision-
+language models. In Proceedings of the IEEE/CVF
+conference on computer vision and pattern recogni-
+tion, pages 28076–28086.
+Tsung-Yi Lin, Michael Maire, Serge Belongie, James
+Hays, Pietro Perona, Deva Ramanan, Piotr Dollár,
+and C Lawrence Zitnick. 2014.
+Microsoft coco:
+Common objects in context. In European confer-
+ence on computer vision, pages 740–755. Springer.
+Xin Lin, Changxing Ding, Jinquan Zeng, and Dacheng
+Tao. 2020. Gps-net: Graph property sensing net-
+work for scene graph generation. In Proceedings of
+the IEEE/CVF conference on computer vision and
+pattern recognition, pages 3746–3753.
+
+---PAGE BREAK---
+Bingshuai Liu, Chenyang Lyu, Zijun Min, Zhanyu
+Wang, Jinsong Su, and Longyue Wang. 2025.
+Retrieval-augmented multi-modal chain-of-thoughts
+reasoning for large language models. In 2025 In-
+ternational Joint Conference on Neural Networks
+(IJCNN), pages 1–8. IEEE.
+Haotian Liu, Chunyuan Li, Qingyang Wu, and Yong Jae
+Lee. 2023. Visual instruction tuning. Advances in
+neural information processing systems, 36:34892–
+34916.
+Nils Reimers and Iryna Gurevych. 2019. Sentence-bert:
+Sentence embeddings using siamese bert-networks.
+In Proceedings of the 2019 Conference on Empirical
+Methods in Natural Language Processing and the 9th
+International Joint Conference on Natural Language
+Processing (EMNLP-IJCNLP), pages 3982–3992.
+Brigit Schroeder and Subarna Tripathi. 2020. Struc-
+tured query-based image retrieval using scene graphs.
+In Proceedings of the IEEE/CVF conference on
+computer vision and pattern recognition workshops,
+pages 178–179.
+Hao Shao, Shengju Qian, Han Xiao, Guanglu Song,
+Zhuofan Zong, Letian Wang, Yu Liu, and Hong-
+sheng Li. 2024a.
+Visual cot: Advancing multi-
+modal language models with a comprehensive dataset
+and benchmark for chain-of-thought reasoning. Ad-
+vances in Neural Information Processing Systems,
+37:8612–8642.
+Zhihong Shao, Peiyi Wang, Qihao Zhu, Runxin Xu,
+Junxiao Song, Xiao Bi, Haowei Zhang, Mingchuan
+Zhang, YK Li, Yang Wu, and 1 others. 2024b.
+Deepseekmath: Pushing the limits of mathematical
+reasoning in open language models. arXiv preprint
+arXiv:2402.03300.
+Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan
+Luo, and Wei Liu. 2019. Learning to compose dy-
+namic tree structures for visual contexts. In Proceed-
+ings of the IEEE/CVF conference on computer vision
+and pattern recognition, pages 6619–6628.
+Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob
+Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz
+Kaiser, and Illia Polosukhin. 2017. Attention is all
+you need. Advances in neural information processing
+systems, 30.
+Leandro von Werra, Younes Belkada, Lewis Tunstall,
+Edward Beeching, Tristan Thrush, Nathan Lambert,
+Shengyi Huang, Kashif Rasul, and Quentin Gal-
+louédec. 2020. Trl: Transformer reinforcement learn-
+ing. https://github.com/huggingface/trl.
+Jinghao Wang, Zhengyu Wen, Xiangtai Li, Zujin Guo,
+Jingkang Yang, and Ziwei Liu. 2024a. Pair then
+relation: Pair-net for panoptic scene graph generation.
+IEEE Transactions on Pattern Analysis and Machine
+Intelligence.
+Peng Wang, Shuai Bai, Sinan Tan, Shijie Wang, Zhi-
+hao Fan, Jinze Bai, Keqin Chen, Xuejing Liu, Jialin
+Wang, Wenbin Ge, and 1 others. 2024b. Qwen2-
+vl: Enhancing vision-language model’s perception
+of the world at any resolution.
+arXiv preprint
+arXiv:2409.12191.
+Weiyun Wang, Yiming Ren, Haowen Luo, Tiantong Li,
+Chenxiang Yan, Zhe Chen, Wenhai Wang, Qingyun
+Li, Lewei Lu, Xizhou Zhu, and 1 others. 2024c. The
+all-seeing project v2: Towards general relation com-
+prehension of the open world. In European Confer-
+ence on Computer Vision, pages 471–490. Springer.
+Jason Wei, Xuezhi Wang, Dale Schuurmans, Maarten
+Bosma, Fei Xia, Ed Chi, Quoc V Le, Denny Zhou,
+and 1 others. 2022. Chain-of-thought prompting elic-
+its reasoning in large language models. Advances
+in neural information processing systems, 35:24824–
+24837.
+Danfei Xu, Yuke Zhu, Christopher B Choy, and Li Fei-
+Fei. 2017. Scene graph generation by iterative mes-
+sage passing. In Proceedings of the IEEE conference
+on computer vision and pattern recognition, pages
+5410–5419.
+Guowei Xu, Peng Jin, Ziang Wu, Hao Li, Yibing Song,
+Lichao Sun, and Li Yuan. 2025. Llava-cot: Let vision
+language models reason step-by-step. In Proceedings
+of the IEEE/CVF International Conference on Com-
+puter Vision, pages 2087–2098.
+Jingkang Yang, Yi Zhe Ang, Zujin Guo, Kaiyang Zhou,
+Wayne Zhang, and Ziwei Liu. 2022. Panoptic scene
+graph generation. In European conference on com-
+puter vision, pages 178–196. Springer.
+Qifan Yu, Juncheng Li, Yu Wu, Siliang Tang, Wei Ji,
+and Yueting Zhuang. 2023. Visually-prompted lan-
+guage model for fine-grained scene graph generation
+in an open world. In Proceedings of the IEEE/CVF
+International Conference on Computer Vision, pages
+21560–21571.
+Xiang Yuan, Xu Chu, Xinrong Chen, Haochen Li,
+Zonghong Dai, Hongcheng Fan, Xiaoyue Yuan,
+Weiping Li, and Tong Mo. 2026. More-r1: Guiding
+lvlm for multimodal object-entity relation extraction
+via stepwise reasoning with reinforcement learning.
+arXiv preprint arXiv:2603.09478.
+Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin
+Choi. 2018. Neural motifs: Scene graph parsing
+with global context. In Proceedings of the IEEE con-
+ference on computer vision and pattern recognition,
+pages 5831–5840.
+Xiang Zhang, Juntai Cao, Chenyu You, and Dujian Ding.
+2025. Why prompt design matters and works: A
+complexity analysis of prompt search space in llms.
+In Proceedings of the 63rd Annual Meeting of the
+Association for Computational Linguistics (Volume
+1: Long Papers), pages 32525–32555.
+Yong Zhang, Yingwei Pan, Ting Yao, Rui Huang, Tao
+Mei, and Chang-Wen Chen. 2023. Learning to gener-
+ate language-supervised and open-vocabulary scene
+
+---PAGE BREAK---
+graph using pre-trained visual-semantic space. In
+Proceedings of the IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition, pages 2915–
+2924.
+Chaofan Zheng, Xinyu Lyu, Lianli Gao, Bo Dai, and
+Jingkuan Song. 2023. Prototype-based embedding
+network for scene graph generation. In Proceedings
+of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, pages 22783–22792.
+Chujie Zheng, Shixuan Liu, Mingze Li, Xiong-Hui
+Chen, Bowen Yu, Chang Gao, Kai Dang, Yuqiong
+Liu, Rui Men, An Yang, and 1 others. 2025.
+Group sequence policy optimization. arXiv preprint
+arXiv:2507.18071.
+Zijian Zhou, Miaojing Shi, and Holger Caesar. 2023.
+Hilo: Exploiting high low frequency relations for
+unbiased panoptic scene graph generation. In Pro-
+ceedings of the IEEE/CVF international conference
+on computer vision, pages 21637–21648.
+Yifeng Zhu, Jonathan Tremblay, Stan Birchfield, and
+Yuke Zhu. 2021.
+Hierarchical planning for long-
+horizon manipulation with geometric and symbolic
+scene graphs. In 2021 IEEE International Confer-
+ence on Robotics and Automation (ICRA), pages
+6541–6548. Ieee.
+
+---PAGE BREAK---
+Appendix
+A
+Implementation Details
+A.1
+Experiment Configurations
+Our experiments are conducted on 8 NVIDIA A800
+(40GB) GPUs. During the supervised fine-tuning
+(SFT) stage, we employ the AdamW optimizer with
+a cosine learning rate scheduler, setting the initial
+learning rate to 1 × 10−5 for training 1 epoch. The
+per-device batch size is set to 2 with 2 gradient
+accumulation steps, resulting in an effective total
+batch size of 32 (2 × 2 × 8).
+For the reinforcement learning (RL) phase, we
+utilize six GPUs for training and two GPUs for
+vLLM deployment to accelerate inference, using a
+sampling size of 8. The total batch size for RL is 96
+(8 × 2 × 6). The model is trained for 1 epoch using
+the AdamW optimizer with a initial learning rate of
+5 × 10−7; further hyperparameter details are pro-
+vided in Table 6. To compute semantic embeddings,
+we employ the all-MiniLM-L6-v2 (Reimers and
+Gurevych, 2019) model to project relation triplets
+or predicates into 384-dimensional embeddings.
+The similarity threshold for filtering augmented
+relation triplets is set to 0.9. The base weight based
+on predicate frequency is set to 1, and the incremen-
+tal weight is 2. When applying DBSCAN to cluster
+ground-truth triplets, we empirically set the clus-
+tering threshold ε = 0.75 and min_samples = 1
+based on the distribution characteristics of the se-
+mantic space. During the evaluation phase, the
+similarity matching threshold between predicted
+triplets and their corresponding ground-truth clus-
+ters is likewise set to 0.75.
+A.2
+Evaluation Setup
+In the evaluation phase, we categorize predicates
+into Head, Body, and Tail based on their frequency
+in the training dataset to precisely assess model
+performance under long-tail distributions. Specif-
+ically, the top 30% most frequent predicates are
+designated as head, the middle 30% as body, and
+the bottom 40% as tail. We then evaluate the recall
+performance within each group. Detailed statistics
+regarding the predicate counts and frequencies for
+each category are provided in Table 7.
+A.3
+Semantic Taxonomy of Predicates
+Recognizing that distinct relations necessitate spe-
+cific semantic and visual cues and acknowledging
+that a single object pair may have multiple concur-
+Hyperparameter
+Value
+Precision
+bf16
+Max completion length
+2048
+Per-device batch size
+8
+Gradient accumulation steps
+2
+Scheduler type
+Cosine
+Temperature
+1.0
+Top-p
+0.9
+Top-k
+50
+Group size
+8
+Num iterations per generation
+1
+Beta (β)
+0.0
+Random seed
+42
+Table 6: Hyperparameter settings for reinforcement
+learning training.
+Category
+VG150
+PSG
+Count
+Freq.%
+Count
+Freq.%
+Head
+15
+94.60
+16
+93.97
+Body
+15
+3.95
+16
+5.32
+Tail
+20
+1.45
+24
+0.71
+Table 7: Distribution of long-tail predicate types across
+two datasets. The table shows the number and frequency
+of predicates in each category: Head (top 30%), Body
+(middle 30%), and Tail (bottom 40%).
+rent relationships depending on different perspec-
+tives, we partition the predicates of each dataset
+into three distinct taxonomies based on their under-
+lying semantic properties. For VG150, relations
+are classified into spatial (e.g., on, near), posses-
+sive (e.g., has, belong to), and interactive (e.g.,
+wearing, standing on) types. Similarly, for the
+PSG dataset, we distinguish between spatial (e.g.,
+on, in), static-interactive (e.g., sitting on, parked
+on), and dynamic-interactive (e.g., walking on,
+jumping over) relations.
+A.4
+Structured Reasoning Prompt
+We design a three-stage Chain-of-Thought (CoT)
+prompt (see Figure 9) to direct the structured out-
+put process of end-to-end Scene Graph Generation
+(SGG). In closed-set scenarios, the prompt incor-
+porates the full set of object categories and rela-
+tion predicate categories of three predefined types
+from the dataset. Specifically, the prompt guides
+the model through a sequential reasoning process
+based on these predefined categories, with each
+stage explicitly defining task objectives and con-
+straints. To ensure robust parsing, all outputs are
+strictly constrained to standardized JSON formats
+within dedicated tags. Furthermore, we leverage
+
+---PAGE BREAK---
+in-context learning with representative examples to
+enhance the model’s adherence to these structural
+constraints.
+A.5
+Relation Augmentation Prompt
+To mitigate the inherent sparsity of relation an-
+notations, we leverage Qwen2.5-VL-32B for data
+augmentation. Our CoT prompting framework (see
+Figure 10) integrates predicate categories of three
+predefined types and ground-truth object sets, in-
+cluding category names and bounding boxes. The
+prompt is structured into a sequential two-stage
+reasoning process, where each stage explicitly de-
+fines task objectives and requirements. To ensure
+precise instruction following and structural consis-
+tency, we also supplement representative in-context
+examples.
+A.6
+CoT Data Construction
+We derive the CoT sequences from the original
+object annotations and augmented relation anno-
+tations. The data is organized into a three-stage
+sequential structure as illustrated in Figure 5:
+Stage 1: Category Identification. We extract
+unique object categories from the object instance
+set to construct an initial list. Given M object
+instances V = {(ci, bi)}M
+i=1, where ci and bi denote
+the category and bounding box respectively, we
+derive a unique category set C = {cn}N
+n=1 (N ≤
+M).
+Stage 2: Sequential Instance Grounding. The
+instances in V are rearranged to align with the order
+of C. To distinguish between multiple instances of
+the same category, we append unique numerical
+suffixes (e.g., person.1, person.2) to each instance.
+Stage 3: Multi-relational Mapping. Finally,
+the set of K relation triplets R = {(sj, pj, oj)}K
+j=1
+is organized. Triplets are first grouped by their
+predefined predicate types and then sorted based
+on the sequential order of subjects sj established
+in Stage 2. This alignment ensures that relational
+reasoning consistently follows the grounded object
+sequence.
+To
+maintain
+clarity
+throughout
+the
+rea-
+soning
+process,
+we
+explicitly
+encapsu-
+lates
+each
+stage
+within
+dedicated
+tags,
+denoting the start and end of each stage:
+<CATEGORY></CATEGORY>, <OBJECT></OBJECT>,
+and <RELATION></RELATION>.
+All outputs are
+standardized in JSON format within these tags.
+This sequential organization aligns with the
+instruction structure of the CoT prompt.
+A.7
+Bipartite Matching
+Following (Chen et al., 2025), the assignment be-
+tween predicted and ground-truth entities is for-
+mulated as a bipartite matching problem. The ob-
+jective is to find an optimal mapping between the
+set of predicted nodes Vpred = {vi = (ci, bi)}M
+i=1
+and ground-truth nodes Vgt = {vj = (cj, bj)}N
+j=1,
+where each node consists of an object class c and
+its corresponding bounding box b. The matching
+cost between vi and vj is defined as:
+Lmatch(vi, vj) =λ1
+ 1 −sim(eci, ecj)
+
++ λ2 (1 −IoU(bi, bj))
++ λ3∥bi −bj∥1
+(14)
+where sim(eci, ecj) denotes the cosine similar-
+ity between semantic embeddings of object classes
+extracted via Sentence-BERT, IoU(·) is the Inter-
+section over Union, and ∥· ∥1 represents the L1 dis-
+tance. The hyper-parameters λ1, λ2, and λ3 serve
+as balancing coefficients that weight the relative
+contributions of semantic consistency, spatial over-
+lap, and coordinate proximity, respectively.
+To minimize false positives and enhance match-
+ing precision, we implement a threshold-based fil-
+tering mechanism. Only candidate pairs below a
+predefined cost threshold are retained for final as-
+signment, which is determined by minimizing the
+global cost. This filtering provides a robust foun-
+dation for subsequent instance grounding optimiza-
+tion.
+B
+Additional Analysis and Results
+B.1
+Dataset Analysis
+Long-tail Analysis. Table 7 details the predicate
+distribution across both datasets, revealing a severe
+long-tail imbalance. In VG150, the head predicates
+comprising only 30% of the predicate categories,
+but accounting for over 90% of all training samples,
+leaving the body and tail categories significantly
+underrepresented. This extreme skewness high-
+lights the substantial distribution bias inherent in
+these benchmarks, necessitating targeted strategies
+to improve rare category recognition.
+Sparsity Analysis. As reported in Table 8, while
+the original datasets average approximately 11 ob-
+jects per image, relation density remains dispropor-
+tionately low at 4.8 for VG150 and 5.6 for PSG.
+This disparity indicates that most valid inter-object
+associations are unannotated, creating a sparse
+
+---PAGE BREAK---
+Dataset
+O/I
+Before RA
+After RA
+Total
+Head
+Body
+Tail
+Total
+Head
+Body
+Tail
+Count
+Type
+Count
+Type
+Count
+Type
+Count
+Type
+Count
+Type
+Count
+Type
+Count
+Type
+Count
+Type
+VG150
+11.7
+269 196
+25 151
+254 656
+20 592
+10 645
+2981
+3985
+1578
+976 465
+30 928
+827 105
+24 742
+62 374
+3320
+86 986
+2866
+PSG
+11.0
+261 666
+18 126
+245 886
+16 430
+13 932
+1287
+1848
+409
+810 219
+23 530
+742 387
+20 542
+55 220
+2150
+12 612
+838
+Table 8: Statistics of relation augmentation on VG150 and PSG training sets, with breakdowns for head/body/tail
+categories. “O/I” denotes average objects per image; “Count” refers to the number of relation triplets; “Type”
+denotes the number of relation triple combination patterns.
+Original data (before relation augmentation)
+The absence of an inherent order and the high density of objects pose significant perceptual hurdles, making it difficult for me to exhaustively
+detect and precisely ground every instance within the scene.
+{"objects": [{"id": "book.1", "bbox": [445, 385, 558, 423]}, {"id": "laptop.2", "bbox": [114, 247, 257, 348]}, {"id": "table-merged.3", "bbox": [18, 307, 640, 480]}, {"id": "paper-merged.4", "bbox": [553, 303, 640, 347]}, {"id":
+"keyboard.5", "bbox": [237, 407, 440, 442]}, {"id": "mouse.6", "bbox": [169, 422, 216, 458]}, {"id": "keyboard.7", "bbox": [130, 326, 247, 335]}, {"id": "wall-other-merged.8", "bbox": [0, 0, 640, 397]}, {"id": "tv.9", "bbox": [414,
+191, 559, 331]}, {"id": "light.10", "bbox": [0, 73, 37, 270]}, {"id": "bottle.11", "bbox": [49, 292, 73, 372]}, {"id": "mouse.12", "bbox": [466, 417, 500, 443]}, {"id": "cup.13", "bbox": [408, 300, 455, 338]}, {"id": "tv.14", "bbox":
+[265, 192, 410, 324]}], "relations": [{"subject": "cup.13", "predicate": "on", "object": "table-merged.3"}, {"subject": "mouse.6", "predicate": "on", "object": "table-merged.3"}, {"subject": "tv.9", "predicate": "beside", "object":
+"tv.14"}]}
+CoT data (after relation augmentation)
+By following a structured reasoning trajectory, I can now detect and localize objects sequentially based on their categories. This ordered
+approach allows me to infer relations step-by-step, resulting in enhanced visual clarity and a more fine-grained scene analysis.
+Object category detection stage: What are the object categories shown in the image?
+<CATEGORY>{"categories": [{"id": "bottle"}, {"id": "cup"}, {"id": "tv"}, {"id": "laptop"}, {"id": "mouse"}, {"id": "keyboard"}, {"id": "book"}, {"id": "light"}, {"id": "table-merged"}, {"id": "paper-merged"}, {"id": "wall-other-
+merged"}]}</CATEGORY>
+Object instance grounding stage: Where are the instances of each object category?
+<OBJECT>{"objects": [{"id": "bottle.1", "bbox": [49, 292, 73, 372]},{"id": "cup.1", "bbox": [408, 300, 455, 338]}, {"id": "tv.1", "bbox": [414, 191, 559, 331]},{"id": "tv.2", "bbox": [265, 192, 410, 324]}, {"id": "laptop.1", "bbox": [114, 247, 257,
+348]},{"id": "mouse.1", "bbox": [466, 417, 500, 443]}, {"id": "mouse.2", "bbox": [169, 422, 216, 458]},{"id": "keyboard.1", "bbox": [130, 326, 247, 335]}, {"id": "keyboard.2", "bbox": [237, 407, 440, 442]},{"id": "book.1", "bbox": [445, 385, 558,
+423]}, {"id": "light.1", "bbox": [0, 73, 37, 270]}, {"id": "table-merged.1", "bbox": [18, 307, 640, 480]}, {"id": "paper-merged.1", "bbox": [553, 303, 640, 347]}, {"id": "wall-other-merged.1", "bbox": [0, 0, 640, 397]}]}</OBJECT>
+Multi-type relation extraction stage: What are the different types of relationships between object instances?
+<RELATION>{"spatial_relations": [{"subject": "bottle.1", "predicate": "on", "object": "table-merged.1"}, {"subject": "cup.1", "predicate": "on", "object": "table-merged.1"}, {"subject": "tv.1", "predicate": "on", "object": "table-merged.1"},
+{"subject": "tv.1", "predicate": "beside", "object": "tv.2"}, {"subject": "tv.2", "predicate": "on", "object": "table-merged.1"}, {"subject": "laptop.1", "predicate": "on", "object": "table-merged.1"}, {"subject": "laptop.1", "predicate": "beside", "object":
+"tv.2"}, {"subject": "mouse.1", "predicate": "on", "object": "table-merged.1"}, {"subject": "mouse.2", "predicate": "on", "object": "table-merged.1"}, {"subject": "keyboard.1", "predicate": "on", "object": "table-merged.1"}, {"subject": "keyboard.2",
+"predicate": "on", "object": "table-merged.1"}, {"subject": "book.1", "predicate": "on", "object": "table-merged.1"}, {"subject": "paper-merged.1", "predicate": "on", "object": "table-merged.1"}, {"subject": "paper-merged.1", "predicate": "beside",
+"object": "tv.2"}], "static_action_relations": [{"subject": "light.1", "predicate": "attached to", "object": "wall-other-merged.1"}], "dynamic_action_relations": []}</RELATION>
+Figure 5: Comparison between original and CoT data. The original data are transformed into our three-stage format
+through a structured curation process.
+scene graph that hinders MLLM fine-tuning. Fol-
+lowing our RA strategy, the average relation count
+rises to 17.4 per image, and the number of rela-
+tions increases across all frequency groups. By
+generating plausible annotations for previously ne-
+glected pairs, our approach substantially enriches
+the relational supervision for the SFT phase.
+Diversity Analysis. As shown in Table 8, the re-
+sults reveal that RA not only expands the total vol-
+ume of relations but also significantly enriches the
+variety of triplet types across all frequency groups.
+This demonstrates its effectiveness in enhancing
+semantic diversity and provides more generalized
+triplet combination patterns for model learning in
+the SFT stage.
+B.2
+MLLM Zero-shot Performance in SGG
+We evaluate the zero-shot end-to-end SGG capabil-
+ities of Qwen2.5-VL (3B, 7B, 32B) using our CoT
+prompt. As shown in Table 9, the results demon-
+strate that MLLMs possess the untapped potential
+to handle dense relational reasoning in a stream-
+lined, end-to-end fashion, bypassing the need for
+complex, multi-stage pipelines.
+However, zero-shot performance remains sub-
+par across all metrics, with Recall, mRecall, and
+zsRecall persisting at extremely low levels com-
+pared to our fine-tuned methods. Severe deficits
+across head, body, and tail categories indicate a
+fundamental failure to capture complex relational
+dependencies. While scaling the model size signif-
+icantly enhances instruction following ability and
+reduces failure rates, it does not resolve the core
+bottleneck in relational reasoning. For instance, de-
+spite the 32B model achieving a low 9.95% failure
+rate on VG150, its Recall of 8.40% is strikingly in-
+ferior to the 35.95% achieved by our fine-tuned ap-
+proach. A similar disparity on PSG underscores the
+limitations of general-purpose MLLMs in dense re-
+lational reasoning under zero-shot settings, further
+validating the necessity of our proposed training
+pipeline.
+B.3
+Qualitative Analysis on Relation
+Augmentation
+To mitigate implausible relations generated by
+Qwen2.5-VL-32B, such as <hand.1, at, person.1>,
+candidate relations are retained only if their maxi-
+
+---PAGE BREAK---
+Model
+Params
+VG150 Dataset
+PSG Dataset
+Failure Rate
+Recall
+mRecall
+zsRecall
+Head
+Body
+Tail
+Failure Rate
+Recall
+mRecall
+zsRecall
+Head
+Body
+Tail
+Zero-shot Performance
+Qwen2.5-VL
+3B
+76.95
+0.46
+0.34
+0.12
+0.46
+0.31
+0.13
+51.05
+3.69
+3.69
+0.00
+2.66
+4.15
+2.42
+Qwen2.5-VL
+7B
+24.89
+3.40
+2.38
+0.78
+3.09
+3.26
+1.98
+8.69
+8.78
+11.02
+0.00
+6.82
+10.45
+7.25
+Qwen2.5-VL
+32B
+9.95
+8.40
+5.66
+1.68
+8.20
+6.13
+4.96
+5.67
+15.69
+17.38
+0.00
+14.03
+18.60
+13.90
+Fine-tuned Performance
+Qwen2.5-VL
+3B
+0.06
+35.95
+14.78
+6.11
+36.98
+15.58
+8.13
+0.00
+52.49
+44.30
+7.69
+50.95
+50.84
+34.14
+Table 9: Performance (%) comparison of Qwen2.5-VL and our fine-tuned approach on the VG150 and PSG test
+sets.
+mum embedding cosine similarity to any ground-
+truth predicate exceeds a threshold. This refine-
+ment filters out 23.19% and 13.83% of initial out-
+puts for VG150 and PSG, respectively, enhancing
+data quality.
+As illustrated in Figure 6, while the original
+datasets feature dense object annotations, they are
+often characterized by severe relation sparsity. Our
+augmentation strategy effectively recovers plausi-
+ble inter-object associations, substantially enhanc-
+ing the connectivity and completeness of the re-
+sulting scene graphs. For instance, it supplements
+missing spatial relations, such as <paper-merged.1,
+beside, tv.1> and <mouse.2, on, table-merged.1>
+for PSG samples, while clarifying possessive de-
+pendencies like <building.1, has, window.1> and
+<sign.1, attached to, pole.1> for VG150 samples.
+These relations are frequently omitted in the orig-
+inal annotations, and our method effectively mit-
+igates this sparsity by generating more plausible
+relations.
+B.4
+Qualitative Analysis of End-to-End SGG
+with SFT and RL
+Comparative analysis in Figure 7 indicates that the
+SFT-only model is prone to hallucinations during
+dense object localization, exhibiting autoregressive
+degeneration such as redundant instances of win-
+dow. This behavior triggers sequence length lim-
+its, leading to premature truncation of outputs and
+underscoring the limitations of SFT. In contrast,
+RL optimization effectively eliminates these repet-
+itive loops, enabling precise localization of eight
+window instances. Notably, the outputs maintain
+strict cross-stage sequentiality: object localization
+adheres to the identified category order, while rela-
+tion extraction follows the subject sequence. This
+structural consistency focuses the model’s atten-
+tion, ensuring complete and coherent reasoning,
+which significantly enhances recall performance.
+Object Detection Performance. The output of
+the SFT model demonstrates incomplete object de-
+tection results with low recall. Compared to the
+SFT model outputs, it is evident that for objects
+such as sidewalk, building, pole, and sign, the RL
+model can detect a greater number of reasonable
+instances of these categories, which is beneficial
+for improving ground truth coverage. Furthermore,
+the detection accuracy of the RL model is also
+enhanced, with fine-grained objects such as sign,
+shirt, and short all being well-detected. Despite the
+sparse annotation of objects in the original images,
+the model is capable of detecting objects like win-
+dow even when they are unlabeled, demonstrating
+strong generalization.
+Relation Recognition Performance. In terms of
+relation output, the SFT output suffers from trun-
+cation, leading to failed relation recognition. In
+contrast, the RL output is complete and includes
+all three types of relations. It can be observed that
+the model strictly adheres to recognizing and out-
+putting these three types of relations, identifying
+relationships between objects from spatial, posses-
+sive, and interactive perspectives. Even with the
+original sparse relation annotations, our two-stage
+fine-tuning framework enables the model to output
+numerous reasonable relations, thereby improving
+recall and exhibiting strong generalization.
+B.5
+Qualitative Comparison of End-to-End
+SGG
+Qualitative comparisons in Figure 8 demonstrate
+the efficacy of our method relative to the baseline
+method R1-SGG (Chen et al., 2025). Although
+R1-SGG produces scene graphs after two-stage
+post-training (SFT and RL), its outputs are no-
+tably shorter, resulting in lower overall recall of
+correct predictions. In contrast, our approach con-
+sistently generates structured three-stage outputs
+with reasoning trajectories that frequently surpass
+the ground truth in depth, leading to significantly
+higher overall recall.
+Object Detection Performance. Regarding object
+detection, it is evident that the baseline method
+
+---PAGE BREAK---
+bottle.1
+cup.1
+tv.1
+tv.2
+laptop.1
+mouse.1
+mouse.2
+keyboard.1
+keyboard.2
+book.1
+light.1
+table-merged.1
+paper-merged.1
+wall-other-merged.1
+building.1
+bus.1
+pole.1
+sidewalk.1
+sign.1
+tree.1
+window.1
+people.1
+(a) Ground-truth image samples with object bounding boxes
+for PSG (left) and VG150 (right).
+beside
+beside
+on
+wall-other-merged.1
+tv.2
+tv.1
+light.1
+laptop.1
+cup.1
+table-merged.1
+bottle.1
+mouse.2
+keyboard.1
+mouse.1
+keyboard.2
+paper-merged.1
+book.1
+tree.1
+walking in
+building.1
+bus.1
+pole.1
+window.1
+sign.1
+people.1
+sidewalk.1
+on
+beside
+beside
+on
+wall-other-merged.1
+tv.2
+tv.1
+light.1
+laptop.1
+cup.1
+table-merged.1
+bottle.1
+mouse.2
+keyboard.1
+mouse.1
+keyboard.2
+paper-merged.1
+book.1
+tree.1
+walking in
+building.1
+bus.1
+pole.1
+window.1
+sign.1
+people.1
+sidewalk.1
+(b) Original sparse scene graphs, where rectangles denote
+objects and directed edges represent relations.
+beside
+beside
+on
+beside
+attached to
+wall-other-merged.1
+light.1
+tv.2
+laptop.1
+tv.1
+cup.1
+bottle.1
+mouse.2
+keyboard.1
+keyboard.2
+mouse.1
+table-merged.1
+paper-merged.1
+book.1
+on
+on
+on
+on
+on
+walking in
+near
+near
+on
+part of
+has
+has
+attached to
+near
+tree.1
+building.1
+bus.1
+sidewalk.1
+window.1
+pole.1
+people.1
+sign.1
+on
+on
+beside
+beside
+on
+beside
+attached to
+wall-other-merged.1
+light.1
+tv.2
+laptop.1
+tv.1
+cup.1
+bottle.1
+mouse.2
+keyboard.1
+keyboard.2
+mouse.1
+table-merged.1
+paper-merged.1
+book.1
+on
+on
+on
+on
+on
+walking in
+near
+near
+on
+part of
+has
+has
+attached to
+near
+tree.1
+building.1
+bus.1
+sidewalk.1
+window.1
+pole.1
+people.1
+sign.1
+on
+on
+(c) Augmented scene graphs with color-coded edges: for PSG,
+green and blue edges signify spatial and static-interactive
+relations; for VG150, green, blue, and red edges represent
+spatial, possessive, and interactive relations, respectively.
+Figure 6: Visualization of relation augmentation. (a)
+Original images with ground-truth object bounding
+boxes and category labels. (b) Visualization of orig-
+inal sparse relation annotations. (c) Visualization of the
+augmented relation annotations.
+exhibits restricted recall and frequently overlooks
+common objects such as cup and shelf, resulting in
+a sparse representation of the scene. In contrast, our
+model identifies a comprehensive range of plausi-
+ble objects, including handle, glass, and cup, even
+when these instances are omitted from the original
+annotations, thereby significantly improving ob-
+ject detection recall. These results underscore the
+superior grounding capabilities of our framework.
+Relation Recognition Performance. The base-
+line yields sparse, often semantically trivial or
+erroneous relations, including unreasonable ones
+(e.g., <cup.5, on, desk.6> with misinterpreted ref-
+erents) and incorrect predicates (e.g., <draw.7,
+on, desk.6>, <book.2, on, desk.6>).
+In con-
+trast, our approach generates a higher density of
+valid triplets across three semantic levels-spatial
+(e.g., <drawer.1, in, desk.1>), possessive (e.g.,
+<drawer.1, has, handle.1>), and complex inter-
+actions (e.g., <person.1, wearing, glasses.1>)-
+achieving superior ground-truth coverage and se-
+mantic depth, thereby mitigating relation bias.
+Moreover, the model detects plausible relations
+even without explicit localization (e.g., <person.1,
+using, computer> when the computer instance is
+undetected), demonstrating strong generalization.
+Collectively, these results demonstrate that our
+three-stage reasoning framework effectively en-
+hances the model’s capacity to recognize fine-
+grained objects and capture intricate semantic de-
+pendencies, advancing the pursuit of robust scene
+understanding in real-world environments.
+
+---PAGE BREAK---
+building.1
+building.2
+building.3
+car.4
+car.5
+lady.6
+man.7
+pole.8
+shirt.9
+short.10
+sidewalk.11
+sign.12
+street.13
+tree.14
+woman.15
+woman.16
+woman.17
+Ground Truth
+building.1
+building.2
+car.1 car.2
+car.3 car.4
+car.5man.1
+people.1
+person.1
+pole.1
+shirt.1
+sidewalk.1
+sign.1
+street.1
+tree.1
+window.1
+window.2
+window.3
+window.4
+window.5
+window.6
+window.7
+window.8
+window.9
+window.10
+window.11
+window.12
+window.13
+window.14
+window.15
+window.16
+window.17
+window.18
+window.19
+window.20
+window.21
+window.22
+window.23
+window.24
+window.25
+window.26
+window.27
+window.28
+window.29
+window.30
+window.31
+window.32
+window.33
+window.34
+window.35
+SFT
+building.1
+building.2
+building.3
+car.1 car.2
+car.3 car.4
+car.5man.1
+man.2
+people.1
+people.2
+person.1
+person.2
+person.3
+pole.1
+pole.2
+shirt.1
+shirt.2
+short.1
+sidewalk.1
+sidewalk.2
+sign.1
+sign.2
+street.1
+tree.1
+window.1
+window.2
+window.3
+window.4
+window.5
+window.6
+window.7
+window.8
+woman.1
+woman.2
+SFT + RL
+(a) Qualitative visualization of object detection. Results are shown for ground truth (left), the SFT only output (middle), and
+output after SFT followed by RL (right).
+Ground truth annotation
+{"objects": [{"id": "building.1", "bbox": [0, 75, 373, 383]}, {"id": "building.2", "bbox": [338, 46, 530, 321]}, {"id": "building.3", "bbox": [371, 251, 466, 359]}, {"id": "car.4", "bbox": [251, 350, 315, 383]}, {"id": "car.5",
+"bbox": [307, 350, 357, 378]}, {"id": "lady.6", "bbox": [521, 342, 551, 427]}, {"id": "man.7", "bbox": [463, 328, 493, 431]}, {"id": "pole.8", "bbox": [486, 313, 495, 410]}, {"id": "shirt.9", "bbox": [463, 346, 487, 376]}, {"id":
+"short.10", "bbox": [467, 375, 490, 407]}, {"id": "sidewalk.11", "bbox": [431, 371, 639, 446]}, {"id": "sign.12", "bbox": [475, 286, 502, 316]}, {"id": "street.13", "bbox": [0, 358, 640, 477]}, {"id": "tree.14", "bbox": [0, 215, 47,
+331]}, {"id": "woman.15", "bbox": [205, 338, 223, 405]}, {"id": "woman.16", "bbox": [554, 336, 583, 434]}, {"id": "woman.17", "bbox": [524, 344, 553, 428]}], "relations": [{"subject": "man.7", "predicate": "wearing",
+"object": "short.10"}, {"subject": "man.7", "predicate": "wearing", "object": "shirt.9"}, {"subject": "tree.14", "predicate": "in front of", "object": "building.1"}, {"subject": "car.4", "predicate": "in", "object": "street.13"},
+{"subject": "car.5", "predicate": "in", "object": "street.13"}]}
+CoT response (SFT)
+CoT response (SFT + RL)
+Next, RL is introduced to intervene. Through stage-wise rewards, I recalibrate my embeddings, eliminate
+hallucinations, and reconstruct rigorous reasoning trajectories amidst complexity.
+<CATEGORY>{"categories": [{"id": "building"}, {"id": "car"}, {"id": "man"}, {"id": "people"}, {"id": "person"}, {"id": "pole"}, {"id": "shirt"}, {"id": "short"}, {"id": "sidewalk"}, {"id": "sign"}, {"id": "street"}, {"id":
+"tree"}, {"id": "window"}, {"id": "woman"}]}</CATEGORY>
+<OBJECT>{"objects": [{"id": "building.1", "bbox": [0, 73, 375, 389]}, {"id": "building.2", "bbox": [336, 47, 530, 359]}, {"id": "building.3", "bbox": [575, 0, 639, 366]}, {"id": "car.1", "bbox": [201, 356, 258, 396]},
+{"id": "car.2", "bbox": [252, 357, 312, 382]}, {"id": "car.3", "bbox": [306, 353, 355, 382]}, {"id": "car.4", "bbox": [356, 355, 398, 375]}, {"id": "car.5", "bbox": [426, 335, 512, 397]}, {"id": "man.1", "bbox": [461, 330,
+490, 427]}, {"id": "man.2", "bbox": [202, 334, 223, 400]}, {"id": "people.1", "bbox": [523, 338, 553, 421]}, {"id": "people.2", "bbox": [551, 334, 587, 429]}, {"id": "person.1", "bbox": [173, 353, 208, 400]}, {"id": "person.2",
+"bbox": [93, 333, 125, 390]}, {"id": "person.3", "bbox": [586, 333, 623, 412]}, {"id": "pole.1", "bbox": [479, 95, 495, 407]}, {"id": "pole.2", "bbox": [71, 161, 99, 393]}, {"id": "shirt.1", "bbox": [462, 338, 489, 375]},
+{"id": "shirt.2", "bbox": [553, 343, 582, 393]}, {"id": "short.1", "bbox": [463, 369, 489, 399]}, {"id": "sidewalk.1", "bbox": [0, 367, 166, 406]}, {"id": "sidewalk.2", "bbox": [429, 363, 639, 443]}, {"id": "sign.1",
+"bbox": [473, 285, 502, 312]}, {"id": "sign.2", "bbox": [66, 302, 87, 323]}, {"id": "street.1", "bbox": [0, 358, 639, 471]}, {"id": "tree.1", "bbox": [0, 208, 51, 369]}, {"id": "window.1", "bbox": [247, 172, 273, 218]},
+{"id": "window.2", "bbox": [28, 145, 71, 195]}, {"id": "window.3", "bbox": [209, 159, 239, 207]}, {"id": "window.4", "bbox": [246, 229, 273, 271]}, {"id": "window.5", "bbox": [278, 188, 303, 229]}, {"id": "window.6",
+"bbox": [209, 219, 238, 264]}, {"id": "window.7", "bbox": [278, 237, 304, 279]}, {"id": "window.8", "bbox": [167, 135, 191, 191]}, {"id": "woman.1", "bbox": [522, 338, 554, 422]}, {"id": "woman.2", "bbox": [549, 333,
+587, 429]}]}</OBJECT>
+<RELATION>{"relations": {"spatial_relations": [{"subject": "building.2", "predicate": "behind", "object": "car.4"}, {"subject": "car.1", "predicate": "on", "object": "street.1"}, {"subject": "car.2", "predicate": "on", "object":
+"street.1"}, {"subject": "car.3", "predicate": "on", "object": "street.1"}, {"subject": "car.4", "predicate": "on", "object": "street.1"}, {"subject": "car.5", "predicate": "on", "object": "street.1"}, {"subject": "man.1", "predicate":
+"on", "object": "sidewalk.2"}, {"subject": "man.2", "predicate": "on", "object": "street.1"}, {"subject": "people.1", "predicate": "on", "object": "sidewalk.2"}, {"subject": "people.2", "predicate": "on", "object": "sidewalk.2"},
+{"subject": "person.1", "predicate": "on", "object": "sidewalk.1"}, {"subject": "pole.1", "predicate": "on", "object": "sidewalk.2"}, {"subject": "shirt.1", "predicate": "on", "object": "man.1"}, {"subject": "shirt.2", "predicate":
+"on", "object": "woman.2"}, {"subject": "short.1", "predicate": "on", "object": "man.1"}, {"subject": "sidewalk.1", "predicate": "along", "object": "street.1"}, {"subject": "sign.1", "predicate": "on", "object": "pole.1"},
+{"subject": "sign.2", "predicate": "on", "object": "pole.2"}, {"subject": "tree.1", "predicate": "near", "object": "building.1"}, {"subject": "tree.1", "predicate": "on", "object": "sidewalk.1"}, {"subject": "woman.1", "predicate":
+"on", "object": "sidewalk.2"}, {"subject": "woman.2", "predicate": "on", "object": "sidewalk.2"}], "possession_relations": [{"subject": "building.1", "predicate": "has", "object": "window.1"}, {"subject": "building.1",
+"predicate": "has", "object": "window.2"}, {"subject": "building.1", "predicate": "has", "object": "window.3"}, {"subject": "window.1", "predicate": "of", "object": "building.1"}, {"subject": "woman.2", "predicate": "with",
+"object": "shirt.2"}], "interaction_relations": [{"subject": "man.1", "predicate": "wearing", "object": "shirt.1"}, {"subject": "man.1", "predicate": "wearing", "object": "short.1"}, {"subject": "man.1",
+"predicate": "walking on", "object": "sidewalk.2"}, {"subject": "woman.1", "predicate": "wearing", "object": "shirt.2"}, {"subject": "woman.1", "predicate": "walking on", "object": "sidewalk.2"}, {"subject": "woman.2",
+"predicate": "wearing", "object": "shirt.2"}]}}</RELATION>
+SFT grants me sequence modeling, yet dense scenes disorient my embedding space, leading to repetitive loops
+and hallucinations...
+<CATEGORY>{"categories": [{"id": "building"}, {"id": "car"}, {"id": "man"}, {"id": "people"}, {"id": "person"}, {"id": "pole"}, {"id": "shirt"}, {"id": "sidewalk"}, {"id": "sign"}, {"id": "street"}, {"id": "tree"}, {"id":
+"window"}, {"id": "woman"}]}</CATEGORY>
+<OBJECT>{"objects": [{"id": "building.1", "bbox": [0, 75, 375, 395]}, {"id": "building.2", "bbox": [337, 48, 529, 366]}, {"id": "car.1", "bbox": [200, 356, 256, 395]}, {"id": "car.2", "bbox": [250, 354, 310, 387]},
+{"id": "car.3", "bbox": [306, 356, 356, 381]}, {"id": "car.4", "bbox": [355, 354, 395, 375]}, {"id": "car.5", "bbox": [427, 348, 512, 406]}, {"id": "man.1", "bbox": [462, 338, 489, 436]}, {"id": "people.1", "bbox": [525,
+349, 551, 431]}, {"id": "person.1", "bbox": [551, 343, 585, 438]}, {"id": "pole.1", "bbox": [479, 100, 493, 415]}, {"id": "shirt.1", "bbox": [551, 354, 580, 399]}, {"id": "sidewalk.1", "bbox": [0, 378, 199, 419]}, {"id":
+"sign.1", "bbox": [473, 293, 500, 320]}, {"id": "street.1", "bbox": [0, 366, 639, 482]}, {"id": "tree.1", "bbox": [0, 217, 51, 379]}, {"id": "window.1", "bbox": [211, 165, 237, 212]}, {"id": "window.2", "bbox": [248, 179,
+271, 224]}, {"id": "window.3", "bbox": [280, 195, 301, 238]}, {"id": "window.4", "bbox": [209, 227, 236, 272]}, {"id": "window.5", "bbox": [248, 237, 271, 280]}, {"id": "window.6", "bbox": [279, 245, 301, 287]}, {"id":
+"window.7", "bbox": [306, 205, 325, 240]}, {"id": "window.8", "bbox": [306, 253, 325, 289]}, {"id": "window.9", "bbox": [330, 214, 346, 250]}, {"id": "window.10", "bbox": [330, 260, 346, 294]}, {"id": "window.11", "bbox":
+[306, 205, 325, 238]}, {"id": "window.12", "bbox": [279, 245, 301, 287]}, {"id": "window.13", "bbox": [248, 237, 271, 280]}, {"id": "window.14", "bbox": [211, 227, 236, 272]}, {"id": "window.15", "bbox": [209,
+227, 236, 272]}, {"id": "window.16", "bbox": [248, 179, 271, 224]}, {"id": "window.17", "bbox": [279, 195, 301, 238]}, {"id": "window.18", "bbox": [306, 205, 325, 240]}, {"id": "window.19", "bbox": [211, 227,
+236, 272]}, {"id": "window.20", "bbox": [248, 237, 271, 280]}, {"id": "window.21", "bbox": [306, 205, 325, 240]}, {"id": "window.22", "bbox": [279, 245, 301, 287]}, {"id": "window.23", "bbox": [306, 260, 325,
+294]}, {"id": "window.24", "bbox": [330, 214, 346, 250]}, {"id": "window.25", "bbox": [248, 237, 271, 280]}, {"id": "window.26", "bbox": [279, 245, 301, 287]}, {"id": "window.27", "bbox": [306, 205, 325, 240]},
+{"id": "window.28", "bbox": [330, 214, 346, 250]}, {"id": "window.29", "bbox": [306, 260, 325, 294]}, {"id": "window.30", "bbox": [279, 245, 301, 287]}, {"id": "window.31", "bbox": [330, 214, 346, 250]}, {"id":
+"window.32", "bbox": [306, 260, 325, 294]}, {"id": "window.33", "bbox": [330, 214, 346, 250]}, {"id": "window.34", "bbox": [306, 260, 325, 294]}, {"id": "window.35", "bbox": [330, 214, 346, 250]}, {"id":
+"window.36", "bbox": [306, 260,
+(b) Comparison between SFT-only and SFT + RL outputs. Predictions are color-coded: green indicates alignment with ground
+truth, red denotes implausible repeated predictions.
+Figure 7: Qualitative comparison of scene graph generation under different fine-tuning strategies. We visualize the
+ground truth, SFT-only outputs, and SFT + RL outputs. The comparisons highlight the performance gaps in both
+object detection (a) and relation recognition (b).
+
+---PAGE BREAK---
+desk.1
+man.2
+shelf.3
+shirt.4
+desk.5
+paper.6
+chair.7
+drawer.8
+book.9
+pant.10
+drawer.11
+shelf.12
+paper.13
+book.14
+paper.15
+hand.16
+bag.17
+cup.18
+cup.19
+Ground Truth
+book.1
+book.2
+chair.3
+cup.4
+cup.5
+desk.6
+drawer.7
+hair.8
+man.9
+paper.10
+shirt.11
+window.12
+person.13
+Baseline Method
+book.1
+book.2
+chair.1
+cup.1
+cup.2
+cup.3
+desk.1
+desk.2
+drawer.1
+drawer.2
+glass.1
+hair.1
+hand.1
+handle.1
+handle.2
+man.1
+paper.1
+paper.2
+shelf.1
+shelf.2
+shirt.1
+window.1
+Our Method
+(a) Qualitative visualization of object detection. Results are shown for ground truth (left), the baseline (middle), and our
+method (right).
+Ground truth annotation
+{"objects": [{"id": "desk.1", "bbox": [12, 386, 565, 599]}, {"id": "man.2", "bbox": [111, 286, 377, 599]}, {"id": "shelf.3", "bbox": [0, 0, 222, 238]}, {"id": "shirt.4", "bbox": [111, 373, 335, 598]}, {"id": "desk.5", "bbox": [580,
+428, 799, 592]}, {"id": "paper.6", "bbox": [582, 315, 763, 436]}, {"id": "chair.7", "bbox": [14, 478, 145, 599]}, {"id": "drawer.8", "bbox": [362, 493, 510, 582]}, {"id": "book.9", "bbox": [121, 39, 135, 133]}, {"id": "pant.10",
+"bbox": [188, 529, 364, 598]}, {"id": "drawer.11", "bbox": [603, 545, 789, 598]}, {"id": "shelf.12", "bbox": [0, 213, 207, 239]}, {"id": "paper.13", "bbox": [668, 289, 800, 338]}, {"id": "book.14", "bbox": [89, 158, 138, 217]},
+{"id": "paper.15", "bbox": [475, 334, 531, 403]}, {"id": "hand.16", "bbox": [335, 402, 378, 436]}, {"id": "bag.17", "bbox": [702, 289, 778, 305]}, {"id": "cup.18", "bbox": [140, 166, 165, 216]}, {"id": "cup.19", "bbox": [444,
+396, 496, 471]}], "relations": [{"subject": "cup.19", "predicate": "on", "object": "desk.1"}, {"subject": "man.2", "predicate": "wears", "object": "shirt.4"}, {"subject": "bag.17", "predicate": "on", "object": "paper.13"}, {"subject":
+"drawer.8", "predicate": "of", "object": "desk.1"}, {"subject": "cup.18", "predicate": "on", "object": "shelf.12"}, {"subject": "paper.13", "predicate": "on", "object": "desk.5"}, {"subject": "man.2", "predicate": "has", "object":
+"hand.16"}, {"subject": "book.9", "predicate": "on", "object": "shelf.12"}, {"subject": "book.14", "predicate": "on", "object": "shelf.12"}, {"subject": "man.2", "predicate": "wearing", "object": "pant.10"}, {"subject": "man.2",
+"predicate": "has", "object": "shirt.4"}, {"subject": "shelf.3", "predicate": "of", "object": "book.9"}]}
+Answer from SGG-R3 (with CoT)
+Execute a three-stage visual reasoning analysis for the provided image: Stage 1 detects unique object categories from predefined sets, outputting a JSON array within <CATEGORY> tags; Stage 2 localizes all
+instances of identified categories with sequential IDs and bounding boxes, outputting a JSON array within <OBJECT> tags; Stage 3 extracts spatial, possessive, and interactive relations between object pairs
+using predefined predicates, outputting a JSON array within <RELATION> tags. The process strictly follows predefined categories and sequential analysis requirements.
+<CATEGORY>{"categories": [{"id": "book"}, {"id": "chair"}, {"id": "cup"}, {"id": "desk"}, {"id": "drawer"}, {"id": "glass"}, {"id": "hair"}, {"id": "hand"}, {"id": "handle"}, {"id": "man"}, {"id": "paper"}, {"id":
+"shelf"}, {"id": "shirt"}, {"id": "window"}]}</CATEGORY>
+<OBJECT>{"objects": [{"id": "book.1", "bbox": [0, 33, 151, 224]}, {"id": "book.2", "bbox": [0, 137, 91, 223]}, {"id": "chair.1", "bbox": [12, 464, 373, 587]}, {"id": "cup.1", "bbox": [453, 389, 502, 459]},
+{"id": "cup.2", "bbox": [725, 458, 767, 514]}, {"id": "cup.3", "bbox": [139, 161, 168, 211]}, {"id": "desk.1", "bbox": [35, 388, 573, 587]}, {"id": "desk.2", "bbox": [584, 452, 798, 587]}, {"id":
+"drawer.1", "bbox": [373, 481, 512, 569]}, {"id": "drawer.2", "bbox": [45, 443, 362, 510]}, {"id": "glass.1", "bbox": [238, 315, 260, 334]}, {"id": "hair.1", "bbox": [161, 276, 248, 370]}, {"id": "hand.1",
+"bbox": [336, 390, 381, 430]}, {"id": "handle.1", "bbox": [419, 515, 463, 538]}, {"id": "handle.2", "bbox": [405, 566, 477, 587]}, {"id": "man.1", "bbox": [110, 276, 380, 587]}, {"id": "paper.1", "bbox":
+[587, 308, 773, 425]}, {"id": "paper.2", "bbox": [264, 256, 304, 315]}, {"id": "shelf.1", "bbox": [0, 0, 221, 238]}, {"id": "shelf.2", "bbox": [0, 119, 222, 143]}, {"id": "shirt.1", "bbox": [110, 365, 338, 587]},
+{"id": "window.1", "bbox": [229, 0, 591, 321]}]}</OBJECT>
+<RELATION>{"relations": {"spatial_relations": [{"subject": "book.1", "predicate": "on", "object": "shelf.1"}, {"subject": "book.1", "predicate": "on", "object": "shelf.2"}, {"subject": "book.2",
+"predicate": "on", "object": "shelf.2"}, {"subject": "chair.1", "predicate": "in front of", "object": "desk.1"}, {"subject": "cup.1", "predicate": "on", "object": "desk.1"}, {"subject": "cup.2", "predicate": "on",
+"object": "desk.2"},  {"subject": "cup.3", "predicate": "on", "object": "shelf.2"}, {"subject": "drawer.1", "predicate": "in", "object": "desk.1"}, {"subject": "drawer.2", "predicate": "in", "object": "desk.1"},
+{"subject": "glass.1", "predicate": "on", "object": "man.1"}, {"subject": "hair.1", "predicate": "on", "object": "man.1"}, {"subject": "hand.1", "predicate": "on", "object": "desk.1"}, {"subject": "handle.1",
+"predicate": "on", "object": "drawer.1"}, {"subject": "handle.2", "predicate": "on", "object": "drawer.1"}, {"subject": "man.1", "predicate": "at", "object": "desk.1"}, {"subject": "paper.1", "predicate": "on", "object":
+"desk.2"}, {"subject": "paper.2", "predicate": "on", "object": "desk.1"}, {"subject": "shelf.1", "predicate": "behind", "object": "man.1"}, {"subject": "shirt.1", "predicate": "on", "object": "man.1"}, {"subject":
+"window.1", "predicate": "in front of", "object": "man.1"}], "possession_relations": [{"subject": "drawer.1", "predicate": "has", "object": "handle.1"}, {"subject": "drawer.2", "predicate": "of", "object":
+"desk.1"}, {"subject": "man.1", "predicate": "has", "object": "shirt.1"}, {"subject": "man.1", "predicate": "has", "object": "hair.1"}, {"subject": "man.1", "predicate": "has", "object": "hand.1"},
+{"subject": "man.1", "predicate": "has", "object": "glass.1"}, {"subject": "man.1", "predicate": "with", "object": "hair.1"}, {"subject": "man.1", "predicate": "with", "object": "shirt.1"}, {"subject": "man.1",
+"predicate": "with", "object": "glass.1"}, {"subject": "shelf.1", "predicate": "with", "object": "book.2"}, {"subject": "shelf.2", "predicate": "with", "object": "book.2"}, {"subject": "shelf.2", "predicate": "with",
+"object": "book.1"}], "interaction_relations": [{"subject": "man.1", "predicate": "sitting on", "object": "chair.1"}, {"subject": "man.1", "predicate": "wearing", "object": "shirt.1"}, {"subject": "man.1",
+"predicate": "wearing", "object": "glass.1"}, {"subject": "man.1", "predicate": "using", "object": "computer"}, {"subject": "man.1", "predicate": "looking at", "object": "screen"}]}}</RELATION>
+structured reasoning
+cot prompting
+Answer from R1-SGG (without CoT)
+Generate a structured scene graph for an image in JSON format, specifying objects with unique IDs (from a predefined set) and bounding boxes, and relationships with subjects, predicates (from a predefined
+set), and objects, following the provided guidelines and example.
+{"objects": [{"id": "book.1", "bbox": [107, 262, 173, 356]}, {"id": "book.2", "bbox": [6, 62, 186, 366]}, {"id": "chair.3", "bbox": [17, 795, 333, 996]}, {"id": "cup.4", "bbox": [560, 666, 622, 787]}, {"id":
+"cup.5", "bbox": [893, 783, 953, 878]}, {"id": "desk.6", "bbox": [13, 596, 710, 996]}, {"id": "drawer.7", "bbox": [457, 820, 637, 967]}, {"id": "hair.8", "bbox": [197, 473, 313, 633]}, {"id": "man.9",
+"bbox": [139, 473, 476, 996]}, {"id": "paper.10", "bbox": [727, 517, 956, 733]}, {"id": "shirt.11", "bbox": [139, 620, 426, 996]}, {"id": "window.12", "bbox": [281, 0, 737, 598]}, {"id": "person.13", "bbox":
+[139, 473, 476, 992]}], "relationships": [{"subject": "man.9", "predicate": "wearing", "object": "shirt.11"}, {"subject": "man.9", "predicate": "sitting on", "object": "chair.3"}, {"subject": "man.9",
+"predicate": "at", "object": "desk.6"}, {"subject": "man.9", "predicate": "has", "object": "hair.8"}, {"subject": "cup.4", "predicate": "on", "object": "desk.6"}, {"subject": "drawer.7", "predicate": "on",
+"object": "desk.6"}, {"subject": "book.2", "predicate": "on", "object": "book.1"}, {"subject": "person.13", "predicate": "at", "object": "desk.6"}, {"subject": "cup.5", "predicate": "on", "object": "desk.6"},
+{"subject": "book.2", "predicate": "on", "object": "desk.6"}, {"subject": "man.9", "predicate": "on", "object": "chair.3"}, {"subject": "chair.3", "predicate": "at", "object": "desk.6"}, {"subject": "cup.4",
+"predicate": "above", "object": "desk.6"}, {"subject": "shirt.11", "predicate": "on", "object": "man.9"}, {"subject": "hair.8", "predicate": "on", "object": "man.9"}, {"subject": "man.9", "predicate": "using",
+"object": "desk.6"}, {"subject": "drawer.7", "predicate": "in", "object": "desk.6"}, {"subject": "book.1", "predicate": "on", "object": "book.2"}, {"subject": "desk.6", "predicate": "has", "object": "drawer.7"},
+{"subject": "man.9", "predicate": "has", "object": "cup.4"}, {"subject": "cup.4", "predicate": "near", "object": "man.9"}, {"subject": "man.9", "predicate": "with", "object": "cup.4"}]}
+unstructured reasoning
+direct prompting
+(b) Qualitative visualization of reasoning trajectories. Object instances and relation triplets are color-coded: green indicates
+alignment with ground truth, red denotes implausible predictions, and orange highlights plausible predictions for undetected
+objects.
+Figure 8: Qualitative comparison of scene graph generation between our method and the baseline. We visualize the
+ground truth, baseline reasoning outputs, and our method’s CoT-based reasoning results. The comparisons highlight
+the performance gaps in both object detection (a) and relation recognition (b).
+
+---PAGE BREAK---
+CoT prompt for scene graph generation
+Execute a structured, three-stage visual reasoning analysis for the provided image, strictly adhering to the predefined object and relation
+categories. Proceed through each stage sequentially and encapsulate your outputs using the specified tags.
+Object Categories: {OBJ_CLS}
+Relation Predicates: Spatial Relations: {SPATIAL_REL}; Possessive Relations: {POSSESSIVE_REL}; Interactive Relations:
+{INTERACTIVE_REL}
+Stage 1: Object Category Detection
+Task: Identify all unique object categories in the image from the provided "Object Categories".
+Requirements: Only output categories that are clearly visible and identifiable in the image. The categories must conform to the
+predefined object categories. Maintain uniqueness (no duplicates). Output Format: Output as a JSON array within <CATEGORY> and
+</CATEGORY> tags.
+Stage 2: Object Instance Grounding
+Task: Detect and localize every individual instance of the categories identified in Stage 1 sequentially.
+Requirements: Process categories in the order identified in Stage 1. The object names must strictly correspond to the categories identified
+in Stage 1. Assign sequential instance numbers to objects within each category (e.g., man.1, man.2, car.1). Provide precise bounding
+boxes in [x1, y1, x2, y2] format (integer coordinates). All categories listed in Stage 1 must have instances detected in Stage 2. Output
+Format: Output as a JSON array within <OBJECT> and </OBJECT> tags.
+Stage 3: Multi-type Relation Extraction
+Task: Independently analyze relations in three predicate types, examining all object pairs within each category. Three Relation
+Categories: 1. Spatial Relations: Analyze all object pairs for spatial/topological relations. 2. Possessive Relations: Analyze all object pairs
+for ownership, composition, and part-whole relations. 3. Interactive Relations: Analyze all object pairs for action-oriented and functional
+relations.
+Requirements: Sequentially analyze each object in Stage 2 as the subject against all other objects in the scene to extract meaningful
+relations. All relations must be between objects localized in Stage 2. All relation predicates MUST belong to their respective predefined
+category. Output Format: Output as a JSON array within <RELATION> and </RELATION> tags.
+Complete Output Example:
+<CATEGORY>{"categories": [{"id": "tree"}, {"id": "sidewalk"}, {"id": "building"}, {"id": "man"}, {"id": "bike"}]}</CATEGORY>
+<OBJECT>{"objects": [{"id": "tree.1", "bbox": [0, 0, 799, 557]}, {"id": "sidewalk.1", "bbox": [75, 306, 798, 596]}, {"id": "building.1",
+"bbox": [0, 0, 222, 538]}, {"id": "man.1", "bbox": [369, 262, 446, 512]}, {"id": "man.2", "bbox": [236, 246, 296, 508]}, {"id": "bike.1",
+"bbox": [335, 317, 362, 353]}]}</OBJECT>
+<RELATION>{"relations": {"spatial_relations": [{"subject": "tree.1", "predicate": "beside", "object": "sidewalk.1"}, {"subject":
+"building.1", "predicate": "near", "object": "tree.1"}], "possession_relations": [{"subject": "man.1", "predicate": "has", "object":
+"bike.1"}], "interaction_relations": [{"subject": "man.1", "predicate": "standing on", "object": "sidewalk.1"},  {"subject": "man.2",
+"predicate": "walking on", "object": "sidewalk.1"}, {"subject": "man.2", "predicate": "talking to", "object": "man.1"},  {"subject":
+"bike.1", "predicate": "parked on", "object": "sidewalk.1"}]}}</RELATION>
+Generate the three-stage analysis for the image:
+[Task Definition]
+[Chain-of-Thought]
+[In-Context Example]
+Figure 9: Three-stage CoT prompt template for end-to-end scene graph generation. The template is applied to both
+VG150 and PSG datasets, with the predefined object classes and predicate categories adjusted accordingly for each
+benchmark.
+CoT prompt for relation augmentation
+Execute a structured, two-stage relation augmentation analysis for the provided image with pre-annotated objects. Your goal is to
+generate plausible relations. 
+Relation Predicates:  Spatial Relations: {SPATIAL_REL};  Possessive Relations: {POSSESSIVE_REL};  Interactive Relations:
+{INTERACTIVE_REL}
+Pre-annotated Objects ({OBJ_COUNT} objects, USE EXACT IDs): {OBJ_LIST}
+Each object includes: id: Unique identifier (e.g., "person.1", "car.1"); box: Bounding box coordinates [x1, y1, x2, y2] representing object
+position
+Stage 1: Scene Context Understanding
+Task: Create a comprehensive natural language description for the image that incorporates ALL pre-annotated objects with their exact
+IDs. 
+Requirements:  Naturally include all {OBJ_COUNT} objects using their specific IDs.  Describe spatial arrangements, potential
+interactions, and scene context. Be descriptive but concise.
+Stage 2: Multi-type Relation Extraction
+Task: Based on the global understanding from Stage 1, independently analyze relations in three predicate types, examining all object
+pairs within each category.  Three Relation Categories:  1. Spatial Relations: Analyze object pairs for spatial/topological
+relations. 2. Possessive Relations: Analyze for ownership/composition/part-whole relations. 3. Interactive Relations: Analyze for action-
+oriented/functional relations.
+Requirements: Sequentially analyze each object in Stage 2 as the subject against all other objects in the scene to extract meaningful
+relations.  All relations must be between objects in pre-annotated objects.  All relation predicates MUST belong to their respective
+predefined category.
+Return ONLY a JSON object with this exact structure:
+{"caption": "A detailed scene description naturally incorporating all object IDs like person.1, car.1, etc.", "spatial_relations": [{"subject":
+"object.number", 
+"predicate": 
+"SPATIAL_PREDICATE", 
+"object": 
+"object.number"}...], 
+"possession_relations": 
+[{"subject":
+"object.number", "predicate": "POSSESSIVE_PREDICATE", "object": "object.number"}...], "interaction_relations": [{"subject":
+"object.number", "predicate": "INTERACTIVE_PREDICATE", "object": "object.number"}...]}}
+Generate the two-stage relation augmentation analysis, focusing on creating meaningful relationships:
+[Task Definition]
+[Chain-of-Thought]
+[In-Context Example]
+Figure 10: Two-stage CoT prompt template for relation augmentation. The template is applied to both VG150 and
+PSG datasets, with the predefined object list and predicate categories adjusted accordingly for each benchmark.
+
+---PAGE BREAK---

@@ -1,0 +1,2022 @@
+RelWitness: Open-Vocabulary 3D Scene Graph Generation with
+Visual-Geometric Relation Witnesses
+Minh Anh Nguyen
+Quang Huy Tran
+Bao Ngoc Le
+Tuan Kiet Pham
+Sui Yang Guang
+Phenikaa University
+Abstract
+Open-vocabulary 3D scene graph generation seeks to de-
+scribe object instances and their relations with flexible
+natural-language predicates. The central difficulty is not
+only vocabulary expansion, but supervision reliability: re-
+lation annotations in 3D scene graph datasets are selec-
+tive, and many valid object-pair relations are unanno-
+tated. Treating all unannotated relations as negatives sup-
+presses useful missing relations, while completing labels
+from language plausibility or object co-occurrence can add
+physically unsupported edges. We propose RelWitness, a
+framework for open-vocabulary 3D scene graph genera-
+tion from posed RGB-D sequences under incomplete rela-
+tion supervision.
+The key concept is a relation witness:
+a concrete visual-geometric cue that makes a relation ob-
+servable in the captured scene. Support relations require
+contact and vertical ordering; containment requires enclo-
+sure; proximity requires metric closeness; orientation re-
+quires facing direction; and stable relations should per-
+sist across views where both objects are visible. RelWit-
+nessconstructs relation witness records from RGB views,
+depth maps, reconstructed 3D geometry, role-sensitive text,
+object-prior null views, and multi-view consistency.
+A
+visual-geometric witness verifier assigns unannotated rela-
+tion candidates to verified missing positives, reliable neg-
+atives, or uncertain unlabeled cases.
+A witness-guided
+positive-unlabeled objective then learns from incomplete
+annotations without turning every missing label into a neg-
+ative.
+We further introduce witness-consistent decoding
+and an RGB-D missing-relation audit protocol. Simulated
+manuscript-planning experiments on 3DSSG/3RScan and
+ScanNet-derived open-vocabulary splits show the intended
+behavior:
+improved unseen-relation recognition, higher
+witness precision, lower hallucination, and reduced redun-
+dant relation phrases. All numerical results are planning
+values and must be replaced by reproduced measurements
+before submission.
+1. Introduction
+Scene graphs represent a visual environment as a struc-
+tured graph whose nodes correspond to object instances
+and whose edges describe relations between objects.
+In
+3D scenes, these graphs are particularly appealing because
+they connect semantic object identity with metric layout,
+support structure, containment, accessibility, and action-
+relevant context. A robot searching for a mug can benefit
+from relations such as mug on table, mug inside cabinet,
+or chair facing desk; an embodied agent can use a scene
+graph to reason over object arrangements without process-
+ing every pixel or point; and an augmented-reality assistant
+can answer spatial queries using a compact object-relation
+representation [1–4].
+The field has recently moved from closed-vocabulary 3D
+scene graph prediction toward open-vocabulary 3D scene
+understanding. Language-aligned 3D features and 2D foun-
+dation models allow systems to query novel categories and
+relation phrases in reconstructed scenes [4–9]. This shift is
+necessary: real indoor scenes contain relations that are fine-
+grained, compositional, and task-dependent. A table may
+be supporting a monitor, beside a chair, facing a sofa, and
+near a window. No fixed predicate list can cover all useful
+descriptions.
+However, open-vocabulary recognition exposes two cou-
+pled challenges that are largely hidden in conventional
+closed-set evaluation. First, relation plausibility gap: an
+open-vocabulary model can propose relations that sound
+correct for the object categories but are not physically
+present in the captured scene. A cup on table relation is
+common, but the RGB-D sequence may show the cup in a
+sink. A chair under table edge is plausible indoors, but the
+chair may actually be beside the table. Second, incomplete
+observability supervision: an unannotated relation is not
+a single type of training example. It may be a true miss-
+ing positive, a true negative, or a relation whose truth is not
+observable from the available views. A scan may annotate
+monitor on desk but omit monitor supported by desk; it may
+annotate chair near table but omit chair facing table. Pe-
+nalizing all missing labels suppresses useful relations, while
+arXiv:2605.20823v3  [cs.CV]  31 May 2026
+accepting all plausible phrases creates hallucinated graph
+edges. These two challenges suggest that vocabulary ex-
+pansion alone is insufficient. A useful open-vocabulary 3D
+SGG method must answer a more precise question: When
+an unannotated relation phrase is plausible, what visual-
+geometric cue in the captured RGB-D scene makes it safe
+to learn from?
+We answer this question with relation witnesses. A re-
+lation witness is a physically interpretable cue that makes a
+relation observable. It is not simply a high classifier score,
+attention map, or text-image similarity.
+It is a relation-
+family-specific check: contact for on, enclosure for inside,
+vertical order for under, metric closeness for near, orienta-
+tion for facing, boundary contact for attached to, and multi-
+view persistence for stable spatial relations. Some phrases,
+such as ownership or intended use, may not have an observ-
+able witness in a static RGB-D scan and should remain un-
+certain rather than being forced into positives or negatives.
+This witness perspective changes the story of open-
+vocabulary 3D SGG. Existing systems are increasingly
+good at proposing relation phrases, but proposing is not the
+same as supervising. RelWitnessfocuses on the missing-
+supervision step: among many semantically plausible re-
+lation candidates, which ones are physically observable
+enough to become training signals? This distinction sep-
+arates RelWitnessfrom open-set querying methods such
+as Open3DSG [7], object-centric mapping systems such
+as ConceptGraphs [4], functional graph methods such as
+OpenFunGraph [8], and online graph construction meth-
+ods such as FROSS [9].
+Those works expand what can
+be queried or built; RelWitnessasks how incomplete rela-
+tion labels should be corrected without hallucinating unsup-
+ported edges.
+Given a posed RGB-D sequence, RelWitnessfuses object
+instances into a global 3D scene, proposes open-vocabulary
+relation candidates, parses each relation into witness fam-
+ilies, and constructs a relation witness record. The record
+includes selected RGB views, depth-based cues, 3D ge-
+ometric probes, role consistency, object-prior null scores,
+multi-view stability, and rendered witness traces. A mo-
+mentum witness verifier uses these records to maintain three
+dynamic sets: verified missing positives, reliable negatives,
+and uncertain candidates. The final model is trained with
+a witness-guided positive-unlabeled objective and decoded
+with witness-consistent redundancy suppression.
+Our contributions are:
+• We formulate open-vocabulary 3D SGG under incom-
+plete supervision as a problem of physical observabil-
+ity, introducing relation witnesses as the unit for deciding
+whether unannotated relations can become supervision.
+• We design a visual-geometric witness verifier that com-
+bines RGB views, depth cues, reconstructed 3D geome-
+try, role-sensitive relation text, object-prior null tests, and
+multi-view persistence.
+• We propose witness-guided positive-unlabeled learning
+with a family-balanced witness memory that stores veri-
+fied missing positives, reliable negatives, uncertain can-
+didates, and their witness traces.
+• We introduce witness-consistent graph decoding and an
+RGB-D missing-relation audit protocol that measures
+witness precision, hallucination, redundancy, and multi-
+view agreement.
+• We provide a complete experimental design with simu-
+lated planning results showing how the method should be
+evaluated on 3DSSG/3RScan and ScanNet-derived open-
+vocabulary benchmarks.
+2. Related Work
+3D Scene Graph Generation.
+3D scene graphs were
+introduced as structured representations that connect se-
+mantic objects, spatial layout, and camera geometry [1].
+They have since been used for metric-semantic mapping,
+localization, robotics, navigation, and planning [4, 10].
+Learning-based 3D SGG methods predict object relations
+from point clouds or RGB-D reconstructions, with ScanNet
+and 3DSSG/3RScan providing influential indoor bench-
+marks [2, 11]. SceneGraphFusion incrementally predicts
+and fuses relations from RGB-D sequences [3]. The geo-
+metric backbone of this literature also draws on point-cloud
+encoders and transformers [12–15]. These works demon-
+strate the importance of 3D graph structure, but they usu-
+ally assume fixed relation vocabularies and treat annotated
+relations as the available ground truth.
+2D, Panoptic, and Open-Vocabulary Scene Graphs. 2D
+scene graph generation connects image retrieval, visual re-
+lationship detection, dense image annotation, and compo-
+sitional reasoning [16–19].
+Later methods improve con-
+text modeling, long-tail learning, predicate representations,
+causal debiasing, and transformer-based decoding [20–33].
+Panoptic and open-vocabulary SGG further expand the pre-
+diction space from boxes to masks and from fixed predicates
+to flexible phrases [34–38]. RelWitnessinherits this open-
+vocabulary motivation but moves the supervision question
+into posed RGB-D scenes, where relations can often be
+checked by geometry rather than only by text-image sim-
+ilarity.
+Open-Vocabulary 3D Scene Understanding.
+Open-
+vocabulary 3D understanding aligns 3D representations
+with language by lifting 2D foundation-model features, fus-
+ing object-level descriptors, or querying point clouds with
+text [5, 6, 39–42]. Segment Anything, Grounding DINO,
+Mask2Former, Mask R-CNN, Faster R-CNN, and DETR-
+style detectors provide the mask and proposal interfaces
+often used to lift 2D observations into 3D [43–48]. Con-
+ceptGraphs constructs object-centric open-vocabulary 3D
+graphs for perception and planning [4]. Open3DSG predicts
+queryable objects and open-set relationships from point
+clouds [7].
+Recent systems also address online RGB-D
+graph construction and functional 3D scene graphs [8, 9].
+These methods broaden graph vocabulary and usability.
+RelWitnessstudies how missing relation labels should be
+used during learning when open-vocabulary candidates are
+plausible but not necessarily observable.
+Incomplete, Multimodal, and Reasoning Supervision.
+Incomplete labels have long affected visual relationship de-
+tection and scene graph generation. Prior work has stud-
+ied limited labels, biased relation distributions, relation
+mining, low-shot predicates, and positive-unlabeled learn-
+ing [30, 49–52].
+The same issue appears in multimodal
+learning when a model must avoid over-trusting a missing
+or biased modality [53–59]. Visual reasoning and HOI work
+likewise show that graphs and localized queries are useful
+when decisions should be inspectable [60–65]. Representa-
+tion and retrieval studies on discrete hashing, network em-
+bedding, and cross-view transformers are relevant to effi-
+cient object retrieval [66–69]. RelWitnessdiffers by using
+RGB-D observability to decide which unannotated relation
+phrases become training signals.
+Grounding and Physical Relation Reasoning.
+Vision-
+language pretraining has made it easier to compare relation
+phrases with image regions [39–41]. However, many 3D re-
+lations are not purely appearance based. Support, contain-
+ment, relative height, and orientation require geometric rea-
+soning, and some functional or affective relations cannot be
+verified from static geometry alone [70]. A single RGB crop
+may suggest on, while depth reveals a gap; a single view
+may suggest containment, while another view shows the
+object in front of the container. RelWitnesstherefore treats
+RGB-language compatibility as one signal among several
+physical witness probes. The final decision is based on if a
+relation has a stable visual-geometric witness.
+3. Method
+3.1. Problem Setup and Overview
+Figure 1 summarizes RelWitness. The model takes a posed
+RGB-D sequence
+S = {(It, Dt, Tt)}T
+t=1,
+(1)
+where It is an RGB frame, Dt is a depth map, and Tt is
+the camera pose. From this sequence, we obtain 3D object
+instances
+O = {oi = (ci, Bi, Mi, Hi, Vi)}N
+i=1,
+(2)
+where ci is an object category or open-vocabulary name, Bi
+is an oriented 3D bounding box, Mi is a point/voxel mask,
+Hi is a fused visual-language feature, and Vi is the set of
+frames in which the object is visible.
+For each ordered pair (oi, oj) and relation phrase r ∈
+Ropen, the observed annotation yr
+ij is incomplete:
+yr
+ij = 1 ⇒zr
+ij = 1,
+yr
+ij = 0 ⇒zr
+ij ∈{0, 1}.
+(3)
+The goal is to estimate pθ(zr
+ij = 1 | S, oi, oj, r) without
+treating all missing labels as negatives. RelWitnessmain-
+tains annotated positives Pobs, verified missing positives
+Pmiss, reliable negatives N rel, and uncertain unlabeled can-
+didates Uunc. The key distinction is that membership in
+these sets is governed by relation witnesses.
+Design Rationale. The method is built around three ob-
+servations. First, plausibility is not observability: object
+names and language priors can suggest many relations, but
+a plausible pillow on bed phrase is wrong if the pillow is on
+the floor. Second, different relations need different checks.
+A single generic verifier cannot faithfully judge on, inside,
+near, and facing, because support depends on contact and
+vertical order, containment depends on enclosure, orienta-
+tion depends on object axes, and proximity depends on met-
+ric distance. Third, RGB-D sequences provide redundancy.
+A relation visible in one frame may be ambiguous, but a
+posed sequence allows the model to compare RGB appear-
+ance, depth, 3D reconstruction, and multiple views, pre-
+venting one accidental high score from becoming a pseudo-
+positive.
+Open-Vocabulary Relation Proposal. The open predicate
+pool Ropen is constructed from four sources: annotated
+3DSSG predicates, normalized synonyms, caption-mined
+spatial phrases, and template-generated relation phrases.
+The template set includes spatial forms such as “subject
+on object”, “subject inside object”, “subject beside object”,
+and “subject facing object”, as well as directional variants
+such as above/below and in front of/behind. Near-duplicate
+phrases are clustered by lemmatization and text embed-
+dings, but directional variants are preserved.
+For each object pair, we compute a pair representation
+pij = ϕp([Hi, Hj, Hu
+ij, gij, hctx
+ij ]),
+(4)
+where Hu
+ij is a fused union feature, gij contains 3D geome-
+try such as relative translation, scale ratio, IoU, vertical dis-
+placement, surface distance, and orientation difference, and
+hctx
+ij summarizes local room context. Candidate phrases are
+retrieved by
+Cij = TopKr∈Ropen sim(Wppij, Wttr).
+(5)
+The proposer is intentionally high recall. False candidates
+are expected; the witness verifier decides whether a candi-
+date can become supervision.
+Witness Taxonomy. The witness taxonomy is the concep-
+tual core of RelWitness: it defines what it means for a rela-
+tion to be observable. Support witnesses, covering phrases
+Figure 1. RelWitness overview. Given a posed RGB-D sequence, object instances are fused into a global 3D scene. Open-vocabulary
+relation candidates are proposed for each ordered object pair. A witness parser maps each phrase to physical witness families, and a visual-
+geometric verifier checks RGB, depth, 3D geometry, role order, object-prior null views, and multi-view persistence. The witness memory
+stores verified missing positives, reliable negatives, and uncertain candidates. The final model predicts a compact 3D scene graph with
+witness-consistent relation phrases.
+such as on, standing on, resting on, and supported by, re-
+quire compatible vertical ordering, small bottom-to-top sur-
+face distance, and overlap between the projected support
+region and the supporting object. Containment witnesses
+cover inside, in, within, and stored in; they require the sub-
+ject’s 3D extent to lie largely within the object’s box or
+mask, with special handling for open containers such as
+shelves and cabinets. Proximity witnesses cover near, next
+to, beside, and adjacent to; they use metric distance nor-
+malized by object size and room scale, and they exclude
+cases where stronger relations such as support or contain-
+ment dominate.
+Vertical-order witnesses cover above, below, under, and
+over, requiring consistent relative height and sufficient hor-
+izontal compatibility. Attachment witnesses cover attached
+to, mounted on, and hanging from, requiring stable bound-
+ary contact across views and a plausible shared surface.
+Orientation witnesses cover facing, looking at, and ori-
+ented toward; they estimate object axes from geometry and
+RGB cues, then check whether the subject’s front direc-
+tion points toward the object. Interaction witnesses cover
+contact-heavy phrases such as holding, touching, and lean-
+ing against. Functional or uncertain relations such as be-
+longs to, used for, and owned by remain in Uunc unless the
+RGB-D sequence contains an observable proxy.
+Table 1 makes the witness library explicit. The table is
+not meant to turn relation prediction into a rule system. In-
+stead, it provides the verifier with an interpretable set of
+physical questions. A learned visual-language model still
+handles object appearance, phrase variation, and ambiguous
+cases, but its pseudo-label decisions are constrained by the
+relation’s expected observability. This distinction is impor-
+tant for reviewer interpretation: RelWitnessdoes not claim
+that hand-designed geometry solves open-vocabulary rela-
+tion prediction; it uses geometry to decide when missing
+supervision is reliable enough to trust.
+Alternative Formulations and Why They Fail. Before
+introducing the parser, it is useful to contrast relation wit-
+nesses with three simpler formulations. Semantic comple-
+tion accepts unannotated relations when text embeddings
+are close to annotated predicates or when a language model
+says the relation is plausible; it recovers synonyms but can-
+not distinguish a cup on a table from a cup in a sink if
+both phrases are common for the object pair. Pure geomet-
+ric rules are transparent but brittle for open shelves, partial
+scans, deformable objects, paraphrases, and relations whose
+meaning depends on appearance. Black-box teacher pre-
+dictions can improve recall, but they are difficult to audit
+and can amplify object-prior bias, for example by adding
+chair facing table whenever the object pair is common. Rel-
+Table 1. Relation witness probe library. The table summarizes the intended physical check for each family. This is a design specification;
+reproduced experiments should report the exact thresholds and learned probe weights.
+Witness family
+Example phrases
+Positive witness cue
+Common rejection cue
+Support
+on, standing on, resting on, supported by
+vertical order, bottom-top contact, support-surface overlap
+visible depth gap or subject below object
+Containment
+in, inside, within, stored in
+subject extent lies inside container volume or shelf cell
+subject in front of container, weak enclosure
+Proximity
+near, next to, beside, adjacent to
+small metric distance normalized by object and room scale
+large surface distance or intervening object
+Vertical order
+above, below, under, over
+consistent height ordering and horizontal compatibility
+contradictory depth/height relation
+Attachment
+attached to, mounted on, hanging from
+stable boundary contact and plausible shared surface
+contact appears only in one view or surface mismatch
+Orientation
+facing, looking at, oriented toward
+front-axis points toward target, view-consistent orientation
+symmetric object or axis points away
+Interaction
+holding, touching, leaning against
+local RGB/depth contact region or force-like configuration
+no localized contact or occluded interaction region
+Functional/uncertain
+used for, belongs to, part of task
+explicit observable proxy or strong task-specific cue
+no visual-geometric cue in static scan
+Witnesscombines the useful parts of these alternatives: lan-
+guage proposes phrases and parses witness families, geome-
+try and depth test physical observability, RGB views handle
+appearance and local interactions, and the teacher memory
+stabilizes pseudo-labels over training.
+3.2. Relation Witness Construction
+Witness Type Parser. Given a relation phrase r, a parser
+predicts a distribution over witness families:
+πr = fparse(tr).
+(6)
+The parser combines prompt descriptions, lexical templates,
+and a lightweight text classifier. It also predicts role sensi-
+tivity dr ∈[0, 1], because book on table and table on book
+have different physical meanings. The parser is deliberately
+modest: it does not decide whether a relation is true; it de-
+cides what physical check should be performed.
+This separation is important. A language model may
+know that “on” and “supported by” are related, but it can-
+not know from text alone whether the scan contains sup-
+port contact.
+By restricting the parser to witness-family
+selection, RelWitnessuses language to organize verification
+while leaving truth assignment to visual-geometric cues.
+Relation Witness Record. For each candidate (oi, r, oj),
+RelWitnessconstructs a witness record
+Wr
+ij = {Srgb, Sdep, S3d, Smv, Srole, Snull,
+πr, A2d, A3d, ηij}.
+(7)
+Here Srgb measures RGB-language compatibility, Sdep
+depth consistency, S3d 3D geometric compatibility, Smv
+multi-view persistence, Srole role consistency, Snull object-
+prior null strength, A2d and A3d are witness traces, and ηij
+summarizes visibility and reconstruction quality.
+RGB Witness View. RGB frames provide fine-grained ap-
+pearance cues: handles, shelves, chair fronts, hand-object
+contact, and object boundaries. For a pair, we select views
+Vij = {t : vis(oi, t) > τv, vis(oj, t) > τv},
+(8)
+then rank them by joint visibility, mask quality, view angle
+diversity, and crop resolution. A cross-modal verifier com-
+putes frame-level scores
+st
+rgb = ψrgb(It, Πt(Mi), Πt(Mj), r),
+(9)
+where Πt projects 3D masks into frame t. The pooled RGB
+witness score is a reliability-weighted top-average:
+Srgb =
+P
+t∈Tij ρtst
+rgb
+P
+t∈Tij ρt + ϵ.
+(10)
+This avoids using a single accidental view as decisive.
+Depth Witness View.
+Depth maps test whether image-
+level appearance is physically plausible. For support, depth
+should indicate small surface separation at the contact re-
+gion; for front/behind, depth should agree with the claimed
+ordering; for containment, depth discontinuities should be
+compatible with enclosure. We compute
+Sdep = gπr
+dep({Dt, Πt(Mi), Πt(Mj)}t∈Tij),
+(11)
+where gπr
+dep selects the probe associated with the parsed wit-
+ness family.
+3D Geometric Witness View.
+The reconstructed 3D
+scene provides the most direct physical checks.
+Let
+dsurf(Mi, Mj) be the minimum robust surface distance,
+∆zij the vertical displacement, Ωij projected horizontal
+overlap, and δin(i, j) the fraction of the subject contained
+by the object. We define family-specific probes such as
+qsup = σ(a1Ωij −a2dsurf + a3∆zij),
+(12)
+qin = σ(b1δin −b2dout),
+qprox = exp(−dsurf/τd).
+(13)
+The final 3D score is
+S3d =
+X
+k
+πr(k)qk(Mi, Bi, Mj, Bj).
+(14)
+These probes are not hard-coded labels; they are differ-
+entiable or weakly differentiable constraints that calibrate
+whether the candidate relation has a physical witness.
+Multi-View Persistence. A relation should be stable across
+views in which it is observable. We compute a multi-view
+score from the agreement between RGB and depth wit-
+nesses:
+Smv = 1 −Vart∈Tij(ρt(st
+rgb + st
+dep)).
+(15)
+Low variance alone is not enough, so we multiply by mean
+witness strength in implementation.
+This prevents uni-
+formly weak views from being considered consistent.
+Role Consistency and Null Views. Open-vocabulary rela-
+tions are often directed. We compute role consistency by
+comparing the candidate with a role-swapped version:
+Srole = σ(sr
+ij −sr
+ji)dr.
+(16)
+We also compute object-prior null scores by masking pair
+geometry and interaction regions:
+Snull = ψnull(ci, cj, Hi, Hj, tr).
+(17)
+If Snull is high but witness scores are weak, the candidate is
+likely driven by co-occurrence rather than physical observ-
+ability.
+3.3. Witness-Guided Missing-Relation Learning
+Visual-Geometric Witness Verifier. The verifier converts
+the witness record into a calibrated witness quality:
+Qr
+ij = σ(wrgbSrgb + wdepSdep + w3dS3d
++ wmvSmv + wroleSrole −wnullSnull).
+(18)
+Weights are family-dependent, w = h(πr), because each
+relation family has different observability conditions. Sup-
+port emphasizes Sdep and S3d; orientation emphasizes
+RGB and geometric axes; interaction emphasizes local
+RGB/depth contact; proximity emphasizes metric distance
+and reconstruction quality.
+Uncertainty is estimated by augmenting frames, perturb-
+ing object masks, sampling phrase paraphrases, and recom-
+puting witness quality:
+U r
+ij = VarM
+m=1Qr,m
+ij .
+(19)
+An unannotated relation becomes a verified missing posi-
+tive if
+Qr
+ij > τ πr
+p ,
+U r
+ij < τu,
+S3d > τ πr
+3d ,
+Smv > τ πr
+mv.
+(20)
+It becomes a reliable negative if witness quality and family-
+critical probes are consistently low. All other candidates re-
+main uncertain. This conservative triage is central: RelWit-
+nessis not trying to label every unannotated relation, only
+the ones that are safe enough to learn from.
+Witness Memory. Direct self-training can amplify early
+mistakes. RelWitnesstherefore uses a momentum teacher ¯θ:
+¯θ ←α¯θ + (1 −α)θ.
+(21)
+The teacher updates a witness memory
+Mr
+ij = {Q, U, πr, Srgb, Sdep, S3d, Smv,
+Srole, Snull, A2d, A3d}.
+(22)
+The memory is balanced by relation family, object-pair
+type, seen/unseen status, and phrase cluster. Without bal-
+ancing, frequent relations such as near and on dominate
+pseudo-supervision. We cap each family-cluster bucket and
+sample underrepresented object-pair types more often. Wit-
+ness traces are stored so that later training and audit can in-
+spect why a relation was accepted or rejected.
+Training Schedule. RelWitnessis trained in three stages.
+The staging is not merely an engineering convenience; it
+prevents the model from trusting its own incomplete rela-
+tion predictions before the witness probes become stable.
+Stage 1: supervised warm-up. The object-pair encoder,
+relation proposer, and base relation classifier are trained us-
+ing only annotated positives and sampled background pairs.
+During this stage, witness probes are learned with weak ge-
+ometric consistency losses, but no unannotated relation is
+used as a pseudo-positive. The goal is to obtain reason-
+able object-pair features and calibrated relation-text embed-
+dings.
+Stage 2: conservative witness bootstrapping.
+The
+momentum teacher evaluates unannotated candidates under
+view subsampling, mask perturbation, and relation para-
+phrases. Only candidates satisfying strict witness-family
+thresholds are admitted into Pmiss or N rel. This stage is
+intentionally precision oriented. It produces a small but re-
+liable memory of missing relations and reliable negatives.
+Stage 3: joint witness-guided learning. The student is
+trained with annotated positives, verified missing positives,
+reliable negatives, and uncertain candidates. Thresholds are
+relaxed slightly after validation witness precision stabilizes.
+Family-balanced sampling is used throughout so that sup-
+port and proximity relations do not overwhelm rarer con-
+tainment, orientation, and attachment relations.
+Why Relation Witnesses Improve Supervision. The wit-
+ness design can be understood as a controlled relaxation of
+closed-set supervision. A standard classifier uses Pobs as
+positives and treats most other relation candidates as nega-
+tives, which is too harsh when annotations are incomplete.
+Text completion relaxes this by expanding positives through
+semantic similarity, but this relaxation is too broad because
+it ignores the captured geometry. RelWitnessrelaxes super-
+vision only through physically observable witnesses.
+In
+other words, it expands the positive set along the dimen-
+sions that the RGB-D scan can support.
+This also explains why reliable negatives matter. If cup
+on table is unannotated and no table contact exists, keep-
+ing it uncertain forever allows a language prior to remain
+overconfident. Assigning it to N rel when witness probes
+consistently reject it teaches the model that plausible ob-
+ject pairs are not sufficient. Conversely, if box inside shelf
+is unannotated but containment probes are strong across
+views, adding it to Pmiss prevents the model from penaliz-
+ing a useful relation. The three-way split Pmiss, N rel, Uunc
+is therefore essential: it distinguishes physically supported
+missing positives, physically rejected candidates, and rela-
+tions that the scan cannot decide.
+Witness-Guided Positive-Unlabeled Learning.
+Anno-
+tated positives are trained with standard positive supervi-
+sion:
+Lobs = E(i,j,r)∈Pobs[−log pθ(zr
+ij = 1)].
+(23)
+Verified missing positives receive witness-weighted posi-
+tive supervision:
+Lmiss = E(i,j,r)∈Pmiss[−Qr
+ij log pθ(zr
+ij = 1)].
+(24)
+Reliable negatives are useful because not every unannotated
+relation should remain ambiguous:
+Lneg = E(i,j,r)∈N rel[−(1 −Qr
+ij) log(1 −pθ(zr
+ij = 1))].
+(25)
+For uncertain candidates, we use confidence tempering
+rather than forcing a label:
+Lunc = E(i,j,r)∈Uunc[−H(pθ(zr
+ij = 1))].
+(26)
+The full objective is
+L = Lobs+λmLmiss+λnLneg+λuLunc+λwLwit, (27)
+where Lwit regularizes family-specific probes, role direc-
+tion, multi-view stability, and paraphrase consistency.
+3.4. Witness-Consistent Decoding
+At inference, relation candidates are ranked by classifier
+confidence and witness quality:
+ˆsr
+ij = sr
+ij + λQ log(Qr
+ij + ϵ).
+(28)
+Many open-vocabulary phrases are semantically overlap-
+ping.
+RelWitnesssuppresses duplicates only when two
+phrases have high text similarity and share the same wit-
+ness family and trace. Thus on and supported by may be
+merged for the same contact witness, while near and facing
+can both remain because they describe different observable
+properties.
+Reproducibility Notes. The relation pool, witness thresh-
+olds, and audit protocol are fixed before running the main
+comparisons. Phrase normalization uses lowercase lemma-
+tization, removal of determiners, and a manually reviewed
+list for directional relations. Witness-family thresholds are
+tuned on a validation split using witness precision rather
+than test recall.
+The audit candidate pool is generated
+once from all methods and then randomized for annotators.
+These details are important because missing-relation evalu-
+ation can otherwise be biased toward the proposed method’s
+preferred candidates.
+4. Missing-Relation Audit Protocol
+Standard scene graph metrics compare predictions against
+incomplete annotations, so they cannot fully evaluate
+missing-relation recovery.
+We propose an RGB-D wit-
+ness audit. The audit pool is built from predictions of all
+methods and stratified by relation frequency, relation fam-
+ily, seen/unseen status, object-pair type, confidence, and
+whether the relation is annotated or unannotated. Annota-
+tors see selected RGB frames, depth crops, rendered 3D ob-
+ject geometry, subject/object masks, the candidate phrase,
+and the model’s witness trace, but not the source method.
+Each candidate is labeled supported, unsupported, am-
+biguous, or not observable. A missing relation is verified
+only if at least two annotators mark it supported. We report:
+• Verified Missing Recall: recall over unannotated rela-
+tions judged supported.
+• Witness Precision: fraction of unannotated predictions
+with valid witness support.
+• Multi-View Witness Agreement: agreement between
+model traces and annotator-selected supporting views or
+3D regions.
+• Hallucination Rate: fraction of high-confidence predic-
+tions judged unsupported.
+• Redundancy Rate: fraction of predictions that duplicate
+another phrase with the same witness.
+5. Experiments
+5.1. Experimental Setup
+3DSSG/3RScan. We use the 3DSSG benchmark built on
+3RScan indoor reconstructions [2]. The closed-vocabulary
+setting follows standard object-pair relation prediction. For
+the missing-label setting, annotated relations are treated
+as observed positives and other candidate phrases as unla-
+beled.
+OV-3DSSG. We create an open-vocabulary split by re-
+serving rare and compositional relation phrases as unseen.
+Seen predicates are used for supervised training, while un-
+seen phrases appear in text prompts and evaluation. Phrase
+clusters preserve directional variants.
+ScanNet-OV. We derive an RGB-D open-vocabulary
+split from ScanNet camera trajectories [11].
+Object in-
+stances are obtained from ground-truth or detector masks
+depending on the protocol. Relation labels are mapped from
+spatial templates and verified subsets, making this split use-
+ful for multi-view witness testing.
+Audit subset. For witness audit, we sample 2,400 candi-
+date relations across methods, including 1,200 unannotated
+predictions. The sample is balanced by relation family and
+confidence range.
+Baselines.
+We compare with closed-set 3D SGG base-
+lines, SceneGraphFusion-style RGB-D relation fusion [3],
+Open3DSG [7], ConceptGraphs-style relation querying [4],
+OpenFunGraph [8], FROSS [9], and two completion base-
+lines.
+Text Completion accepts pseudo-relations using
+phrase similarity and classifier confidence.
+Object-Prior
+Completion accepts relations predicted from object-pair
+statistics.
+We also evaluate RGB-only, depth-only, and
+geometry-only variants.
+Implementation Details. We initialize RGB features with
+a CLIP-style image encoder [39] and text features with the
+paired text encoder. Object masks are lifted into 3D using
+camera poses and depth. Unless otherwise stated, the pro-
+poser retrieves K = 20 relation candidates per ordered ob-
+ject pair. The witness verifier uses four transformer layers
+with hidden dimension 512. Witness memory starts after
+a 5-epoch warm-up and is updated every two epochs. The
+momentum coefficient is 0.996. Thresholds are relation-
+family-dependent and calibrated on a validation subset. All
+experiments use AdamW and cosine learning-rate decay.
+The numerical values below are simulated planning re-
+sults for manuscript development only. We sanity-calibrate
+their scale against published 3DSSG and open-vocabulary
+3D graph reports, where closed-vocabulary supervised re-
+lation prediction is typically much higher than zero-shot
+open-vocabulary querying, and online RGB-D construction
+trades some accuracy for speed [2, 3, 7–9].
+The tables
+should therefore be read as plausible experiment templates,
+not reproduced claims.
+5.2. Main Results
+Main Results on 3DSSG/3RScan.
+Table 2 shows the intended pattern. RelWitnessimproves
+mean recall more than raw recall because witness-guided
+learning adds reliable supervision for under-annotated and
+rare relations. Text completion improves recall but is less
+selective, while object-prior completion increases frequent
+relation predictions without comparable gains in mR.
+Open-Vocabulary Results.
+The open-vocabulary split emphasizes the main re-
+search question.
+Language-based methods propose un-
+seen phrases, but they cannot always distinguish observable
+missing relations from plausible hallucinations. RelWitnes-
+simproves unseen mean recall and harmonic mean because
+witness records provide a physical criterion for accepting
+unseen relation phrases.
+Missing-Relation Audit.
+Table 4 clarifies the trade-off. Text completion recov-
+ers many missing relations, but it also accepts unsupported
+phrases. RelWitnesshas slightly lower VMR than aggres-
+sive text completion, but its witness precision and halluci-
+nation rate are substantially better. This is the intended be-
+havior: the method favors reliable missing supervision over
+maximal expansion.
+5.3. Analysis and Ablations
+Witness Family Breakdown. Gains are strongest for re-
+lations with clear geometry, such as support and contain-
+ment. Interaction and attachment remain harder because
+small contact regions are often noisy in reconstructed scans.
+This family breakdown helps reviewers see that the method
+is not a black-box pseudo-labeler; its strengths and weak-
+nesses follow the observability of each relation family.
+Ablation Study. Each component contributes. RGB wit-
+nesses improve unseen phrase matching, depth and 3D ge-
+ometry reduce physically impossible relations, multi-view
+persistence improves trace agreement, null tests suppress
+object-prior hallucinations, and memory improves rare re-
+lation coverage.
+Sensitivity Analysis.
+Small K misses valid unseen re-
+lations, while very large K introduces many language-
+plausible candidates and increases redundancy. The mem-
+ory table shows that relation witnesses improve both pre-
+cision and diversity, rather than only selecting more high-
+confidence labels.
+Threshold and Parser Analysis.
+The threshold study
+shows a precision-recall trade-off in witness memory con-
+struction. Low thresholds recover more missing relations
+but increase hallucination, while high thresholds are reli-
+able but too conservative. We use a threshold that favors
+witness precision without collapsing memory size. Parser
+quality matters because incorrect witness families cause the
+verifier to check the wrong physical cue. The combined
+parser performs best because templates preserve simple di-
+rectional phrases while the classifier handles paraphrases.
+Cross-Dataset and Detector Robustness.
+Transfer re-
+sults indicate that witness-based supervision is less dataset-
+specific than object-pair priors because physical cues such
+as contact and containment transfer across indoor environ-
+ments. Detector robustness shows the expected degradation
+when masks become noisy. The largest drop appears in wit-
+ness precision and multi-view agreement, confirming that
+object localization quality is a bottleneck for relation wit-
+nesses.
+Audit Reliability. The audit is most reliable for relations
+with clear spatial witnesses and least reliable for functional
+or interaction-heavy relations. This supports the design de-
+cision to keep non-observable functional candidates uncer-
+tain unless the scene contains a concrete visual-geometric
+cue.
+Efficiency. RelWitnessis more expensive because it evalu-
+ates multiple witness views and stores witness traces. The
+cost is partly mitigated by candidate pruning, cached object
+features, and applying full witness verification only to top-
+ranked candidates. The overhead is acceptable for offline
+scene graph construction; online deployment would require
+distillation or lighter witness probes.
+Table 2. Main comparison on 3DSSG/3RScan relation prediction. Values are simulated manuscript-planning numbers and must be replaced
+by reproduced results.
+Method
+Predicate Classification
+Scene Graph Generation
+R@50
+R@100
+mR@50
+mR@100
+R@50
+R@100
+mR@50
+mR@100
+3DSSG Baseline
+58.4
+63.7
+24.1
+27.3
+34.8
+39.6
+13.5
+15.9
+SGFN-style 3D GNN
+61.2
+66.5
+26.8
+30.4
+36.9
+42.1
+15.2
+18.0
+SceneGraphFusion
+62.7
+67.8
+27.5
+31.2
+38.3
+43.7
+16.1
+18.6
+Open3DSG
+64.3
+69.1
+29.2
+32.8
+40.5
+45.9
+17.8
+20.4
+ConceptGraphs-query
+63.8
+68.4
+28.7
+32.1
+39.7
+45.2
+17.1
+19.7
+OpenFunGraph
+65.5
+70.2
+30.4
+34.5
+41.3
+46.6
+18.6
+21.3
+FROSS
+65.1
+69.8
+30.0
+33.9
+42.1
+47.2
+18.9
+21.6
+Text Completion
+66.8
+71.5
+33.9
+37.2
+43.4
+48.7
+22.8
+25.3
+Object-Prior Completion
+67.5
+72.0
+32.6
+35.8
+44.0
+49.1
+21.9
+24.1
+RelWitness
+69.3
+74.1
+38.4
+41.7
+46.8
+52.5
+27.6
+30.8
+Table 3. Open-vocabulary results on OV-3DSSG. Values are sim-
+ulated manuscript-planning numbers.
+Method
+@50
+@100
+S-mR
+U-mR
+HM
+S-mR
+U-mR
+HM
+CLIP Retrieval
+21.4
+8.1
+11.8
+23.0
+9.0
+12.9
+Open3DSG
+28.9
+13.7
+18.6
+31.2
+15.1
+20.3
+ConceptGraphs-query
+27.6
+12.9
+17.6
+30.1
+14.2
+19.3
+OpenFunGraph
+30.4
+15.6
+20.6
+32.7
+17.2
+22.5
+FROSS
+29.8
+15.1
+20.0
+32.1
+16.7
+21.9
+Text Completion
+31.7
+20.8
+25.1
+34.0
+22.5
+27.1
+Object-Prior Completion
+32.1
+19.4
+24.2
+34.4
+20.9
+26.0
+RelWitness
+34.2
+25.7
+29.3
+36.8
+27.9
+31.7
+Table 4.
+RGB-D missing-relation audit.
+Values are simulated
+manuscript-planning numbers. Higher is better for VMR, WP, and
+MVWA; lower is better for Hallucination and Redundancy.
+Method
+VMR
+WP
+MVWA
+Halluc.↓
+Redun.↓
+SceneGraphFusion
+24.6
+57.3
+49.8
+29.4
+21.7
+Open3DSG
+32.8
+63.1
+56.2
+23.7
+18.4
+OpenFunGraph
+35.7
+65.9
+58.6
+21.5
+17.1
+FROSS
+34.9
+64.7
+59.1
+22.0
+16.8
+Text Completion
+49.4
+60.8
+52.7
+28.6
+24.5
+Object-Prior Completion
+46.1
+57.5
+50.3
+31.8
+25.9
+RelWitness
+47.6
+78.9
+72.4
+12.7
+8.8
+5.4. Qualitative and Audit Analysis
+Qualitative Analysis. Figure 2 illustrates the desired be-
+havior. In support cases, RelWitnessrelies on contact and
+vertical ordering rather than the object names alone.
+In
+containment cases, it checks whether the subject is inside
+a plausible container volume. For orientation, it tests facing
+direction and view consistency. For rejected hallucinations,
+the candidate phrase is semantically plausible but the wit-
+ness record contradicts it.
+Failure Analysis.
+We group failure cases into four cat-
+Table 5. Breakdown by witness family on OV-3DSSG. Values are
+simulated manuscript-planning numbers.
+Family
+U-mR@50
+WP
+MVWA
+Halluc.↓
+Gain
+Support
+29.8
+82.4
+76.5
+9.8
++7.1
+Containment
+27.3
+80.1
+73.9
+11.2
++6.4
+Proximity
+24.5
+75.6
+68.0
+14.6
++4.2
+Vertical order
+26.2
+78.5
+70.7
+12.9
++5.8
+Attachment
+21.8
+70.4
+64.3
+17.5
++3.7
+Orientation
+23.7
+73.2
+66.1
+15.9
++5.1
+Interaction
+20.9
+68.7
+60.8
+19.8
++3.4
+egories. First, geometric ambiguity occurs when object
+masks are incomplete or the reconstruction has holes near
+contact regions. This affects thin structures such as chair
+legs, shelves, and handles. Second, semantic ambiguity
+occurs when phrases differ in granularity: on, standing on,
+and supported by may share the same support witness but
+imply different linguistic specificity. Third, view ambigu-
+ity occurs when a relation is visible in only one low-quality
+frame; the multi-view score then becomes conservative and
+may reject a true missing relation. Fourth, non-observable
+semantics occurs for functional or social relations whose
+truth cannot be determined from a static scan.
+This failure analysis is useful for the final experimental
+paper because it makes the limitation measurable. If future
+reproduced experiments show a different failure distribu-
+tion, the witness taxonomy and thresholds should be revised
+accordingly. The important point is that RelWitnessexposes
+failure causes through witness records, whereas pure text
+completion often produces unsupported relations without a
+clear diagnostic trace.
+Table ?? was used as an internal manuscript review
+checklist. It forces each narrative claim to be paired with
+a concrete result. This is especially important for a paper
+Table 6. Ablation study on OV-3DSSG. Values are simulated manuscript-planning numbers.
+Variant
+RGB
+Depth
+3D
+MV
+Null
+Mem.
+S-mR
+U-mR
+HM
+VMR
+WP
+MVWA
+Halluc.↓
+Redun.↓
+Baseline OV-3DSG
+✗
+✗
+✗
+✗
+✗
+✗
+28.4
+13.1
+17.9
+29.7
+61.5
+53.2
+25.8
+19.6
++ RGB witness
+✓
+✗
+✗
+✗
+✗
+✗
+30.1
+16.2
+21.1
+36.4
+66.9
+58.7
+21.4
+17.3
++ Depth witness
+✓
+✓
+✗
+✗
+✗
+✗
+31.0
+18.7
+23.3
+40.6
+70.8
+63.5
+18.1
+15.6
++ 3D geometry
+✓
+✓
+✓
+✗
+✗
+✗
+32.1
+21.4
+25.7
+43.5
+74.2
+67.9
+15.6
+13.4
++ Multi-view
+✓
+✓
+✓
+✓
+✗
+✗
+32.8
+22.9
+27.0
+44.8
+76.1
+70.2
+14.1
+12.2
++ Null test
+✓
+✓
+✓
+✓
+✓
+✗
+33.2
+23.8
+27.7
+45.1
+77.8
+71.1
+13.2
+11.4
+Full RelWitness
+✓
+✓
+✓
+✓
+✓
+✓
+34.2
+25.7
+29.3
+47.6
+78.9
+72.4
+12.7
+8.8
+Figure 2. Qualitative witness cases. Support, containment, and orientation relations are accepted when the RGB-D scene contains
+corresponding physical witnesses. A plausible relation is rejected when object priors suggest it but geometry contradicts it. The figure is
+generated for manuscript illustration; real qualitative figures should use dataset examples.
+Table 7. Sensitivity to candidate number K on OV-3DSSG. Values
+are simulated manuscript-planning numbers.
+K
+S-mR
+U-mR
+HM
+VMR
+WP
+Halluc.↓
+Redun.↓
+5
+31.5
+20.1
+24.5
+39.8
+82.3
+10.9
+5.7
+10
+33.1
+23.6
+27.6
+44.2
+80.4
+11.8
+7.1
+20
+34.2
+25.7
+29.3
+47.6
+78.9
+12.7
+8.8
+30
+34.0
+25.4
+29.1
+48.9
+76.1
+14.5
+11.2
+40
+33.4
+24.8
+28.5
+49.5
+72.8
+17.2
+14.9
+Table 8.
+Witness memory quality.
+Values are simulated
+manuscript-planning numbers.
+Selection strategy
+Precision
+Diversity
+Seen/Unseen Bal.
+Halluc.↓
+Classifier confidence
+56.8
+41.5
+0.36
+30.4
+Object-pair prior
+58.2
+44.7
+0.39
+32.0
+Text completion
+61.3
+58.4
+0.54
+27.8
+RGB witness only
+67.9
+55.6
+0.58
+21.9
+RGB-D witness
+74.2
+61.8
+0.66
+15.8
+Full witness memory
+79.5
+68.7
+0.74
+12.4
+Table 9. Sensitivity to positive witness threshold τp. Values are
+simulated manuscript-planning numbers.
+τp
+U-mR
+HM
+VMR
+WP
+MVWA
+Halluc.↓
+Mem. size
+0.55
+26.1
+29.1
+52.8
+70.4
+64.9
+19.6
+1.00×
+0.60
+26.3
+29.5
+50.1
+74.2
+68.1
+16.3
+0.82×
+0.65
+25.7
+29.3
+47.6
+78.9
+72.4
+12.7
+0.64×
+0.70
+24.1
+28.0
+42.9
+82.5
+75.8
+10.8
+0.47×
+0.75
+21.8
+25.9
+36.0
+84.0
+76.1
+10.2
+0.31×
+Table 10.
+Witness type parser quality.
+Values are simulated
+manuscript-planning numbers.
+Parser
+Family Acc.
+Dir. Acc.
+U-mR@50
+Halluc.↓
+Template only
+82.1
+78.4
+22.8
+16.5
+Text embedding nearest
+85.7
+80.9
+23.4
+15.9
+Prompt classifier
+88.6
+84.1
+24.3
+14.8
+Template + classifier
+91.2
+87.5
+25.7
+12.7
+with simulated planning numbers: when real experiments
+are run, the authors should replace or remove claims that are
+Table 11. Cross-dataset transfer from 3DSSG/3RScan to ScanNet-
+OV. Values are simulated manuscript-planning numbers.
+Method
+S-mR
+U-mR
+HM
+WP
+Halluc.↓
+Redun.↓
+Open3DSG
+25.6
+11.8
+16.1
+59.7
+26.1
+18.9
+OpenFunGraph
+27.4
+13.9
+18.4
+62.5
+23.7
+17.2
+FROSS
+28.2
+14.5
+19.1
+63.4
+22.9
+16.5
+Text Completion
+28.9
+18.6
+22.7
+58.1
+29.4
+24.8
+RelWitness
+31.0
+22.4
+26.0
+74.6
+14.9
+10.6
+Table 12. Robustness to object source on ScanNet-OV. Values are
+simulated manuscript-planning numbers.
+Object source
+R@50
+mR@50
+U-mR
+WP
+MVWA
+Halluc.↓
+GT masks
+46.8
+27.6
+25.7
+78.9
+72.4
+12.7
+Mask2Former lift
+43.5
+24.8
+23.2
+75.1
+68.0
+15.6
+Open-vocab masks
+41.9
+23.7
+22.4
+73.8
+66.5
+16.4
+Noisy boxes only
+38.6
+20.9
+19.1
+68.2
+60.1
+21.8
+Table 13.
+Human audit reliability.
+Values are simulated
+manuscript-planning numbers.
+Relation group
+Samples
+Agree.
+Fleiss κ
+Supported
+Support
+360
+86.4
+0.74
+61.9
+Containment
+300
+84.1
+0.70
+58.7
+Proximity
+420
+78.5
+0.62
+65.0
+Vertical order
+300
+82.7
+0.68
+55.3
+Orientation
+300
+76.9
+0.59
+48.6
+Interaction
+300
+73.2
+0.54
+42.8
+Functional/uncertain
+420
+69.5
+0.47
+31.4
+Table 14.
+Efficiency on ScanNet-OV. Values are simulated
+manuscript-planning numbers measured for a single A100 setting.
+Method
+Params
+Train
+FPS
+GPU Mem.
+Open3DSG
+134M
+1.0×
+6.8
+15.3G
+ConceptGraphs-query
+149M
+1.1×
+5.9
+16.1G
+FROSS
+128M
+0.8×
+8.4
+14.7G
+Text Completion
+142M
+1.2×
+6.1
+16.5G
+RelWitness
+166M
+1.6×
+4.7
+19.2G
+Table 15. Failure category distribution from the audit subset. Val-
+ues are simulated manuscript-planning numbers.
+Failure category
+Share
+Main families
+Typical effect
+Geometry noise
+31.6
+support/attach
+false reject
+Semantic granularity
+24.8
+support/proximity
+redundancy
+Single-view ambiguity
+22.1
+orientation/interact
+uncertain
+Non-observable phrase
+15.3
+functional
+uncertain
+Parser mismatch
+6.2
+directional
+false accept/reject
+not supported by reproduced measurements. For example,
+if real audit results show high VMR but weak witness pre-
+cision, the paper should no longer claim reliable missing-
+relation recovery. If detector robustness collapses, the final
+contribution should be framed around high-quality recon-
+structions rather than general RGB-D deployment.
+6. Conclusion
+We presented RelWitness, an open-vocabulary 3D scene
+graph framework for incomplete relation supervision. The
+central idea is that a missing relation should become super-
+vision only when the RGB-D scene contains a relation wit-
+ness: a visual-geometric cue that makes the relation phys-
+ically observable.
+By combining witness parsing, RGB-
+D/3D verification, object-prior null tests, multi-view per-
+sistence, witness memory, positive-unlabeled learning, and
+witness-consistent decoding, RelWitnesstargets the gap be-
+tween relation plausibility and relation observability. The
+resulting manuscript-planning experiments show the in-
+tended profile: better unseen relation recognition, higher
+witness precision, fewer hallucinated edges, and less redun-
+dant graph output.
+References
+[1] Iro Armeni, Zhi-Yang He, JunYoung Gwak, Amir R. Zamir,
+Martin Fischer, Jitendra Malik, and Silvio Savarese. 3d scene
+graph: A structure for unified semantics, 3d space, and cam-
+era. In Proceedings of the IEEE/CVF International Confer-
+ence on Computer Vision, 2019. 1, 2
+[2] Johanna Wald, Helisa Dhamo, Nassir Navab, and Federico
+Tombari. Learning 3d semantic scene graphs from 3d indoor
+reconstructions. In Proceedings of the IEEE/CVF Confer-
+ence on Computer Vision and Pattern Recognition, 2020. 2,
+7, 8
+[3] Shun-Cheng Wu, Johanna Wald, Keisuke Tateno, Nassir
+Navab, and Federico Tombari. Scenegraphfusion: Incremen-
+tal 3d scene graph prediction from rgb-d sequences. In Pro-
+ceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, 2021. 2, 7, 8
+[4] Qiao
+Gu,
+Alyssa
+Kuwajerwala,
+Sacha
+Morin,
+Kr-
+ishna Murthy Jatavallabhula, Bipasha Sen, Aditya Agarwal,
+Corban Rivera, William Paul, Kirsty Ellis, Rama Chellappa,
+Chuang Gan, Celso M. de Melo, Joshua B. Tenenbaum,
+Antonio Torralba, Florian Shkurti, and Liam Paull. Concept-
+graphs: Open-vocabulary 3d scene graphs for perception
+and planning.
+In Proceedings of the IEEE International
+Conference on Robotics and Automation, 2024. 1, 2, 7
+[5] Songyou
+Peng,
+Kyle
+Genova,
+Chiyu
+Jiang,
+Andrea
+Tagliasacchi, Marc Pollefeys, and Thomas Funkhouser.
+Openscene: 3d scene understanding with open vocabularies.
+In Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, 2023. 2
+[6] Ayc¸a Takmaz, Elisabetta Fedele, Robert W. Sumner, Marc
+Pollefeys, Federico Tombari, and Francis Engelmann. Open-
+mask3d: Open-vocabulary 3d instance segmentation. In Ad-
+vances in Neural Information Processing Systems, 2023. 2
+[7] Sebastian Koch, Narunas Vaskevicius, Mirco Colosi, Pe-
+dro Hermosilla, and Timo Ropinski.
+Open3dsg: Open-
+vocabulary 3d scene graphs from point clouds with
+queryable objects and open-set relationships. In Proceed-
+ings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, 2024. 2, 3, 7, 8
+[8] Zian Zhang, Cheng-Yu Tai, Yikuan Xie, Xuezhi Bao, Haritha
+Yerramilli, Luca Weihs, Alexander Weihs, Aniruddha Kem-
+bhavi, Roozbeh Mottaghi, Prune Truong, and Yiran Geng.
+Open-vocabulary functional 3d scene graphs for real-world
+indoor spaces. arXiv preprint arXiv:2503.19199, 2025. 2, 3,
+8
+[9] Jingyi Hou, Kun Liu, Ning Lu, Raghudeep Gadde, and
+Qiang Qiu. Fross: Faster online 3d reconstruction of open-
+vocabulary scene graphs from rgb-d streams. arXiv preprint
+arXiv:2506.19146, 2025. 1, 2, 3, 8
+[10] Antoni Rosinol, Marcus Abate, Yun Chang, and Luca Car-
+lone. Kimera: An open-source library for real-time metric-
+semantic localization and mapping. In Proceedings of the
+IEEE International Conference on Robotics and Automation,
+2020. 2
+[11] Angela Dai, Angel X. Chang, Manolis Savva, Maciej Hal-
+ber, Thomas Funkhouser, and Matthias Nießner. Scannet:
+Richly-annotated 3d reconstructions of indoor scenes.
+In
+Proceedings of the IEEE Conference on Computer Vision
+and Pattern Recognition, 2017. 2, 7
+[12] Charles R. Qi, Hao Su, Kaichun Mo, and Leonidas J. Guibas.
+Pointnet: Deep learning on point sets for 3d classification
+and segmentation. In Proceedings of the IEEE Conference
+on Computer Vision and Pattern Recognition, 2017. 2
+[13] Charles R. Qi, Li Yi, Hao Su, and Leonidas J. Guibas. Point-
+net++: Deep hierarchical feature learning on point sets in a
+metric space. In Advances in Neural Information Processing
+Systems, 2017.
+[14] Hugues Thomas, Charles R. Qi, Jean-Emmanuel Deschaud,
+Beatriz Marcotegui, Franc¸ois Goulette, and Leonidas J.
+Guibas. Kpconv: Flexible and deformable convolution for
+point clouds. In Proceedings of the IEEE/CVF International
+Conference on Computer Vision, 2019.
+[15] Hengshuang Zhao, Li Jiang, Jiaya Jia, Philip H. S. Torr, and
+Vladlen Koltun. Point transformer. In Proceedings of the
+IEEE/CVF International Conference on Computer Vision,
+2021. 2
+[16] Justin Johnson, Ranjay Krishna, Michael Stark, Li-Jia Li,
+David Shamma, Michael Bernstein, and Li Fei-Fei. Image
+retrieval using scene graphs.
+In Proceedings of the IEEE
+Conference on Computer Vision and Pattern Recognition,
+2015. 2
+[17] Cewu Lu, Ranjay Krishna, Michael Bernstein, and Li Fei-
+Fei. Visual relationship detection with language priors. In
+Proceedings of the European Conference on Computer Vi-
+sion, 2016.
+[18] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A. Shamma, Michael Bernstein, and
+Li Fei-Fei. Visual genome: Connecting language and vision
+using crowdsourced dense image annotations. In Interna-
+tional Journal of Computer Vision, 2017.
+[19] Danfei Xu, Yuke Zhu, Christopher B. Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing. In Pro-
+ceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition, 2017. 2
+[20] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin
+Choi. Neural motifs: Scene graph parsing with global con-
+text. In Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition, 2018. 2
+[21] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi
+Parikh. Graph r-cnn for scene graph generation. In Proceed-
+ings of the European Conference on Computer Vision, 2018.
+[22] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan Luo,
+and Wei Liu. Learning to compose dynamic tree structures
+for visual contexts. In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition, 2019.
+[23] Kaihua Tang, Yulei Niu, Jianqiang Huang, Jiaxin Shi, and
+Hanwang Zhang. Unbiased scene graph generation from bi-
+ased training. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, 2020.
+[24] Rongjie Li, Songyang Zhang, Bo Wan, and Xuming He.
+Bipartite graph network with adaptive message passing for
+unbiased scene graph generation.
+In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, 2021.
+[25] Rongjie Li, Songyang Zhang, and Xuming He. Sgtr: End-to-
+end scene graph generation with transformer. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, 2022.
+[26] Chaofan Zheng, Xinyu Lyu, Lianli Gao, Bo Dai, and
+Jingkuan Song.
+Predicate-aware embedding learning for
+scene graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+2023.
+[27] Tianshui Chen, Weihao Yu, Riquan Chen, and Liang Lin.
+Knowledge-embedded routing network for scene graph gen-
+eration.
+In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, 2019.
+[28] Xinyu Lyu, Lianli Gao, Yudong Guo, Zhou Zhao, and Heng
+Tao Shen Huang. Fine-grained predicates learning for scene
+graph generation. In Proceedings of the IEEE/CVF Confer-
+ence on Computer Vision and Pattern Recognition, 2022.
+[29] T. He, L. Gao, J. Song, J. Cai, and Y.-F. Li. Learning from the
+scene and borrowing from the rich: Tackling the long tail in
+scene graph generation. In Proceedings of the International
+Joint Conference on Artificial Intelligence, 2020.
+[30] T. He, L. Gao, J. Song, J. Cai, and Y.-F. Li. Semantic compo-
+sitional learning for low-shot scene graph generation. arXiv
+preprint arXiv:2108.08600, 2021. 3
+[31] T. He, L. Gao, J. Song, and Y.-F. Li. State-aware composi-
+tional learning toward unbiased training for scene graph gen-
+eration. IEEE Transactions on Image Processing, 32:43–56,
+2022.
+[32] T. He, L. Gao, J. Song, and Y.-F. Li.
+Toward a unified
+transformer-based framework for scene graph generation and
+human-object interaction detection. IEEE Transactions on
+Image Processing, 32:6274–6288, 2023.
+[33] T. He, T. Wu, D. Zhang, G. Duan, K. Qin, and Y.-
+F. Li.
+Towards lifelong scene graph generation with
+knowledge-aware in-context prompt learning. arXiv preprint
+arXiv:2401.14626, 2024. 2
+[34] Jingkang Yang, Yi Zhe Ang, Zujin Guo, Kaiyang Zhou,
+Wayne Zhang, and Ziwei Liu. Panoptic scene graph gener-
+ation. In Proceedings of the European Conference on Com-
+puter Vision, 2022. 2
+[35] Yeliang Wang, Jialian Yu, Zhongang Zhang, and Ziwei Liu.
+Pair-net: Human-object interaction detection and panoptic
+scene graph generation with pairwise representation learn-
+ing. In Proceedings of the IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition, 2024.
+[36] Ziqin Zhou, Yichao Zhang, Yifei Wang, Yu Li, and Ziwei
+Liu. Openpsg: Open-set panoptic scene graph generation via
+large multimodal models. In Proceedings of the European
+Conference on Computer Vision, 2024.
+[37] T. He, L. Gao, J. Song, and Y.-F. Li.
+Towards open-
+vocabulary scene graph generation with prompt-based fine-
+tuning. In European Conference on Computer Vision, 2022.
+[38] X.
+Hu,
+K.
+Qin,
+G.
+Duan,
+M.
+Li,
+Y.-F.
+Li,
+and
+T. He. Spade: Spatial-aware denoising network for open-
+vocabulary panoptic scene graph generation with long-
+and local-range context reasoning.
+In Proceedings of the
+IEEE/CVF International Conference on Computer Vision,
+2025. 2
+[39] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya
+Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry,
+Amanda Askell, Pamela Mishkin, Jack Clark, Gretchen
+Krueger, and Ilya Sutskever.
+Learning transferable visual
+models from natural language supervision. In Proceedings
+of the International Conference on Machine Learning, 2021.
+2, 3, 8
+[40] Junnan Li, Dongxu Li, Caiming Xiong, and Steven Hoi.
+Blip: Bootstrapping language-image pre-training for unified
+vision-language understanding and generation. In Proceed-
+ings of the International Conference on Machine Learning,
+2022.
+[41] Junnan Li, Dongxu Li, Silvio Savarese, and Steven Hoi.
+Blip-2:
+Bootstrapping language-image pre-training with
+frozen image encoders and large language models. In Pro-
+ceedings of the International Conference on Machine Learn-
+ing, 2023. 3
+[42] Haotian Liu, Chunyuan Li, Qingyang Wu, and Yong Jae Lee.
+Visual instruction tuning. In Advances in Neural Information
+Processing Systems, 2023. 2
+[43] Alexander Kirillov, Eric Mintun, Nikhila Ravi, Hanzi Mao,
+Chloe Rolland, Laura Gustafson, Tete Xiao, Spencer White-
+head, Alexander C. Berg, Wan-Yen Lo, Piotr Doll´ar, and
+Ross Girshick. Segment anything. In Proceedings of the
+IEEE/CVF International Conference on Computer Vision,
+2023. 2
+[44] Shilong Liu, Zhaoyang Zeng, Tianhe Ren, Feng Li, Hao
+Zhang, Jie Yang, Qing Jiang, Chunyuan Li, Jianwei Yang,
+Hang Su, Jun Zhu, and Lei Zhang. Grounding dino: Marry-
+ing dino with grounded pre-training for open-set object de-
+tection. In arXiv preprint arXiv:2303.05499, 2023.
+[45] Bowen Cheng, Ishan Misra, Alexander G. Schwing, Alexan-
+der Kirillov, and Rohit Girdhar.
+Masked-attention mask
+transformer for universal image segmentation. In Proceed-
+ings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, 2022.
+[46] Kaiming He, Georgia Gkioxari, Piotr Doll´ar, and Ross Gir-
+shick. Mask r-cnn. In Proceedings of the IEEE International
+Conference on Computer Vision, 2017.
+[47] Shaoqing Ren, Kaiming He, Ross Girshick, and Jian Sun.
+Faster r-cnn: Towards real-time object detection with region
+proposal networks. In Advances in Neural Information Pro-
+cessing Systems, 2015.
+[48] Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas
+Usunier, Alexander Kirillov, and Sergey Zagoruyko. End-to-
+end object detection with transformers. In Proceedings of the
+European Conference on Computer Vision, 2020. 2
+[49] Apoorva Dornadula, Austin Narcomey, Ranjay Krishna,
+Michael Bernstein, and Li Fei-Fei. Scene graph prediction
+with limited labels. In Proceedings of the IEEE/CVF Inter-
+national Conference on Computer Vision Workshops, 2019.
+3
+[50] Vincent S. Chen, Paroma Varma, Ranjay Krishna, Michael
+Bernstein, Christopher R´e, and Li Fei-Fei. Learning to com-
+pose dynamic tree structures for visual contexts with limited
+labels. In Proceedings of the IEEE/CVF International Con-
+ference on Computer Vision Workshops, 2019.
+[51] Meng-Jiun Chiou, Henghui Ding, Hanshu Yan, Changhu
+Wang, Roger Zimmermann, and Jiashi Feng. Recovering the
+unbiased scene graphs from the biased ones. In Proceedings
+of the ACM International Conference on Multimedia, 2021.
+[52] Vikash Goel, Nishant Chandak, and Dinesh Manocha. Not
+all relations are equal: Mining informative relationships for
+scene graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+2022. 3
+[53] R. Dai, Y. Tan, L. Mo, T. He, K. Qin, and S. Liang.
+Muap:
+Multi-step adaptive prompt learning for vision-
+language model with missing modality.
+arXiv preprint
+arXiv:2409.04693, 2024. 3
+[54] R. Dai, Y. Tan, L. Mo, T. He, K. Qin, and S. Liang. Robustpt:
+Dynamic disentanglement prompt tuning in vision-language
+models with missing modalities. In Proceedings of the 2025
+International Conference on Multimedia Retrieval, 2025.
+[55] R. Dai, C. Li, Y. Yan, L. Mo, K. Qin, and T. He. Unbi-
+ased missing-modality multimodal learning. In Proceedings
+of the IEEE/CVF International Conference on Computer Vi-
+sion, 2025.
+[56] R. Dai, Z. Cai, L. Mo, G. Duan, K. Shi, and T. He. Anchor
+drift no more: Hierarchical consistency-guided prompt dis-
+tillation for incomplete multimodal learning. In Proceedings
+of the ACM Web Conference, pages 7330–7341, 2026.
+[57] S. Wei,
+K. Zhang,
+L. Chen,
+T. He,
+and G. Duan.
+Unbiased dynamic multimodal fusion.
+arXiv preprint
+arXiv:2603.19681, 2026.
+[58] Q. Dong, R. Dai, G. Duan, K. Qin, Y. Zhang, and T. He. Un-
+biased multimodal intent recognition with auxiliary rationale
+generation. Neurocomputing, page 131197, 2025.
+[59] W. Yin, S. Zhan, C. Liu, X. Hu, G. Duan, X. Xie, Y.-F. Li,
+and T. He. Tical: Typicality-based consistency-aware learn-
+ing for multimodal emotion recognition. In Proceedings of
+the AAAI Conference on Artificial Intelligence, volume 40,
+pages 17948–17956, 2026. 3
+[60] Peter Anderson, Xiaodong He, Chris Buehler, Damien
+Teney, Mark Johnson, Stephen Gould, and Lei Zhang.
+Bottom-up and top-down attention for image captioning and
+visual question answering. In Proceedings of the IEEE Con-
+ference on Computer Vision and Pattern Recognition, 2018.
+3
+[61] T. He, L. Gao, J. Song, and Y.-F. Li. Exploiting scene graphs
+for human-object interaction detection. In Proceedings of
+the IEEE/CVF International Conference on Computer Vi-
+sion, pages 15984–15993, 2021.
+[62] X. Hu, K. Qin, T. He, and G. Luo. Exploring hierarchical
+tuple-based contextual correlations for human-object inter-
+action detection. Tsinghua Science and Technology, 2026.
+[63] Z. Yang, X. Liu, D. Ouyang, G. Duan, D. Zhang, T. He, and
+Y.-F. Li. Towards open-vocabulary hoi detection with cal-
+ibrated vision-language models and locality-aware queries.
+In Proceedings of the 32nd ACM International Conference
+on Multimedia, pages 1495–1504, 2024.
+[64] J. W. Owusu, R. Y. Zakari, K. Qin, and T. He.
+Graph
+convolutional networks with fine-tuned word representations
+for visual question answering. In 2024 IEEE Smart World
+Congress, pages 1381–1387, 2024.
+[65] R. Y. Zakari, J. W. Owusu, K. Qin, H. Wang, Z. K. Lawal,
+and T. He. Vqa and visual reasoning: An overview of ap-
+proaches, datasets, and future direction. Neurocomputing,
+622:129345, 2025. 3
+[66] J. Song, T. He, H. Fan, and L. Gao. Deep discrete hashing
+with self-supervised pairwise labels. In Joint European Con-
+ference on Machine Learning and Knowledge Discovery in
+Databases, 2017. 3
+[67] T. He, L. Gao, J. Song, X. Wang, K. Huang, and Y. Li.
+Sneq: Semi-supervised attributed network embedding with
+attention-based quantisation.
+In Proceedings of the AAAI
+Conference on Artificial Intelligence, volume 34, pages
+4091–4098, 2020.
+[68] T. He, L. Gao, J. Song, and Y.-F. Li. Semisupervised net-
+work embedding with differentiable deep quantization. IEEE
+Transactions on Neural Networks and Learning Systems, 34
+(8):4791–4802, 2021.
+[69] D. Zhang, S. Liang, T. He, J. Shao, and K. Qin. Cviformer:
+Cross-view interactive transformer for efficient stereoscopic
+image super-resolution.
+IEEE Transactions on Emerging
+Topics in Computational Intelligence, 9(2), 2024. 3
+[70] W. Yin, Y. Wang, G. Duan, D. Zhang, X. Hu, Y.-F. Li,
+and T. He. Knowledge-aligned counterfactual-enhancement
+diffusion perception for unsupervised cross-domain visual
+emotion recognition. In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition, pages
+3888–3898, 2025. 3

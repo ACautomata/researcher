@@ -1,0 +1,956 @@
+Click2Graph: Interactive Panoptic Video Scene Graphs from a Single Click
+Raphael Ruschel*
+UC Santa Barbara
+Electrical & Computer Engineering
+raphael251@ucsb.edu
+Hardikkumar Prajapati*
+UC Santa Barbara
+Electrical & Computer Engineering
+hprajapati@ucsb.edu
+Md Awsafur Rahman
+UC Santa Barbara
+Electrical & Computer Engineering
+awsaf@ucsb.edu
+B. S. Manjunath
+UC Santa Barbara
+Electrical & Computer Engineering
+manj@ucsb.edu
+Abstract
+State-of-the-art Video Scene Graph Generation (VSGG)
+systems provide structured visual understanding but oper-
+ate as closed, feed-forward pipelines with no ability to in-
+corporate human guidance. In contrast, promptable seg-
+mentation models such as SAM2 enable precise user inter-
+action but lack semantic or relational reasoning. We in-
+troduce Click2Graph, the first interactive framework for
+Panoptic Video Scene Graph Generation (PVSG) that uni-
+fies visual prompting with spatial, temporal, and semantic
+understanding. From a single user cue, such as a click or
+bounding box, Click2Graph segments and tracks the subject
+across time, autonomously discovers interacting objects,
+and predicts ⟨subject, object, predicate⟩triplets to form
+a temporally consistent scene graph. Our framework in-
+troduces two key components: a Dynamic Interaction Dis-
+covery Module that generates subject-conditioned object
+prompts, and a Semantic Classification Head that performs
+joint entity and predicate reasoning. Experiments on the
+OpenPVSG benchmark demonstrate that Click2Graph es-
+tablishes a strong foundation for user-guided PVSG, show-
+ing how human prompting can be combined with panoptic
+grounding and relational inference to enable controllable
+and interpretable video scene understanding.
+1. Introduction
+Understanding not only what appears in a video but how en-
+tities interact is a core challenge in intelligent perception.
+This capability is desired in applications in robotics, au-
+tonomous agents, assistive systems, and surveillance, where
+downstream decisions depend on correctly interpreting ac-
+tions, intentions, and relationships. Scene Graph Genera-
+tion (SGG) has emerged as a powerful representation for
+such structured understanding, evolving from static im-
+age reasoning [30, 35] to dynamic, video-based formula-
+tions that capture temporal context [5, 12]. More recently,
+panoptic scene graph generation has advanced ground-
+ing fidelity by replacing bounding boxes with pixel-level
+masks [31, 33], enabling fine-grained grounding of classes,
+especially for objects with irregular shapes (commonly ref-
+ered as ”stuff” classes), such as floor and sky.
+Despite these advances, existing video SGG and PVSG
+pipelines remain fully automated and closed-loop. Once a
+model overlooks an occluded object, misclassifies a rare in-
+teraction, or drifts during tracking, the user has no mecha-
+nism to intervene. This lack of controllability is problematic
+in complex or safety-critical environments, where correct-
+ing errors or directing model attention is essential. At the
+same time, a new class of promptable segmentation mod-
+els, most notably SAM and SAM2 [13, 23], has demon-
+strated the power of direct visual prompting. With a simple
+click or box, users can obtain precise, temporally consis-
+tent segmentation masks. Yet these models are inherently
+class-agnostic and relation-agnostic: they determine where
+objects are but not what they are or how they interact.
+This disconnect reveals a fundamental gap:
+current
+PVSG systems lack user guidance, and current interactive
+segmentation models lack semantic structure. We address
+this gap with Click2Graph, the first framework for user-
+guided Panoptic Video Scene Graph Generation. From a
+single visual cue, such as clicking a subject in any frame,
+Click2Graph:
+1. Segments and tracks the prompted subject across time,
+2. Autonomously discovers and segments interacting ob-
+jects, and
+3. Predicts ⟨subject, object, predicate⟩relationships to
+form a temporally consistent scene graph.
+Figure 1 illustrates how distinct scene graphs can be pro-
+1
+arXiv:2511.15948v2  [cs.CV]  25 Nov 2025
+Figure 1. On the left example, the user clicked on the ⟨dog⟩, and Click2Graph segmented the ⟨carpet⟩and predicted the ⟨sitting⟩activity.
+On the right, we have a prompt on ⟨child⟩which yields ⟨dog⟩, ⟨playing⟩as associated object and activity.
+duced depending on which entity the user prompts, high-
+lighting the controllability of the system.
+Click2Graph introduces two components that supply the
+missing semantic and relational reasoning. A Dynamic In-
+teraction Discovery Module (DIDM) generates subject-
+conditioned object prompts, enabling automatic discovery
+of entities participating in interactions. A Semantic Clas-
+sification Head (SCH) performs joint subject, object, and
+predicate inference over the discovered segments, produc-
+ing structured scene graph outputs. Together, these com-
+ponents elevate promptable segmentation from geometric
+mask extraction to full panoptic video scene graph gener-
+ation.
+Our contributions are summarized as follows:
+• User-Guided Panoptic Video Scene Graphs. We intro-
+duce the first interactive PVSG framework that converts a
+single visual prompt into a temporally consistent panop-
+tic scene graph, enabling controllable, interpretable video
+analysis.
+• Dynamic Interaction Discovery. We propose a novel
+module that generates subject-conditioned prompts to
+discover interacting objects, naturally supporting multi-
+subject and multi-object reasoning.
+• Semantic Reasoning atop Promptable Segmentation.
+A dedicated classification head predicts subject–object
+pairs labels and the relationship between them, bridging
+the gap between prompt-based segmentation and struc-
+tured semantic inference.
+Click2Graph establishes a new paradigm for video scene
+understanding by combining human guidance, pixel-level
+grounding, and relational reasoning within a unified archi-
+tecture. As shown in our experiments on the OpenPVSG
+benchmark, this paradigm enables controllable and inter-
+pretable scene graph generation while offering a practical
+path toward real-world interactive video analytics.
+2. Related Works
+Our work lies at the intersection of video scene graph gen-
+eration, panoptic-level scene understanding, and interactive
+visual analysis.
+Below, we position Click2Graph within
+each of these domains. Table 1 shows a summary of the
+related domains.
+2.1. Advances in Video Scene Graph Generation
+Scene Graph Generation (SGG) was first developed for
+static images [30, 35], and later extended to videos
+(VidSGG) to capture temporal dynamics [7, 12, 16, 18,
+19, 27, 28, 36].
+Transformer-based approaches such as
+STTran [5], DDS [11], and VSG-Net [26] improved long-
+range temporal reasoning and robustness to clutter.
+An-
+other thread of work addresses the heavy long-tail distribu-
+tion of predicates through debiasing methods such as TEM-
+PURA [21] and VISA [17], while DiffVSGG [3] frames
+video SGG as an iterative denoising problem.
+Although these methods advance automated scene graph
+reasoning, they operate as closed-loop systems: once the
+model misdetects or misclassifies an entity, the user can-
+not intervene. Click2Graph introduces this missing inter-
+active dimension, enabling subject-specific, user-directed
+scene graph construction.
+2.2. Panoptic-Level Scene Understanding
+To improve spatial precision, recent works replace bound-
+ing boxes with pixel-level masks. Panoptic Scene Graph
+Generation (PSG) [31] grounds all entities, including
+“stuff” classes, in panoptic masks.
+This paradigm was
+extended temporally in the Panoptic Video Scene Graph
+(PVSG) task [33], which provides temporally consistent
+panoptic annotations through the OpenPVSG benchmark.
+Click2Graph builds on this foundation but differs from
+prior PVSG approaches by introducing user control. In-
+2
+Table 1. A comparative analysis of Scene Graph Generation paradigms. Click2Graph is the first to unify video-level temporal reasoning,
+panoptic-level spatial precision, and user-guided visual prompting for end-to-end tracking and relationship prediction.
+Method
+Modality
+Granularity
+Interaction Type
+End-to-End Tracking
+Relationship Prediction
+Traditional SGG (e.g., MOTIFS [35])
+Image
+Box
+None
+N/A
+Yes
+Video SGG (e.g., STTran [5])
+Video
+Box
+None
+Yes
+Yes
+Panoptic SGG (e.g., PSGFormer [31])
+Image
+Mask
+None
+N/A
+Yes
+Panoptic Video SGG (PVSG) [33]
+Video
+Mask
+None
+Yes
+Yes
+Text-Prompted SGG (e.g., VLPrompt [37])
+Image
+Mask
+Text
+N/A
+Yes
+Click2Graph (Ours)
+Video+Image
+Mask
+Visual (Click/Box)
+Yes
+Yes
+stead of producing a full-frame graph in a fully automated
+manner, we allow a user to specify a subject of interest and
+generate an interaction-centric scene graph guided by that
+prompt.
+2.3. Promptable and Interactive Scene Analysis
+Interactive reasoning has emerged in adjacent domains but
+remains underexplored for scene graph generation. Exist-
+ing approaches fall into two categories: text-prompted and
+visually-guided methods.
+2.3.1. Text-Prompted Generation
+Several SGG methods incorporate language guidance. Ov-
+SGG [9] and CaCao [34] use text prompts for open-
+vocabulary predicate detection, while VLPrompt [37] in-
+tegrates LLM-derived priors to improve panoptic SGG.
+Although language prompts provide rich semantics, they
+lack spatial specificity, text cannot uniquely and precisely
+ground pixel-level subjects.
+These systems also depend
+on language availability and may not generalize across set-
+tings.
+In contrast, Click2Graph uses direct visual prompts
+(points, boxes or masks), which are universal, unambigu-
+ous, and spatially precise.
+2.3.2. Visually-Guided Interaction
+Visually guided interaction remains largely unexplored for
+scene graph generation. Prior work has examined interac-
+tive image or 3D scene graph editing [1, 14, 20], and inter-
+active video object segmentation (VOS) allows tracking of
+a single prompted object [10]. However, these methods lack
+interaction discovery and semantic relationship reasoning.
+To our knowledge, Click2Graph is the first framework
+to leverage direct visual prompts for end-to-end Panop-
+tic Video Scene Graph Generation, including object dis-
+covery, segmentation, and predicate prediction.
+2.4. Foundation Models for Segmentation
+Foundation models such as SAM [13] and SAM2 [23] pro-
+vide powerful engines for promptable segmentation and
+video mask propagation.
+SAM2, in particular, delivers
+high-quality temporal consistency. However, these models
+are class-agnostic and relation-agnostic: they cannot iden-
+tify object categories, infer interactions, or discover inter-
+acting entities from a prompted subject.
+Click2Graph fills this gap by introducing two compo-
+nents, the Dynamic Interaction Discovery Module and the
+Semantic Classification Head, that transform SAM2’s ge-
+ometric outputs into pixel-accurate, temporally consistent
+scene graphs.
+3. Methodology
+3.1. Problem Formulation
+Given a video V = {I1, . . . , IT } with T frames and an
+initial user prompt Pi (a point, box, or mask) specifying the
+subject of interest, the goal of Click2Graph is to generate
+structured interaction tracklets. Each tracklet describes a
+subject si, one of its interacting objects oi,j, the relationship
+ri,j between them, and the corresponding panoptic masks
+over time.
+Formally, for subject i, the set of interaction tracklets is:
+ATi =
+
+ati
+j = ⟨si, oi,j, ri,j, SM, OM, tstart, tend⟩
+	Mi
+j=1 ,
+where SM and OM denote the subject and object panoptic
+masks across the active temporal window [tstart, tend] and Mi
+is the number of activities carried by subject si. Images are
+treated as a special case with T = 1. The model supports
+multiple subjects, and users may introduce new prompts at
+any time.
+3.2. Network Architecture
+Click2Graph builds on SAM2 [24], a promptable video
+segmentation model that produces fine-grained, temporally
+consistent masks from sparse visual prompts.
+SAM2 is
+class-agnostic and yields masks for one object per prompt.
+To enable interaction discovery and semantic reasoning, we
+introduce two modules:
+1. Dynamic Interaction Discovery Module (DIDM) —
+predicts a set of subject-conditioned object prompts.
+2. Semantic Classification Head (SCH) — predicts sub-
+ject, object, and predicate labels for discovered seg-
+ments.
+Together, these modules transform SAM2 from a geo-
+metric segmentation backbone into a full panoptic video
+3
+Figure 2. Overview of the Click2Graph architecture for user-guided Panoptic Video Scene Graph Generation. From a single user prompt,
+the system segments and tracks the subject, discovers interacting objects via the Dynamic Interaction Discovery Module (DIDM), and
+predicts subject–object–predicate triplets using the Semantic Classification Head (SCH).
+scene graph generator, see Figure 2, for a comprehensive
+overview of our architecture.
+3.3. Dynamic Interaction Discovery Module
+It is a lightweight, set-based transformer module designed
+to convert a single user prompt into a fixed set of spatially
+precise object prompts. DIDM:
+1. Receives the encoded image features from the SAM2
+backbone,
+2. For a given subject, generates a dedicated subject feature
+token by combining a learnable subject embedding with
+a feature vector derived from the subject’s segmentation
+mask. This token is then prepended to a fixed set of Nq
+learnable object query embeddings,
+3. Passes these combined query tokens through a series of
+Transformer layers, where they perform cross-attention
+against the image features. The queries are trained to
+shift their attention and encode the presence and location
+of objects interacting with the subject,
+4. Maps the refined object tokens to the normalized (x, y)
+coordinates for the discovered interacting object prompts
+The predicted points serve as prompt locations that
+SAM2 uses to segment candidate interacting objects. We
+empirically set Nq = 3 to exceed the typical number of
+objects interacting with a subject. Figure 3 illustrates the
+module’s design.
+3.4. Semantic Classification Head
+This module bridges the gap between geometric outputs
+(masks) and structured, relational understanding (scene
+graphs). It performs the final semantic inference, classi-
+fying both objects and their relationships. The Semantic
+Classification Head:
+1. Extract semantic features by spatially aggregating the
+vision features (from the SAM2 encoder) over the pre-
+dicted segmentation masks,
+2. Passes the aggregated subject and object features
+through a dedicated Multilayer Perceptron (MLP) to pre-
+dict the subject’s class label (si) and the object’s class
+label (oi,j) respectively,
+3. Concatenates the dedicated features from SAM2 Mask
+Decoder, specifically, the obj ptr query token for the
+subject and the discovered object to form a subject-
+object pair representation,
+4. Passes this joint feature vector through a separate MLP
+to predict the complex relationship predicate (ri,j)
+For each prompted subject i, the output is:
+O(It | Pi) =
+Nq
+[
+j=1
+⟨si, oi,j, ri,j⟩.
+(1)
+3.5. Training Objective
+We formulate our objective as a strategically composed
+multi-task loss to effectively optimize the heterogeneous
+output types of our framework:
+panoptic segmentation
+masks, precise control over object discovery, and structured
+semantic reasoning:
+Ltotal = Lmask + LL2 + Lsub + Lobj + Lrel.
+4
+Figure 3. Architecture of the Dynamic Interaction Discovery Module (DIDM). A single user-prompted subject prompt is transformed
+into Nq predicted object prompts. It combines a feature vector derived from the subject mask with learnable object queries. These tokens
+pass through a Transformer decoder, which performs cross-attention over the image features, enabling the module to autonomously predict
+the precise locations (via the Point Prediction Head) of all entities interacting with the prompted subject.
+Mask Loss.
+For both subject and discovered object
+masks, we use a combination of:
+Lmask = LBCE + LIoU + LDice.
+Prompt Localization Loss.
+Each DIDM-predicted point
+is supervised with:
+LL2 = ∥ˆp −p∗∥2
+2,
+where p∗is a ground-truth object interior point.
+Semantic Prediction Loss.
+We apply cross-entropy
+losses to: Lsub,
+Lobj,
+Lrel.
+Set-Based Hungarian Matching.
+Because DIDM and
+SCH generate a fixed set of predictions, we adopt the bipar-
+tite matching strategy from DETR [2] to align predictions
+with ground-truth interaction sets.
+3.6. Training and Inference Details
+We use SAM2.1-Large as the backbone and freeze its 224M
+parameters. DIDM and SCH introduce approximately 5M
+trainable parameters. Training uses AdamW with learning
+rate 5×10−4 for SCH parameters and a cosine annealing
+schedule with start value 5×10−5 and end value 1×10−5
+for DIDM parameters. We train for 400 epochs, sampling 8-
+frame clips per batch following SAM2’s video-centric strat-
+egy.
+For each loss term Ll we use an appropriate loss weight
+λl which are set as:
+λBCE = 10, λDice = 1, λIoU = 1,
+λL2 = 20, λsub = 10, λobj = 10, λrel = 20.
+Inference runs at ∼
+10 FPS on an NVIDIA A100
+(40GB), with a memory footprint of ∼7GB for a Video
+input resolution of (1024x1024).
+3.7. Ground-Truth Point Sampling Strategy
+Training DIDM requires stable ground-truth points inside
+each object mask.
+Boundary points are ambiguous for
+promptable models like SAM2, whereas interior points
+yield clearer supervisory signals.
+We therefore:
+1. Compute the distance transform of each object mask,
+2. Assign each pixel a sampling probability proportional to
+its distance from the mask boundary,
+3. Sample core interior points as high-quality targets.
+This distance-weighted sampling generates robust super-
+vision for DIDM’s point regression and improves object dis-
+covery accuracy.
+4. Dataset: OpenPVSG
+The Panoptic Video Scene Graph (PVSG) task requires
+pixel-level grounding of entities and their relationships
+across time. We evaluate Click2Graph on the Open Panop-
+tic Video Scene Graph (OpenPVSG) dataset introduced
+5
+by Yang et al. [32], which provides the most comprehensive
+benchmark for panoptic-level video scene graph generation.
+Scale
+and
+Composition:
+OpenPVSG
+contains
+400
+videos totaling approximately 150k frames at 5 FPS. On
+those videos, each subject is typically interacting with ≤2
+objects per frame. The data spans a wide range of environ-
+ments and camera styles, aggregated from:
+• VidOR [25] (289 videos),
+• EPIC-Kitchens [6] (55 videos),
+• Ego4D [8] (56 videos).
+The dataset includes both third-person and egocentric per-
+spectives, enabling evaluation under diverse motion pat-
+terns, object configurations, and interaction types.
+Annotations:
+The annotation set includes:
+• 126 object categories grounded with pixel-accurate
+panoptic segmentation,
+• 57 relationship predicates covering spatial, contact, and
+interaction types,
+• Temporally consistent instance masks and relation trajec-
+tories.
+Panoptic masks allow detailed grounding of both “things”
+and “stuff” classes, which is essential for modeling non-
+rigid entities and background interactions.
+Relevance to Click2Graph:
+OpenPVSG provides a chal-
+lenging testbed for user-guided PVSG for three reasons:
+1. High visual and temporal diversity: videos include
+complex camera motion, occlusions, multiple interact-
+ing entities, and indoor/outdoor environments.
+2. Fine-grained semantic space:
+the large number of
+closely related object and predicate classes exposes the
+difficulty of semantic reasoning.
+3. Panoptic-level grounding:
+pixel-accurate masks are
+necessary for evaluating prompt localization, segmenta-
+tion, and relationship prediction.
+These characteristics make OpenPVSG an ideal bench-
+mark for assessing Click2Graph’s ability to combine visual
+prompting, object discovery, panoptic segmentation, and re-
+lational reasoning in a unified framework.
+5. Evaluation Metrics
+Click2Graph integrates visual prompting, interaction dis-
+covery, panoptic segmentation, and semantic reasoning into
+a unified pipeline. Standard SGG metrics such as Pred-
+icate Classification (PREDCLS), Scene Graph Classifica-
+tion (SGCLS), and Scene Graph Detection (SGDET) are
+therefore inappropriate to characterize system performance.
+We evaluate using three complementary recall-based met-
+rics that provides a fine-grained evaluation of our model’s
+spatial precision, prompt generation reliability, and overall
+scene graph accuracy.
+1. Recall@K (End-to-End Semantic Interaction Recall)
+Recall@K (R@K) measures full triplet correctness. A pre-
+diction ⟨si, oi,j, ri,j⟩is counted as correct if:
+1. Subject, object, and predicate labels match the ground
+truth; and
+2. The predicted subject and object masks both achieve
+IoU ≥τ with the corresponding ground-truth masks.
+Predictions are ranked by confidence, and only the top-K
+are used. This metric evaluates the complete Click2Graph
+pipeline, combining DIDM, SAM2 segmentation, and SCH
+semantic reasoning. Following prior PVSG work, we set
+the IoU threshold to τ = 0.5.
+2. Spatial Interaction Recall (SpIR) SpIR isolates the
+quality of spatial grounding. While calculating this met-
+ric, a subject–object pair is considered correct if it satisfies
+the following requirement:
+IoU( ˆ
+SM, SM∗) ≥τ
+and
+IoU( ˆ
+OM, OM∗) ≥τ,
+regardless of predicted class or predicate labels. This metric
+evaluates the combined effectiveness of DIDM in producing
+appropriate object prompts and SAM2 in propagating pre-
+cise panoptic masks over time.
+3. Prompt Localization Recall (PLR) PLR measures the
+accuracy of DIDM’s predicted object prompt points. A dis-
+covered object prompt ˆpi,j is counted as correct if it lies
+within the ground-truth object mask:
+ˆpi,j ∈OM∗
+i,j.
+PLR thus assesses the reliability of interaction discovery in-
+dependently of subsequent segmentation or semantic pre-
+diction.
+Evaluation Protocol. Because prompt-based systems are
+sensitive to initial user inputs, we evaluate robustness by
+repeating each experiment 25 times, sampling a unique ini-
+tial point from the subject’s ground-truth mask for each run.
+We report all metrics as mean ± standard deviation across
+runs.
+6. Results & Ablations
+We evaluate Click2Graph on the OpenPVSG benchmark us-
+ing the three metrics introduced in Section 5. These metrics
+allow us to separately assess (1) semantic triplet reasoning,
+(2) segmentation and interaction grounding quality, and (3)
+the reliability of object prompt generation.
+End-to-End
+Performance:
+Table
+2
+compares
+Click2Graph with prior automated PVSG approaches.
+6
+Table 2.
+Comparison of standard Recall@K metrics between
+Click2Graph and prior automated PVSG approaches.
+Prior
+methods generate full-frame proposals and must detect subjects;
+Click2Graph receives a subject prompt, reflecting its interactive
+setting.
+Method
+Recall@3
+Recall@20
+PVSG [32] + IPS+T [4, 29]
+-
+3.88
+PVSG [32] + VPS [4, 15]
+-
+0.42
+MACL [22] + IPS+T
+-
+4.51
+MACL [22] + VPS
+-
+0.84
+Click2Graph (Ours)
+2.23
+-
+Unlike these methods, which generate dense full-frame
+proposals and must detect subjects, our work receives a
+subject prompt and produces only the interaction-centric
+predictions associated with that target. Despite generating
+far fewer predictions per frame (Nq = 3, compared to
+∼100 in automated baselines),
+Click2Graph achieves
+competitive R@K scores. This demonstrates that targeted,
+user-guided reasoning can reduce the search space while
+preserving strong semantic alignment.
+Furthermore, the
+interactive paradigm makes Click2Graph complementary
+to fully automated PVSG methods, offering a practical path
+toward controllable and corrective scene graph generation.
+Robustness to Prompt Type:
+We study how the quality
+of user-specified prompts influences Click2Graph by com-
+paring three forms of input: a single point, a bounding box,
+and a full segmentation mask. During training, point and
+box prompts are sampled with high probability (0.49 each),
+reflecting low-effort user inputs, while mask prompts are
+used rarely (0.02). As shown in Table 3, performance varies
+modestly across prompt types: masks yield slightly higher
+scores, as expected, but all three provide stable results, with
+low variance across runs. This confirms that Click2Graph
+is robust to imperfect or low-precision user interactions,
+which is a key requirement for practical deployment.
+Contribution of System Components:
+The three met-
+rics jointly reveal the behavior of Click2Graph’s submod-
+ules. High PLR scores indicate that the Dynamic Interaction
+Discovery Module reliably generates subject-conditioned
+prompts that fall inside the correct object regions. Strong
+SpIR performance demonstrates that SAM2, when guided
+by these prompts, yields accurate panoptic masks for both
+subjects and interacting objects. R@K remains the most
+challenging metric, reflecting the difficulty of fine-grained
+label and predicate classification.
+Most semantic errors
+arise from confusions between visually similar categories
+(e.g., child vs. baby, box vs. bag, floor vs. ground), con-
+sistent with the long-tail and high redundancy of the Open-
+Table 3.
+Ablation experiment showing robustness to different
+prompt types.
+Dataset Prompt
+R@3
+SpIR
+PLR
+Epic K. Mask
+1.78
+24.22
+30.67
+Point
+1.14±0.38 23.04±1.08 32.06±0.81
+BBox
+2.08±0.06 25.02±0.09 31.96±0.09
+Ego4d
+Mask
+0.73
+17.22
+38.37
+Point
+0.56±0.04 16.21±1.04 39.87±0.38
+BBox
+0.72±0.06 17.49±0.32 38.97±0.11
+Vidor
+Mask
+3.33
+18.77
+30.82
+Point
+2.72±0.25 15.37±0.55 28.86±0.34
+BBox
+3.18±0.10 17.59±0.36 30.13±0.23
+PVSG semantic space.
+Importance of DIDM:
+To isolate the contribution of the
+Dynamic Interaction Discovery Module, we replace it with
+a heuristic that samples prompts from a dataset-level object-
+probability heatmap. The heuristic assigns high likelihood
+to locations where objects commonly appear but is not
+conditioned on the prompted subject. Table 4 shows that
+this replacement severely degrades PLR, SpIR, and R@K
+across all datasets. This highlights that subject-conditioned
+prompt generation is essential for interaction-centric rea-
+soning—generic object priors are insufficient to capture the
+relational structure required for PVSG.
+Table 4. Comparison of the different metric based on the interac-
+tion discovery strategy.
+Dataset
+Strategy
+Metric
+R@3
+SpIR
+PLR
+Epic K.
+Heuristic
+0.62
+5.14
+10.60
+DIDM(ours)
+2.08
+25.02
+32.06
+Ego4d
+Heuristic
+0.28
+4.26
+9.30
+DIDM(ours)
+0.73
+17.49
+39.87
+Vidor
+Heuristic
+0.68
+4.66
+10.19
+DIDM(ours)
+3.33
+18.77
+30.82
+Qualitative Analysis:
+Figure 4 illustrates Click2Graph’s
+behavior across diverse scenarios. In the first row, the sys-
+tem correctly recovers multiple interacting objects and pro-
+duces coherent triplets. The second row demonstrates tem-
+poral robustness: even after partial occlusion or momen-
+tary subject disappearance, the system continues to pro-
+duce consistent predictions. Failure cases (third row) typ-
+ically involve predicate granularity (on vs. sitting) or ob-
+ject categories with subtle visual differences (gift vs. box).
+7
+(a)
+Prediction: adult, box, holding
+GT: adult, box, holding
+(b)
+Prediction: adult, bag, holding
+GT: adult, bag, holding
+(c)
+Prediction: adult, spatula, holding
+GT: adult, spatula, holding
+(d)
+Prediction: ball, grass, on
+GT: ball, grass, on
+(e)
+Subject temporarily occluded by camera
+motion
+(f)
+Prediction: ball, grass, on
+GT: ball, grass, on
+(g)
+Prediction: child, floor, sitting
+GT: child, floor, on
+(h)
+Prediction: child, box, holding
+GT: child, gift, holding
+(i)
+Prediction: child, helmet, wearing
+Triplet not in Ground Truth
+Figure 4. Qualitative results illustrating correct predictions, occlusion robustness, and typical failure cases.
+These examples visually corroborate our quantitative find-
+ings: segmentation and interaction discovery are reliable,
+while semantic classification remains the primary bottle-
+neck.
+7. Conclusions and Future Work
+We introduced Click2Graph, the first user-guided frame-
+work for Panoptic Video Scene Graph Generation. By com-
+bining a single visual prompt with subject-conditioned in-
+teraction discovery and semantic reasoning, Click2Graph
+enables controllable, interpretable video understanding.
+Central to the system is the Dynamic Interaction Discov-
+ery Module, which reliably generates object prompts con-
+ditioned on the user-specified subject, and the Semantic
+Classification Head, which elevates promptable segmenta-
+tion into full triplet prediction. Together, these components
+transform SAM2 into a complete PVSG pipeline capable of
+structured, interaction-centric reasoning.
+Experiments on the OpenPVSG benchmark demonstrate
+that Click2Graph achieves strong spatial grounding and re-
+liable object discovery, while highlighting the challenges of
+fine-grained semantic classification in a large, diverse label
+space. Most errors arise from distinctions between visu-
+ally similar object categories or predicates, suggesting that
+semantic reasoning, rather than segmentation or interaction
+discovery, is the primary bottleneck.
+A limitation of the current system is that real-time user
+intervention is restricted to segmentation correction; users
+cannot directly modify predicted labels during inference,
+and such corrections do not yet feed back into the model.
+As future work, we plan to integrate a lightweight feed-
+back mechanism in which user-provided label corrections
+dynamically update a set of learnable class embeddings.
+This would enable Click2Graph to adapt its semantic pre-
+8
+dictions over time and maintain consistency across future
+frames.
+Beyond label correction, Click2Graph opens several
+promising research directions, including (1) integrating
+language models to enhance predicate reasoning and re-
+duce fine-grained semantic confusion, (2) developing multi-
+subject prompting strategies for complex multi-agent inter-
+actions, and (3) leveraging interactive supervision to im-
+prove long-tail predicate learning. By unifying promptable
+segmentation with subject-conditioned relational inference,
+Click2Graph offers a foundation for the next generation of
+interactive, human-centered video scene understanding sys-
+tems.
+References
+[1] Oron Ashual and Lior Wolf. Interactive scene generation via
+scene graphs with attributes.
+In Proceedings of the AAAI
+Conference on Artificial Intelligence, pages 13651–13654,
+2020. 3
+[2] Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas
+Usunier, Alexander Kirillov, and Sergey Zagoruyko. End-to-
+end object detection with transformers. In European confer-
+ence on computer vision, pages 213–229. Springer, 2020. 5
+[3] Mu Chen, Liulei Li, Wenguan Wang, and Yi Yang. Diffvsgg:
+Diffusion-driven online video scene graph generation.
+In
+Proceedings of the Computer Vision and Pattern Recognition
+Conference, pages 29161–29172, 2025. 2
+[4] Bowen Cheng, Ishan Misra, Alexander G Schwing, Alexan-
+der Kirillov, and Rohit Girdhar.
+Masked-attention mask
+transformer for universal image segmentation. In Proceed-
+ings of the IEEE/CVF conference on computer vision and
+pattern recognition, pages 1290–1299, 2022. 7
+[5] Yuren Cong, Wentong Liao, Hanno Ackermann, Bodo
+Rosenhahn, and Michael Ying Yang. Spatial-temporal trans-
+former for dynamic scene graph generation. In Proceedings
+of the IEEE/CVF international conference on computer vi-
+sion, pages 16372–16382, 2021. 1, 2, 3
+[6] Dima Damen, Hazel Doughty, Giovanni Maria Farinella,
+Sanja Fidler, Antonino Furnari, Evangelos Kazakos, Da-
+vide Moltisanti, Jonathan Munro, Toby Perrett, Will Price,
+and Michael Wray.
+Scaling egocentric vision: The epic-
+kitchens dataset. In European Conference on Computer Vi-
+sion (ECCV), 2018. 6
+[7] Shengyu Feng, Hesham Mostafa, Marcel Nassar, Somdeb
+Majumdar, and Subarna Tripathi. Exploiting long-term de-
+pendencies for generating dynamic scene graphs. In Pro-
+ceedings of the IEEE/CVF Winter Conference on Applica-
+tions of Computer Vision, pages 5130–5139, 2023. 2
+[8] Kristen
+Grauman,
+Andrew
+Westbury,
+Eugene
+Byrne,
+Zachary Chavis, Antonino Furnari, Rohit Girdhar, Jackson
+Hamburger, Hao Jiang, Miao Liu, Xingyu Liu, et al. Ego4d:
+Around the world in 3,000 hours of egocentric video. In Pro-
+ceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, pages 18995–19012, 2022. 6
+[9] Tao He, Lianli Gao, Jingkuan Song, and Yuan-Fang Li. To-
+wards open-vocabulary scene graph generation with prompt-
+based finetuning. In European Conference on Computer Vi-
+sion, pages 56–73. Springer, 2022. 3
+[10] Yuk Heo, Yeong-Jun Lee, and Chang-Su Kim. Guided inter-
+active video object segmentation using reliability-based at-
+tention maps. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 14134–
+14143, 2021. 3
+[11] ASM Iftekhar, Raphael Ruschel, Satish Kumar, Suya You,
+and BS Manjunath. Dds: Decoupled dynamic scene-graph
+generation network. In 2025 IEEE/CVF Winter Conference
+on Applications of Computer Vision (WACV), pages 9670–
+9680. IEEE, 2025. 2
+[12] Siddhesh Khandelwal and Leonid Sigal.
+Iterative scene
+graph generation. Advances in Neural Information Process-
+ing Systems, 35:24295–24308, 2022. 1, 2
+[13] Alexander Kirillov, Eric Mintun, Nikhila Ravi, Hanzi
+Mao, Chloe Rolland, Laura Gustafson, Tete Xiao, Spencer
+Whitehead, Alexander C Berg, Wan-Yen Lo, Piotr Doll´ar,
+and Ross Girshick.
+Segment anything.
+arXiv preprint
+arXiv:2304.02643, 2023. 1, 3
+[14] Chaotao Li, Weixuan Wang, Fan Zhang, and Hao Zhang.
+Sgsg: Stroke-guided scene graph generation. IEEE Trans-
+actions on Visualization and Computer Graphics, 2025. 3
+[15] Xiangtai Li, Wenwei Zhang, Jiangmiao Pang, Kai Chen,
+Guangliang Cheng, Yunhai Tong, and Chen Change Loy.
+Video k-net: A simple, strong, and unified baseline for video
+segmentation. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 18847–
+18857, 2022. 7
+[16] Yiming Li, Xiaoshan Yang, and Changsheng Xu. Dynamic
+scene graph generation via anticipatory pre-training. In Pro-
+ceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, pages 13874–13883, 2022. 2
+[17] Yanjun Li, Zhaoyang Li, Honghui Chen, and Lizhi Xu. Un-
+biased video scene graph generation via visual and semantic
+dual debiasing. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition (CVPR), 2025.
+2
+[18] Xin Lin, Chong Shi, Yibing Zhan, Zuopeng Yang, Yaqi Wu,
+and Dacheng Tao. Td2-net: Toward denoising and debiasing
+for dynamic scene graph generation. ArXiv, abs/2401.12479,
+2024. 2
+[19] Jiale Lu, Lianggangxu Chen, Youqi Song, Shaohui Lin,
+Changbo Wang, and Gaoqi He. Prior knowledge-driven dy-
+namic scene graph generation with causal inference. In Pro-
+ceedings of the 31st ACM International Conference on Mul-
+timedia, page 4877–4885, New York, NY, USA, 2023. Asso-
+ciation for Computing Machinery. 2
+[20] Otniel-Bogdan Mittal, Han Zhang, Tae-Hyun Park, and K
+Sohn. Interactive image generation from scene graphs. In
+Proceedings of the IEEE/CVF Conference on Computer Vi-
+sion and Pattern Recognition Workshops, pages 0–0, 2019.
+3
+[21] Sayak Nag, Kyle Min, Subarna Tripathi, and Amit K Roy-
+Chowdhury. Unbiased scene graph generation in videos. In
+Proceedings of the IEEE/CVF Conference on Computer Vi-
+sion and Pattern Recognition, pages 21008–21018, 2023. 2
+9
+[22] Thong Thanh Nguyen, Xiaobao Wu, Yi Bin, Cong-Duy T
+Nguyen, See-Kiong Ng, and Anh Tuan Luu. Motion-aware
+contrastive learning for temporal panoptic scene graph gen-
+eration. In Proceedings of the AAAI Conference on Artificial
+Intelligence, pages 6218–6226, 2025. 7
+[23] Nikhila Ravi, Valentin Gabeur, Yuan-Ting Hu, Ronghang
+Hu, Chaitanya Ryali, Tengyu Ma, Haitham Khedr, Roman
+R¨adle, Chloe Rolland, Laura Gustafson, et al.
+Sam 2:
+Segment anything in images and videos.
+arXiv preprint
+arXiv:2408.00714, 2024. 1, 3
+[24] Nikhila Ravi, Valentin Gabeur, Yuan-Ting Hu, Ronghang
+Hu, Chaitanya Ryali, Tengyu Ma, Haitham Khedr, Roman
+R¨adle, Chloe Rolland, Laura Gustafson, Eric Mintun, Junt-
+ing Pan, Kalyan Vasudev Alwala, Nicolas Carion, Chao-
+Yuan Wu, Ross Girshick, Piotr Doll´ar, and Christoph Feicht-
+enhofer. Sam 2: Segment anything in images and videos,
+2024. 3
+[25] Xindi Shang, Donglin Di, Junbin Xiao, Yu Cao, Xun Yang,
+and Tat-Seng Chua. Annotating objects and relations in user-
+generated videos. In Proceedings of the 2019 on Interna-
+tional Conference on Multimedia Retrieval, pages 279–287.
+ACM, 2019. 6
+[26] Oytun Ulutan, ASM Iftekhar, and Bangalore S Manjunath.
+Vsgnet: Spatial attention network for detecting human ob-
+ject interactions using graph convolutions. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 13617–13626, 2020. 2
+[27] Guan Wang, Zhimin Li, Qingchao Chen, and Yang Liu. Oed:
+Towards one-stage end-to-end dynamic scene graph genera-
+tion. In Proceedings of the IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition, pages 27938–27947,
+2024. 2
+[28] Shuang Wang, Lianli Gao, Xinyu Lyu, Yuyu Guo, Pengpeng
+Zeng, and Jingkuan Song. Dynamic scene graph generation
+via temporal prior inference. In Proceedings of the 30th ACM
+International Conference on Multimedia, page 5793–5801,
+New York, NY, USA, 2022. Association for Computing Ma-
+chinery. 2
+[29] Zhongdao Wang, Hengshuang Zhao, Ya-Li Li, Shengjin
+Wang, Philip Torr, and Luca Bertinetto. Do different track-
+ing tasks require different appearance models? Advances in
+Neural Information Processing Systems, 34:726–738, 2021.
+7
+[30] Danfei Xu, Yuke Zhu, Christopher B Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing. In Pro-
+ceedings of the IEEE conference on computer vision and pat-
+tern recognition, pages 5410–5419, 2017. 1, 2
+[31] Jingkang Yang, Yi Zhe Ang, Zujin Guo, Kaiyang Zhou,
+Wayne Zhang, and Ziwei Liu. Panoptic scene graph gen-
+eration. In European conference on computer vision, pages
+175–192. Springer, 2022. 1, 2, 3
+[32] Jingkang Yang, Wenxuan Peng, Xiangtai Li, Zujin Guo,
+Liangyu Chen, Bo Li, Zheng Ma, Kaiyang Zhou, Wayne
+Zhang, Chen Change Loy, and Ziwei Liu. Panoptic video
+scene graph generation. In CVPR, 2023. 6, 7
+[33] Jingkang Yang, Wenxuan Peng, Xiangtai Li, Zujin Guo,
+Liangyu Chen, Bo Li, Zheng Ma, Kaiyang Zhou, Wayne
+Zhang, Chen Change Loy, et al. Panoptic video scene graph
+generation.
+In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 18675–
+18685, 2023. 1, 2, 3
+[34] Qifan Yu, Juncheng Li, Yu Wu, Siliang Tang, Wei Ji, and
+Yueting Zhuang.
+Visually-prompted language model for
+fine-grained scene graph generation in an open world. In
+Proceedings of the IEEE/CVF International Conference on
+Computer Vision, pages 21560–21571, 2023. 3
+[35] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin
+Choi. Neural motifs: Scene graph parsing with global con-
+text. In Proceedings of the IEEE conference on computer
+vision and pattern recognition, pages 5831–5840, 2018. 1,
+2, 3
+[36] Yong Zhang, Yingwei Pan, Ting Yao, Rui Huang, Tao Mei,
+and Chang-Wen Chen. End-to-end video scene graph gener-
+ation with temporal propagation transformer. IEEE Transac-
+tions on Multimedia, 26:1613–1625, 2023. 2
+[37] Zijian Zhou, Miaojing Shi, and Holger Caesar. Vlprompt:
+Vision-language prompting for panoptic scene graph gener-
+ation. arXiv preprint arXiv:2311.16492, 2023. 3
+10

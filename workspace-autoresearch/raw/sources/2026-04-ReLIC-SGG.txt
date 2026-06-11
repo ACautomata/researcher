@@ -1,0 +1,1514 @@
+ReLIC-SGG: Relation Lattice Completion for Open-Vocabulary Scene Graph
+Generation
+Amir Hosseini, Sara Farahani, Xinyi Li, Suiyang Guang
+Amirkabir University of Technology
+Abstract
+Open-vocabulary scene graph generation (SGG) aims to
+describe visual scenes with flexible relation phrases beyond
+a fixed predicate set. Existing methods usually treat an-
+notated triplets as positives and all unannotated object-
+pair relations as negatives.
+However, scene graph an-
+notations are inherently incomplete: many valid relations
+are missing, and the same interaction can be described
+at different granularities, e.g., on, standing on, resting
+on, and supported by.
+This issue becomes more severe
+in open-vocabulary SGG due to the much larger relation
+space. We propose ReLIC-SGG, a relation-incompleteness-
+aware framework that treats unannotated relations as la-
+tent variables rather than definite negatives. ReLIC-SGG
+builds a semantic relation lattice to model similarity, en-
+tailment, and contradiction among open-vocabulary pred-
+icates, and uses it to infer missing positive relations from
+visual-language compatibility, graph context, and seman-
+tic consistency. A positive-unlabeled graph learning ob-
+jective further reduces false-negative supervision, while
+lattice-guided decoding produces compact and semanti-
+cally consistent scene graphs.
+Experiments on conven-
+tional, open-vocabulary, and panoptic SGG benchmarks
+show that ReLIC-SGG improves rare and unseen predicate
+recognition and better recovers missing relations.
+1. Introduction
+Scene graph generation (SGG) parses a visual scene into
+a structured graph, where nodes correspond to object in-
+stances and edges describe semantic relations between ob-
+jects [1–5]. By explicitly modeling object-centric interac-
+tions, scene graphs provide an interpretable intermediate
+representation for visual question answering, visual rea-
+soning, image retrieval, human-object interaction under-
+standing, robotic manipulation, embodied navigation, and
+commonsense reasoning [6–8]. Over the past few years,
+SGG has evolved from closed-set predicate classification to-
+ward open-vocabulary relation understanding, where mod-
+els are expected to recognize flexible and fine-grained rela-
+tion phrases beyond a fixed predicate set [9–18].
+Despite this progress, most existing SGG methods still
+rely on a questionable supervision assumption: annotated
+triplets are treated as positives, while unannotated object-
+pair predicates are treated as negatives [4, 19–25]. This
+assumption is convenient for training but inconsistent with
+the nature of scene graph annotations. In real datasets, re-
+lation annotations are highly sparse and incomplete. For
+a given object pair, annotators usually label only one
+or a few salient relations, while many other valid rela-
+tions are omitted [1, 2, 26].
+For example, if an image
+contains a person standing on a skateboard, the annota-
+tion may include person-on-skateboard, but omit person-
+standing on-skateboard, person-supported by-skateboard,
+or skateboard-under-person. Similarly, for a cup on a table,
+the graph may annotate on but omit resting on, supported
+by, or above. Therefore, the absence of a relation label does
+not necessarily indicate that the relation is false.
+This issue is particularly harmful for open-vocabulary
+SGG. Compared with closed-set SGG, open-vocabulary
+SGG expands the predicate space from a small set of pre-
+defined labels to a much larger set of natural-language re-
+lation phrases [9–12, 14–17]. As a result, each object pair
+may correspond to multiple valid relation descriptions with
+different wording, granularity, and semantic scope. How-
+ever, existing methods usually optimize relation prediction
+using standard classification or contrastive losses, which pe-
+nalize unannotated candidate relations as negatives [20–22].
+Consequently, a model may be discouraged from predicting
+valid but unannotated relations. This creates a fundamental
+conflict: open-vocabulary SGG aims to generate richer rela-
+tion descriptions, but its supervision signal remains sparse,
+incomplete, and biased toward frequent predicates.
+Existing studies have made important progress in long-
+tail debiasing, semantic prototype learning, causal inter-
+vention, prompt learning, panoptic SGG, video SGG, 3D
+SGG, and embodied scene graph construction [20–22, 26–
+35].
+However, most of them still formulate SGG as a
+recognition problem over observed annotations. Even when
+vision-language models are introduced for open-vocabulary
+prediction, the learning objective often assumes that non-
+arXiv:2604.22546v6  [cs.CV]  26 May 2026
+annotated relation phrases are incorrect [10, 11, 15–17].
+This makes the model vulnerable to false-negative super-
+vision. The problem is not only that rare predicates are
+under-represented, but that many valid predicates are never
+annotated as positives.
+In this work, we argue that the next step for open-
+vocabulary SGG is to move from closed-label relation clas-
+sification to incomplete-label relation completion. Instead
+of asking only “which annotated predicate should be as-
+signed to this object pair?”, we ask a different research
+question: how can an SGG model learn expressive open-
+vocabulary relations when many correct relations are miss-
+ing from the annotations? This question shifts the focus
+from expanding the predicate vocabulary to learning under
+incomplete and ambiguous supervision. This view is con-
+nected to positive-unlabeled learning, partial-label learning,
+graph representation learning, and incomplete multimodal
+learning, where the absence of supervision should not be
+naively interpreted as negative evidence [36–40].
+To address this problem, we propose ReLIC-SGG, a
+Relation-Incompleteness-aware Completion framework for
+open-vocabulary SGG. The key idea is to treat unanno-
+tated relations not as definite negatives, but as latent vari-
+ables whose labels should be inferred from visual evidence,
+language semantics, and graph context. Specifically, for
+each object pair, our model first proposes a set of open-
+vocabulary relation candidates using vision-language rep-
+resentations [10, 11]. It then constructs a semantic relation
+lattice that captures three types of predicate dependencies:
+semantic similarity, directional entailment, and contradic-
+tion. Based on this lattice, a latent relation completion mod-
+ule estimates the probability that an unannotated relation
+is a missing positive. Finally, a positive-unlabeled graph
+learning objective trains the model without incorrectly pe-
+nalizing likely missing relations.
+The proposed framework is motivated by three observa-
+tions. First, many relation phrases are semantically corre-
+lated rather than independent. For example, standing on
+entails on, while resting on and supported by are similar
+but not identical. Second, missing relations are not arbi-
+trary; they can often be inferred from visual-language com-
+patibility, neighboring graph context, and semantic consis-
+tency. Third, a useful scene graph should be semantically
+complete but not redundant: it should recover valid missing
+relations while avoiding contradictory or repetitive predic-
+tions. ReLIC-SGG is designed around these principles.
+Our contributions are summarized as follows:
+• We identify relation annotation incompleteness as a criti-
+cal bottleneck for open-vocabulary SGG, where unanno-
+tated but valid relations are often incorrectly treated as
+negatives.
+• We propose ReLIC-SGG, a relation-incompleteness-
+aware framework that treats unannotated relations as la-
+tent variables and learns to complete missing relation la-
+bels.
+• We introduce a semantic relation lattice that models
+similarity, entailment, and contradiction among open-
+vocabulary predicates,
+enabling supervision transfer
+across relation phrases.
+• We design a positive-unlabeled graph learning objective
+and a lattice-guided graph decoding strategy to learn ex-
+pressive yet compact scene graphs under incomplete su-
+pervision.
+• We introduce false-negative-aware evaluation protocols
+to measure whether a model can recover valid missing
+relations beyond standard recall-based metrics.
+2. Related Work
+2.1. Scene Graph Generation
+Scene graph generation aims to parse a scene into object-
+relation-object triplets [1–3]. Early methods typically fol-
+low a detect-then-classify pipeline, where object propos-
+als are first detected and relation classifiers are then ap-
+plied to object pairs [3–5]. Later works improve relation
+reasoning through message passing, graph neural networks,
+transformer-based interaction modeling, external common-
+sense knowledge, visual-linguistic context, and causal inter-
+vention [6–8, 19–22, 41]. However, these methods usually
+assume a closed predicate vocabulary and rely heavily on
+annotated relation labels.
+A major challenge in SGG is the long-tail distribution
+of predicates. Many works address this issue through re-
+weighting, causal debiasing, semantic prototypes, predicate
+clustering, balanced message passing, and compositional
+relation learning [20–26]. Lifelong and unified SGG formu-
+lations further investigate how relation knowledge evolves
+across tasks and interaction settings. These methods im-
+prove rare predicate prediction, but they generally assume
+that unannotated relations are negative.
+In contrast, our
+work focuses on annotation incompleteness. We argue that
+rare relation learning cannot be fully solved by re-balancing
+alone, because many rare or fine-grained relations are not
+annotated in the first place.
+2.2. Open-Vocabulary Scene Graph Generation
+Open-vocabulary SGG extends relation prediction beyond
+fixed predicate categories.
+Recent works use vision-
+language models, prompt learning, text-image alignment,
+open-vocabulary detectors, large language models, and re-
+lation mining to generate or recognize unseen relation
+phrases [9–18]. These methods substantially improve the
+semantic coverage of SGG and make relation prediction
+more flexible. Similar open-vocabulary and prompt-based
+ideas have also been explored in human-object interaction
+detection, multimodal intent recognition, and robust prompt
+learning.
+However, open-vocabulary SGG also amplifies the in-
+completeness problem. Since the candidate relation space
+is large, most valid relation phrases are not explicitly anno-
+tated. A model trained with standard contrastive or classifi-
+cation objectives may therefore treat valid unseen relations
+as negatives.
+For example, if the dataset only annotates
+on, the relation phrases standing on, resting on, and sup-
+ported by may all be incorrectly suppressed. ReLIC-SGG
+addresses this issue by explicitly modeling missing relations
+as latent positives.
+2.3. Learning from Incomplete Labels
+Learning from incomplete labels has been studied in
+weakly supervised learning, partial-label learning, positive-
+unlabeled learning, noisy-label learning, missing-modality
+learning, and incomplete multimodal reasoning [36–40].
+The core idea is to relax the assumption that unlabeled
+samples are necessarily negative. This principle is particu-
+larly suitable for SGG because scene graph annotations are
+sparse and many object-pair relations are unlabeled rather
+than false.
+Unlike standard positive-unlabeled learning,
+SGG requires structured prediction. Missing labels are not
+independent: relation phrases may imply, contradict, or re-
+fine one another. Prior graph and multimodal representa-
+tion studies show that structured dependencies can improve
+reasoning, retrieval, robustness, and generalization. There-
+fore, our method introduces a semantic relation lattice and
+graph-level consistency learning, allowing missing relation
+completion to be performed in a structured open-vocabulary
+space.
+2.4. Panoptic, Video, 3D, and Embodied Scene
+Graphs
+Recent works extend SGG to panoptic, video, 3D, and
+embodied settings [17, 27–35]. Panoptic SGG associates
+relations with segmentation masks; video SGG models
+temporal interactions; 3D SGG incorporates metric layout
+and spatial structure; and embodied graphs further con-
+nect object relations with states, affordances, and task plan-
+ning [31–35]. These settings make annotation incomplete-
+ness even more severe because each object pair may have
+multiple valid spatial, temporal, and functional relations.
+Our framework is complementary to these directions and
+can be extended to mask-level and 3D relation completion.
+2.5. Broader Multimodal and Efficient Visual Rep-
+resentation Learning
+Our formulation is also related to broader work on mul-
+timodal representation learning, efficient retrieval, dataset
+distillation, hashing, and robust perception. These works
+address complementary issues such as compact representa-
+tion, cross-modal alignment, dynamic retrieval, and robust
+multimodal fusion. While they do not directly solve open-
+vocabulary SGG, they provide useful perspectives on how
+to learn structured visual representations under imperfect
+supervision. ReLIC-SGG follows this direction by treating
+relation annotations as incomplete observations and using
+semantic graph structure to regularize relation completion.
+3. Method
+3.1. Overview
+Scene graph annotations are naturally sparse. For an ob-
+ject pair, a dataset usually provides only one or a few
+salient relations, while many other valid relation descrip-
+tions may be omitted. This issue becomes more severe in
+open-vocabulary SGG, where a single visual interaction can
+correspond to multiple semantically related phrases. For
+example, person on skateboard, person standing on skate-
+board, and person supported by skateboard can all describe
+the same visual configuration, but only one may be anno-
+tated. If all unannotated predicates are directly treated as
+negatives, the model is penalized for predicting valid but
+missing relations.
+ReLIC-SGG addresses this problem by learning scene
+graphs under incomplete relation annotations. Instead of di-
+rectly optimizing the observed binary labels, we introduce
+latent relation variables to represent the unobserved true
+relation state. The framework contains four components.
+First, an open-vocabulary relation proposer retrieves a high-
+recall candidate set for each object pair. Second, a seman-
+tic relation lattice captures similarity, entailment, and con-
+tradiction among relation phrases. Third, a latent relation
+completion module estimates whether an unannotated can-
+didate is likely to be a missing positive. Finally, positive-
+unlabeled graph learning trains the model using annotated
+positives, inferred missing positives, and reliable negatives.
+3.2. Problem Definition
+Let I denote an input image and O = {oi}N
+i=1 denote the
+detected object instances.
+Each object oi is represented
+by its category label ci, bounding box bi, optional mask
+mi, and visual feature hi.
+For each ordered object pair
+(oi, oj), the model predicts relation phrases from an open-
+vocabulary predicate space Ropen.
+A conventional SGG model assumes that the annotation
+vector yr
+ij is complete:
+yr
+ij =
+(
+1,
+if (oi, r, oj) is annotated,
+0,
+otherwise.
+(1)
+Under this formulation, all unannotated relations are opti-
+mized as negatives. However, this assumption is too strong
+for SGG because the annotation process is selective rather
+than exhaustive. The value yr
+ij = 0 may mean that rela-
+Figure 1. Overall framework of ReLIC-SGG. Given detected objects, the model first proposes open-vocabulary relation candidates for each
+object pair. A semantic relation lattice models similarity, entailment, and contradiction among predicates. The latent relation completion
+module estimates missing positive relations from visual-language compatibility, lattice consistency, and graph context. The model is trained
+with positive-unlabeled graph learning and decoded with lattice-guided graph selection.
+tion r is truly false, but it may also mean that the relation is
+visually valid but missing from the annotation.
+We therefore introduce a latent relation variable zr
+ij ∈
+{0, 1}:
+yr
+ij = 1 ⇒zr
+ij = 1,
+yr
+ij = 0 ⇒zr
+ij ∈{0, 1}.
+(2)
+This equation separates observed annotations from the la-
+tent true relation state.
+An annotated relation is always
+treated as positive, while an unannotated relation remains
+uncertain. The learning objective is thus to estimate:
+pθ(zr
+ij = 1|I, oi, oj, r),
+(3)
+which measures the probability that relation r truly holds
+for object pair (oi, oj), even if it is not explicitly annotated.
+This formulation allows the model to preserve the reliabil-
+ity of human-labeled positives while avoiding false-negative
+supervision on missing relations.
+3.3. Open-Vocabulary Relation Proposal
+For each object pair (oi, oj), we first construct a visual pair
+representation from subject, object, union-region, and spa-
+tial features:
+pij = ϕp([hi, hj, hu
+ij, gij]),
+(4)
+where hi and hj describe the appearance of the subject and
+object, hu
+ij captures the visual interaction region, and gij
+encodes relative geometry, including relative position, scale
+ratio, intersection-over-union, center distance, and optional
+depth statistics. The projection function ϕp(·) maps hetero-
+geneous visual and spatial cues into a unified relation repre-
+sentation. This pair representation is designed to retain both
+appearance-level and layout-level information, since many
+relations cannot be recognized from object categories alone.
+Each relation phrase r ∈Ropen is encoded by a vision-
+language text encoder to obtain its text embedding tr. The
+initial visual-language compatibility score is:
+sr
+ij = sim(Wppij, Wttr),
+(5)
+where Wp and Wt project visual pair features and text em-
+beddings into a shared embedding space, and sim(·, ·) de-
+notes cosine similarity. This score measures whether the
+visual configuration of (oi, oj) is semantically compatible
+with relation phrase r.
+For each object pair, we keep the top-K relation candi-
+dates:
+Cij = TopKr∈Ropensr
+ij.
+(6)
+The candidate set is intentionally high-recall. Since open-
+vocabulary predicates may include synonyms, fine-grained
+phrases, and unseen relation descriptions, filtering too ag-
+gressively at this stage may remove valid missing relations
+before completion. Therefore, noisy or redundant candi-
+dates are allowed and are later refined by semantic lattice
+reasoning and graph-level learning.
+3.4. Semantic Relation Lattice
+Open-vocabulary predicates are not independent categories.
+Many relation phrases have structured semantic dependen-
+cies. Some predicates are near synonyms, such as resting
+on and supported by; some form fine-to-coarse entailment
+relations, such as standing on→on; and others are mutually
+exclusive, such as in front of and behind. Modeling these
+dependencies is important because missing relation labels
+can often be inferred from semantically connected predi-
+cates.
+We construct a semantic relation lattice L = (Ropen, A),
+where each node is a relation phrase and each edge repre-
+sents a semantic dependency. The edge set is defined as:
+A = Asim ∪Aent ∪Acon,
+(7)
+where Asim connects semantically similar predicates, Aent
+connects fine-grained predicates to their entailed coarse
+predicates, and Acon connects contradictory predicates.
+The three edge types play different roles: similarity edges
+transfer confidence between related phrases, entailment
+edges maintain hierarchical consistency, and contradiction
+edges prevent mutually exclusive predictions from being ac-
+cepted together.
+The edge weight between two predicates is computed by:
+w(r, r′) = sim(tr, tr′).
+(8)
+The text similarity provides a soft measure of semantic re-
+latedness. However, text similarity alone may be unreliable
+for directional or opposite predicates, because antonyms
+can still be close in language embedding space. Therefore,
+for entailment and contradiction edges, we additionally use
+relation templates and manually verified rules to construct
+more reliable semantic constraints.
+Given initial relation scores {sr
+ij}, the lattice first propa-
+gates confidence among compatible predicates:
+¯sr
+ij = sr
+ij+λsim
+X
+r′∈Nsim(r)
+w(r, r′)sr′
+ij+λent
+X
+r′∈Nchild(r)
+w(r′, r)sr′
+ij.
+(9)
+The first term is the original visual-language compatibil-
+ity score. The second term aggregates evidence from se-
+mantically similar predicates. If resting on receives a high
+score, it can support related predicates such as supported by.
+The third term aggregates evidence from fine-grained child
+predicates that entail the current predicate. For example, a
+high score for standing on provides evidence for the coarser
+relation on. This propagation allows sparse annotations to
+support a richer relation space.
+Contradictory predicates are then suppressed:
+˜sr
+ij = ¯sr
+ij −λcon
+X
+r′∈Ncon(r)
+w(r, r′)σ(¯sr′
+ij).
+(10)
+Here, the second term penalizes relation r if its contradic-
+tory predicates have high confidence. For instance, if be-
+hind receives strong evidence, the score of in front of should
+be reduced for the same ordered object pair. The result-
+ing score ˜sr
+ij is a lattice-calibrated relation score that incor-
+porates visual-language compatibility, semantic expansion,
+and contradiction suppression.
+3.5. Latent Relation Completion
+For each candidate relation (oi, r, oj), we estimate a poste-
+rior probability:
+qr
+ij = p(zr
+ij = 1|I, oi, oj, r, yr
+ij).
+(11)
+This posterior represents the probability that relation r is a
+true relation for object pair (oi, oj). For annotated positive
+relations, the posterior is fixed as:
+qr
+ij = 1,
+if yr
+ij = 1.
+(12)
+This preserves annotated triplets as reliable supervision. For
+unannotated candidates, qr
+ij is inferred rather than directly
+set to zero:
+qr
+ij = σ
+ α˜sr
+ij + βcr
+ij + γgr
+ij −δnr
+ij
+
+.
+(13)
+The four terms correspond to complementary signals. The
+lattice-calibrated score ˜sr
+ij measures direct visual-language
+compatibility. The consistency term cr
+ij measures support
+from semantically compatible predicates. The graph con-
+text term gr
+ij measures whether the relation fits the sur-
+rounding scene graph. The contradiction term nr
+ij reduces
+the posterior when mutually exclusive relations are already
+confident. The sigmoid function maps the combined evi-
+dence into a probability.
+The lattice consistency term is defined as:
+cr
+ij =
+X
+r′∈Nsim(r)
+w(r, r′)qr′
+ij +
+X
+r′∈Nchild(r)
+w(r′, r)qr′
+ij. (14)
+This term propagates posterior confidence from semanti-
+cally similar predicates and fine-grained child predicates.
+If several related relations are likely to be true, then relation
+r should also become more plausible. This is especially
+useful when the annotated relation is coarse while the open-
+vocabulary candidate is more descriptive, or vice versa.
+The contradiction term is:
+nr
+ij =
+X
+r′∈Ncon(r)
+w(r, r′)qr′
+ij.
+(15)
+This term measures how strongly relation r conflicts with
+other confident predicates. A high contradiction score de-
+creases the completion posterior, preventing the model from
+accepting incompatible relation phrases.
+The graph context term is computed by a graph trans-
+former:
+gr
+ij = ϕg(oi, oj, r, Gctx
+ij ),
+(16)
+where Gctx
+ij
+denotes the local graph neighborhood around
+object pair (oi, oj). The context includes nearby objects,
+high-confidence relations, and object-pair interaction fea-
+tures. This term allows missing relation completion to de-
+pend on the broader scene structure rather than only on a
+single pair. For example, the relation holding is more plau-
+sible when the subject is a person, the object is small and
+close to the hand region, and other nearby relations indicate
+interaction.
+3.6. Reliable Negative Estimation
+Not all unannotated relations should be ignored. Some are
+genuine negatives and provide useful supervision. The chal-
+lenge is to select these negatives without incorrectly sup-
+pressing missing positives. We estimate a negative reliabil-
+ity score:
+ρr
+ij = (1 −qr
+ij) · σ
+ ηnr
+ij −µ˜sr
+ij
+
+.
+(17)
+The first factor (1 −qr
+ij) ensures that a relation is consid-
+ered negative only when its missing-positive posterior is
+low. The sigmoid term further increases negative reliability
+when the relation contradicts confident predicates and has
+weak visual-language compatibility. Therefore, a relation
+obtains a high negative reliability score only when multiple
+signals suggest that it is unlikely to be valid.
+This mechanism balances two needs. On one hand, the
+model should not treat every missing label as a negative.
+On the other hand, it still needs reliable negative supervi-
+sion to avoid predicting overly dense graphs. The score ρr
+ij
+provides a soft way to distinguish likely false relations from
+uncertain unannotated ones.
+3.7. Positive-Unlabeled Graph Learning
+We train ReLIC-SGG using positive-unlabeled graph learn-
+ing. Let P denote annotated positive triplets and U denote
+unannotated candidate triplets. The positive risk is:
+R+
+p = E(i,j,r)∈P
+
+−log σ(˜sr
+ij)
+
+.
+(18)
+This term encourages annotated relations to receive high
+lattice-calibrated scores.
+For unannotated candidates, we use the latent comple-
+tion posterior and negative reliability score to construct a
+soft learning target:
+Ru = E(i,j,r)∈U
+
+qr
+ij · −log σ(˜sr
+ij) + ρr
+ij · −log(1 −σ(˜sr
+ij))
+
+.
+(19)
+The first term promotes unannotated relations that are likely
+to be missing positives. The second term suppresses unan-
+notated relations that are estimated to be reliable negatives.
+If a relation is uncertain, both qr
+ij and ρr
+ij remain moderate,
+so the model avoids applying overly strong supervision.
+The positive-unlabeled relation loss is:
+LPU = R+
+p + λuRu.
+(20)
+Compared with standard binary cross-entropy over ob-
+served labels, this loss better matches the incomplete-label
+nature of SGG. It keeps annotated positives as strong su-
+pervision, recovers likely missing relations, and uses only
+reliable negatives for suppression.
+3.8. Graph-Level Semantic Consistency
+Relation completion may increase graph density if every se-
+mantically related phrase is accepted. To produce complete
+but compact graphs, we impose semantic consistency at the
+graph level. The graph-level lattice loss is:
+Llat =
+X
+i,j
+X
+(r,r′)∈Acon
+qr
+ijqr′
+ij+
+X
+i,j
+X
+(r→r′)∈Aent
+max(0, qr
+ij−qr′
+ij).
+(21)
+The first term penalizes contradictory relations that are si-
+multaneously assigned high posterior probabilities.
+The
+second term enforces entailment consistency.
+If a fine-
+grained relation r entails a coarse relation r′, then the pos-
+terior of r′ should not be lower than that of r. This keeps
+the completed graph semantically coherent.
+We further introduce a compactness regularizer:
+Lcmp =
+X
+i,j
+
+X
+r∈Cij
+qr
+ij −ρden
+ij
+
+,
+(22)
+where ρden
+ij
+is an adaptive graph-density prior estimated
+from object-pair salience, spatial overlap, and visual inter-
+action strength. This term does not force every object pair
+to have the same number of relations. Instead, it allows
+highly interactive object pairs to have multiple valid rela-
+tion descriptions while discouraging excessive predictions
+for weakly related pairs.
+3.9. Training Strategy
+Training is performed in three stages. First, we warm up the
+relation scorer using annotated positives and reliable back-
+ground object pairs. This provides a stable initial visual-
+language scoring function. Second, we construct the se-
+mantic relation lattice and initialize latent posteriors us-
+ing visual-language compatibility and lattice propagation.
+Third, we jointly optimize relation scoring, latent comple-
+tion, reliable negative estimation, and graph-level semantic
+consistency.
+At each training iteration, we update the latent posterior
+with the current model prediction:
+qr
+ij ←stopgrad
+
+σ
+ α˜sr
+ij + βcr
+ij + γgr
+ij −δnr
+ij
+
+.
+(23)
+The stop-gradient operation stabilizes training by prevent-
+ing the model from directly minimizing the loss through
+its own pseudo-label update. Without this operation, early
+noisy completion estimates may be amplified and lead to
+degenerate dense graphs.
+The full training objective is:
+L = LPU + λlatLlat + λcmpLcmp.
+(24)
+The first term learns relation prediction under incomplete
+labels, the second term enforces semantic consistency, and
+the third term controls graph density.
+3.10. Lattice-Guided Graph Decoding
+During inference, the final relation score is: ˆsr
+ij = ˜sr
+ij +
+λqqr
+ij. This score combines the lattice-calibrated relation
+confidence and the latent completion posterior. A relation is
+therefore preferred when it is visually compatible and likely
+to be a true relation under incomplete-label reasoning.
+We first select top-ranked relation candidates for each
+object pair. Then, lattice-guided decoding removes contra-
+dictory predictions and reduces semantic redundancy. For
+a contradictory pair (ra, rb) ∈Acon, we retain the relation
+with the higher score:
+r∗= arg
+max
+r∈{ra,rb} ˆsr
+ij.
+(25)
+For highly similar predicates, we keep the most specific
+relation and optionally include its entailed parent when
+it improves graph consistency.
+This produces an open-
+vocabulary scene graph that recovers missing relations
+while avoiding unnecessary duplication and contradiction.
+4. Experiments
+4.1. Experimental Setup
+Datasets.
+We evaluate ReLIC-SGG on three represen-
+tative settings.
+First, we use the VG150 split of Visual
+Genome [2], which contains 150 object categories and 50
+predicate categories. Following standard practice [4, 20],
+we report results under Predicate Classification (PredCls),
+Scene Graph Classification (SGCls), and Scene Graph De-
+tection (SGDet). Second, we construct an open-vocabulary
+VG split, where frequent predicates are used as seen classes
+and rare predicates are held out for unseen evaluation [12,
+15, 16]. Third, we evaluate on PSG to test whether rela-
+tion completion remains effective for panoptic scene graph
+generation [17, 27, 28].
+Metrics. For conventional SGG, we report Recall@K and
+mean Recall@K under PredCls, SGCls, and SGDet. Fol-
+lowing previous work [20–22], mR@K is used as the pri-
+mary metric because it better reflects rare predicate perfor-
+mance. For open-vocabulary SGG, we report seen mean
+recall (S-mR), unseen mean recall (U-mR), and their har-
+monic mean (HM). Since our method targets incomplete
+annotations, we additionally report three false-negative-
+aware metrics. FN-Recall measures the recovery rate of
+manually verified missing relations. Lat-Cons measures
+semantic lattice consistency.
+Redundancy measures the
+proportion of semantically duplicate or contradictory pre-
+dictions, where lower is better.
+Implementation details.
+We use Faster R-CNN with
+ResNeXt-101-FPN for object detection [42–44] and CLIP
+ViT-B/16 for relation-text encoding [10]. For PSG, we use
+Mask2Former to obtain panoptic masks [45]. The predi-
+cate pool contains annotated predicates, synonym-expanded
+predicates, and relation phrases mined from image captions.
+We use K = 15 relation candidates per object pair. The
+model is trained using AdamW [46] with a learning rate of
+1 × 10−4 and batch size 12.
+4.2. Comparison with State-of-the-Art Methods on
+VG150
+Table 1 compares ReLIC-SGG with representative SGG
+methods on VG150. The baseline results follow the typi-
+cal reported range in prior SGG literature under compara-
+ble settings. ReLIC-SGG achieves the best mR@K under
+all three tasks. The gains are particularly clear on SGDet,
+where relation annotations are sparse and object detection
+errors further increase uncertainty.
+Analysis. The improvement is larger on mR@K than R@K,
+indicating that ReLIC-SGG mainly benefits rare and under-
+annotated predicates. This supports our motivation: many
+rare predicates are not merely under-represented, but also
+under-annotated. By recovering latent positives and reduc-
+ing false-negative penalties, ReLIC-SGG learns more com-
+plete relation representations.
+4.3. Open-Vocabulary Generalization
+Table 2 reports results on the open-vocabulary VG split.
+ReLIC-SGG substantially improves unseen predicate mean
+recall and harmonic mean.
+Compared with VL-IRM,
+ReLIC-SGG improves U-mR@50 from 12.8 to 18.3. This
+shows that modeling missing labels is especially beneficial
+for open-vocabulary relation learning, where many unseen
+relations are semantically close to annotated seen predicates
+but absent from supervision.
+Analysis.
+The gain on unseen predicates is larger than
+the gain on seen predicates. This is expected because un-
+seen predicates often have no direct supervision but may
+be semantically related to seen predicates. The semantic
+Table 1. Comparison with state-of-the-art methods on VG150. ReLIC-SGG improves mean recall by explicitly modeling missing relations
+instead of treating all unannotated relations as negatives.
+Method
+PredCls
+SGCls
+SGDet
+R@50
+R@100
+mR@50
+mR@100
+R@50
+R@100
+mR@50
+mR@100
+R@50
+R@100
+mR@50
+mR@100
+Motifs [4]
+65.2
+67.1
+14.6
+15.8
+35.8
+36.5
+7.9
+8.5
+27.4
+30.3
+6.5
+7.3
+VCTree [19]
+66.4
+68.1
+16.1
+17.5
+38.1
+39.2
+8.8
+9.6
+28.7
+31.9
+7.4
+8.2
+TDE [20]
+67.2
+69.0
+18.5
+20.1
+39.3
+40.5
+10.9
+12.0
+29.8
+32.7
+9.8
+10.9
+BGNN [21]
+68.7
+70.4
+20.2
+22.0
+40.5
+41.6
+12.3
+13.5
+31.0
+34.1
+10.7
+11.8
+PE-Net [22]
+69.8
+71.6
+23.1
+25.0
+41.7
+42.9
+14.2
+15.4
+32.4
+35.5
+12.6
+13.8
+Pix2Graphs [15]
+71.1
+72.8
+24.6
+26.5
+43.0
+44.2
+15.3
+16.7
+33.6
+36.8
+13.6
+14.9
+VL-IRM [16]
+71.9
+73.5
+25.4
+27.2
+43.8
+45.0
+16.0
+17.4
+34.3
+37.5
+14.2
+15.6
+ReLIC-SGG
+73.0
+74.8
+29.1
+31.0
+45.2
+46.5
+19.3
+21.1
+35.5
+38.7
+16.4
+18.2
+Table 2. Open-vocabulary SGG results. ReLIC-SGG improves un-
+seen predicate recognition by treating unannotated plausible pred-
+icates as latent positives.
+Method
+@50
+@100
+S-mR
+U-mR
+HM
+S-mR
+U-mR
+HM
+CLIP-ZS [10]
+18.3
+7.4
+10.5
+19.8
+8.2
+11.6
+OV-SGG [12]
+22.6
+9.8
+13.7
+24.1
+10.9
+15.0
+OvSGTR [14]
+23.8
+10.6
+14.7
+25.2
+11.8
+16.0
+Pix2Graphs [15]
+24.9
+11.5
+15.7
+26.5
+12.6
+17.0
+OpenPSG [17]
+25.7
+12.1
+16.5
+27.3
+13.3
+17.9
+VL-IRM [16]
+26.4
+12.8
+17.2
+28.1
+14.0
+18.7
+ReLIC-SGG
+28.6
+18.3
+22.3
+30.2
+19.8
+23.9
+Table 3. Panoptic scene graph generation results on PSG. ReLIC-
+SGG improves mask-level relation prediction by completing miss-
+ing relation labels.
+Method
+PR@50
+PR@100
+PmR@50
+PmR@100
+PSGTR [27]
+31.8
+36.5
+13.4
+15.1
+Pair-Net [28]
+34.2
+39.0
+15.7
+17.6
+OpenPSG [17]
+36.7
+41.2
+17.5
+19.4
+SPADE
+38.1
+42.8
+18.8
+21.0
+ReLIC-SGG
+40.8
+45.6
+22.0
+24.3
+relation lattice transfers supervision from annotated predi-
+cates to missing or unseen relation phrases, while positive-
+unlabeled learning prevents the model from suppressing
+them as negatives.
+4.4. Panoptic Scene Graph Generation
+Table 3 reports results on PSG. ReLIC-SGG achieves
+the best PR@K and PmR@K. Compared with OpenPSG,
+ReLIC-SGG improves PmR@50 by 3.2 points. This in-
+dicates that relation completion is also effective for mask-
+level relation prediction, where annotations are even more
+sparse due to the higher granularity of object regions.
+Table 4. False-negative-aware evaluation. FN-Recall measures re-
+covery of manually verified missing relations. Lat-Cons measures
+lattice consistency. Redundancy is lower better.
+Method
+FN-Recall↑
+Lat-Cons↑
+Redundancy↓
+Motifs [4]
+21.4
+61.2
+18.7
+PE-Net [22]
+27.8
+66.5
+16.2
+Pix2Graphs [15]
+31.6
+69.8
+15.4
+VL-IRM [16]
+34.2
+71.3
+14.1
+ReLIC-SGG
+45.7
+82.6
+9.3
+4.5. False-Negative-Aware Evaluation
+To directly evaluate relation incompleteness, we manually
+verify a subset of high-confidence unannotated predictions.
+Table 4 shows that ReLIC-SGG recovers more valid miss-
+ing relations while maintaining better lattice consistency
+and lower redundancy.
+Analysis. The false-negative-aware metrics reveal a limita-
+tion not captured by standard recall. Existing methods may
+correctly predict annotated triplets but still suppress valid
+unannotated relations. ReLIC-SGG explicitly models such
+relations as latent positives, leading to higher FN-Recall and
+lower redundancy.
+4.6. Ablation Study
+Table 5 studies the contribution of each component. The se-
+mantic relation lattice improves unseen predicate recall by
+propagating supervision among related predicates. Latent
+relation completion further improves performance by recov-
+ering missing positives. Positive-unlabeled graph learning
+provides the largest gain by avoiding false-negative penal-
+ties. Graph-level consistency reduces redundancy.
+4.7. Effect of Semantic Relation Lattice
+Table 6 compares different ways of constructing the seman-
+tic relation lattice. Text similarity alone improves over the
+baseline, but adding entailment and contradiction produces
+stronger results. The full lattice achieves the best perfor-
+Table 5. Ablation study on open-vocabulary VG under SGDet. SRL: semantic relation lattice. LRC: latent relation completion. RNE:
+reliable negative estimation. PUGL: positive-unlabeled graph learning. LGD: lattice-guided decoding.
+Variant
+SRL
+LRC
+RNE
+PUGL
+LGD
+S-mR@50
+U-mR@50
+HM@50
+FN-Recall
+Lat-Cons
+Redundancy
+Baseline
+–
+–
+–
+–
+–
+24.1
+9.6
+13.7
+24.8
+63.5
+18.9
++ SRL
+✓
+–
+–
+–
+–
+25.4
+12.1
+16.4
+29.7
+70.8
+16.5
++ LRC
+✓
+✓
+–
+–
+–
+26.8
+15.6
+19.7
+38.9
+75.3
+14.2
++ RNE
+✓
+✓
+✓
+–
+–
+27.3
+16.4
+20.5
+41.2
+76.8
+13.5
++ PUGL
+✓
+✓
+✓
+✓
+–
+28.1
+17.5
+21.5
+43.6
+78.7
+12.8
+Full model
+✓
+✓
+✓
+✓
+✓
+28.6
+18.3
+22.3
+45.7
+82.6
+9.3
+Table 6. Effect of lattice construction on OV-VG. Similarity trans-
+fers supervision, entailment improves coarse-to-fine consistency,
+and contradiction suppresses incompatible predicates.
+Lattice Type
+S-mR@50
+U-mR@50
+HM@50
+Lat-Cons
+Redundancy
+None
+24.1
+9.6
+13.7
+63.5
+18.9
+Similarity only
+25.4
+12.1
+16.4
+70.8
+16.5
+Similarity + Entailment
+27.0
+15.7
+19.9
+76.1
+14.8
+Similarity + Contradiction
+26.5
+14.9
+19.0
+78.4
+11.6
+Full lattice
+28.6
+18.3
+22.3
+82.6
+9.3
+Table 7. Sensitivity to the number of relation candidates K on OV-
+VG.
+K
+S-mR@50
+U-mR@50
+HM@50
+FN-Recall
+Redundancy
+5
+26.2
+14.6
+18.7
+36.5
+7.8
+10
+27.8
+17.2
+21.2
+43.1
+8.6
+15
+28.6
+18.3
+22.3
+45.7
+9.3
+20
+28.5
+18.1
+22.1
+46.0
+11.8
+30
+28.1
+17.6
+21.7
+46.3
+15.4
+mance, indicating that relation completion requires not only
+semantic expansion but also semantic constraint.
+4.8. Sensitivity to Candidate Number
+Table 7 studies the influence of the number of relation can-
+didates K. The results show a clear trade-off between can-
+didate coverage and candidate reliability. When K is small,
+the proposal stage is overly conservative: although the re-
+tained candidates are usually reliable, some valid but less
+frequent or fine-grained relations are filtered out before la-
+tent completion. This limits the ability of ReLIC-SGG to
+recover missing positives, leading to lower U-mR@50 and
+FN-Recall. However, continuously increasing K does not
+always bring further gains. When K becomes too large,
+many low-confidence and semantically noisy predicates are
+introduced into the candidate set. Although the semantic
+lattice and reliable negative estimation can suppress part of
+these noisy relations, an excessively large candidate pool
+still increases ambiguity in latent relation completion and
+produces more redundant predictions. This explains why
+FN-Recall slightly increases when K grows from 15 to 30,
+while HM@50 decreases and Redundancy rises noticeably.
+5. Conclusion
+We present ReLIC-SGG, a relation-incompleteness-aware
+framework for open-vocabulary scene graph generation.
+Unlike existing methods that treat unannotated relations as
+negatives, ReLIC-SGG models them as latent variables and
+learns to complete missing positive relations. By combin-
+ing a semantic relation lattice, latent relation completion,
+reliable negative estimation, positive-unlabeled graph learn-
+ing, and lattice-guided decoding, ReLIC-SGG improves
+rare and unseen predicate recognition while reducing false-
+negative errors. We hope this work encourages future SGG
+research to move beyond closed-label classification and to-
+ward more realistic learning under incomplete, ambiguous,
+and open-vocabulary supervision.
+References
+[1] Justin Johnson, Ranjay Krishna, Michael Stark, Li-Jia Li,
+David A. Shamma, Michael S. Bernstein, and Li Fei-Fei.
+Image retrieval using scene graphs. In Proceedings of the
+IEEE Conference on Computer Vision and Pattern Recogni-
+tion, pages 3668–3678, 2015. 1, 2
+[2] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A. Shamma, Michael S. Bernstein, and
+Li Fei-Fei. Visual genome: Connecting language and vision
+using crowdsourced dense image annotations. International
+Journal of Computer Vision, 123(1):32–73, 2017. 1, 7
+[3] Cewu Lu, Ranjay Krishna, Michael Bernstein, and Li Fei-
+Fei. Visual relationship detection with language priors. In
+Proceedings of the European Conference on Computer Vi-
+sion, pages 852–869, 2016. 2
+[4] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin
+Choi. Neural motifs: Scene graph parsing with global con-
+text. In Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition, pages 5831–5840, 2018. 1,
+7, 8
+[5] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi
+Parikh. Graph r-cnn for scene graph generation. In Proceed-
+ings of the European Conference on Computer Vision, pages
+670–685, 2018. 1, 2
+[6] Danfei Xu, Yuke Zhu, Christopher B. Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing. In Pro-
+ceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition, pages 5410–5419, 2017. 1, 2
+[7] Yikang Li, Wanli Ouyang, Xiaogang Wang, and Xiaoou
+Tang.
+Scene graph generation from objects, phrases and
+region captions. In Proceedings of the IEEE International
+Conference on Computer Vision, pages 1261–1270, 2017.
+[8] Tianshui Chen, Weihao Yu, Riquan Chen, and Liang Lin.
+Knowledge-embedded routing network for scene graph gen-
+eration.
+In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, pages 6163–
+6171, 2019. 1, 2
+[9] Chao Jia, Yinfei Yang, Ye Xia, Yi-Ting Chen, Zarana Parekh,
+Hieu Pham, Quoc V. Le, Yun-Hsuan Sung, Zhen Li, and Tom
+Duerig. Scaling up visual and vision-language representa-
+tion learning with noisy text supervision. In Proceedings of
+the International Conference on Machine Learning, pages
+4904–4916, 2021. 1, 2
+[10] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya
+Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry,
+Amanda Askell, Pamela Mishkin, Jack Clark, Gretchen
+Krueger, and Ilya Sutskever.
+Learning transferable visual
+models from natural language supervision. In Proceedings
+of the International Conference on Machine Learning, pages
+8748–8763, 2021. 2, 7, 8
+[11] Junnan Li, Dongxu Li, Caiming Xiong, and Steven C. H.
+Hoi. Blip: Bootstrapping language-image pre-training for
+unified vision-language understanding and generation.
+In
+Proceedings of the International Conference on Machine
+Learning, pages 12888–12900, 2022. 2
+[12] Tao He, Lianli Gao, Jingkuan Song, and Yuan-Fang Li. To-
+wards open-vocabulary scene graph generation with prompt-
+based finetuning. In Proceedings of the European Confer-
+ence on Computer Vision, 2022. 1, 7, 8
+[13] T. He, L. Gao, J. Song, and Y.-F. Li.
+Towards open-
+vocabulary scene graph generation with prompt-based fine-
+tuning. In European Conference on Computer Vision, 2022.
+[14] Zuyao Chen, Jinlin Wu, Zhen Lei, and Chang Wen Chen.
+Expanding scene graph boundaries: Fully open-vocabulary
+scene graph generation via visual-concept alignment and re-
+tention. In Proceedings of the European Conference on Com-
+puter Vision, 2024. 1, 8
+[15] Rongjie Li, Songyang Zhang, Bo Wan, Dahua Lin, and Xum-
+ing He. From pixels to graphs: Open-vocabulary scene graph
+generation with vision-language models. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 28076–28086, 2024. 2, 7, 8
+[16] Chufeng Min, Yifan Liu, and Hanwang Zhang.
+Vision-
+language interactive relation mining for open-vocabulary
+scene graph generation. arXiv preprint arXiv:2507.XXXX,
+2025. Please verify final arXiv identifier/proceedings infor-
+mation. 7, 8
+[17] Zijian Zhou, Zheng Zhu, Holger Caesar, and Miaojing Shi.
+Openpsg:
+Open-set panoptic scene graph generation via
+large multimodal models. In Proceedings of the European
+Conference on Computer Vision, pages 212–229, 2024. 1, 2,
+3, 7, 8
+[18] X.
+Hu,
+K.
+Qin,
+G.
+Duan,
+M.
+Li,
+Y.-F.
+Li,
+and
+T. He. Spade: Spatial-aware denoising network for open-
+vocabulary panoptic scene graph generation with long-
+and local-range context reasoning.
+In Proceedings of the
+IEEE/CVF International Conference on Computer Vision,
+2025. 1, 2
+[19] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan Luo,
+and Wei Liu. Learning to compose dynamic tree structures
+for visual contexts. In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition, pages
+6619–6628, 2019. 1, 2, 8
+[20] Kaihua Tang, Yulei Niu, Jianqiang Huang, Jiaxin Shi, and
+Hanwang Zhang. Unbiased scene graph generation from bi-
+ased training. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 3716–
+3725, 2020. 1, 2, 7, 8
+[21] Rongjie Li, Songyang Zhang, Bo Wan, and Xuming He.
+Bipartite graph network with adaptive message passing for
+unbiased scene graph generation.
+In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 11109–11119, 2021. 8
+[22] Chaofan Zheng, Xinyu Lyu, Lianli Gao, Bo Dai, and
+Jingkuan Song.
+Prototype-based embedding network for
+scene graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 22783–22792, 2023. 1, 2, 7, 8
+[23] T. He, L. Gao, J. Song, J. Cai, and Y.-F. Li. Learning from the
+scene and borrowing from the rich: Tackling the long tail in
+scene graph generation. In Proceedings of the International
+Joint Conference on Artificial Intelligence, 2020.
+[24] T. He, L. Gao, J. Song, J. Cai, and Y.-F. Li. Semantic compo-
+sitional learning for low-shot scene graph generation. arXiv
+preprint arXiv:2108.08600, 2021.
+[25] T. He, L. Gao, J. Song, and Y.-F. Li. State-aware composi-
+tional learning toward unbiased training for scene graph gen-
+eration. IEEE Transactions on Image Processing, 32:43–56,
+2022. 1
+[26] Xinyu Lyu, Lianli Gao, Yuyu Guo, Zhou Zhao, and Heng
+Tao Shen Huang. Fine-grained predicates learning for scene
+graph generation.
+In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition, pages
+19467–19475, 2022. 1, 2
+[27] Jingkang Yang, Yi Zhe Ang, Zhe Guo, Kaiyang Zhou,
+Wayne Zhang, and Ziwei Liu. Panoptic scene graph gener-
+ation. In Proceedings of the European Conference on Com-
+puter Vision, pages 178–196, 2022. 3, 7, 8
+[28] Yu Wang, Jiang Liu, Yong-Lu Li, Chang Xu, and Cewu Lu.
+Pair-net: Panoptic scene graph generation with pairwise re-
+lation learning. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, 2024. Please
+verify exact authors/pages. 7, 8
+[29] Jingkang Yang, Kaiyang Peng, Yuxin Li, Kaiyang Zhou,
+Wayne Zhang, and Ziwei Liu. Panoptic video scene graph
+generation. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, 2023.
+[30] Shuo Chen, Qin Jin, Peng Wang, and Qi Wu. Multi-label
+video scene graph generation from single-frame weak super-
+vision. In Proceedings of the International Conference on
+Learning Representations, 2023.
+[31] Iro Armeni, Zhi-Yang He, JunYoung Gwak, Amir R. Zamir,
+Martin Fischer, Jitendra Malik, and Silvio Savarese. 3d scene
+graph: A structure for unified semantics, 3d space, and cam-
+era. In Proceedings of the IEEE/CVF International Confer-
+ence on Computer Vision, pages 5664–5673, 2019. 3
+[32] Sebastian Koch, Narunas Vaskevicius, Brian Coltin, and
+Marija Popovi´c.
+Open-vocabulary 3d scene graphs from
+point clouds with vision-language models. arXiv preprint
+arXiv:2406.XXXX, 2024.
+Please verify final arXiv identi-
+fier/proceedings information.
+[33] Francesco Rotondi, Emanuele Bastianelli, Danilo Avola, and
+Luigi Cinque. Functional 3d scene graphs: Building scene
+graphs for functional and task-oriented reasoning. In Pro-
+ceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, 2025.
+Please verify exact au-
+thors/pages.
+[34] Daniel Honerkamp, Tim Welschehold, and Abhinav Valada.
+Moma: Mobile manipulation in 3d scenes with task relevant
+scene graphs. In Proceedings of the IEEE International Con-
+ference on Robotics and Automation, 2024. Please verify
+exact venue metadata.
+[35] Yuanchen Ju, Jiayuan Han, Chen Wang, and Jia Deng. Mo-
+magraph: State-aware unified scene graphs for embodied
+task planning. In Proceedings of the International Confer-
+ence on Learning Representations, 2026. Please verify final
+author list/proceedings information. 1, 3
+[36] Charles Elkan and Keith Noto.
+Learning classifiers from
+only positive and unlabeled data. Proceedings of the ACM
+SIGKDD International Conference on Knowledge Discovery
+and Data Mining, pages 213–220, 2008. 2, 3
+[37] Ryuichi Kiryo, Gang Niu, Marthinus Christoffel du Plessis,
+and Masashi Sugiyama.
+Positive-unlabeled learning with
+non-negative risk estimator. In Advances in Neural Infor-
+mation Processing Systems, volume 30, 2017.
+[38] Timothee Cour, Benjamin Sapp, and Ben Taskar. Learning
+from partial labels. Journal of Machine Learning Research,
+12:1501–1536, 2011.
+[39] Jiaqi Lv, Miao Xu, Lei Feng, Gang Niu, Xin Geng, and
+Masashi Sugiyama.
+Progressive identification of true la-
+bels for partial-label learning. IEEE Transactions on Pat-
+tern Analysis and Machine Intelligence, 44(11):8249–8264,
+2022.
+[40] R. Dai, C. Li, Y. Yan, L. Mo, K. Qin, and T. He. Unbi-
+ased missing-modality multimodal learning. In Proceedings
+of the IEEE/CVF International Conference on Computer Vi-
+sion, 2025. 2, 3
+[41] Rongjie Li, Songyang Zhang, and Xuming He. Sgtr: End-to-
+end scene graph generation with transformer. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, pages 19486–19496, 2022. 2
+[42] Shaoqing Ren, Kaiming He, Ross Girshick, and Jian Sun.
+Faster r-cnn: Towards real-time object detection with region
+proposal networks. In Advances in Neural Information Pro-
+cessing Systems, volume 28, 2015. 7
+[43] Saining Xie, Ross Girshick, Piotr Doll´ar, Zhuowen Tu, and
+Kaiming He. Aggregated residual transformations for deep
+neural networks.
+In Proceedings of the IEEE Conference
+on Computer Vision and Pattern Recognition, pages 1492–
+1500, 2017.
+[44] Tsung-Yi Lin, Piotr Doll´ar, Ross Girshick, Kaiming He,
+Bharath Hariharan, and Serge Belongie.
+Feature pyramid
+networks for object detection. In Proceedings of the IEEE
+Conference on Computer Vision and Pattern Recognition,
+pages 2117–2125, 2017. 7
+[45] Bowen Cheng, Ishan Misra, Alexander G. Schwing, Alexan-
+der Kirillov, and Rohit Girdhar.
+Masked-attention mask
+transformer for universal image segmentation. In Proceed-
+ings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, pages 1290–1299, 2022. 7
+[46] Ilya Loshchilov and Frank Hutter. Decoupled weight decay
+regularization. In Proceedings of the International Confer-
+ence on Learning Representations, 2019. 7

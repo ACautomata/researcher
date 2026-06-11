@@ -1,0 +1,1609 @@
+1
+Importance Weighted Structure Learning for
+Scene Graph Generation
+Daqi Liu, Miroslaw Bober, Member, IEEE, Josef Kittler, Life Member, IEEE
+Abstract—Scene graph generation is a structured prediction task aiming to explicitly model objects and their relationships via
+constructing a visually-grounded scene graph for an input image. Currently, the message passing neural network based mean ﬁeld
+variational Bayesian methodology is the ubiquitous solution for such a task, in which the variational inference objective is often
+assumed to be the classical evidence lower bound. However, the variational approximation inferred from such loose objective generally
+underestimates the underlying posterior, which often leads to inferior generation performance. In this paper, we propose a novel
+importance weighted structure learning method aiming to approximate the underlying log-partition function with a tighter importance
+weighted lower bound, which is computed from multiple samples drawn from a reparameterizable Gumbel-Softmax sampler. A generic
+entropic mirror descent algorithm is applied to solve the resulting constrained variational inference task. The proposed method
+achieves the state-of-the-art performance on various popular scene graph generation benchmarks.
+Index Terms—Scene Graph Generation, Structured Prediction, Message Passing Neural Network, Importance Weighted Variational
+Inference.
+!
+1
+INTRODUCTION
+A
+S a structured prediction task, scene graph generation
+(SGG) aims to construct a visually-grounded scene
+graph for an input image, in which its potential objects
+as well as their relevant relationships are explicitly mod-
+elled. Such fundamental scene understanding task could
+potentially facilitate the downstream computer vision tasks,
+such as image captioning [1], [2], [3] and visual question
+answering [4], [5], [6]. Given an input image x, SGG aims
+to infer the optimum interpretations z∗by a max aposteriori
+(MAP) estimation z∗= arg maxz pθ(z|x), where θ is applied
+to parameterize the underlying posterior p(z|x). Due to
+the exponential dependencies among the output variables,
+it is often computationally intractable to directly compute
+pθ(z|x).
+To this end, current SGG models generally follow a
+variational Bayesian (VB) [7], [8] framework, in which the
+variational inference step aims to approximate pθ(z|x) with
+a computationally tractable variational distribution q(z),
+while the variaitonal learning step tries to ﬁt the underlying
+posterior pθ(z|x) for the ground-truth training samples via
+a cross entropy loss. To estimate the optimum q∗(z) and
+θ∗, one needs to alternate the above variational inference
+and learning steps. For tractability, in current SGG models
+[9], [10], [11], [12], [13], [14], [15], [16], the variational dis-
+tribution q(z) is often assumed to be fully decomposed as
+q(z1, z2, ..., zn) = Qn
+i=1 qi(zi), where zi is the interpretation
+of one of the potential n object and relationship region
+proposals and qi(zi) represents the corresponding local
+variational approximation. The resulting VB framework is
+also known as the mean ﬁeld variational Bayesian (MFVB)
+[7], [8], and the associated variational inference step is also
+called mean ﬁeld variational inference (MFVI) [7], [8].
+•
+The authors are with the Centre for Vision, Speech and Signal Processing,
+University of Surrey, Guildford GU2 7XH, U.K. Under Review...
+E-mail: {daqi.liu, m.bober, j.kittler}@surrey.ac.uk
+The above MFVI step in current SGG tasks is often
+formulated using message passing neural network (MPNN)
+models [15], [16], [17], [18], [19], which require two funda-
+mental modules to be constructed: visual perception and
+visual context reasoning [20]. Such formulation combines
+the superior feature representation learning capability of
+the deep neural networks and the inference capability of
+the classical MFVI. As a result, the above MPNN-based
+MFVI methodology has became the ubiquitous solution for
+current SGG tasks [15], [16], [17], [18], [19]. In the above
+formulation, a classical evidence lower bound (ELBO) [21]
+is often implicitly (since the message passing optimization
+method do not need to explicitly maximize it) chosen as the
+variational inference objective.
+However, the variational approximation inferred from
+such loose ELBO objective generally underestimates the
+underlying complex posterior [21], which often leads to in-
+ferior generation performance. In other words, the classical
+ELBO objective does not achieve a balanced bias-variance
+trade-off, since it generates overly simpliﬁed representations
+which fail to use the entire modeling capability of the
+network [22]. This perhaps partly explains the fact that the
+detection performance of the current SGG models fall short
+of our expectations.
+To solve the above issue, in this paper, we propose
+a novel importance weighted structure learning (IWSL)
+method, which employs a tighter importance weighted
+lower bound [22] to replace the classical loose ELBO [21]
+as the variational inference objective. Such importance
+weighted approximation is essentially a lower bound of the
+underlying log-partition function [22], which is estimated
+from the multiple samples drawn from a reparameterizable
+Gumbel-Softmax sampler [23], [24]. Unlike the classical
+MPNN-based SGG models, the proposed IWSL method
+requires to solve a constrained variational inference step.
+Basically, it aims to explicitly maximize the importance
+arXiv:2205.07017v1  [cs.CV]  14 May 2022
+
+2
+weighted lower bound objective, subject to the constraint
+that the categorical probability approximated by a Gumbel-
+Softmax variational distribution resides in a probability sim-
+plex. To this end, a generic constrained optimization algo-
+rithm - entropic mirror descent [25] - is applied to infer the
+optimum interpretation from the input image. The proposed
+IWSL method achieves the state-of-the-art performance on
+two popular scene graph generation benchmarks: Visual
+Genome and Open Images V6.
+This paper is organized as follows: Section 2 presents the
+related works while Section 3 demonstrates the proposed
+importance weighted structure learning methodology. The
+experimental results and the corresponding analysis are
+elaborated in Section 4. Finally, the conclusions are drawn
+in Section 5.
+2
+RELATED WORKS
+Current SGG models follow two main research directions:
+pursuing a superior feature extracting structure or imple-
+menting an unbiased relationship prediction. The former
+aims to improve the feature representation learning capabil-
+ities of the neural network models, while the latter focuses
+on overcoming the problem of bias (which mainly detects
+the dominant relationship categories with abundant train-
+ing samples and largely ignores the informative ones with
+fewer training samples) in the learnt relationship prediction,
+caused by a long-tail data distribution.
+For the ﬁrst direction, [3], [11], [17], [26], [27] devise
+novel MPNN models while [26], [13], [15], [12], [19] em-
+bed the relevant contextual structural information into the
+current MPNN models. For the second direction, various
+debiasing methodologies have been proposed to solve the
+biased relationship prediction problem. For instance, dataset
+resampling [28], [29], [30], instance-level resampling [31],
+[32], bi-level data resampling [16], knowledge transfer learn-
+ing [33], [34], [35] and loss reweighting based on instance
+frequency [36], [37] are the various remedies suggested in
+the literature. Unlike the above traditional debiasing meth-
+ods, [38] removes the harmful bias from the good context
+bias based on the counterfactual causality (via calculating
+the Total Direct Effect with the help of a causal graph).
+Most of the above SGG models [39], [27], [13], [10], [19],
+[16] tend to rely on a uniﬁed MPNN-based MFVB method-
+ology. Such formulation generally employs the ELBO as the
+variational inference objective, in which the resulting vari-
+ational approximation derived from ELBO often underesti-
+mates the underlying complex posterior [22]. In contrary, we
+use a tighter importance weighted lower bound as the vari-
+ational inference objective in the proposed IWSL method,
+and solve the resulting constrained variational inference
+task via a generic entropic mirror descent strategy rather
+than the traditional message passing technique. Speciﬁcally,
+various samples drawn from a reparameterizable Gumbel-
+Softmax sampler [23], [24] are applied to compute the above
+importance weighted lower bound.
+The above strictly tighter importance weighted lower
+bound is ﬁrstly introduced in the importance weighted au-
+toencoder (IWAE) [22], which is a generative model with the
+same architecture as the classical variational autoencoder
+(VAE). In particular, the recognition network in IWAE relies
+on multiple samples to approximate the posterior, which
+increases the ﬂexibility to model complex posteriors which
+do not ﬁt the VAE modeling assumptions. Moreover, due to
+the inability to backpropagate through samples, the output
+categorical latent variables in SGG tasks are rarely employed
+in the stochastic neural networks. To this end, in this paper,
+instead of producing non-differentiable samples from a cat-
+egorical distribution, Gumbel-Softmax sampler is utilized to
+draw differentiable samples from a novel Gumbel-Softmax
+distribution [23], [24]. Due to the applied explicit reparam-
+eterization function, it is quite easy to construct an efﬁcient
+gradient estimator.
+3
+PROPOSED METHODOLOGY
+In this section, we ﬁrst present the problem formulation,
+followed by the proposed scoring function and the relevant
+Gumbel-Softmax sampler. Finally, the importance weighted
+structure learning and the adopted entropic mirror descent
+inference strategy are also discussed in the last two sub-
+sections. Fig.1 demonstrates the overview of the proposed
+IWSL method.
+3.1
+Problem Formulation
+As a structured prediction task, scene graph generation aims
+to build a visually-grounded scene graph for an input image
+by explicitly identifying the scene objects and their relevant
+relationships. In the current SGG settings, the scene graph
+includes a list of intertwined semantic triplet structures, in
+which each triplet consists of three components: a subject, a
+predicate and an object. Speciﬁcally, the current SGG tasks
+only focus on inferring the pairwise relationships, where the
+relationship between two interacting instances (subject and
+object) in an input image is termed as a predicate.
+Generally, SGG task aims to infer the optimum interpre-
+tations z∗from the input image x via a MAP estimation
+z∗= arg maxz pθ(z|x), in which the underlying posterior
+pθ(z|x) can be computed as follows:
+pθ(z|x) =
+sθ(x, z)
+P
+z sθ(x, z) = sθ(x, z)
+sθ(x)
+(1)
+where sθ(x, z) is a scoring function of the probabilis-
+tic graphical model (e.g. conditional random ﬁeld [41])
+of the SGG task, which is used to measure the similar-
+ity/compatibility between the input variable x and the
+output variable z. sθ(x) is the relevant partition function or
+normalizing constant. Due to the exponential combinatorial
+dependencies existing in the SGG task, sθ(x) is generally
+computationally intractable, which implies that it can only
+be estimated by certain approximation strategies.
+To this end, a classical variational inference (VI) [7], [8]
+technique is generally employed to estimate the computa-
+tionally intractable log-partition function logsθ(x) in current
+SGG models. For tractability, the computationally tractable
+variational distribution is often assumed to be fully decom-
+posed and the resulting inference technique is known as
+mean ﬁeld variational inference (MFVI) [7], [8]. Besides the
+above variational inference step, one still requires another
+variational learning step to ﬁt the underlying posterior with
+the ground-truth training samples. Such formulation is also
+
+3
+Fig. 1: An overview of the proposed IWSL method. The green dash line designates the proposed visual context reasoning
+module. Given an input image, the visual perception module is used to generate a set of region proposals with the
+associated image patches. The corresponding feature vectors are obtained by a certain feature extracting algorithm deﬁned
+in [40]. Given a feature vector set and a relevant vocabulary, the target log scoring function is computed via MLP. The
+variable elimination technique is applied to infer the corresponding log marginal scoring set, and the output samples are
+drawn from a Gumbel-Softmax sampler by feeding random Gumbel noises into it. With the log marginal scoring set and
+the above output samples, one can compute the corresponding importance weighted lower bound, and employ an MFVI
+framework (with the entropic mirror descent inference method) to infer the optimum categorical probability, which is then
+used to update the Gumbel-Softmax sampler. The associated surrogate logit set is computed from the above optimum
+categorical probability as well as the log marginal scoring set, which is then transformed into the resulting log marginal
+set via the LogSumExp trick. Finally, the output scene graph is generated via the corresponding arg max operation. A
+cross-entropy loss is employed in the variational learning step.
+known as mean ﬁeld variational Bayesian (MFVB) [7], [8]
+framework, in which the optimum q∗(z) and θ∗are obtained
+by alternating the above inference and learning steps. More
+importantly, for MFVI, the original MAP inference in SGG
+task can be transformed into a corresponding marginal
+inference task, which is not the case for other VI techniques
+[42].
+In the current SGG modelling approaches, a classical
+cross-entropy loss is generally employed to solve the vari-
+aitional learning step, while the above MFVI step is com-
+monly formulated using a message passing neural network
+(MPNN) [43], [44], [45], [46] model, in which the traditional
+ELBO is invariably implicitly chosen as the variational infer-
+ence objective. As a result, the MPNN-based MFVB formula-
+tion has became the de facto solution for current SGG tasks.
+In this MPNN-based MFVB framework, two fundamental
+modules are required, namely, visual perception and visual
+context reasoning. The former aims to locate and instantiate
+the objects and predicates within the input image, while the
+latter tries to infer their consistent interpretation.
+Speciﬁcally, given an input image x, visual perception
+module aims to generate a set of object region proposals
+bo
+i ∈R4, i = 1, ..., m, as well as a set of predicate region
+proposals bp
+j ∈R4, j = 1, ..., n, where m and n represent
+the number of objects and predicates detected in the input
+image, respectively. Correspondingly, the input image x can
+be divided into two sets of image patches xo
+i , i = 1, ..., m
+and xp
+j, j = 1, ..., n. One can extract the relevant ﬁxed-sized
+latent feature representation sets yo
+i ∈Rd, i = 1, ..., m and
+yp
+j ∈Rd, j = 1, ..., n by applying a ROI pooling on the
+feature maps obtained from the visual perception module.
+Given a set of object classes C and a set of relationship
+categories R, a visual context reasoning module aims to
+infer the resulting object and predicate interpretation sets
+zo
+i ∈C, i = 1, ..., m and zp
+j ∈R, j = 1, ..., n based on the
+above latent feature representation sets.
+However, the variational distribution derived from the
+above loose ELBO objective often underestimates the un-
+derlying posterior [21], which leads to inferior generation
+performance. To this end, in this paper, we propose a novel
+importance weighted structure learning (IWSL) method,
+which employs a tighter (which is explicitly explained in
+Section 3.4) importance weighted lower bound to replace
+the classical ELBO as the variational inference objective.
+Instead of relying on the classical message passing tech-
+nique, the proposed IWSL method applies a generic entropic
+mirror descent algorithm to accomplish the resulting con-
+strained variational inference task. The proposed generic
+IWSL methodology allows us to increase the model com-
+plexity so that one can ﬁnd a balanced bias-variance trade-
+off. In other words, the resulting variational distribution
+derived from the tighter importance weighted lower bound
+objective facilitates a better exploration of the complex
+multiple-modal behaviour of the underlying posterior.
+
+4
+3.2
+Scoring Function
+As a structured prediction task, scene graph generation
+can be generally formulated using a probabilistic graphical
+model, e.g. a conditional random ﬁeld (CRF) [41]. With such
+probabilistic graphical model, one can model the conditional
+dependencies among the relevant variables by devising a
+non-negative scoring function sθ(x, z), where θ is used to
+parameterize the scoring function.
+Basically, sθ(x, z) measures the similarity or compatibil-
+ity between the input image x and the output interpretations
+z, which is often deﬁned as follows:
+sθ(x, z) =
+Y
+r∈R
+fr(xr, zr)
+(2)
+where r is a clique within a clique set R (which is deﬁned
+by the corresponding graph structure), fr is a non-negative
+factor function which models the dependencies between xr
+and zr. Generally, the underlying posterior pθ(z|x) related
+to sθ(x, z) is often assumed to be a Gibbs distribution in
+traditional VB framework [7]. Correspondingly, fr often
+takes the exponential form and the log scoring function is
+computed as follows:
+logsθ(x, z) = −
+X
+r∈R
+ψr(xr, zr)
+(3)
+where ψr is also known as a potential function. In current
+SGG models, we have two types of potential functions:
+the unary potential function ψu and the pairwise/binary
+potential function ψb.
+Currently, only local contextual information is consid-
+ered in most previous SGG models, while the global con-
+textual information is largely ignored. In this paper, we aim
+to compute a latent global feature representation yg ∈Rd
+from the global region proposal bg, where bg is obtained
+by the union of all the associated object/predicate region
+proposals in the input image. Correspondingly, xg is the
+relevant global image patch of bg, and zg is its interpretation.
+With the above deﬁnitions, by adding two types
+of
+pairwise
+potential
+terms
+ψp
+b(xp
+j, xg, zp
+j , zg)
+and
+ψo
+b(xo
+i , xg, zo
+i , zg),
+one
+could
+incorporate
+the
+global
+contextual information into the following applied log
+scoring function:
+logsθ(x, z) = −
+m
+X
+i=1
+[ψo
+u(xo
+i , zo
+i ) +
+X
+j∈N(i)
+ψo
+b(xo
+i , xp
+j, zo
+i , zp
+j )
++
+X
+l∈N(i)
+ψo
+b(xo
+i , xo
+l , zo
+i , zo
+l ) + ψo
+b(xo
+i , xg, zo
+i , zg)]
+−
+n
+X
+j=1
+[ψp
+u(xp
+j, zp
+j ) +
+X
+i∈N(j)
+ψp
+b(xo
+i , xp
+j, zo
+i , zp
+j )
++ψp
+b(xp
+j, xg, zp
+j , zg)]
+(4)
+where the superscripts o, p, g represent the object, the
+predicate and the global context, respectively. N(i) is the set
+of neighbouring nodes around the target i. It is worth to note
+the latent feature representations y are implicitly embedded
+in the above formulation.
+3.3
+Gumbel-Softmax Sampler
+In SGG tasks, the output variables z are generally as-
+sumed as categorical variables, which are rarely applied in
+stochastic neural networks due to the inability to compute
+and backpropagate the gradients of the associated discrete
+distributions [23], [24]. To this end, instead of generating
+non-differentiable samples from a categorical distribution, a
+Gumbel-Softamx sampler [23], [24] is employed to produce
+differentiable samples drawn from a novel Gumbel-Softmax
+distribution. Such sampler is generally reparameterizable,
+in which an efﬁcient gradient estimator can be easily imple-
+mented.
+Suppose z be the interpretation of a potential region
+proposal, it can be modelled as a categorical variable with
+the class probabilities π1, ..., πv (where v is the number of
+hypotheses for z), and the output categorical variables in
+SGG are encoded as v-dimensional one-hot vectors locating
+on the corners of the (v−1)-dimensional simplex, ∆v−1. The
+reparameterization function gπ in Gumbel-Softmax sampler
+is deﬁned as follows:
+gπ(σ) = z
+(5)
+where σ represents a v-dimensional Gumbel noise, z ∈
+∆v−1 is the output v-dimensional sample vector and its i-th
+element zi is computed as follows:
+zi =
+exp((log(πi) + σi)/τ)
+Pv
+j=1 exp((log(πj) + σj)/τ), for i = 1, ..., v
+(6)
+where τ is the softmax temperature. The samples drawn
+from the Gumbel-Softmax sampler become one-hot vectors
+when annealing the softmax temperature τ to zero. In
+reality, τ is often annealed to a relatively low temperature
+instead of zero.
+3.4
+Importance Weighted Structure Learning
+In traditional VB framework, ELBO is generally employed
+as the variational inference objective and the resulting max-
+imization of ELBO is used to approximate the computation-
+ally intractable log-partition function [21]. Given a scoring
+function sθ(x, z) and a computationally tractable variational
+distribution q(z), one can easily derive the following:
+logsθ(x) = Eq(z)log sθ(x, z)
+q(z)
++ Eq(z)log
+q(z)
+pθ(z|x)
+(7)
+where, on the right-hand side of the equation, the ﬁrst
+term is the so-called ELBO and the second term is the
+Kullback–Leibler (KL) divergence between the variational
+distribution q(z) and the underlying posterior pθ(z|x).
+Clearly, ELBO is lower bound of logsθ(x) since the KL
+divergence term is non-negative. However, such loose ELBO
+objective often leads to overly simpliﬁed model, which may
+not capture the complicated multi-modal structure of the
+underlying posterior [22].
+To this end, a tighter lower bound Ls based on s-sample
+importance weighting [22] is employed to replace the clas-
+sical ELBO in this paper. Such lower bound is also known
+as importance weighted lower bound, which is deﬁned as
+follows:
+Ls = Ez1,...,zs∼q(z)[log 1
+s
+s
+X
+i=1
+sθ(x, zi)
+q(zi)
+] ≤logsθ(x)
+(8)
+
+5
+where s represents the number of samples, in which each zi
+is an i.i.d. random sample drawn from the variational dis-
+tribution q(z). wi = sθ(x,zi)
+q(zi)
+is also known as the importance
+weight, and Ls is the importance weighted lower bound of
+logsθ(x) when s is a relatively small value. Essentially, Ls
+becomes an unbiased estimator of logsθ(x) when s reaches
+inﬁnity. In particular, the traditional ELBO is just a special
+case of the importance weighted lower bound Ls (when
+setting s = 1). Using more samples could only improve the
+tightness of the bound [22]. Therefore, compared with the
+traditional ELBO, Ls is a much tighter lower bound of the
+log partition function logsθ(x).
+For tractability, the above variational distribution q(z) is
+often assumed to be fully decomposed as:
+q(z) =
+m
+Y
+i=1
+qo
+i (zo
+i )
+n
+Y
+j=1
+qp
+j (zp
+j )
+(9)
+where qo
+i (zo
+i ) ∈∆vo−1 and qp
+j (zp
+j ) ∈∆vp−1 are local
+variational approximations for the objects and predicates in
+the output scene graph, respectively. vo and vp are the sizes
+of vocabularies for the objects and predicates, respectively.
+Such inference procedure is also known as mean ﬁeld varia-
+tional inference (MFVI) [7], [8]. In MFVI, the MAP inference
+formulated in the ﬁrst subsection can be transformed into
+a corresponding marginal inference task, which may not be
+the case in general [42].
+Given a potential region proposal bi, the corresponding
+local log marginal posterior logpθ(zi|xi) is computed as
+follows:
+logpθ(zi|xi) = logsθ(xi, zi) −logsθ(xi)
+(10)
+where logsθ(xi) is the computationally intractable log parti-
+tion function, and logsθ(xi, zi) = P
+z\zi logsθ(xi, z) (where
+z\zi represents marginalization over all nodes except the
+node i) is the local log marginal scoring function of bi, which
+is generally obtained by a variable elimination technique.
+Speciﬁcally, for a potential object region proposal bo
+i , it is
+computed as follows:
+logsθ(xo
+i , zo
+i ) ∝−[ψo
+u(xo
+i , zo
+i ) +
+X
+j∈N(i)
+mop
+j→i
++
+X
+l∈N(i)
+moo
+l→i + mog
+g→i]
+ψo
+u(xi, zo
+i ) = ho
+θ(xi) · zo
+i
+mop
+j→i =
+X
+zp
+j ∈R
+ψo
+b(xo
+i , xp
+j, zo
+i , zp
+j ) = gop
+θ (xo
+i , xp
+j) · zo
+i
+moo
+l→i =
+X
+zo
+l ∈C
+ψo
+b(xo
+i , xo
+l , zo
+i , zo
+l ) = goo
+θ (xo
+i , xo
+l ) · zo
+i
+mog
+g→i =
+X
+zg∈G
+ψo
+b(xo
+i , xg, zo
+i , zg) = gog
+θ (xo
+i , xg) · zo
+i
+(11)
+while for a potential predicate region proposal bp
+j, it is
+obtained by:
+logsθ(xp
+j, zp
+j ) ∝−[ψp
+u(xp
+j, zp
+j ) +
+X
+i∈N(j)
+mpo
+i→j + mpg
+g→j]
+ψp
+u(xj, zp
+j ) = hp
+θ(xj) · zp
+j
+mpo
+i→j =
+X
+zo
+i ∈C
+ψp
+b(xo
+i , xp
+j, zo
+i , zp
+j ) = gpo
+θ (xo
+i , xp
+j) · zp
+j
+mpg
+g→j =
+X
+zg∈G
+ψp
+b(xg, xp
+j, zg, zp
+j ) = gpg
+θ (xp
+j, xg) · zp
+j
+(12)
+In the above two equations, · means an inner product, zo
+i
+and zp
+j are the output variables for an object and a predicate,
+which are generated by a Gumbel-Softmax sampler. G is
+a relevant global region proposal interpretation set. The
+feature representation learning functions ho
+θ, hp
+θ, gop
+θ , goo
+θ ,
+gog
+θ , gpo
+θ , gpg
+θ
+are constructed by combing visual perception
+modules and multi-layer perceptrons (MLPs), which are
+parameterized by θ. Each of these functions will ﬁrst map
+the input image patches x into the corresponding feature
+representations y ∈Rd via the visual perception module,
+and then obtain the resulting Rv dimensional feature vector
+by feeding relevant y into the corresponding MLP. Most
+importantly, the MLPs implicitly perform the potential func-
+tion marginalization prescribed in Equations (11) and (12).
+The resulting log score is essentially the inner product of the
+above Rv dimensional feature vector and the corresponding
+v-dimensional vector z.
+To
+approximate
+the
+computationally
+intractable
+logsθ(xi),
+in
+this
+paper,
+we
+employ
+the
+following
+constrained variational inference objective Li
+s:
+logsθ(xi) ≜max
+πi Li
+s =
+max
+πi Ezi1,...,zis∼qπi(zi)[log 1
+s
+s
+X
+j=1
+sθ(xi, zij)
+qπi(zij) ] s.t. πi ∈∆v−1
+(13)
+where Li
+s represents the s-sample importance weighted
+lower bound, and the local variational approximation qi(zi)
+is set to a Gumbel-Softmax distribution with a categorical
+probability πi ∈∆v−1. zi1, ..., zis represent the s i.i.d sam-
+ples drawn from qπi(zi). Since the local Gumbel-Softmax
+variational distribution qπi(zi) is reparameterizable, based
+on the Gumbel-Softmax sampler in the above subsection,
+Li
+s can be formulated as follows:
+Li
+s = Eσi1,...,σis∼u(σi)[log 1
+s
+s
+X
+j=1
+sθ(xi, zij)
+qπi(zij) ]|zij=gπi(σij)
+(14)
+where σij is v-dimensional Gumbel noise drawn from a
+Gumbel distribution u(σi), which is fed into the Gumbel-
+Softmax reparameterization function gπi to explicitly com-
+pute the corresponding output sample zij.
+As a result, the above expectation Li
+s can be approxi-
+mated using a Monte Carlo estimator as follows:
+Li
+s ≜[log 1
+s
+s
+X
+j=1
+sθ(xi, zij)
+qπi(zij) ]|zij=gπi(σij), σij∼u(σi)
+(15)
+where the efﬁcient computation of the log importance
+weight logwij = logsθ(xi, zij) −logqπi(zij) is essential for
+computing the above Li
+s. Speciﬁcally, logsθ(xi, zij) can be
+
+6
+easily computed based on Equation (11) and (12), while
+the above log probability logqπi(zij) is approximated as
+follows:
+logqπi(zij) ≜∥πi·zij∥1−max(πi)−log∥eπi−max(πi)∥1 (16)
+where ∥.∥1 represents the L1 norm while max(πi) is the
+maximum value of πi.
+With the above Li
+s, one can compute the target log
+marginal posterior logpθ(zi|xi) via a corresponding surro-
+gate logit φ:
+logpθ(zi|xi) ≜φ + C
+φ = logsθ(xi, zi) −max
+πi Li
+s
+(17)
+where C is a relevant constant w.r.t. xi and zi. According
+to the LogSumExp trick, one can compute logpθ(zi|xi) by
+ignoring the above constant C:
+logpθ(zi|xi) ≜φ −log∥eφ∥1
+(18)
+where the optimum interpretation z∗
+i of the input region
+proposal bi is computed as z∗
+i = arg maxzi logpθ(zi|xi).
+Moreover, a classical cross-entropy loss is employed in
+the relevant variational learning step to ﬁt the above pθ(z|x)
+with the ground-truth training samples:
+θ∗= arg min
+θ
+L(θ) = arg min
+θ
+−[1
+c
+c
+X
+k=1
+logpθ( ˆzk| ˆxk)]
+(19)
+where L(θ) represents the variational learning objective, c
+is the number of training images in a mini-batch, ˆzk is the
+ground-truth scene graph of the input image ˆxk.
+Algorithm 1 Importance Weighted Structure Learning
+Input region proposal b, categorical probability π, number
+of samples s, Gumbel noise distribution u(σ), Gumbel-
+Softmax reparameterization function gπ, learning rate α,
+softmax temperature τ, minimum temperature τmin, tem-
+perature annealing rate β, number of iterations T
+Output θ, τ
+1: randomly initialize θ
+2: for iteration t = 1 to T do
+3:
+randomly initialize π for b
+4:
+draw s Gumbel noise samples σ1, ..., σs from u(σ)
+5:
+compute s output samples z1, ..., zs
+by feeding
+σ1, ..., σs into gπ
+6:
+compute log importance weight log sθ(x,z)
+qπ(z)
+and ap-
+proximate Ls via Monte Carlo estimation
+7:
+employ EMD to solve Equation (13) and update π
+8:
+compute the surrogate logit φ as well as the resulting
+logpθ(z|x) using the updated π
+9:
+compute L(θ) and update θ ←θ −α · ▽θL(θ)
+10:
+update τ ←max(τ · e−β·t, τmin)
+11: end for
+Finally, to better illustrate the proposed IWSL method,
+we summarize it in Algorithm 1. As a MFVB framework,
+the proposed IWSL method consists of two procedures:
+variational inference and variational learning. In particular,
+the variational inference procedure includes steps 3-7, while
+steps 8-9 represent the variational learning procedure. The
+temperature annealing process is accomplished in step 10.
+For computational efﬁciency, the number of samples s in
+variational inference is often smaller than the one applied in
+variational learning.
+Speciﬁcally, in variational inference, one ﬁrst randomly
+initialize a categorical probability π for a potential region
+proposal b, and then draw s Gumbel noise samples σ1, ..., σs
+from a Gumbel noise distribution u(σ). The output sam-
+ples z1, ..., zs are explicitly computed by feeding the above
+Gumbel noises σ1, ..., σs into a Gumbel-Softmax reparam-
+eterization function gπ. With the Equations (11), (12) and
+(16), one can easily compute the relevant importance weight
+log sθ(x,z)
+qπ(z)
+and approximate the corresponding importance
+weighted lower bound Ls via an Monte Carlo estimation.
+Finally, an entropic mirror descent (EMD) (which is intro-
+duced in the following subsection) method is applied to
+solve the resulting constrained variational inference task
+and obtain the optimum categorical probability π∗. In vari-
+ational learning, according to Equation (17), one can ﬁrst
+compute a surrogate logit φ based on the above updated
+optimum categorical probability π∗, and then obtain the
+resulting logpθ(z|x) using the LogSumExp trick. Finally,
+we compute the variational learning objective L(θ) and
+then update the corresponding θ according to the stochastic
+gradient descent method.
+With the above variational inference and learning proce-
+dures, in the training period, one can obtain the optimum
+θ∗and τ ∗. In the test period, θ and τ are ﬁxed to θ∗and τ ∗,
+respectively. In particular, one discards the steps 9 and 10
+in Algorithm 1, and generates the optimum interpretations
+z∗= arg maxz logpθ(z|x).
+3.5
+Entropic Mirror Descent
+As demonstrated in Equation (13), the variational inference
+procedure in the proposed method requires us to solve a
+constrained optimization problem. Speciﬁcally, to approxi-
+mate the computationally intractable log partition function
+logsθ(xi), one needs to maximize the s-sample importance
+weighted lower bound Li
+s, subject to the constraint that the
+categorical probability πi resides in (v −1)-simplex.
+Algorithm 2 Entropic Mirror Descent
+Input variational distribution π, importance weighted lower
+bound Ls, number of iterations M, an initial learning rate
+γ, a predeﬁned objective Lp
+s, a small positive value ϵ
+Output optimum π∗
+1: for iteration i = 1 to M do
+2:
+compute the derivative ▽πLs
+3:
+set learning rate γ =
+γ
+√
+i
+4:
+end the loop if |Ls −Lp
+s| < ϵ
+5:
+set Lp
+s = Ls
+6:
+compute r = γ · ▽πLs
+7:
+compute r = π · er−max(r)
+8:
+set π =
+r
+∥r∥1
+9: end for
+Among the existing constrained optimization algo-
+rithms, entropic mirror descent (EMD) [25] method is cho-
+sen as the applied variational inference methodology, as
+demonstrated in Algorithm 2. Since the above constraint is
+a probability simplex, the negative entropy can naturally be
+
+7
+employed as a speciﬁc function to construct the required
+Bregman distance [47]. Due to the utilization of the geom-
+etry of the optimization problem [48], EMD generally con-
+verges faster than the classical projected gradient descent
+methods [49].
+4
+EXPERIMENTS
+In this section, we ﬁrst validate the proposed IWSL method
+by comparing it with various state-of-the-art SGG models
+on two popular benchmarks: Visual Genome [50] and Open
+Images V6 [51], respectively. Finally, the ablation study and
+the visualization results are presented and discussed in the
+last two subsections.
+4.1
+Visual Genome
+4.1.1
+Experiment Conﬁguration
+Benchmark: Visual Genome [50] is the most common scene
+graph generation benchmark, which consists of 108,077 im-
+ages with an average of 38 objects and 22 relationships per
+image. In this experiment, we employ the data split protocol
+as in [9], in which the most frequent 150 object categories
+and 50 predicate classes are selected. Furthermore, we split
+the Visual Genome into a training set (70%) and a test set
+(30%). For validation, an evaluation set (5k) is randomly se-
+lected from the training set. Following [52], according to the
+number of objects in training split, the relevant categories
+are divided into three disjoint sets: head (more than 10k),
+body (0.5k ∼10k) and tail (less than 0.5k), as demonstrated
+in Fig.2.
+Evaluation Metrics: Due to the reporting bias caused by the
+data imbalance, the mean Recall@K (mR@K) rather than
+the common Recall@K (R@K) is chosen as the evaluation
+metric in this experiment. Compared with R@K which only
+concentrates on common predicates (e.g. on) with abundant
+training samples, mR@K focuses on the informative pred-
+icate categories (e.g. parked on) with much less training
+samples. Three tasks are applied to validate the proposed
+method, namely, Predicate Classiﬁcation (PredCls), Scene
+Graph Classiﬁcation (SGCls) and Scene Graph Detection
+(SGDet). Speciﬁcally, PredCls aims to predict the predicate
+labels, given the input image, the ground-truth bounding
+boxes and object labels; SGCls tries to predict the labels
+for objects and predicates, given the input image and the
+ground-truth bounding boxes; SGDet constructs the output
+scene graph from the input image.
+Implementation Details: Following [38], ResNeXt-101-FPN
+[53] and Faster-RCNN [40] are chosen as the backbone and
+the object detector, respectively. Like previous methods, we
+choose the step training strategy and freeze the above visual
+perception models during training. As in [16], a bi-level
+data resampling strategy is adopted to achieve an effective
+trade-off between the head and the tail categories, which
+consists of image-level over-sampling and instance-level
+under-sampling. The former creates a random permutation
+of images, repeating each image according to its repeat
+factor t in each epoch, while the latter achieves under-
+sampling according to a drop-out probability for instances
+of different predicate classes in each image. Speciﬁcally,
+we set the repeat factor t = 0.07 and the instance drop
+Fig. 2: Visual Genome training split follows a long-tail data
+distribution, which can be divided into three disjoint sets:
+head (red bars), body (green bars) and tail (blue bars). Here,
+y axis represents the number of samples.
+rate γd = 0.7. The batch size bs is set to 12, and an SGD
+optimizer with a learning rate of 0.008 × bs is applied in
+this experiment. The number of samples s is set to 50 in the
+variational inference step. For the variational learning step,
+s is set to 8000 in the SGDet task and 5000 in the PredCls
+and SGCls tasks.
+4.1.2
+Comparisons with State-of-the-art Methods
+As demonstrated in Table 1, besides achieving comparable
+performance with the latest BGNN algorithm in the PredCls
+task, the proposed IWSL method outperforms the previous
+state-of-the-art SGG models by a large margin in the re-
+maining SGCls and SGDet tasks. For instance, for the most
+difﬁcult yet representative SGDet task, compared with the
+latest BGNN model, the proposed IWSL method achieves
+28% and 26.2% performance gain, respectively. Moreover,
+such performance is obtained with a quite small number
+of training iterations (which is usually set to 4000). This is
+mainly because the applied generic entropic mirror descent
+method converges faster than the classical message passing
+strategy.
+Moreover, we also compare the SGDet performance
+(R@100) on the long-tail categorical groups in Table 1, in
+which the proposed IWSL method archives the best mean
+performance. For the informative body and tail category
+groups, the proposed IWSL method outperforms the state-
+of-the-art SGG models by a large margin. Unlike the previ-
+ous models, which focus on detecting the common predicate
+categories, the proposed IWSL method aims to improve the
+informative predicate detection capability. In other words,
+the proposed IWSL method could mitigate the intrinsic
+biased predicate prediction problem caused by the long-tail
+data distribution exhibited in Visual Genome.
+Generally, two types of imbalance lead to the above
+biased predicate prediction problem, namely the semantic
+space imbalance and the training sample imbalance. By
+adopting a generic balance adjustment (BA) strategy [35]
+
+8
+TABLE 1: A performance comparison on Visual Genome dataset.
+Method
+PredCls
+SGCls
+SGDet
+SGDet(R@100)
+mR@50
+mR@100
+mR@50
+mR@100
+mR@50
+mR@100
+Head
+Body
+Tail
+Mean
+RelDN† [39]
+15.8
+17.2
+9.3
+9.6
+6.0
+7.3
+34.1
+6.6
+1.1
+13.9
+Motifs [27]
+14.6
+15.8
+8.0
+8.5
+5.5
+6.8
+36.1
+7.0
+0.0
+14.4
+Motifs* [27]
+18.5
+20.0
+11.1
+11.8
+8.2
+9.7
+34.2
+8.6
+2.1
+15.0
+G-RCNN† [13]
+16.4
+17.2
+9.0
+9.5
+5.8
+6.6
+28.6
+6.5
+0.1
+11.7
+MSDN† [10]
+15.9
+17.5
+9.3
+9.7
+6.1
+7.2
+35.1
+5.5
+0.0
+13.5
+GPS-Net† [19]
+15.2
+16.6
+8.5
+9.1
+6.7
+8.6
+34.5
+7.0
+1.0
+14.2
+GPS-Net†∗[19]
+19.2
+21.4
+11.7
+12.5
+7.4
+9.5
+30.4
+8.5
+3.8
+14.2
+VCTree-TDE [38]
+25.4
+28.7
+12.2
+14.0
+9.3
+11.1
+24.5
+13.9
+0.1
+12.8
+BGNN [16]
+30.4
+32.9
+14.3
+16.5
+10.7
+12.6
+33.4
+13.4
+6.4
+17.7
+IWSL
+30.0
+32.1
+17.4
+18.9
+13.7
+15.9
+30.6
+16.5
+10.7
+19.3
+• Note: All the above methods apply ResNeXt-101-FPN as the backbone. ∗means the re-sampling strategy [31] is applied in this method, and †
+depicts the reproduced results with the latest code from the authors. Using bold to represent the proposed method.
+TABLE 2: The performance comparison on the Visual Genome dataset using the
+balance adjustment strategy.
+PredCls
+SGCls
+SGDet
+Method
+mR@50
+mR@100
+mR@50
+mR@100
+mR@50
+mR@100
+Motifs+BA [35]
+29.7
+31.7
+16.5
+17.5
+13.5
+15.6
+VCTree+BA [35]
+30.6
+32.6
+20.1
+21.2
+13.5
+15.7
+Transformer+BA [35]
+31.9
+34.2
+18.5
+19.4
+14.8
+17.1
+IWSL+BA
+36.9
+39.2
+20.7
+22.2
+16.1
+18.6
+• Note: All the above methods apply the same balance adjustment strategy as in [35]. Using
+bold to represent the proposed method.
+in the proposed IWSL method, the resulting IWSL+BA
+algorithm improves the informative predicate detection ca-
+pability further. Speciﬁcally, to overcome the above two
+types of imbalance, two procedures are devised in the
+generic balance adjustment strategy: semantic adjustment
+and balanced predicate learning. The former aims to induce
+the predictions by the IWSL method to be more informative
+via constructing an appropriate transition matrix, while the
+latter tries to extend the sampling space for informative
+predicates.
+As demonstrated in Table 2, for a fair comparison,
+the proposed IWSL+BA method is compared with three
+baseline models as presented in [35]. It can be seen that
+the proposed IWSL+BA method outperforms the previous
+state-of-the-art models by a large margin, especially for the
+PredCls task. This is mainly thanks to: 1) the transition
+matrix, introduced by the semantic adjustment procedure,
+which maps the predictions from the IWSL method to
+more informative ones; 2) more balanced training samples
+drawn by the balanced predicate learning procedure, which
+discards some redundant training samples of the common
+head group, while keeping the training samples in the
+informative body and tail groups.
+4.2
+Open Images V6
+4.2.1
+Experiment Conﬁguration
+Benchmark: With a superior annotation quality, Open Im-
+ages V6 [51] is another popular scene graph generation
+benchmark, which is constructed by Google. It includes
+126,368 training images, 5322 test images and 1813 valida-
+tion images. In this experiment, we adopt the same data
+processing protocols as in [19], [39], [51].
+Evaluation Metrics: According to the evaluation protocols
+in [19], [39], [51], in this experiment, we choose the follow-
+ing evaluation metrics: the mean Recall@50 (mR@50), the
+regular Recall@50 (R@50), the weighted mean AP of rela-
+tionships (wmAPrel) and the weighted mean AP of phrase
+(wmAPphr). Like [19], [51], [39], the weight metric score is
+deﬁned as: scorewtd = 0.2×R@50+0.4×wmAPrel +0.4×
+wmAPphr.
+Implementation Details: Similar to the previous experiment
+in Visual Genome, we choose ResNeXt-101-FPN [53] and
+Faster-RCNN [40] as the backbone and the object detec-
+tor, respectively. We employ the step training strategy and
+freeze the above visual perception models. The same bi-
+level data resampling strategy is adopted as in the previous
+experiment. We set the batch size bs = 12 and utilize an
+Adam optimizer with the learning rate of 0.0001. For the
+variational inference step, the number of samples s is set to
+50. For the variational learning step, s is set to 5000.
+4.2.2
+Comparisons with State-of-the-art Methods
+To verify the effectiveness of the proposed IWSL method
+further, in this experiment, we compare it with various state-
+of-the-art SGG models in Table 3. Some of the methods (with
+†) are reproduced with the latest code from the authors,
+while the other methods (with ∗) employ an additional
+re-sampling strategy [31]. As demonstrated in Table 3, the
+proposed IWSL method outperforms the state-of-the-art
+SGG models by a large margin on the most representative
+mR@50 evaluation metric, and achieve a comparable per-
+formance with the latest BGNN algorithm on the remaining
+evaluation metrics.
+4.3
+Ablation Study
+The importance weighted lower bound becomes an unbi-
+ased estimator when the number of samples reaches inﬁnity.
+However, it is impossible to achieve the above learning
+
+9
+Fig. 3: Visualization of the qualitative results of the ground-truth (GT), the baseline BGNN model, the proposed IWSL
+method and the derived IWSL+BA algorithm in the SGDet task. The black, orange and green arrows represent the triplets
+with head predicate categories, the triplets with body or tail predicate categories and the reasonable triplets detected by
+models which are not included in GT, respectively. Compared with the baseline BGNN model, the scene graphs generated
+by the proposed IWSL method and the derived IWSL+BA algorithm are much closer to the ground-truth scene graph GT.
+TABLE 3: A performance comparison on the Open Images V6 dataset.
+Method
+mR@50
+R@50
+wmAP rel
+wmAP phr
+score wtd
+RelDN† [39]
+33.98
+73.08
+32.16
+33.39
+40.84
+RelDN†∗[39]
+37.20
+75.34
+33.21
+34.31
+41.97
+VCTree† [15]
+33.91
+74.08
+34.16
+33.11
+40.21
+G-RCNN† [13]
+34.04
+74.51
+33.15
+34.21
+41.84
+Motifs† [27]
+32.68
+71.63
+29.91
+31.59
+38.93
+VCTree-TDE† [38]
+35.47
+69.30
+30.74
+32.80
+39.27
+GPS-Net† [19]
+35.26
+74.81
+32.85
+33.98
+41.69
+GPS-Net†∗[19]
+38.93
+74.74
+32.77
+33.87
+41.60
+BGNN [16]
+40.45
+74.98
+33.51
+34.15
+42.06
+IWSL
+42.18
+74.68
+33.11
+34.33
+41.87
+• Note: All the above methods apply ResNeXt-101-FPN as the backbone. ∗means the
+re-sampling strategy [31] is applied in this method, and † depicts the reproduced
+results with the latest code from the authors. Using bold to represent the proposed
+method.
+scenario in reality, due to the high computational complex-
+ity and the huge computational resources. In practice, for
+computational efﬁciency, the number of samples is often set
+to a relatively small number. To investigate the detection
+performance dependency of the proposed IWSL method on
+the number of samples, in this section, we choose three set-
+tings and compare their impact on the SGDet performance
+as shown in Table 4. We observe that the SGDet perfor-
+TABLE 4: Ablation study of the impact of the number of
+samples in variational inference step.
+Number of Samples S
+mR@20
+mR@50
+mR@100
+10
+9.9
+13.1
+15.5
+30
+10.7
+13.5
+15.6
+50
+10.6
+13.7
+15.9
+• Note: We compare the SGDet performance in this ablation study.
+mance gradually increases with the number of samples.
+The performance gain obtained from a larger number of
+samples (s > 50) is not that obvious, while its correspond-
+ing computation time increases dramatically. To pursue a
+balanced trade-off between the detection performance and
+the computational complexity, in this paper, the number of
+samples s is set to 50 in variational inference step.
+4.4
+Visualization Results
+To visually demonstrate the superiority of the proposed
+methods, in Fig. 3, we compare the visualization of the
+qualitative results of the ground-truth (GT), the baseline
+BGNN model, the proposed IWSL method and the derived
+IWSL+BA algorithm in the SGDet task. Compared with
+
+10
+the baseline BGNN model, the proposed IWSL method
+is capable of detecting more informative body and tail
+predicates. For example, the proposed IWSL could detect
+an additional < laying on > predicate for the top im-
+age, or an additional < standing on > predicate for the
+middle image. Besides, the spatial informative predicates
+such as < on back of > can also be detected. Moreover,
+the derived IWSL+BA method further improves the above
+capability. For example, it could detect an additional triplet
+< cat in front of window > for the top image, or even a
+new reasonable triplet < wing of airplane > (which is not
+included in the ground-truth scene graph GT) for the bottom
+image. In a word, compared with the baseline BGNN model,
+the scene graphs generated by the proposed IWSL method
+and the derived IWSL+BA algorithm are much closer to the
+ground-truth scene graph GT.
+5
+CONCLUSION
+To achieve a balanced bias-variance trade-off, in this pa-
+per, we propose a novel importance weighted structure
+learning (IWSL) method, which employs a tighter impor-
+tance weighted lower bound to replace the classical ELBO
+as the variational inference objective. This is because the
+variational approximation derived from the ELBO often
+underestimates the underlying posterior. A generic entropic
+mirror descent algorithm, rather than the traditional mes-
+sage passing strategy, is employed to accomplish the re-
+sulting constrained variational inference task. We validate
+the proposed IWSL method on two popular scene graph
+generation benchmarks: Visual Genome and Open Images
+V6, showing it outperforms the state-of-the-art models by a
+large margin.
+ACKNOWLEDGMENTS
+This work was supported in part by the U.K. Defence
+Science and Technology Laboratory, and in part by the
+Engineering and Physical Research Council (collaboration
+between U.S. DOD, U.K. MOD, and U.K. EPSRC through
+the Multidisciplinary University Research Initiative) under
+Grant EP/R018456/1.
+REFERENCES
+[1]
+Q. You, H. Jin, Z. Wang, C. Fang, and J. Luo, “Image captioning
+with semantic attention,” in Proceedings of the IEEE conference on
+computer vision and pattern recognition, 2016, pp. 4651–4659.
+[2]
+S. J. Rennie, E. Marcheret, Y. Mroueh, J. Ross, and V. Goel, “Self-
+critical sequence training for image captioning,” in Proceedings of
+the IEEE conference on computer vision and pattern recognition, 2017,
+pp. 7008–7024.
+[3]
+X. Yang, K. Tang, H. Zhang, and J. Cai, “Auto-encoding scene
+graphs for image captioning,” in Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition, 2019, pp.
+10 685–10 694.
+[4]
+D. Teney, L. Liu, and A. van Den Hengel, “Graph-structured
+representations for visual question answering,” in Proceedings of
+the IEEE conference on computer vision and pattern recognition, 2017,
+pp. 1–9.
+[5]
+P. Anderson, X. He, C. Buehler, D. Teney, M. Johnson, S. Gould,
+and L. Zhang, “Bottom-up and top-down attention for image
+captioning and visual question answering,” in Proceedings of the
+IEEE conference on computer vision and pattern recognition, 2018, pp.
+6077–6086.
+[6]
+J. Shi, H. Zhang, and J. Li, “Explainable and explicit visual reason-
+ing over scene graphs,” in Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, 2019, pp. 8376–8384.
+[7]
+M. J. Wainwright, M. I. Jordan et al., “Graphical models, exponen-
+tial families, and variational inference,” Foundations and Trends in
+Machine Learning, vol. 1, no. 1–2, pp. 1–305, 2008.
+[8]
+C. W. Fox and S. J. Roberts, “A tutorial on variational bayesian
+inference,” Artiﬁcial intelligence review, vol. 38, no. 2, pp. 85–95,
+2012.
+[9]
+D. Xu, Y. Zhu, C. B. Choy, and L. Fei-Fei, “Scene graph generation
+by iterative message passing,” in Proceedings of the IEEE conference
+on computer vision and pattern recognition, 2017, pp. 5410–5419.
+[10] Y. Li, W. Ouyang, B. Zhou, K. Wang, and X. Wang, “Scene
+graph generation from objects, phrases and region captions,” in
+Proceedings of the IEEE international conference on computer vision,
+2017, pp. 1261–1270.
+[11] B. Dai, Y. Zhang, and D. Lin, “Detecting visual relationships with
+deep relational networks,” in Proceedings of the IEEE conference on
+computer vision and Pattern recognition, 2017, pp. 3076–3086.
+[12] S. Woo, D. Kim, D. Cho, and I. S. Kweon, “Linknet: Relational em-
+bedding for scene graph,” Advances in Neural Information Processing
+Systems, vol. 31, pp. 560–570, 2018.
+[13] J. Yang, J. Lu, S. Lee, D. Batra, and D. Parikh, “Graph r-cnn for
+scene graph generation,” in Proceedings of the European conference
+on computer vision (ECCV), 2018, pp. 670–685.
+[14] W. Wang, R. Wang, S. Shan, and X. Chen, “Exploring context
+and visual pattern of relationship for scene graph generation,”
+in Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, 2019, pp. 8188–8197.
+[15] K. Tang, H. Zhang, B. Wu, W. Luo, and W. Liu, “Learning to com-
+pose dynamic tree structures for visual contexts,” in Proceedings
+of the IEEE Conference on Computer Vision and Pattern Recognition,
+2019, pp. 6619–6628.
+[16] R. Li, S. Zhang, B. Wan, and X. He, “Bipartite graph network with
+adaptive message passing for unbiased scene graph generation,”
+in Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, 2021, pp. 11 109–11 119.
+[17] Y. Li, W. Ouyang, B. Zhou, J. Shi, C. Zhang, and X. Wang, “Factor-
+izable net: an efﬁcient subgraph-based framework for scene graph
+generation,” in Proceedings of the European Conference on Computer
+Vision (ECCV), 2018, pp. 335–351.
+[18] T. Chen, W. Yu, R. Chen, and L. Lin, “Knowledge-embedded
+routing network for scene graph generation,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2019, pp. 6163–6171.
+[19] X. Lin, C. Ding, J. Zeng, and D. Tao, “Gps-net: Graph property
+sensing network for scene graph generation,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2020, pp. 3746–3753.
+[20] D. Liu, M. Bober, and J. Kittler, “Visual semantic information
+pursuit: A survey,” IEEE transactions on pattern analysis and machine
+intelligence, vol. 43, no. 4, pp. 1404–1422, 2019.
+[21] C. Zhang, J. B¨utepage, H. Kjellstr¨om, and S. Mandt, “Advances
+in variational inference,” IEEE transactions on pattern analysis and
+machine intelligence, vol. 41, no. 8, pp. 2008–2026, 2018.
+[22] R. B. G. Yuri Burda and R. Salakhutdinov, “Importance weighted
+autoencoders,” in 4th International Conference on Learning Represen-
+tations (ICLR), 2016.
+[23] S. G. Eric Jang and B. Poole, “Categorical reparameterization
+with gumbel-softmax,” in 5th International Conference on Learning
+Representations (ICLR), 2017.
+[24] C. J. Maddison, A. Mnih, and Y. W. Teh, “The concrete distribution:
+A continuous relaxation of discrete random variables,” in 5th
+International Conference on Learning Representations (ICLR), 2017.
+[25] A. Beck and M. Teboulle, “Mirror descent and nonlinear pro-
+jected subgradient methods for convex optimization,” Operations
+Research Letters, vol. 31, no. 3, pp. 167–175, 2003.
+[26] M. Qi, W. Li, Z. Yang, Y. Wang, and J. Luo, “Attentive relational
+networks for mapping images to scene graphs,” in Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2019, pp. 3957–3966.
+[27] R. Zellers, M. Yatskar, S. Thomson, and Y. Choi, “Neural motifs:
+Scene graph parsing with global context,” in Proceedings of the
+IEEE Conference on Computer Vision and Pattern Recognition, 2018,
+pp. 5831–5840.
+
+11
+[28] N. V. Chawla, K. W. Bowyer, L. O. Hall, and W. P. Kegelmeyer,
+“Smote: synthetic minority over-sampling technique,” Journal of
+artiﬁcial intelligence research, vol. 16, pp. 321–357, 2002.
+[29] L. Shen, Z. Lin, and Q. Huang, “Relay backpropagation for effec-
+tive learning of deep convolutional neural networks,” in European
+conference on computer vision.
+Springer, 2016, pp. 467–482.
+[30] D. Mahajan, R. Girshick, V. Ramanathan, K. He, M. Paluri, Y. Li,
+A. Bharambe, and L. Van Der Maaten, “Exploring the limits of
+weakly supervised pretraining,” in Proceedings of the European
+conference on computer vision (ECCV), 2018, pp. 181–196.
+[31] A. Gupta, P. Dollar, and R. Girshick, “Lvis: A dataset for large
+vocabulary instance segmentation,” in Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition, 2019, pp.
+5356–5364.
+[32] X. Hu, Y. Jiang, K. Tang, J. Chen, C. Miao, and H. Zhang, “Learning
+to segment the tail,” in Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, 2020, pp. 14 045–14 054.
+[33] S. Gidaris and N. Komodakis, “Dynamic few-shot visual learning
+without forgetting,” in Proceedings of the IEEE Conference on Com-
+puter Vision and Pattern Recognition, 2018, pp. 4367–4375.
+[34] B. Zhou, Q. Cui, X.-S. Wei, and Z.-M. Chen, “Bbn: Bilateral-
+branch network with cumulative learning for long-tailed visual
+recognition,” in Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, 2020, pp. 9719–9728.
+[35] Y. Guo, L. Gao, X. Wang, Y. Hu, X. Xu, X. Lu, H. T. Shen,
+and J. Song, “From general to speciﬁc: Informative scene graph
+generation via balance adjustment,” in Proceedings of the IEEE/CVF
+International Conference on Computer Vision, 2021, pp. 16 383–16 392.
+[36] K. Cao, C. Wei, A. Gaidon, N. Arechiga, and T. Ma, “Learning
+imbalanced datasets with label-distribution-aware margin loss,” in
+Proceedings of the 33rd International Conference on Neural Information
+Processing Systems, 2019, pp. 1567–1578.
+[37] Y. Cui, M. Jia, T.-Y. Lin, Y. Song, and S. Belongie, “Class-balanced
+loss based on effective number of samples,” in Proceedings of the
+IEEE/CVF conference on computer vision and pattern recognition, 2019,
+pp. 9268–9277.
+[38] K. Tang, Y. Niu, J. Huang, J. Shi, and H. Zhang, “Unbiased
+scene graph generation from biased training,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2020, pp. 3716–3725.
+[39] J. Zhang, K. J. Shih, A. Elgammal, A. Tao, and B. Catanzaro,
+“Graphical contrastive losses for scene graph parsing,” in Pro-
+ceedings of the IEEE Conference on Computer Vision and Pattern
+Recognition, 2019.
+[40] S. Ren, K. He, R. Girshick, and J. Sun, “Faster r-cnn: Towards real-
+time object detection with region proposal networks,” Advances in
+neural information processing systems, vol. 28, pp. 91–99, 2015.
+[41] C. Sutton and A. McCallum, “An introduction to conditional
+random ﬁelds for relational learning,” Introduction to statistical
+relational learning, vol. 2, pp. 93–128, 2006.
+[42] A. Blake, P. Kohli, and C. Rother, Markov random ﬁelds for vision and
+image processing.
+MIT press, 2011.
+[43] F. Scarselli, M. Gori, A. C. Tsoi, M. Hagenbuchner, and G. Mon-
+fardini, “The graph neural network model,” IEEE transactions on
+neural networks, vol. 20, no. 1, pp. 61–80, 2008.
+[44] J. Gilmer, S. S. Schoenholz, P. F. Riley, O. Vinyals, and G. E. Dahl,
+“Neural message passing for quantum chemistry,” in International
+conference on machine learning.
+PMLR, 2017, pp. 1263–1272.
+[45] X. Wang, R. Girshick, A. Gupta, and K. He, “Non-local neural
+networks,” in Proceedings of the IEEE conference on computer vision
+and pattern recognition, 2018, pp. 7794–7803.
+[46] J. Zhou, G. Cui, S. Hu, Z. Zhang, C. Yang, Z. Liu, L. Wang, C. Li,
+and M. Sun, “Graph neural networks: A review of methods and
+applications,” AI Open, vol. 1, pp. 57–81, 2020.
+[47] M. Teboulle, “Entropic proximal mappings with applications
+to nonlinear programming,” Mathematics of Operations Research,
+vol. 17, no. 3, pp. 670–690, 1992.
+[48] G. Raskutti and S. Mukherjee, “The information geometry of
+mirror descent,” IEEE Transactions on Information Theory, vol. 61,
+no. 3, pp. 1451–1457, 2015.
+[49] B. Eicke, “Iteration methods for convexly constrained ill-posed
+problems in hilbert space,” Numerical Functional Analysis and Opti-
+mization, vol. 13, no. 5-6, pp. 413–429, 1992.
+[50] R. Krishna, Y. Zhu, O. Groth, J. Johnson, K. Hata, J. Kravitz,
+S. Chen, Y. Kalantidis, L.-J. Li, D. A. Shamma et al., “Visual
+genome: Connecting language and vision using crowdsourced
+dense image annotations,” International journal of computer vision,
+vol. 123, no. 1, pp. 32–73, 2017.
+[51] A. Kuznetsova, H. Rom, N. Alldrin, J. Uijlings, I. Krasin, J. Pont-
+Tuset, S. Kamali, S. Popov, M. Malloci, T. Duerig, and V. Ferrari,
+“The open images dataset v4: Uniﬁed image classiﬁcation, object
+detection, and visual relationship detection at scale,” International
+journal of computer vision, 2020.
+[52] Z. Liu, Z. Miao, X. Zhan, J. Wang, B. Gong, and S. X. Yu, “Large-
+scale long-tailed recognition in an open world,” in Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2019, pp. 2537–2546.
+[53] K. He, X. Zhang, S. Ren, and J. Sun, “Deep residual learning for
+image recognition,” in Proceedings of the IEEE conference on computer
+vision and pattern recognition, 2016, pp. 770–778.
+

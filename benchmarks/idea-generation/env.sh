@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
 # benchmarks/idea-generation/env.sh
-# Stages a tiny paper/ directory and qa.jsonl for the main agent's
-# idea-generate skill. The fixture is placed inside the
-# workspace-idea-generate workspace because that is the sub-agent main
-# will spawn; the staging is purely advisory (main's prompt tells it where
-# to look).
+# Stages a tiny paper/ directory for the main agent's idea-generate skill.
+# qa.jsonl is read by run_bench.py on the host — no need to stage it.
 set -euo pipefail
 
 : "${BENCH_CONTAINER:?must be exported by env_setup.sh}"
@@ -14,15 +11,15 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 log() { printf '\n[idea-generation.env] %s\n' "$*"; }
 
-# Bring up a fresh openclaw-bench container for this benchmark so fixtures
-# and runtime state from a previous benchmark cannot leak in.
+# Bring up a fresh container.
 if [[ -f "${BENCH_ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
   . "${BENCH_ENV_FILE}"
   bench_force_recreate
 fi
 
-TARGET="${BENCH_MOUNT}/workspace-idea-generate/bench-fixtures/bench-${BENCH_RUN_ID}/paper"
+# Stage tiny test papers into the ideate workspace so the agent can find them.
+TARGET="${BENCH_MOUNT}/workspace/ideate/bench-fixtures/bench-${BENCH_RUN_ID}/paper"
 log "staging paper fixture at ${TARGET}"
 docker exec "${BENCH_CONTAINER}" mkdir -p "${TARGET}"
 
@@ -45,14 +42,5 @@ MovieLens-1M split we get Recall@20 = 0.16, but inference FLOPs drop 40%.
 '
 echo "${PAPER_A}" | docker exec -i "${BENCH_CONTAINER}" bash -lc "cat > ${TARGET}/tinyrec.md"
 echo "${PAPER_B}" | docker exec -i "${BENCH_CONTAINER}" bash -lc "cat > ${TARGET}/sparserec.md"
-
-log "staging qa.jsonl"
-docker exec "${BENCH_CONTAINER}" mkdir -p \
-  "${BENCH_MOUNT}/workspace-idea-generate/bench-fixtures"
-docker cp "${HERE}/qa.jsonl" "${BENCH_CONTAINER}:${BENCH_MOUNT}/workspace-idea-generate/bench-fixtures/qa.jsonl"
-
-log "ensuring run dir"
-docker exec "${BENCH_CONTAINER}" mkdir -p \
-  "${BENCH_MOUNT}/workspace-idea-generate/idea-runs/bench-${BENCH_RUN_ID}"
 
 log "env ready"

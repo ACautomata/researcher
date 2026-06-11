@@ -1,0 +1,2846 @@
+Generative Compositional Augmentations for Scene Graph Prediction
+
+Boris Knyazev*,1,2 Harm de Vries3 C˘at˘alina Cangea4
+Graham W. Taylor1,2 Aaron Courville5,6 Eugene Belilovsky5,7
+1School of Engineering, University of Guelph 2Vector Institute for Artificial Intelligence
+
+3Element AI
+
+4University of Cambridge
+
+5Mila
+
+6Université de Montréal
+
+7Concordia University
+
+Abstract
+
+Inferring objects and their relationships from an image
+in the form of a scene graph is useful in many applications
+at the intersection of vision and language. We consider a
+challenging problem of compositional generalization that
+emerges in this task due to a long tail data distribution. Cur-
+rent scene graph generation models are trained on a tiny
+fraction of the distribution corresponding to the most fre-
+quent compositions, e.g. <cup, on, table>. However, test
+images might contain zero- and few-shot compositions of
+objects and relationships, e.g. <cup, on, surfboard>. De-
+spite each of the object categories and the predicate (e.g.
+‘on’) being frequent in the training data, the models often fail
+to properly understand such unseen or rare compositions.
+To improve generalization, it is natural to attempt increas-
+ing the diversity of the training distribution. However, in
+the graph domain this is non-trivial. To that end, we pro-
+pose a method to synthesize rare yet plausible scene graphs
+by perturbing real ones. We then propose and empirically
+study a model based on conditional generative adversarial
+networks (GANs) that allows us to generate visual features
+of perturbed scene graphs and learn from them in a joint
+fashion. When evaluated on the Visual Genome dataset, our
+approach yields marginal, but consistent improvements in
+zero- and few-shot metrics. We analyze the limitations of our
+approach indicating promising directions for future research.
+
+1. Introduction
+
+Reasoning about the world in terms of objects and re-
+lationships between them is an important aspect of human
+and machine cognition [21]. In our environment, we can
+often observe frequent compositions such as “person on a
+surfboard” or “person next to a dog”. When we are faced
+with a rare or previously unseen composition such as “dog
+
+*This work was partially done while the author was an intern at Mila.
+
+Correspondence to: bknyazev@uoguelph.ca
+
+(a) The triplet distribution in Visual Genome [38] is
+Figure 1.
+extremely long-tailed, with numerous few- and zero-shot composi-
+tions (highlighted in red and yellow respectively). (b) The training
+set contains a tiny fraction (3%) of all possible triplets, while many
+other plausible triplets exist. We aim to “hallucinate” such com-
+positions using GANs to increase the diversity of training samples
+and improve generalization. Recall results are from [67].
+
+on a surfboard”, to understand the scene we need to un-
+derstand the concepts of ‘person’, ‘dog’, ‘surfboard’ and
+‘on’. While such unbiased reasoning about concepts is easy
+for humans, for machines this task has remained extremely
+challenging [3, 32, 4, 35, 40]. Learning-based models tend
+to capture spurious statistical correlations in the training
+data [2, 52], e.g. ‘person’ rather than ‘dog’ has always oc-
+curred on a surfboard. When the evaluation is explicitly
+focused on compositional generalization – ability to recog-
+nize novel or rare combinations of objects and relationships
+– such models then can fail remarkably [3, 45, 67, 36].
+
+Predicting compositions of objects and the relationships
+between them from images is part of the scene graph gen-
+eration (SGG) task. SGG is important, because accurately
+inferred scene graphs can improve downstream results in
+tasks, such as VQA [83, 29, 7, 41, 63, 26, 12], image cap-
+tioning [78, 22, 42, 72, 48], retrieval [33, 5, 67, 69, 62] and
+others [1, 75]. However, inferring scene graphs accurately is
+
+1
+
+dog on surfboardman on surfboardcup on surfboardman in shirtwoman has hairwoman on surfboardsurfboard with ﬂowerdog wearing shirtdog laying on skateboardbear has helmetRecall=41%Recall=4.5%bear has legﬂag on bearwheel on skateboardear of dogAllpossibletripletsUnlikelytripletsOtherplausibletripletsTriplets inthe dataset(a)(b)Figure 2. The distributions of top-25 predicate (left) and object
+(right) categories in Visual Genome [38] (split of [74]).
+
+challenging due to a long tail data distribution and inevitable
+appearance of zero-shot (ZS) compositions (triplets) of
+objects and relationships at test time, e.g. “cup on surfboard”
+(Figure 1). The SGG results using the recent Total Direct
+Effect (TDE) method [67] show a severe drop in ZS recall
+highlighting the extreme challenge of compositional general-
+ization. This might appear surprising given that the marginal
+distributions in the entire scene graph dataset (e.g. Visual
+Genome [38]) and the ZS subset are very similar (Fig. 2).
+More specifically, the predicate and object categories that are
+frequent in the entire dataset, such as ‘on’, ‘has’ and ‘man’,
+‘person’ also dominate among the ZS triplets. For example,
+both “cup on surfboard” and “bear has helmet” consist of
+frequent entities, but represent extremely rare compositions
+(Fig. 1). This strongly suggests that the challenging nature
+of correctly predicting ZS triplets does not directly stem
+from the imbalance of predicates (or objects), as commonly
+viewed in the previous SGG works, where the models
+attempt to improve mean (or predicate-normalized) recall
+metrics [9, 18, 68, 85, 67, 10, 80, 44, 81, 76]. Therefore, we
+focus on compositional generalization and associated zero-
+and few-shot metrics.
+
+Despite recent improvements in compositional general-
+ization within the SGG task [67, 36, 65], the state-of-the-art
+result in zero-shot recall is still 4.5% compared to 41% for
+all-shot recall (Figure 3). To address compositional general-
+ization, we consider exposing the model to a large diversity
+of training examples that can lead to emergent generaliza-
+tion [27, 58]. To avoid expensive labeling of additional data,
+we propose a compositional augmentation approach based on
+conditional generative adversarial networks (GANs) [19, 49].
+Our general idea is augmenting the dataset by perturbing
+scene graphs and corresponding visual features of images,
+such that together they represent a novel or rare situation.
+
+Overall, we make the following contributions:
+•We propose scene graph perturbation methods (§ 3.1.1)
+as part of a GAN-based model (§ 3.1), to augment the
+training set with underrepresented compositions;
+•We propose natural language- and dataset-based met-
+rics to evaluate the quality of (perturbed) scene graphs
+(§ 3.2);
+•We extensively evaluate our model and outperform a
+strong baseline in zero-, few- and all-shot recall (§ 4).
+Our code is available at https://github.com/
+
+bknyaz/sgg.
+
+2
+
+[74]
+
+[82]
+
+[82]
+
+[9]
+
+[67]
+
+[67]
+
+[36]
+
+Figure 3. In this work, the compositional augmentations we propose
+improve on zero-shot (ZS) as well as all-shot recall.
+
+2. Related Work
+
+Scene Graph Generation. SGG [74] extended an earlier
+visual relationship detection (VRD) task [45, 60], enabling
+generation of a complete scene graph (SG) for an image.
+This spurred more research at the intersection of vision and
+language, where a SG can facilitate high-level visual reason-
+ing tasks such as VQA [83, 29, 63] and others [1, 75, 55].
+Follow-up SGG works [43, 77, 82, 85, 23, 68, 46, 47]
+have significantly improved the performance in terms of
+all-shot recall (Fig. 3). While the problem of zero-shot (ZS)
+generalization was already actively explored in the VRD
+task [84, 79, 73], in a more challenging SGG task and on
+a realistic dataset, such as Visual Genome [38], this problem
+has been addressed only recently in [67] by proposing
+Total Direct Effect (TDE), in [36] by normalizing the graph
+loss, and in [65] by the energy-based loss. Previous SGG
+works have not addressed the compositional generalization
+issue by synthesizing rare SGs. The closest work that
+also considers a generative approach is [73] solving the
+VRD task. Compared to it, our model follows a standard
+SGG pipeline and evaluation [74, 82] including object
+and predicate classification, instead of classifying only the
+predicate. We also condition a GAN on SGs rather than
+triplets, which combinatorially increases the number of
+possible augmentations. To improve SG’s likelihood, we
+leverage both the language model and dataset statistics as
+opposed to random compositions as in [73].
+
+Predicate imbalance and mean recall. Recent SGG
+works have focused on the predicate imbalance problem [9,
+18, 68, 85, 67, 10, 80, 44, 81, 76] and mean (over predicates)
+recall as a metric not sensitive to the dominance of frequent
+predicates. However, as we discussed in § 1, the challenge of
+compositional generalization does not directly stem from the
+imbalance of predicates, since frequent predicates (e.g. ‘on’)
+still dominate in unseen/rare triplets (Fig. 2). Moreover, [67]
+showed mean recall is relatively easy to improve by standard
+Reweight/Resample methods, while ZS recall is not.
+
+Data augmentation with GANs. Data augmentation is
+a standard method for improving machine learning models
+[57]. Typically these methods rely on domain specific knowl-
+edge such as applying known geometric transformations to
+
+onhasofwearinginnearwithbehindholdingwearsabovesitting onunderin front ofridingstanding onattached tobelonging toatwalking oncarryingoverwatchinghanging fromfor0.00.10.20.3FractionCorrelation between  distributions = 0.76Entire test setZero-shot test setmanpersontreewindowshirtlegbuildingwomanheadsignpolehandtablehaircarleafpantearpeopleshoelightarmdoorplatefence0.000.020.040.060.080.10FractionCorrelation between  distributions = 0.99Entire test setZero-shot test setIMP+2017Freq2018NM2018KERN2019VCTree2019TDE2020IMP++2020Ours1008060402002040Recall change  relative to IMP+ (%)All-Shot RecallZero-Shot RecallFigure 4. Illustrative examples of different perturbation schemes we consider. Only the subgraph is shown for clarity.
+
+images [17, 11]. In the case of SGG we require more general
+augmentation methods, so here we explore a GAN-based
+approach as one of them. GANs [19] have been signifi-
+cantly improved w.r.t. stability of training and the quality
+of generated samples [6, 34], with recent works considering
+their usage for data augmentation [58, 64, 61]. Furthermore,
+recent work has shown that it is possible to produce plau-
+sible out-of-distribution (OOD) examples conditioned on
+unseen label combinations, by intervening on the underlying
+graph [37, 8, 66, 13, 20]. In this work, we have direct access
+to the underlying graphs of images in the form of SGs, which
+allows us to condition on OOD compositions as in [8, 13].
+
+3. Methods
+
+We consider a dataset of N tuples D = {(I, G, B)}N ,
+where I is an image with a corresponding scene graph
+G [33] and bounding boxes B. A scene graph G = (O, R)
+consists of n objects O = {o1, ..., on}, and m relation-
+ships between them R = {r1, ..., rm}. For each object
+oi there is an associated bounding box bi ∈ R4, B =
+{b1, ..., bn}. Each object oi is labeled with a particular cat-
+egory oi ∈ C, while each relationship rk = (i, ek, j) is a
+triplet with a subject (start node) i, an object (end node)
+j and a predicate ek ∈ R, where R is a set of all pred-
+icate classes. For further convenience, we define a cate-
+gorical triplet (composition) ˜rk = (oi, ek, oj) consisting
+of object and predicate categories, ˜R = {˜r1, ..., ˜rm}. An
+example of a scene graph is presented in Figure 4 with ob-
+jects O = {person, surf board, wave} and relationships
+R = {(3, near, 1), (1, on, 2)} and categorical relationships
+˜R = {(wave, near, person), (person, on, surf board)}.
+
+3.1. Generative Compositional Augmentations
+
+In a given dataset D, such as Visual Genome [38], the
+distribution of triplets is extremely long-tailed with a small
+fraction of dominating triplets (Fig. 1). To address the long-
+tail issue, we consider a GAN-based approach to augment
+D and artificially upsample rare compositions. Our model
+is based on the high-level idea of generating an additional
+set ˆD = {( ˆI, ˆG, ˆB)} ˆN . A typical scene-graph-to-image
+generation pipeline is [31] ˆG → ˆB → ˆI. We describe our
+model accordingly by beginning with constructing ˆG and
+ˆB (§ 3.1.1) followed by the generation of ˆI (in our case,
+features) (§ 3.1.2). See Figure 5 for the overall pipeline.
+
+3.1.1 Scene Graph Perturbations
+
+We propose three methods to synthetically upsample under-
+represented triplets in the dataset (Fig. 4). Our goal is to
+construct diverse compositions avoiding both very likely
+(already abundant in the dataset) and very unlikely (“implau-
+sible”) combinations of objects and predicates, so that the dis-
+tribution of synthetic ˆG will resemble the tail of the real distri-
+bution of G. To construct ˆG, we perturb existing G available
+in D, since constructing graphs from scratch is more diffi-
+cult: G → ˆG. We focus on perturbing nodes only as it allows
+the creation of highly diverse compositions, so ˆG = ( ˆO, R),
+where ˆO = {ˆo1, ..., ˆon} are the replacement object cate-
+gories. We perturb only L · n nodes, where L ∈ R[0,1], so
+ˆoi = oi for n(1−L) nodes. We sample L·n nodes for pertur-
+bation based on their sum of in and out degrees. Each scene
+graph typically has a few “hub” nodes densely connected to
+other nodes. So, by perturbing the hubs, we introduce more
+novel compositions with fewer perturbations.
+
+RAND (random) is the simplest strategy, where for a node
+i we uniformly sample a category ˆo from C, so that oi = ˆo.
+NEIGH (semantic neighbors) leverages pretrained GloVe
+word embeddings [54] available for each of the object cat-
+egories C. Thus, given node i of category oi we retrieve
+the top-k neighbors of oi in the embedding space using co-
+sine similarity. We then uniformly sample ˆo from the top-k
+neighbors replacing oi with ˆo.
+
+GRAPHN (graph-structured semantic neighbors). RAND
+and NEIGH do not take into account the graph struc-
+ture or dataset statistics leading to unlikely or not diverse
+enough compositions. To alleviate that, we propose the
+GRAPHN method. Given node i of category oi in the graph
+G, we consider all triplets ˜Ri = {˜rk,i} in G that contain i as
+the start or end node, i.e. ˜rk,i = (oi, ek, oj) or (oj, ek, oi).
+For example in Figure 4, if oi is ‘person’, then ˜Ri =
+{(person, on, surf board), (wave, near, person)}.
+For
+each ˜rk,i we find all triplets ˜Rc in the dataset D match-
+ing (oc, ek, oj) or (oj, ek, oc), where oc ̸= oi is a candidate
+replacement for oi. For each candidate oc, we count matched
+triplets nc = | ˜Rc| and define unnormalized probabilities ˆpc
+based on the inverse of nc, namely ˆpc = 1/nc. This way we
+define a set of possible replacements {oc, ˆpc} for node i.
+
+One of our key observations is that depending on the eval-
+uation metric and amount of noise in the dataset, we might
+want to avoid sampling candidates with very high ˆpc (low nc).
+
+3
+
+Trainingscene graphRandrandomobject classNeighGraphNWho/what isunlikely to be on'surfboard'?  'Wave' isunlikely to benear who/what?sample from  top-k neighborssamplefrom   top-kneighbors: man  woman  people  child  ...full scene graph andcorresponding imagepersonsurfboardonnearonwaveroomsurfboardonnearonwavepeoplesurfboardonnearonwavedogsurfboardonnearonwaveFigure 5. Our generative scene graph augmentation pipeline with its main components: discriminators D, a generator G and a scene graph
+classification model F . See § 3 and § A.1 in Appendix for a detailed description of our pipeline and model architectures.
+
+Therefore, to control for that, we introduce an additional hy-
+perparameter α that allows to filter out candidates with nc <
+α by setting their ˆpc to 0. This way we can trade-off between
+upsampling rare and frequent triplets. We then normalize pc
+to ensure (cid:80) pc = 1 and sample o′ ∼ pc. To further increase
+the diversity, the final ˆo is chosen from the top-k semantic
+neighbors of o′ as in NEIGH, including o′ itself. GRAPHN is
+a sequential perturbation procedure, where for each node
+the perturbation is conditioned on the current graph state. In
+contrast, RAND and NEIGH perturb all L·n nodes in parallel.
+Bounding boxes. Since we perturb only a few nodes, for
+simplicity we assume that the perturbed graph has the same
+bounding boxes B: ˆB = B. While one can reasonably argue
+that object sizes and positions vary a lot depending on the
+category, i.e. “elephant” is much larger than “dog”, we can
+often find instances disproving that, e.g. if a toy “elephant”
+or a drawing of an elephant is present. Empirically we found
+this approach to work well. Please see § B.3 in Appendix for
+the experiments with predicting ˆB conditioned on ˆG.
+
+3.1.2 Scene Graph to Visual Features
+
+Given perturbed ( ˆG, ˆB), the next step in our GAN-based
+pipeline is to generate visual features (Figure 5). To train
+such a model, we first need to extract real features from
+the dataset D = {(I, G, B)}N . Following [74, 82], we
+use a pretrained and frozen object detector [59] to extract
+global visual features H from input images. Then, given
+B and H, we use RoIAlign [24] to extract visual features
+(V, E) of nodes and edges, respectively. To extract edge
+features between a pair of nodes, the union of their bounding
+boxes is used [82]. Since we do not update the detector, we
+do not need to generate images as in scene-graph-to-image
+models [31], just intermediate features ˆH, ˆV , ˆE.
+
+Main scene graph classification model F . Given ex-
+tracted (V, E), the main model F predicts a scene graph
+G = (O, R), i.e. it needs to correctly assign object labels O
+to node features V and predicate classes R to edge features
+E. Our pipeline is not constrained to the choice of F .
+
+Generator G. Our scene-graph-to-features generator G
+follows the architecture of [31]. First, a scene graph ˆG is pro-
+cessed by a graph convolutional network (GCN) to exchange
+information between nodes and edges. We found it beneficial
+to concatenate output GCN features of all nodes with visual
+features V ′, where V ′ are sampled from the set {Voi} pre-
+computed at the previous stage and oi is the category of node
+i. By conditioning the generator on visual features, the main
+task of G becomes simply to align and smooth the features
+appropriately, which we believe is easier than generating
+visual features from the categorical distribution. In addition,
+the randomness of this sampling step injects noise improving
+the diversity of generated features. The generated node fea-
+tures and the bounding boxes ˆB are used to construct the lay-
+out followed by feature refinement [31] to generate ˆH. After-
+wards, ( ˆV , ˆE) are extracted from ˆH the same way as (V, E).
+Discriminators D. We have independent discriminators
+for nodes and edges, Dnode and Dedge, that discriminate
+real features (V , E) from fake ones ( ˆV , ˆE) conditioned
+on their class as per the CGAN [49, 56]. We add a global
+discriminator Dglobal acting on feature maps H, which
+encourages global consistency between nodes and edges.
+Thus, Dnode and Dedge are trained to match marginal
+distributions, while Dglobal is trained to match the joint
+distribution. The right balance between these discriminators
+should enable the generation of realistic visual features
+conditioned on OOD scene graphs. Please see § A.1 in
+Appendix for the detailed architectures of D and G.
+
+Losses. To train our generative model, we define several
+
+4
+
+Scene graph classifi-cation model  Global and localdiscriminators Pretrained objectdetectorwaveperson Loss LosssurfboardScenegraphpertur-bationBased on the union of boxes Avg poolReal dataforward andbackward passGenerated dataforward andbackward passsurfboarddogPre-computedvisualfeatureswaveVisualfeaturesDataset statistics +language modelRoIAligndogsurfboardonnearonwavepersonsurfboardonnearonwaveGeneratorLosseslosses. These include the baseline SG classification loss (1)
+and ones specific to our generative pipeline (2)-(5). The
+latter are motivated by a CycleGAN [86] and, similarly,
+consist of the reconstruction and adversarial losses (2)-(5).
+We use an improved scene graph classification loss
+from [36], which is a sum of the node cross-entropy loss LO
+and graph density-normalized edge cross-entropy loss LR:
+
+LCLS = L(F (V, E), G) =
+
+= LO(F (V, E), O) + LR(F (V, E), R).
+(1)
+LR is computed based on the ratio of foreground (an-
+notated) to background (not annotated) edges in a batch
+of scene graphs [36]. To improve F by training it on
+augmented features ( ˆV , ˆE), we define the reconstruction
+(cycle-consistency) loss analogous to (1):
+
+LREC =L(F (G( ˆG, ˆB, V ′)), ˆG) =
+
+=LO(F ( ˆV , ˆE), ˆO) + LR(F ( ˆV , ˆE), R).
+
+(2)
+We do not update G on this loss to prevent its potential
+undesirable collaboration with F . Instead, to train G as well
+as D, we optimize conditional adversarial losses [49]. We
+first write these separately for D and G in a general form. So,
+for some features x and their corresponding class y:
+ADV(x, y) = Ex∼pdata(x)[log D(x|y)]+
+LD
+
+E ˆG∼p ˆG ( ˆG)[log(1 − D(G( ˆG)|y)]
+
+(3)
+
+(4)
+
+ADV(y) = E ˆG∼p ˆG ( ˆG)[log D(G( ˆG)|y)].
+LG
+We compute these losses for object and edge visual fea-
+tures by using the discriminators Dnode and Dedge. This loss
+is also computed for global features H using Dglobal, so that
+the total discriminator and generator losses are:
+ADV(V, O) + LD
+ADV(E, R) + LD
+ADV(O) + LG
+ADV(∅),
+
+(5)
+where ∅ denotes that our global discriminator is uncondi-
+tional for simplicity. Thus, the total loss to minimize is:
+
+ADV = LD
+ADV = LG
+
+ADV(R) + LG
+
+ADV(H, ∅)
+
+LD
+LG
+
+L = LCLS + LREC
+(cid:125)
+
+(cid:124)
+
+(cid:123)(cid:122)
+update F
+
+−γ( LD
+
+ADV
+(cid:124) (cid:123)(cid:122) (cid:125)
+update D
+
+),
+
++ LG
+
+ADV
+(cid:124) (cid:123)(cid:122) (cid:125)
+update G
+
+(6)
+
+where the loss weight γ = 5 worked well in our experiments.
+Compared to a similar work of [73], in our model all of its
+components (F, D, G) are learned jointly end-to-end.
+
+3.2. Semantic Plausibility of Scene Graphs
+
+Language model. To directly evaluate the quality of per-
+turbations, it is desirable to have some quantitative measure
+other than downstream SGG performance. We found that
+a cheap (relative to human evaluation) and effective way to
+achieve this goal is to use a language model. In particular,
+we use a pretrained BERT [14] model and estimate the
+“semantic plausibility” of both ground truth and perturbed
+scene graphs in the following way. We create a textual query
+from a scene graph by concatenating all triplets (in a random
+
+5
+
+order). We then mask out one of the perturbed nodes (in
+case of ˆG) or a random node (in case of G) in the triplet, so
+that BERT can return (unnormalized) likelihood scores for
+the object category of the masked out token. We have also
+considered using this strategy to create SG perturbations
+as an alternative to GRAPHN. However, we did not find it
+effective for obtaining rare scene graphs, since BERT is
+not grounded to visual concepts and not aware of what is
+considered “rare” in a particular SG dataset. For qualitative
+evaluation and when BERT scores are averaged over many
+samples, we found them still useful as a rough measure of
+SG quality. Please see § B.2 in Appendix for an example
+of the BERT-based estimation of scene graph quality.
+
+Hit rate. For perturbed SGs, we compute an additional
+qualitative metric, which we call the ‘Hit rate’. Assuming we
+perturbed M triplets in total for all training SGs, this metric
+computes the percentage of the triplets matching an actual an-
+notation in an evaluation test subset (zero-, few- or all-shot).
+
+4. Experiments
+4.1. Dataset, Models and Hyperparameters
+
+We use a publicly available SGG codebase1 for evaluation
+and baseline model implementations. For the model F , we
+use Iterative Message Passing (IMP+) [74, 82] and Neural
+Motifs (NM) [82]. IMP+ shows strong compositional gen-
+eralization capabilities [36] and, therefore is more explored
+in this work. We use an improved loss for (1) from [36], so
+we denote our baselines as IMP++ and NM++. We use the
+default hyperparameters and identical setups for the baseline
+models without a GAN and our models with a GAN. We bor-
+row the detector Faster-RCNN with the VGG16 backbone
+pretrained on Visual Genome (VG) from [82] and use it in
+all our experiments. We evaluate the models on a standard
+split of VG [38], with the 150 most frequent object classes
+and 50 predicate classes, introduced in [74]. The training
+set has 57723 and the test set has 26446 images. Similarly
+to [36, 73, 67, 65], in addition to the all-shot (all test scene
+graphs) case, we define zero-shot, 10-shot and 100-shot test
+subsets. For each such subset we keep only those triplets
+in a scene graph that occur 0, 1-10 or 11-100 times during
+training and remove samples without such triplets, which
+results in 4519, 9602 and 16528 test scene graphs (and im-
+ages) respectively. We use a held-out validation set of 5000
+images for tuning the hyperparameters.
+
+Baselines.
+
+In addition to the IMP++ and NM++
+baselines, we evaluate RESAMPLE, REWEIGHT and
+TDE [67] when combined with IMP++. RESAMPLE
+samples training images based on the inverse frequency of
+predicates/triplets [67]. REWEIGHT increases the softmax
+scores of rare predicate classes (see § B.4 in Appendix for
+details). TDE debiases contextual edge features of a SGG
+
+1https://github.com/rowanz/neural-motifs
+
+Table 1. Results on Visual Genome [38] using models based on IMP++ [36]. The top-1 result in each column is bolded (ignoring
+ORACLE-ZS). ORACLE-ZS results are an upper bound estimate of ZS recall obtained by directly using ZS test triplets for perturbations.
+
+MODEL
+
+ZERO-SHOT RECALL
+PredCls
+
+SGCls
+
+10-SHOT RECALL
+SGCls
+
+PredCls
+
+100-SHOT RECALL
+PredCls
+SGCls
+
+ALL-SHOT RECALL
+PredCls
+
+SGCls-mR
+
+SGCls
+
+Baseline (IMP++)
+GAN+GRAPHN, α = 2
+GAN+GRAPHN, α = 5
+GAN+GRAPHN, α = 10
+GAN+GRAPHN, α = 20
+
+9.27±0.10
+9.89±0.15
+9.62±0.29
+9.84±0.17
+9.65±0.15
+
+28.14±0.05
+28.90±0.14
+29.18±0.33
+28.90±0.46
+28.68±0.28
+
+21.80±0.19
+21.96±0.30
+22.24±0.11
+22.04±0.33
+21.97±0.30
+
+42.78±0.32
+43.79±0.27
+43.74±0.10
+43.54±0.36
+43.64±0.20
+
+40.42±0.02
+41.22±0.33
+41.39±0.26
+41.46±0.15
+41.24±0.08
+
+67.78±0.07
+69.17±0.24
+69.11±0.05
+69.13±0.24
+69.31±0.17
+
+48.70±0.08
+50.06±0.29
+50.14±0.21
+50.10±0.23
+49.89±0.28
+
+77.48±0.09
+78.98±0.09
+78.94±0.03
+79.00±0.09
+78.95±0.04
+
+27.78±0.10
+27.79±0.48
+27.98±0.23
+27.68±0.37
+27.42±0.36
+
+Ablated models
+GAN (no perturb.)
+GAN+RAND
+GAN+NEIGH
+
+Other baselines
+REWEIGHT
+RESAMPLE-predicates
+RESAMPLE-triplets
+TDE
+
+9.25±0.20
+9.71±0.09
+9.65±0.04
+
+28.66±0.35
+28.71±0.40
+28.68±0.40
+
+22.15±0.21
+21.89±0.21
+21.86±0.23
+
+43.66±0.29
+43.33±0.18
+43.77±0.15
+
+41.58±0.20
+41.01±0.32
+41.25±0.35
+
+69.16±0.16
+68.88±0.23
+69.07±0.09
+
+50.38±0.28
+49.83±0.32
+50.00±0.36
+
+79.05±0.08
+78.84±0.10
+78.94±0.10
+
+28.17±0.08
+27.45±0.48
+27.41±0.51
+
+9.58±0.14
+9.13±0.06
+8.94±0.16
+9.21±0.21
+
+28.27±0.22
+27.77±0.10
+27.66±0.14
+27.91±0.09
+
+22.19±0.09
+21.35±0.05
+21.65±0.10
+21.20±0.16
+
+42.98±0.17
+42.14±0.16
+42.60±0.17
+41.61±0.32
+
+40.00±0.01
+39.69±0.06
+39.39±0.08
+39.72±0.10
+
+65.27±0.13
+66.74±0.01
+66.44±0.06
+65.40±0.21
+
+48.13±0.10
+48.23±0.10
+47.77±0.10
+48.35±0.08
+
+74.68±0.13
+76.59±0.05
+76.38±0.14
+76.22±0.17
+
+30.95±0.05
+28.44±0.38
+27.56±0.10
+28.25±0.21
+
+ORACLE perturbations ˆG
+GAN+ORACLE-ZS ˆG
+10.11±0.34
+GAN+ORACLE-ZS ˆG + ˆB 10.52±0.31
+
+29.27±0.10
+29.43±0.42
+
+22.05±0.38
+21.98±0.39
+
+43.78±0.09
+43.03±0.13
+
+41.38±0.50
+41.12±0.19
+
+69.06±0.16
+68.73±0.17
+
+50.19±0.36
+50.05±0.35
+
+79.00±0.08
+78.65±0.09
+
+27.91±0.56
+27.52±0.46
+
+(a) Zero-shot hit rate
+
+(b) 10-shot hit rate
+
+(c) 100-shot hit rate
+
+(d) All-shot hit rate
+
+Figure 6. Triplet hit rates (§ 3.2) versus the threshold α on four different VG test subsets using our perturbation methods.
+
+model. We use the Total Effect (TE) variant according
+to Eq. 6 in [67], since applying TDE to IMP++ is not
+straightforward due to the absence of conditioning on
+node labels when making predictions for edges in IMP++.
+REWEIGHT and TDE/TE do not require retraining IMP++.
+GAN. To train the generator G and discriminators D of
+a GAN, we generally follow hyperparameters suggested by
+SPADE [53]. In particular, we use Spectral Norm [50] for
+D, Batch Norm [30] for G, and TTUR [25] with learning
+rates of 1e-4 and 2e-4 for G and D respectively.
+
+Perturbation methods (§ 3.1.1). We found that
+perturbing L = 20% nodes works well across the methods,
+which we use in all our experiments. For NEIGH we use
+top-k=10 as a compromise between too limited diversity
+and plausibility. For GRAPHN, we set top-k=5, as the
+method enables larger diversity even with very small top-k.
+To train the GAN-based models with GRAPHN, we use
+frequency threshold α = [2, 5, 10, 20]. In addition to the
+proposed perturbation methods, we also consider so called
+ORACLE-ZS perturbations. These are created by directly
+using ZS triplets from the test set (all obtained triplets
+are the same as ZS triplets, so that zero-shot hit rate is
+100%). We also evaluate ORACLE-ZS+ ˆB, which in addition
+to exploiting test ZS triplets, uses bounding boxes from
+the test samples corresponding to the resulted ZS triplets.
+ORACLE-ZS-based results are an upper bound estimate of
+ZS recall, highlighting the challenging nature of the task.
+
+Evaluation. Following prior work [74, 82, 36, 67], we
+focus our evaluation on two standard SGG tasks: scene
+graph classification (SGCls) and predicate classification
+(PredCls), using recall (R@K) metrics. The scene graph
+generation (SGGen) results are presented in § B.6 in Ap-
+pendix. Unless otherwise stated, we report results with
+K=100 for SGCls and K=50 for PredCls, since the latter
+is an easier task with saturated results for K=100. We com-
+pute recall without the graph constraint in Table 1, since
+it is a less noisy metric [36]. We emphasize performance
+metrics that focus on the ability to recognize rare and novel
+visual relationship compositions [36, 67, 65]: zero-shot and
+10-shot recalls. In Tables 1 and 2, the mean and standard
+deviations of 3 runs (random seeds) are reported.
+
+4.2. Results
+
+Main SGG results (Table 1). First, we compare the base-
+line IMP++ to our GAN-based model trained without and
+with perturbation methods. Even without any perturbations,
+the GAN-based model significantly outperforms IMP++, es-
+pecially on the 100-shot and all-shot recalls. GANs with
+simple perturbation strategies, RAND (as in [73]) and NEIGH,
+improve on zero-shots, but at a drop in the 100-shot and all-
+shot recalls. GANs with GRAPHN further improve ZS and
+10-shot recalls, but compared to RAND and NEIGH, also
+show high recalls on the 100-shots and all-shots.
+
+For GRAPHN, there is a connection between the SGG
+
+6
+
+01020304050Theshold parameter 2030405060Hit rate (%)RandNeighGraphN01020304050Theshold parameter 2.83.03.23.43.63.8Hit rate (%)01020304050Theshold parameter 6810121416Hit rate (%)01020304050Theshold parameter 510152025Hit rate (%)01020304050Theshold parameter 2030405060Hit rate (%)Table 2. ZS recall results on VG using the graph constraint eval-
+uation. †The results are obtained with a more advanced feature
+extractor and, thus, are not directly comparable.
+
+MODEL
+
+FREQ [82]
+KERN [9]
+VCTree† [67]
+
+NM [82]
+NM† [67]
+NM, TDE† [67]
+NM, EBM† [65]
+NM++ [36]
+NM++, GAN+GRAPHN
+
+IMP+ [74, 82]
+IMP+, EBM† [65]
+IMP++ [36]
+IMP++, TDE
+IMP++, GAN+GRAPHN
+IMP++, GAN+GRAPHN (max)
+
+SGCls
+
+PredCls
+
+zsR@50 zsR@100 zsR@50 zsR@100
+
+0.0
+−
+1.9
+
+1.1
+2.2
+3.4
+1.3
+1.8±0.1
+2.5±0.1
+
+2.5
+3.7
+3.5±0.1
+3.5±0.1
+3.7±0.1
+3.8
+
+0.0
+1.5
+2.6
+
+0.1
+3.9
+10.8
+
+0.1
+−
+14.3
+
+1.7
+3.0
+4.5
+−
+
+6.5
+10.9
+14.4
+4.9
+2.3±0.1 10.2±0.1 13.4±0.3
+3.1±0.1 14.2±0.0 17.4±0.3
+
+9.5
+14.5
+18.2
+−
+
+3.2
+−
+
+17.2
+−
+
+14.5
+18.6
+4.2±0.2 18.3±0.4 21.2±0.5
+4.3±0.1 18.5±0.3 21.5±0.3
+4.4±0.1 19.1±0.3 21.8±0.4
+19.5
+
+22.4
+
+4.5
+
+Table 3. Evaluation of generated (fake) node feature using the
+metrics of “similarity” between two distributions X and Y [39, 51].
+The same held-out set of real test features (Y ∼ V ) is used as
+the reference distribution in all cases. The percentage in the super-
+scripts denotes a relative drop of the average metric when switching
+from test to test-zs conditioning. For all metrics, higher is better.
+
+DISTRIBUTION X
+
+Fidelity (realism)
+
+Diversity
+
+PRECISION DENSITY RECALL COVERAGE
+
+AVG
+
+Real test
+Real test-zs
+GAN: Fake test
+GAN: Fake test-zs
+
+0.74
+0.66
+0.55
+0.47
+
+1.02
+0.99
+0.77
+0.60
+
+0.75
+0.70
+0.42
+0.41
+
+0.97
+0.94
+0.82
+0.75
+
+0.87
+0.82−6%
+0.64
+0.56−13%
+
+REAL NODE FEATURES V
+
+FAKE NODE FEATURES ˆV
+
+recall results (Table 1) and triplet hit rates (Fig. 6) for dif-
+ferent values of the threshold α. Specifically, GRAPHN with
+lower α values upsamples more of the rare compositions
+leading to higher ZS and 10-shot hit rate (Fig. 6 a,b)
+and, as a result, higher ZS and 10-shot recalls (Table 1).
+GRAPHN with higher α values upsamples more of the
+frequent compositions leading to higher 100-shot and
+all-shot hit rates (Fig. 6 c,d) and, as a result, higher 100-shot
+and all-shot recalls. Compared to RAND and NEIGH, the
+compositions obtained using GRAPHN have higher triplet
+hit rates due to better respecting the graph structure and
+dataset statistics. As a result, GRAPHN shows overall better
+recalls in SGG, even approaching the ORACLE-ZS model
+(Table 1). Devising a perturbation strategy universally
+strong across all metrics is challenging. NEIGH can be
+viewed as such an attempt, which shows average hit rates for
+all test subsets, but lower performance in all SGG metrics.
+
+Among the alternatives
+
+to our GAN approach,
+REWEIGHT improves on zero-shots, 10-shots and mean
+recall (SGCls-mR) (Table 1). However it downweights the
+class scores of frequent predicates, which directly degrades
+100-shot and all-shot recalls. RESAMPLE underperforms
+on all metrics except for SGCls-mR. The main limitation of
+RESAMPLE is that when we resample images with rare pred-
+icates/triplets, those images are likely to contain annotations
+of frequent predicates/triplets. Another method, TDE [67],
+only debiases the predicates similarly to REWEIGHT and
+RESAMPLE-predicates. So, it may benefit little in recog-
+nizing ZS triplets such as (cup, on, surf board), because
+the predicate ‘on’ is the frequent one. ZS compositions
+with such frequent predicates are abundant in VG (Fig. 1).
+Thus, debiasing only the predicates fundamentally limits
+TDE’s performance. In contrast, our GAN method does not
+suffer from this limitation, since we perturb scene graphs
+
+Figure 7. Real vs generated node features plotted using t-SNE.
+
+aiming to increase compositional diversity, not merely the
+frequency of rare predicates. As a result, our GAN method
+improves on all metrics, especially on ZS (in relative terms).
+Comparison to other SGG works (Table 2). Our GAN
+approach also improves ZS recall (zsR) of other SGG models,
+namely NM++. For example in PredCls, GAN+GRAPHN im-
+proves zsR of NM++ by 4 percentage points. Compared to
+the other previous methods presented in Table 2, we obtain
+competitive ZS results on par or better with TDE [67] and
+recent EBM [65]. However, it is hard to directly compare
+to the results reported in [67, 65] due to the different object
+detectors and potential implementation discrepancies.
+
+Evaluation of generated visual features. We evaluate
+the quality of generated features of our GAN trained with
+GRAPHN by comparing the generated (fake) features to
+the real ones. To obtain fake node features ˆV , we condition
+our GAN on test SGs. To obtain real node features V ,
+we apply the pretrained object detector to test images as
+described in § 3.1.2. First, for the qualitative evaluation
+of node features, we group features based on the object
+category’s super-type, e.g. ‘people’ includes all features
+of ‘man’, ‘woman’, ‘person’, etc. When projected on a
+2D space using t-SNE [70], the fake features ˆV generated
+using our GAN are clustered similarly to the real features
+V (Fig. 7). Therefore, qualitatively our GAN generates
+realistic and diverse features given a scene graph.
+
+Second, we evaluate GAN features quantitatively. For
+that purpose, we follow [15] and use Precision, Recall [39]
+and Density, Coverage [51] metrics. These metrics compare
+the manifolds spanned by real and fake features and do not
+require any labels. We consider two cases: conditioning our
+GAN on test SGs and test zero-shot (test-zs) SGs. The moti-
+
+7
+
+604020020406010080604020020406060402002040601008060402002040600.00.51.01.52.02.53.03.54.00.040.020.000.020.04PeopleFoodAnimalsVehiclesConstructionsFigure 8. Ablations of our GAN model on SGG and feature quality
+metrics. Error bars denote standard deviation. For feature quality
+the average metric on the test-zs SGs from Table 3 is used.
+
+vation is similar to [8]: understand if novel compositions con-
+fuse the GAN and lead to poor features, that in our context
+may result in poor training of the main model F . Indeed, the
+features generated conditioned on test-zs SGs significantly
+degrade in quality compared to test SGs, especially in terms
+of fidelity (Table 3). This result suggests that it is more chal-
+lenging to produce realistic features for more rare composi-
+tions limiting our approach (see § B.8 in Appendix for a dis-
+cussion). The same qualitative and quantitative experiments
+for edge features (E, ˆE) and global features (H, ˆH) confirm
+our results: (1) when conditioned on test SGs, the generated
+features are realistic and diverse; (2) conditioning on more
+rare compositions degrades feature quality (see § B.7).
+
+Ablations (Figure 8). We also performed ablations to
+determine the effect of the proposed GAN losses (6) and
+other design choices on the (i) SGG performance and (ii)
+quality of generated features. As a reference model, we use
+our GAN model without any perturbations. In general, all
+ablated GANs degrade both in (i) and (ii) with correlated
+drops between (i) and (ii). So by improving generative mod-
+els in future work, we can expect larger SGG gains. One
+exception is the GAN without the global terms in (5), which
+performed better on zero-shots despite having lower feature
+quality. This might be explained as some regularization ef-
+fect. We also found that this model did not combine well
+with perturbations.
+
+Evaluating the quality of SG perturbations. We show
+examples of SG perturbations in Fig. 10 and in Appendix. In
+case of RAND, most of the created triplets are implausible
+as a result of random perturbations. NEIGH leads to very
+likely compositions, but less often provides rare plausible
+compositions. In contrast, GRAPHN can create plausible
+compositions that are rare or more frequent depending on α.
+We also analyzed the quality of real and perturbed SGs us-
+ing the BERT-based metric (§ 3.2). We found that the overall
+test set has on average the highest BERT scores, while lower-
+shot subsets gradually decrease in “semantic plausibility”,
+which aligns with our intuition. We then perturbed all nodes
+of all test SGs using our perturbation strategies. Surprisingly,
+real test-zs SGs have very low plausibility close to RAND-
+based SGs. NEIGH produces SGs of plausibility between real
+10-shot and 100-shot SGs. In contrast, with GRAPHN we
+
+Figure 9. Semantic plausibility (as per BERT) depending on α.
+These results should be interpreted with caution, because: (1) the
+variance of scores is very high (not shown); (2) in the zero- and
+few-shot test subsets the graphs are significantly smaller, which
+affects the amount of contextual information available to BERT.
+
+IMAGE
+
+ORIGINAL SG
+
+RAND
+
+NEIGH
+
+N
+H
+P
+A
+R
+G
+
+α = 2
+
+α = 5
+
+α = 10
+
+α = 20
+
+Figure 10. Examples of perturbations (nodes in red) applied to a
+scene graph. The numbers on edges denote the count of triplets in
+the training set and a thick red arrow denotes matching a ZS triplet.
+
+can gradually slide between low and high plausibility, which
+enabled better SGG results. The BERT scores, however, are
+not tied to the VG dataset. So, semantic plausibility per
+BERT may be different from the likelihood per VG.
+
+5. Conclusion
+
+We focus on the compositional generalization problem
+within the scene graph generation task. Our GAN-based aug-
+mentation approach can be used with different SGG models
+and can improve their zero-, few- and all-shot SGG results.
+To obtain better SGG results using our augmentations, it is
+important to rely on the structure of scene graphs and tune
+the augmentation parameters towards a specific SGG metric.
+Our evaluation confirmed that our augmentations provide
+plausible compositions and the generator generally produces
+high-fidelity and diverse features enabling gains in SGG.
+
+Acknowledgments
+
+We thank all the reviewers for their useful feedback. This
+research was developed with funding from DARPA. The views,
+opinions and/or findings expressed are those of the authors and
+should not be interpreted as representing the official views or
+policies of the Department of Defense or the U.S. Government.
+The authors also acknowledge support from the Canadian Institute
+for Advanced Research and the Canada Foundation for Innova-
+tion. Resources used in preparing this research were provided,
+in part, by the Province of Ontario, the Government of Canada
+through CIFAR, and companies sponsoring the Vector Institute:
+http://www.vectorinstitute.ai/#partners.
+
+8
+
+No Global in (5)No Local in (5)No DADV in (6)No GADV in (6)No DREC in (6)Smaller batch sizeNo Visual (V')108642024Recall change (%)SGCls-ZSPredCls-ZSSGCls-10-ShotSGCls-All-Shot1008060402002040Feature quality change (%)Feature quality01020304050Theshold parameter 456789BERT score0246810Theshold parameter 456789BERT scorerandneighgraphntest-zstest-10shottest-100shottest-allshotReferences
+
+[1] Aniket Agarwal, Ayush Mangal, et al. Visual relationship
+detection using scene graphs: A survey. arXiv preprint
+arXiv:2005.08045, 2020. 1, 2
+
+[2] Martin Arjovsky, Léon Bottou, Ishaan Gulrajani, and David
+Invariant risk minimization. arXiv preprint
+
+Lopez-Paz.
+arXiv:1907.02893, 2019. 1
+
+[3] Yuval Atzmon, Jonathan Berant, Vahid Kezami, Amir
+Globerson, and Gal Chechik. Learning to generalize to
+new compositions in image understanding. arXiv preprint
+arXiv:1608.07639, 2016. 1
+
+[4] Dzmitry Bahdanau, Shikhar Murty, Michael Noukhovitch,
+Thien Huu Nguyen, Harm de Vries, and Aaron Courville.
+Systematic generalization: what is required and can it be
+learned? arXiv preprint arXiv:1811.12889, 2018. 1
+
+[5] Eugene Belilovsky, Matthew Blaschko, Jamie Kiros, Raquel
+Urtasun, and Richard Zemel. Joint embeddings of scene
+graphs and images. 2017. 1
+
+[6] Andrew Brock, Jeff Donahue, and Karen Simonyan. Large
+scale gan training for high fidelity natural image synthesis.
+arXiv preprint arXiv:1809.11096, 2018. 3
+
+[7] C˘at˘alina Cangea, Eugene Belilovsky, Pietro Liò, and Aaron
+Courville. VideoNavQA: Bridging the Gap between Vi-
+sual and Embodied Question Answering. arXiv preprint
+arXiv:1908.04950, 2019. 1
+
+[8] Arantxa Casanova, Michal Drozdzal, and Adriana Romero-
+Soriano. Generating unseen complex scenes: are we there
+yet? arXiv preprint arXiv:2012.04027, 2020. 3, 8, 14, 16
+[9] Tianshui Chen, Weihao Yu, Riquan Chen, and Liang Lin.
+Knowledge-embedded routing network for scene graph gen-
+eration. In Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition, pages 6163–6171, 2019. 2,
+7, 15
+
+[10] Vincent S Chen, Paroma Varma, Ranjay Krishna, Michael
+Bernstein, Christopher Re, and Li Fei-Fei. Scene graph pre-
+diction with limited labels. In Proceedings of the IEEE Inter-
+national Conference on Computer Vision, pages 2580–2590,
+2019. 2
+
+[11] Ekin D Cubuk, Barret Zoph, Dandelion Mane, Vijay Vasude-
+van, and Quoc V Le. Autoaugment: Learning augmentation
+policies from data. arXiv preprint arXiv:1805.09501, 2018. 3
+[12] Vinay Damodaran, Sharanya Chakravarthy, Akshay Ku-
+mar, Anjana Umapathy, Teruko Mitamura, Yuta Nakashima,
+Noa Garcia, and Chenhui Chu. Understanding the role of
+scene graphs in visual question answering. arXiv preprint
+arXiv:2101.05479, 2021. 1
+
+[13] Fei Deng, Zhuo Zhi, Donghun Lee, and Sungjin Ahn. Gener-
+ative scene graph networks. In International Conference on
+Learning Representations, 2021. 3
+
+[14] Jacob Devlin, Ming-Wei Chang, Kenton Lee, and Kristina
+Toutanova.
+Pre-training of deep bidirectional
+transformers for language understanding. arXiv preprint
+arXiv:1810.04805, 2018. 5
+
+Bert:
+
+[15] Terrance DeVries, Michal Drozdzal, and Graham W Taylor.
+Instance selection for gans. arXiv preprint arXiv:2007.15255,
+2020. 7
+
+[16] Terrance DeVries and Graham W Taylor. Dataset augmenta-
+tion in feature space. arXiv preprint arXiv:1702.05538, 2017.
+16
+
+[17] Terrance DeVries and Graham W Taylor. Improved regular-
+ization of convolutional neural networks with cutout. arXiv
+preprint arXiv:1708.04552, 2017. 3
+
+[18] Apoorva Dornadula, Austin Narcomey, Ranjay Krishna,
+Michael Bernstein, and Li Fei-Fei. Visual relationships as
+In
+functions: Enabling few-shot scene graph prediction.
+ArXiv, 2019. 2
+
+[19] Ian Goodfellow, Jean Pouget-Abadie, Mehdi Mirza, Bing
+Xu, David Warde-Farley, Sherjil Ozair, Aaron Courville, and
+Yoshua Bengio. Generative adversarial nets. In Advances
+in neural information processing systems, pages 2672–2680,
+2014. 2, 3
+
+[20] Klaus Greff, Raphaël Lopez Kaufman, Rishabh Kabra, Nick
+Watters, Christopher Burgess, Daniel Zoran, Loic Matthey,
+Matthew Botvinick, and Alexander Lerchner. Multi-object
+representation learning with iterative variational inference.
+In International Conference on Machine Learning, pages
+2424–2433. PMLR, 2019. 3
+
+[21] Klaus Greff, Sjoerd van Steenkiste, and Jürgen Schmidhuber.
+On the binding problem in artificial neural networks. arXiv
+preprint arXiv:2012.05208, 2020. 1
+
+[22] Jiuxiang Gu, Shafiq Joty, Jianfei Cai, Handong Zhao, Xu
+Yang, and Gang Wang. Unpaired image captioning via scene
+graph alignments. In Proceedings of the IEEE International
+Conference on Computer Vision, pages 10323–10332, 2019.
+1
+
+[23] Jiuxiang Gu, Handong Zhao, Zhe Lin, Sheng Li, Jianfei Cai,
+and Mingyang Ling. Scene graph generation with external
+knowledge and image reconstruction. In Proceedings of the
+IEEE Conference on Computer Vision and Pattern Recogni-
+tion, pages 1969–1978, 2019. 2
+
+[24] Kaiming He, Georgia Gkioxari, Piotr Dollár, and Ross Gir-
+shick. Mask r-cnn. In Proceedings of the IEEE international
+conference on computer vision, pages 2961–2969, 2017. 4
+
+[25] Martin Heusel, Hubert Ramsauer, Thomas Unterthiner, Bern-
+hard Nessler, and Sepp Hochreiter. Gans trained by a two
+time-scale update rule converge to a local nash equilibrium.
+In Advances in neural information processing systems, pages
+6626–6637, 2017. 6
+
+[26] Marcel Hildebrandt, Hang Li, Rajat Koner, Volker Tresp,
+and Stephan Günnemann. Scene graph reasoning for visual
+question answering. arXiv preprint arXiv:2007.01072, 2020.
+1
+
+[27] Felix Hill, Andrew Lampinen, Rosalia Schneider, Stephen
+Clark, Matthew Botvinick, James L. McClelland, and Adam
+Santoro. Environmental drivers of systematicity and general-
+ization in a situated agent, 2019. 2
+
+[28] Seunghoon Hong, Dingdong Yang, Jongwook Choi, and
+Honglak Lee. Inferring semantic layout for hierarchical text-
+to-image synthesis. In Proceedings of the IEEE Conference
+on Computer Vision and Pattern Recognition, pages 7986–
+7994, 2018. 16
+
+[29] Drew Hudson and Christopher D Manning. Learning by
+In H. Wallach, H.
+abstraction: The neural state machine.
+Larochelle, A. Beygelzimer, F. d’Alché Buc, E. Fox, and R.
+Garnett, editors, Advances in Neural Information Processing
+Systems 32, pages 5903–5916. Curran Associates, Inc., 2019.
+1, 2
+
+[30] Sergey Ioffe and Christian Szegedy. Batch normalization:
+Accelerating deep network training by reducing internal co-
+variate shift. arXiv preprint arXiv:1502.03167, 2015. 6, 12
+
+9
+
+[31] Justin Johnson, Agrim Gupta, and Li Fei-Fei. Image gener-
+ation from scene graphs. In Proceedings of the IEEE con-
+ference on computer vision and pattern recognition, pages
+1219–1228, 2018. 3, 4, 12
+
+[32] Justin Johnson, Bharath Hariharan, Laurens van der Maaten,
+Li Fei-Fei, C Lawrence Zitnick, and Ross Girshick. Clevr: A
+diagnostic dataset for compositional language and elementary
+visual reasoning. In Proceedings of the IEEE Conference on
+Computer Vision and Pattern Recognition, pages 2901–2910,
+2017. 1
+
+[33] Justin Johnson, Ranjay Krishna, Michael Stark, Li-Jia Li,
+David Shamma, Michael Bernstein, and Li Fei-Fei. Image
+In Proceedings of the IEEE
+retrieval using scene graphs.
+conference on computer vision and pattern recognition, pages
+3668–3678, 2015. 1, 3
+
+[34] Tero Karras, Miika Aittala, Janne Hellsten, Samuli Laine,
+Training generative
+arXiv preprint
+
+Jaakko Lehtinen, and Timo Aila.
+adversarial networks with limited data.
+arXiv:2006.06676, 2020. 3
+
+[35] Daniel Keysers, Nathanael Schärli, Nathan Scales, Hylke
+Buisman, Daniel Furrer, Sergii Kashubin, Nikola Momchev,
+Danila Sinopalnikov, Lukasz Stafiniak, Tibor Tihon, et al.
+Measuring compositional generalization: A comprehensive
+method on realistic data. arXiv preprint arXiv:1912.09713,
+2019. 1
+
+[36] Boris Knyazev, Harm de Vries, C˘at˘alina Cangea, Graham W
+Taylor, Aaron Courville, and Eugene Belilovsky. Graph
+density-aware losses for novel compositions in scene graph
+generation. British Machine Vision Conference, 2020. 1, 2, 5,
+6, 7, 12, 13, 15
+
+[37] Murat Kocaoglu, Christopher Snyder, Alexandros G Dimakis,
+and Sriram Vishwanath. CausalGAN: Learning causal im-
+plicit generative models with adversarial training. arXiv
+preprint arXiv:1709.02023, 2017. 3
+
+[38] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A Shamma, et al. Visual genome:
+Connecting language and vision using crowdsourced dense
+image annotations. International Journal of Computer Vision,
+123(1):32–73, 2017. 1, 2, 3, 5, 6, 12, 13
+
+[39] Tuomas Kynkäänniemi, Tero Karras, Samuli Laine, Jaakko
+Improved precision and recall
+arXiv preprint
+
+Lehtinen, and Timo Aila.
+metric for assessing generative models.
+arXiv:1904.06991, 2019. 7, 15
+
+[40] Brenden M Lake. Compositional generalization through meta
+sequence-to-sequence learning. In Advances in Neural Infor-
+mation Processing Systems, pages 9788–9798, 2019. 1
+[41] Soohyeong Lee, Ju-Whan Kim, Youngmin Oh, and Joo Hyuk
+Jeon. Visual question answering over scene graph. In 2019
+First International Conference on Graph Computing (GC),
+pages 45–50. IEEE, 2019. 1
+
+[42] Xiangyang Li and Shuqiang Jiang. Know more say less:
+Image captioning based on scene graphs. IEEE Transactions
+on Multimedia, 21(8):2117–2130, 2019. 1
+
+[43] Yikang Li, Wanli Ouyang, Bolei Zhou, Kun Wang, and Xi-
+aogang Wang. Scene graph generation from objects, phrases
+and region captions. In Proceedings of the IEEE International
+Conference on Computer Vision, pages 1261–1270, 2017. 2
+[44] Xin Lin, Changxing Ding, Jinquan Zeng, and Dacheng Tao.
+Gps-net: Graph property sensing network for scene graph
+
+generation. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, pages 3746–3753,
+2020. 2, 15
+
+[45] Cewu Lu, Ranjay Krishna, Michael Bernstein, and Li Fei-
+Fei. Visual relationship detection with language priors. In
+European conference on computer vision, pages 852–869.
+Springer, 2016. 1, 2
+
+[46] Yichao Lu, Cheng Chang, Himanshu Rai, Guangwei Yu, and
+Maksims Volkovs. Learning effective visual relationship
+detector on 1 gpu. arXiv preprint arXiv:1912.06185, 2019. 2
+[47] Yichao Lu, Cheng Chang, Himanshu Rai, Guangwei Yu, and
+Maksims Volkovs. Multi-view scene graph generation in
+videos. International Challenge on Activity Recognition (Ac-
+tivityNet) CVPR 2021 Workshop, 2021. 2
+
+[48] Victor Milewski, Marie-Francine Moens, and Iacer Calixto.
+Are scene graphs good enough to improve image captioning?
+arXiv preprint arXiv:2009.12313, 2020. 1
+
+[49] Mehdi Mirza and Simon Osindero. Conditional generative
+adversarial nets. arXiv preprint arXiv:1411.1784, 2014. 2, 4,
+5
+
+[50] Takeru Miyato, Toshiki Kataoka, Masanori Koyama, and
+Yuichi Yoshida. Spectral normalization for generative adver-
+sarial networks. arXiv preprint arXiv:1802.05957, 2018. 6,
+12
+
+[51] Muhammad Ferjad Naeem, Seong Joon Oh, Youngjung Uh,
+Yunjey Choi, and Jaejun Yoo. Reliable fidelity and diversity
+metrics for generative models. In International Conference
+on Machine Learning, pages 7176–7185. PMLR, 2020. 7, 15
+[52] Yulei Niu, Kaihua Tang, Hanwang Zhang, Zhiwu Lu, Xian-
+Sheng Hua, and Ji-Rong Wen. Counterfactual vqa: A cause-
+effect look at language bias. arXiv preprint arXiv:2006.04315,
+2020. 1
+
+[53] Taesung Park, Ming-Yu Liu, Ting-Chun Wang, and Jun-Yan
+Zhu. Semantic image synthesis with spatially-adaptive nor-
+malization. In Proceedings of the IEEE Conference on Com-
+puter Vision and Pattern Recognition, pages 2337–2346, 2019.
+6
+
+[54] Jeffrey Pennington, Richard Socher, and Christopher D Man-
+In
+ning. Glove: Global vectors for word representation.
+Proceedings of the 2014 conference on empirical methods
+in natural language processing (EMNLP), pages 1532–1543,
+2014. 3
+
+[55] Moshiko Raboh, Roei Herzig, Jonathan Berant, Gal Chechik,
+and Amir Globerson. Differentiable scene graphs. In Proceed-
+ings of the IEEE/CVF Winter Conference on Applications of
+Computer Vision, pages 1488–1497, 2020. 2
+
+[56] Alec Radford, Luke Metz, and Soumith Chintala. Unsuper-
+vised representation learning with deep convolutional genera-
+tive adversarial networks. arXiv preprint arXiv:1511.06434,
+2015. 4, 12
+
+[57] Alexander J Ratner, Henry Ehrenberg, Zeshan Hussain, Jared
+Dunnmon, and Christopher Ré. Learning to compose domain-
+specific transformations for data augmentation. In Advances
+in neural information processing systems, pages 3236–3246,
+2017. 2
+
+[58] Suman Ravuri and Oriol Vinyals. Seeing is not necessarily
+believing: Limitations of biggans for data augmentation. 2019.
+2, 3
+
+[59] Shaoqing Ren, Kaiming He, Ross Girshick, and Jian Sun.
+Faster r-cnn: Towards real-time object detection with region
+
+10
+
+proposal networks. In Advances in neural information pro-
+cessing systems, pages 91–99, 2015. 4
+
+[60] Mohammad Amin Sadeghi and Ali Farhadi. Recognition
+using visual phrases. In CVPR 2011, pages 1745–1752. IEEE,
+2011. 2
+
+[61] Veit Sandfort, Ke Yan, Perry J Pickhardt, and Ronald M
+Summers. Data augmentation using generative adversarial
+networks (cyclegan) to improve generalizability in ct segmen-
+tation tasks. Scientific reports, 9(1):1–9, 2019. 3
+
+[62] Brigit Schroeder and Subarna Tripathi. Structured query-
+based image retrieval using scene graphs. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition Workshops, pages 178–179, 2020. 1
+
+[63] Jiaxin Shi, Hanwang Zhang, and Juanzi Li. Explainable and
+explicit visual reasoning over scene graphs. In Proceedings
+of the IEEE Conference on Computer Vision and Pattern
+Recognition, pages 8376–8384, 2019. 1, 2
+
+[64] Hoo-Chang Shin, Neil A Tenenholtz, Jameson K Rogers,
+Christopher G Schwarz, Matthew L Senjem, Jeffrey L Gunter,
+Katherine P Andriole, and Mark Michalski. Medical image
+synthesis for data augmentation and anonymization using
+generative adversarial networks. In International workshop
+on simulation and synthesis in medical imaging, pages 1–11.
+Springer, 2018. 3
+
+[65] Mohammed Suhail, Abhay Mittal, Behjat Siddiquie, Chris
+Broaddus, Jayan Eledath, Gerard Medioni, and Leonid Sigal.
+Energy-based learning for scene graph generation. arXiv
+preprint arXiv:2103.02221, 2021. 2, 5, 6, 7
+
+[66] Wei Sun and Tianfu Wu. Learning layout and style reconfig-
+urable gans for controllable image synthesis. arXiv preprint
+arXiv:2003.11571, 2020. 3
+
+[67] Kaihua Tang, Yulei Niu, Jianqiang Huang, Jiaxin Shi, and
+Hanwang Zhang. Unbiased scene graph generation from
+biased training. In Proceedings of the IEEE Conference on
+Computer Vision and Pattern Recognition, 2020. 1, 2, 5, 6, 7,
+12, 14, 15
+
+[68] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan Luo,
+and Wei Liu. Learning to compose dynamic tree structures for
+visual contexts. In Proceedings of the IEEE Conference on
+Computer Vision and Pattern Recognition, pages 6619–6628,
+2019. 2
+
+[69] Subarna Tripathi, Sharath Nittur Sridhar, Sairam Sundaresan,
+and Hanlin Tang. Compact scene graphs for layout composi-
+tion and patch retrieval. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+Workshops, pages 0–0, 2019. 1
+
+[70] Laurens Van der Maaten and Geoffrey Hinton. Visualizing
+data using t-sne. Journal of machine learning research, 9(11),
+2008. 7
+
+[71] Vikas Verma, Alex Lamb, Christopher Beckham, Amir Najafi,
+Ioannis Mitliagkas, David Lopez-Paz, and Yoshua Bengio.
+Manifold mixup: Better representations by interpolating hid-
+den states. In International Conference on Machine Learning,
+pages 6438–6447. PMLR, 2019. 16
+
+[72] Dalin Wang, Daniel Beck, and Trevor Cohn. On the role of
+scene graphs in image captioning. In Proceedings of the Be-
+yond Vision and LANguage: inTEgrating Real-world kNowl-
+edge (LANTERN), pages 29–34, 2019. 1
+
+[73] Xiaogang Wang, Qianru Sun, Marcelo ANG, and Tat-Seng
+CHUA. Generating expensive relationship features from
+cheap objects. 2019. 2, 5, 6
+
+11
+
+[74] Danfei Xu, Yuke Zhu, Christopher B Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing.
+In
+Proceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition, pages 5410–5419, 2017. 2, 4, 5, 6, 7, 12,
+15
+
+[75] Pengfei Xu, Xiaojun Chang, Ling Guo, Po-Yao Huang, Xiao-
+jiang Chen, and Alexander G Hauptmann. A survey of scene
+graph: Generation and application. 2020. 1, 2
+
+[76] Shaotian Yan, Chen Shen, Zhongming Jin, Jianqiang Huang,
+Rongxin Jiang, Yaowu Chen, and Xian-Sheng Hua. Pcpl:
+Predicate-correlation perception learning for unbiased scene
+graph generation. In Proceedings of the 28th ACM Interna-
+tional Conference on Multimedia, pages 265–273, 2020. 2,
+14, 15
+
+[77] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi
+Parikh. Graph r-cnn for scene graph generation. In Proceed-
+ings of the European conference on computer vision (ECCV),
+pages 670–685, 2018. 2
+
+[78] Xu Yang, Kaihua Tang, Hanwang Zhang, and Jianfei Cai.
+Auto-encoding scene graphs for image captioning. In Pro-
+ceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition, pages 10685–10694, 2019. 1
+
+[79] Xu Yang, Hanwang Zhang, and Jianfei Cai. Shuffle-then-
+assemble: Learning object-agnostic visual relationship fea-
+tures. In Proceedings of the European Conference on Com-
+puter Vision (ECCV), pages 36–52, 2018. 2
+
+[80] Alireza Zareian, Svebor Karaman, and Shih-Fu Chang. Bridg-
+ing knowledge graphs to generate scene graphs. In European
+Conference on Computer Vision, pages 606–623. Springer,
+2020. 2
+
+[81] Alireza Zareian, Haoxuan You, Zhecan Wang, and Shih-Fu
+Chang. Learning visual commonsense for robust scene graph
+generation. arXiv preprint arXiv:2006.09623, 2020. 2
+[82] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin Choi.
+Neural motifs: Scene graph parsing with global context. In
+Proceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition, pages 5831–5840, 2018. 2, 4, 5, 6, 7, 12,
+13, 15
+
+[83] Cheng Zhang, Wei-Lun Chao, and Dong Xuan. An empirical
+study on leveraging scene graphs for visual question answer-
+ing. arXiv preprint arXiv:1907.12133, 2019. 1, 2
+
+[84] Hanwang Zhang, Zawlin Kyaw, Shih-Fu Chang, and Tat-
+Seng Chua. Visual translation embedding network for visual
+relation detection. In Proceedings of the IEEE conference on
+computer vision and pattern recognition, pages 5532–5540,
+2017. 2
+
+[85] Ji Zhang, Kevin J Shih, Ahmed Elgammal, Andrew Tao, and
+Bryan Catanzaro. Graphical contrastive losses for scene graph
+parsing. In Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition, pages 11535–11543, 2019. 2
+[86] Jun-Yan Zhu, Taesung Park, Phillip Isola, and Alexei A Efros.
+Unpaired image-to-image translation using cycle-consistent
+adversarial networks. In Proceedings of the IEEE interna-
+tional conference on computer vision, pages 2223–2232, 2017.
+5
+
+Appendix
+
+A. Experimental Details
+
+A.1. Architectures
+
+For our GAN model see the detailed architectures of the
+generator and discriminators in Tables 4 and 5 respectively.
+
+Table 4. Architecture of the generator G. All GraphTripleConv
+and Upsample-Refine blocks include Batch Norm (BN) [30] fol-
+lowed by ReLU/LeakyReLU. ˜n, ˜m are the number of nodes and
+edges in a batch; bs is batch size.
+Nodes
+Layer
+
+Edges
+
+˜mx200
+˜mx200
+608x64
+192x64
+192x64
+192x64
+192x64
+−
+
+input-1 (embedd. layer)
+concat. with boxes B
+GraphTripleConv-1
+GraphTripleConv-2
+GraphTripleConv-3
+GraphTripleConv-4
+GraphTripleConv-5
+output-1
+
+˜nx200
+˜nx204
+204x64
+64x64
+64x64
+64x64
+64x(32·7·7)
+˜nx32x7x7
+
+conv1
+conv2
+output-2
+input-2: vis. features V ′
+concatenate
+conv3
+output-3
+
+32x64
+64x64
+˜nx64x7x7
+˜nx512x7x7
+output-2, input-2
+(64+512)x64
+˜nx64x7x7
+
+input-3: boxes B
+Boxes2Layout
+output-4
+
+Upsample-Refine-1
+Upsample-Refine-2
+Upsample-Refine-3
+conv1x1
+output-5 ( ˆH)
+
+RoIAlign
+output-6 ( ˆV , ˆE)
+
+˜nx4
+
+build feature maps based on output-3 and B
+bsx64x37x37
+
+Global feature maps
+64x128
+128x256
+256x512
+512x512
+bsx512x37x37
+
+Table 5. Architectures of the discriminators D. Following [56],
+the discriminators are regularized by having a fully-convolutional
+architecture with four layers interleaved with ReLU. All convolu-
+tions are 3x3 without padding and normalized with Spectral Norm
+(SN) [50]. ˜n, ˜m are the number of nodes and edges in a batch; bs is
+batch size; |C| = 151, |R| = 51 - number of object and predicate
+classes including the “background” (no object, no edge) class [82].
+
+Layer
+
+input
+
+Dnode
+
+Dedge
+
+Dglobal
+
+˜nx(512+151)x7x7 ˜mx(512+51)x7x7 bsx512x37x37
+
+real feature/labels
+fake feature/labels
+
+V, O
+ˆV , ˆO
+
+E, R
+ˆE, R
+
+H
+ˆH
+
+SN-conv1
+nonlinearity
+pooling
+
+SN-conv2
+nonlinearity
+pooling
+
+SN-conv3
+nonlinearity
+pooling
+
+SN-conv4
+
+output
+
+(512+151)x256
+ReLU
+−
+
+(512+51)x256
+ReLU
+−
+
+256x128
+ReLU
+−
+
+128x64
+ReLU
+−
+
+64x1
+
+˜nx1
+
+256x128
+ReLU
+−
+
+128x64
+ReLU
+−
+
+64x1
+
+˜mx1
+
+512x256
+LeakyReLU
+Average-2
+
+256x256
+LeakyReLU
+Average-2
+
+256x128
+LeakyReLU
+Average-2
+
+128x1
+
+bsx1
+
+a fixed number of 20 epochs according to [36]. PredCls
+results are obtained following a standard procedure [82]
+of reusing the SGCls model and setting object classes to
+ground truth. We use PyTorch 1.5+ to train all models. The
+difference between the graph constraint and no constraint
+metrics is discussed in [82, 36]. We also report the results
+on the SGGen/SGDet task in § B.6. However, we highlight
+that SGGen/SGDet is not the focus of our work and we do
+not expect large improvements, since we do not update the
+detector on generated features.
+
+extract node, edge feat. based on output-5 and B
+
+˜nx512x7x7
+
+˜mx512x7x7
+
+A.3. Implementing IMP with TDE
+
+In the generator, GraphTripleConvNet2, Boxes2Layout3,
+Upsample-Refine4 are borrowed from the sg2im implementa-
+tion of [31]. For the baseline IMP++ model we use a publicly
+available implementation5 with a default architecture and
+the graph-normalized loss [36] from another public code6.
+
+A.2. Hyperparameters and Tasks
+
+SGCls. We use batch size bs = 24 and lr = (1e−3)×bs.
+Training was done on NVIDIA V100 with 32GB of GPU
+memory or RTX6000 with 24GB. We train all models for
+
+2GraphTripleConvNet:
+
+https://github.com/google/
+
+sg2im/blob/master/sg2im/graph.py
+
+3Boxes2Layout:
+
+https://github.com/google/sg2im/
+
+blob/master/sg2im/layout.py
+
+4Upsample-Refine:
+
+https://github.com/google/sg2im/
+
+blob/master/sg2im/crn.py
+
+5IMP+/IMP++:
+neural-motifs
+
+https://github.com/rowanz/
+
+To apply TDE to a SGG model, the model is assumed
+to have a contextual layer, such as LSTM in Neural Motifs
+or TreeLSTM in VCTree, conditioned on object predictions
+from the object detector. This contextual layer to some
+extent captures the frequency bias in the dataset during
+training. So, the main goal of TDE is to debias this
+contextual layer at test time. Since, IMP does not have such
+a conditional contextual layer and, consequently, is less bi-
+ased, applying TDE is both (1) unclear implementation-wise
+and (2) has questionable benefits from the conceptual point
+of view. It is still possible to use Total Effect (TE) according
+to Eq. 6 in [67], which we report in the main text. But, there
+is almost no gain w.r.t. IMP in this case.
+
+B. Additional Experimental Results
+
+All presented results in this work are on Visual
+
+6Graph-normalized loss: https://github.com/bknyaz/sgg
+
+Genome [38] (split of [74]).
+
+12
+
+Table 6. Results of GRAPHN with topk = 5 (same as reported in the main text) compared to NEIGH with different values of topk. The
+models are based on IMP++ [82, 36].
+
+MODEL
+
+GAN+GRAPHN, α = 2
+GAN+GRAPHN, α = 5
+GAN+GRAPHN, α = 10
+GAN+GRAPHN, α = 20
+
+GAN+NEIGH, topk = 2
+GAN+NEIGH, topk = 5
+GAN+NEIGH, topk = 10
+GAN+NEIGH, topk = 20
+
+MODEL
+
+ZERO-SHOT RECALL
+
+SGCls
+
+PredCls
+
+10-SHOT RECALL
+PredCls
+SGCls
+
+100-SHOT RECALL
+PredCls
+SGCls
+
+ALL-SHOT RECALL
+PredCls
+
+SGCls
+
+SGCls-mR
+
+9.89±0.15
+9.62±0.29
+9.84±0.17
+9.65±0.15
+
+9.49±0.21
+9.38±0.25
+9.58±0.22
+9.65±0.04
+
+28.90±0.14
+29.18±0.33
+28.90±0.46
+28.68±0.28
+
+28.58±0.40
+28.68±0.40
+28.63±0.39
+28.57±0.06
+
+21.96±0.30
+22.24±0.11
+22.04±0.33
+21.97±0.30
+
+43.79±0.27
+43.74±0.10
+43.54±0.36
+43.64±0.20
+
+41.22±0.33
+41.39±0.26
+41.46±0.15
+41.24±0.08
+
+69.17±0.24
+69.11±0.05
+69.13±0.24
+69.31±0.17
+
+50.06±0.29
+50.14±0.21
+50.10±0.23
+49.89±0.28
+
+78.98±0.09
+78.94±0.03
+79.00±0.09
+78.95±0.04
+
+27.79±0.48
+27.98±0.23
+27.68±0.37
+27.42±0.36
+
+21.72±0.23
+21.75±0.25
+21.86±0.23
+21.82±0.17
+
+43.62±0.05
+43.45±0.14
+43.77±0.15
+43.28±0.21
+
+41.04±0.26
+41.05±0.49
+41.14±0.30
+40.98±0.30
+
+69.07±0.09
+68.94±0.14
+69.03±0.09
+69.01±0.14
+
+49.64±0.29
+49.75±0.30
+49.86±0.38
+49.68±0.28
+
+78.94±0.11
+78.94±0.10
+78.89±0.01
+78.92±0.05
+
+27.33±0.41
+27.05±0.15
+27.41±0.51
+27.17±0.12
+
+Table 7. Results using models based on Neural Motifs++ [82, 36].
+
+ZERO-SHOT RECALL
+
+SGCls
+
+PredCls
+
+10-SHOT RECALL
+PredCls
+SGCls
+
+100-SHOT RECALL
+PredCls
+SGCls
+
+ALL-SHOT RECALL
+PredCls
+
+SGCls
+
+SGCls-mR
+
+Neural Motifs++
+Neural Motifs++, GAN+GRAPHN
+
+6.81±0.10
+8.06±0.13
+
+16.91±0.31
+23.36±0.08
+
+21.07±0.03
+20.99±0.04
+
+44.75±0.12
+45.98±0.04
+
+40.16±0.10
+39.92±0.05
+
+73.58±0.14
+73.97±0.13
+
+48.30±0.06
+48.05±0.12
+
+82.17±0.09
+82.89±0.08
+
+25.48±0.15
+25.59±0.02
+
+Table 8. Comparison of GAN models using GT versus predicted bounding boxes and ORACLE-ZS perturbations.
+10-SHOT RECALL
+PredCls
+SGCls
+
+100-SHOT RECALL
+PredCls
+SGCls
+
+ALL-SHOT RECALL
+PredCls
+
+ZERO-SHOT RECALL
+
+PredCls
+
+SGCls
+
+SGCls
+
+SGCls-mR
+
+MODEL
+
+GAN+ORACLE-ZS, ˆB = B
+GAN+ORACLE-ZS ˆG + test ˆB
+GAN+ORACLE-ZS ˆG, pred. ˆB (§ B.3)
+
+10.11±0.34 29.27±0.10
+10.52±0.31 29.43±0.42
+28.93±0.63
+9.92±0.13
+
+22.05±0.38 43.78±0.09
+21.98±0.39 43.03±0.13
+21.67±0.36 42.65±0.47
+
+41.38±0.50 69.06±0.16
+41.12±0.19 68.73±0.17
+40.96±0.48 68.23±0.28
+
+50.19±0.36 79.00±0.08 27.91±0.56
+50.05±0.35 78.65±0.09 27.52±0.46
+49.80±0.50 78.55±0.14 27.22±0.39
+
+B.1. Topk Semantic Neighbors
+
+In the main text, we used topk = 5 for GRAPHN and
+topk = 10 for NEIGH to allow for the same level of di-
+versity of perturbations in both strategies. To make sure
+GRAPHN outperforms not just because of a better choice
+of topk, we report results of NEIGH for more values in Ta-
+ble 6. Overall, different values of topk do not allow NEIGH
+to achieve the same level of performance as GRAPHN.
+
+B.2. BERT-based Evaluation
+
+We show an example of BERT-based evaluation in Fig. 11.
+In this example, we retrieve the score of 9.8 for the token
+‘shorts’ which was masked out in the query. To estimate the
+overall likelihood of the scene graph we mask out only one
+node per graph for faster evaluation, which can explain a
+high variance of SG quality. Aggregating the scores for all
+nodes should lead to better estimates.
+
+B.3. Learning to Predict Bounding Boxes
+
+In the main text, in our generative pipeline for simplicity
+we assumed the layout (bounding boxes B) is unchanged
+after perturbing the associated scene graph: ˆB = B. Here,
+we describe and report results of the alternative version,
+where the boxes ˆB are predicted by some model f given
+a perturbed scene graph ˆB = f ( ˆG). We borrow the same
+principle as we used for producing ˆG: instead of producing
+ˆB from scratch (without relying on B), we perturb ground
+truth B, so ˆB = f ( ˆG, B). This is an easier task, since we
+only need to predict bounding boxes for part of the scene
+
+Figure 11. Example of BERT-based evaluation. The evaluation in
+a dashed rectangle is the one we used in the paper. The other two
+options are shown for comparison. ‘No context’ returns high scores
+for implausible tokens, such as ‘glasses’. Using the context is
+important for more correct evaluation, while changing the context
+affects the scores accordingly. The scene graph is taken from
+original Visual Genome [38] for visualization purposes.
+
+graph. To achieve that, we train a simple graph convolution
+network (GCN) to predict a single bounding box ˆbi given
+the rest of the layout similar to autoregressive models: ˆbi =
+f (G, B, i), where the input coordinates of the i-th object
+in B have values bi = [−1, −1, −1, −1] (Fig. 12). Our f
+is similar to the GCN in our GAN pipeline and is based
+on GraphTripleConv, but has 3 layers with 64 hidden units
+and an additional MLP which predicts 4 coordinates of the
+bounding box. The model is trained with a margin l1 loss:
+Lbox = min(0.5S, max(0.05S, |ˆbi − bi|1)), where S is the
+maximum box coordinate. The idea behind this loss is to
+avoid having too large or too small penalties making the
+training more stable given that there is no single correct
+
+13
+
+uniform: 9.8  shorts: 9.8  jersey: 9.4  shirt: 9.0  green: 8.6  helmet: 8.5  pants: 8.3  hat: 8.0  cap: 7.9  uniforms: 7.9  ...apron: 6.6 watchingballshortscrowdplayerto the left ofwearingWith Contextshorts: 9.2  helmet: 9.0  uniform: 8.6  socks: 8.6  cap: 8.5  pants: 8.4  jersey: 8.2  green: 8.1  shoes: 8.0  glasses: 8.0  ...jeans: 6.4No Contextshorts: 9.0  jersey: 8.3  uniform: 8.2  green: 8.1  suit: 7.8  helmet: 7.6  towel: 7.4  black: 7.4  bikini: 7.3  shoes: 7.3  ... sandals: 5.9With Different Contextfield[CLS] player wearing [MASK]. [SEP][CLS] player wearing [MASK], crowd watching beach, player to the left of volleyball, sand on beach. [SEP][CLS] player wearing [MASK], crowd watching field, player to the left of soccer ball, grass on field. [SEP]grassonBERT queryTop-10 tokensTop-30 tokenFigure 12. Overview of our model learning to predict bounding
+boxes, which is used only to report results in the last row of Table 8.
+
+Table 9. Evaluation of the bounding box prediction model. FD is
+the Fréchet distance (lower is better). IoU denotes percentage of
+times the intersection over union between the predicted and GT
+box is ≥ 50% (higher is better).
+
+MODEL
+
+FD
+test/test-zs
+
+IoU (%)
+test/test-zs
+
+1.8 / 2.0
+No GCN, unconditional (sample GT)
+0.001 / 0.001
+GCN, predict bi (corrupted label in G) 0.019 / 0.034
+2.8 / 2.2
+GCN, predict bi
+0.018 / 0.037
+12.9 / 6.3
+1e−4 / 3e−4 100 / 100
+GCN, GT bi
+
+Figure 14. Example of the prediction for a zero-shot triplet. Weight-
+ing predicate scores increases the score of more descriptive predi-
+cates such as ’walking on’ compared to ’on’, improving mR results,
+which aligns with [67].
+
+Figure 13. PCA-projected distributions of GT and predicted bound-
+ing boxes of the test (left) and test zero-shot (right) sets.
+
+prediction in this task (i.e. besides the GT there can be many
+other plausible coordinates).
+
+During training and for evaluation (Table 9), we randomly
+(uniformly) sample a single object in a scene graph and
+predict its coordinates given other bounding boxes and a SG.
+After the model is trained, we sequentially apply it only to
+perturbed nodes keeping the boxes of non-perturbed nodes
+unchanged. To isolate the effect of perturbation methods,
+we evaluate this model using ORACLE-ZS (Table 8).
+Surprisingly, this model performs worse on all metrics
+compared to both keeping the layout unchanged and using
+test bounding boxes.
+
+We estimated the quality of the bounding boxes predicted
+by our GCN (Table 9). We found that the model respects
+the conditioning: results of IoU are significantly better com-
+pared to the case when we simply sample GT boxes from a
+distribution for a given class (ignoring SG and other boxes)
+or when we condition the model on a corrupted (random)
+label. However, we found that the model performs signifi-
+cantly worse when is fed with ZS compositions. In particular,
+the distribution appears to be more concentrated around the
+mean in such cases (Fig. 13). This might explain relatively
+poor SGG results when we attempt to use the box prediction
+model in combination with ORACLE-ZS perturbations. Fur-
+ther research is required to resolve the challenges of reliably
+predicting the layout for rare compositions similarly to [8].
+
+Figure 15. Trade-off between different metrics (R, mR and zsR)
+in the SGCls task depending on the strength (x = [0, 1, 2]) of
+weighting predicate scores (×wx) or using TDE [67].
+
+B.4. Predicate Reweighting and Mean Recall
+
+[67] showed that mean (over predicates) recall is rela-
+tively easy to improve by standard Reweight/Resample meth-
+ods, while ZS recall is not. To further analyze this and high-
+light the challenging nature of compositional generalization
+(targeted in this work) as opposed to predicate imbalance
+typically targeted in some previous work, we simplify and
+extend the Reweight idea from [67]. In particular, we com-
+pute the frequency fr of each predicate class r in the training
+set. Then, given a trained SGG model, we multiply softmax
+scores of predicates by wx = 1/f x
+r , where x controls how
+much we need to balance predicate scores (Fig. 14). We
+consider x = [0, 1, 2, 3], denoting models as ×wx, where
+x = 0 corresponds to not changing predictions (our default
+setting). The advantage of our post-hoc calibration com-
+pared to Reweight [67] is that it does not require retraining
+the model and allows us to balance performance on frequent
+and infrequent predicates by carefully choosing x.
+
+The results indicate a severe trade-off between the mean
+and all-shot recalls (Table 10). We can achieve very compet-
+itive mean recall results by simply using large x. However,
+this dramatically hurts the all-shot recall, potentially leading
+to invalid predictions, such as “cup walking on table” instead
+of “cup on table”, as discussed in [76]. Overall, given the
+three SGG metrics (R, mR and zsR), we observe that (R, mR)
+and (R, zsR) are two conflicting pairs of metrics, while (mR,
+
+14
+
+wavesurfboardpersonGCNpersonsurfboardonnearonwavepredicted boxGT boxLoss LBoxxy =[-1,-1,-1,-1]elephantbeachwalkingonelephantbeachononinwalking onwalking innearstanding oneatingofatalong0.00.20.40.6Softmax scoreUnweighted scoresWeighted scores28303234363840R@10010121416mR@10028303234363840R@1003.03.23.43.63.84.04.24.44.6zsR@10010121416mR@1003.03.23.43.63.84.04.24.44.6zsR@10010121416mR@1003.03.23.43.63.84.04.24.44.6zsR@100NM vs NM+TDEBaseline vs Baseline×wxGAN vs GAN×wxTable 10. Tuning for mean (over predicates) recall versus all-shot
+recall using our GAN+GRAPHN model (the graph constraint evalu-
+ation). Underlined are top results among the variants of our model.
+†The results in [67] are obtained with a more advanced detector
+and, thus, are not directly comparable.
+
+MODEL
+
+GPS-net [44]
+NM† [67]
+NM+TDE† [67]
+PCPL [76]
+
+MEAN RECALL
+PredCls
+SGCls
+
+ALL-SHOT RECALL
+SGCls
+
+PredCls
+
+12.6
+8.5
+14.9
+19.6
+
+21.3
+14.6
+25.5
+35.2
+
+40.1
+39.9
+29.9
+28.4
+
+66.9
+66.0
+46.2
+50.8
+
+No weighting (×w0) 10.1±0.2 15.7±0.3
+×w1
+14.3±0.2 22.1±0.3
+×w2
+17.0±0.1 26.3±0.1
+×w3
+18.3±0.1 28.6±0.2
+
+38.1±0.1
+35.2±0.1
+26.4±0.4
+17.2±0.1
+
+62.3±0.2
+56.9±0.3
+42.5±0.2
+27.1±0.2
+
+zsR) have some correlation (Fig. 15). Clearly, the discussed
+metrics measure different properties of a given SGG model.
+In this work, we measure compositional generalization and
+therefore focus on zero-shot (and closely related few-shot)
+recall as appropriate metrics for that particular task.
+
+B.5. Training the Baseline Longer
+
+In our GAN model we have two loss terms (LCLS, LREC)
+that update the model F , which can be considered as having
+two times more updates compared to the baseline, and so
+can be an implicit advantage. We investigated if the baseline
+model can improve itself if it is updated two times more. Our
+results in Table 11 suggest that the model starts to overfit
+leading to poor results on all metrics except mean recall. This
+might indicate that a stronger regularization is required for
+the baseline trained longer. Our GAN losses can be viewed
+as such a regularizer leading to better generalization results.
+
+Table 11. Effect of training the baseline model longer. Metrics are
+R@100 for SGCls and R@50 for PredCls (no graph constraint).
+
+MODEL
+
+ZERO-SHOT MEAN RECALL
+
+ALL-SHOT
+
+SGCls PredCls
+
+SGCls PredCls
+
+SGCls PredCls
+
+Baseline (IMP++)
+Baseline, ×2 updates 8.2
+
+9.3±0.1 28.1±0.1 27.8±0.1 33.7±0.3 48.7±0.1 77.5±0.1
+
+25.8
+
+27.8
+
+35.1
+
+46.6
+
+73.5
+
+B.6. SGGen/SGDet Results
+
+In addition to SGCls/PredCls results presented in the
+main text, we follow previous work [82, 67] and provide
+SGGen (SGDet) results that rely on using the bounding
+boxes predicted by the detector as opposed to using GT
+boxes (Table 12). We follow a standard refinement proce-
+dure [82, 36] and fine-tune SGCls models with bs = 6 and
+lr = (1e − 4) × bs. We fine-tune for 2 epochs in all cases,
+which we set heuristically as our main goal in this task is not
+to outperform state-of-the-art, but to compare our model with
+the baseline. During this fine-tuning for simplicity we use
+only the baseline loss for all models, so that this step’s main
+purpose is to adapt the SGCls model to predicted bounding
+
+15
+
+Table 12. SGGen results. The top-1 result in each column is bolded.
+†The results in [67] are obtained with a more advanced detector
+and, thus, are not directly comparable.
+
+MODEL
+
+ZERO-SHOT
+
+MEAN RECALL
+
+ALL-SHOT
+
+SGGen zsR@100
+
+SGGen mR@100
+
+SGGen R@100
+
+Graph Constraint ✓
+
+✗
+
+FREQ [82, 9, 36]
+IMP+ [74, 82, 36]
+NM [82, 9, 36]
+KERN [9, 36]
+VCTree† [67]
+NM† [67]
+NM+TDE† [67]
+
+Baseline (IMP++)
+GAN
+GAN×w2
+
+0.1
+0.0
+0.9
+0.9
+0.8
+0.3
+0.0
+0.0
+0.7 −
+0.2 −
+2.9 −
+
+0.8
+1.0
+1.1
+
+0.9
+1.2
+2.2
+
+✓
+
+5.6
+4.8
+6.1
+7.3
+6.9
+6.8
+9.8
+
+5.9
+6.2
+9.9
+
+✗
+
+8.9
+8.0
+12.9
+16.0
+−
+−
+−
+
+9.8
+10.5
+15.9
+
+✓
+
+✗
+
+27.6 30.9
+24.5 27.4
+30.3 35.8
+29.8 35.8
+36.2 −
+36.9 −
+20.3 −
+
+25.1 28.1
+25.4 28.6
+18.5 24.0
+
+boxes instead of ground truth. Despite these simplifications
+our GAN model still improves on the baseline. However, the
+results are worse than in previous works, perhaps because:
+(1) they rely on a stronger detector; (2) we do not update
+the detector on the generated features conditioned on rare
+compositions. Addressing these limitations can be the focus
+of future work. The models with reweighted predicates
+(§ B.4) significantly improve the results on mean recall (as
+expected), and interestingly, on one of the zero-shot metrics.
+
+B.7. Evaluation of Generated Visual Features
+
+In addition to the quality estimation of node features in the
+main text, we evaluate edge and global features qualitatively
+(Fig. 16) and quantitatively (Table 13). We also visualize fea-
+tures by averaging over the channel dimension (Fig. 17, 18).
+These visualizations show that the generated samples are
+diverse and respond to the changes in the conditioning. How-
+ever, the global features generated by our GAN are notice-
+ably more smooth, which might be an effect of the genera-
+tor’s architectural inductive bias or visualization strategy.
+
+Table 13. Evaluation of generated (fake) feature using the metrics of
+“similarity” between two distributions X and Y [39, 51]. The same
+held-out set of real test features (Y ∼ V ) is used as the reference
+distribution in all cases. The percentage in the superscripts denotes
+a relative drop of the average metric when switching from test to
+test-zs conditioning. For all metrics, higher is better.
+
+DISTRIBUTION X
+
+Fidelity (realism)
+
+Diversity
+
+PRECISION DENSITY RECALL COVERAGE
+
+AVG
+
+S Real test
+
+E
+D
+O
+N
+
+Real test-zs
+GAN: Fake test
+GAN: Fake test-zs
+
+S Real test
+
+E
+G
+D
+E
+
+Real test-zs
+GAN: Fake test
+GAN: Fake test-zs
+
+L Real test
+A
+B
+O
+L
+G
+
+Real test-zs
+GAN: Fake test
+GAN: Fake test-zs
+
+0.74
+0.66
+0.55
+0.47
+
+0.73
+0.53
+0.54
+0.38
+
+0.30
+0.20
+0.14
+0.11
+
+1.02
+0.99
+0.77
+0.60
+
+0.97
+0.99
+0.59
+0.36
+
+0.96
+0.91
+0.43
+0.23
+
+0.75
+0.70
+0.42
+0.41
+
+0.72
+0.59
+0.50
+0.50
+
+0.31
+0.35
+0.22
+0.29
+
+0.97
+0.94
+0.82
+0.75
+
+0.97
+0.87
+0.75
+0.58
+
+0.99
+0.73
+0.83
+0.68
+
+0.87
+0.82−6%
+0.64
+0.56−13%
+
+0.85
+0.75−12%
+0.60
+0.46−23%
+
+0.64
+0.55−14%
+0.41
+0.33−20%
+
+REAL NODE FEATURES V
+
+FAKE NODE FEATURES ˆV
+
+REAL EDGE FEATURES
+
+FAKE EDGE FEATURES
+
+GLOBAL FEATURES
+
+Figure 16. Visualizations of real vs generated node, edge and global
+features obtained using t-SNE.
+
+Input image
+
+Real feature map H
+
+Generated ˆH (sample # 1)
+
+Generated ˆH (sample # 2)
+
+G
+
+g
+o
+d
+
+→
+
+n
+o
+s
+r
+e
+p
+
+:
+
+ˆG
+
+Figure 17. Real H and Fake (generated) ˆH global feature maps
+(averaged over the channel dimension) with a perturbation for the
+triplet “person on surfboard” in G.
+
+16
+
+Features of objects Person
+
+Features of predicates On
+
+l
+a
+e
+R
+
+e
+k
+a
+F
+
+Figure 18. Real and Fake node and edge features (averaged over
+the channel dimension) for objects and predicates.
+
+B.8. Limitations
+
+Our method is limited in three main aspects. First, we
+rely on a pretrained object detector to extract visual features.
+Without generating augmentations all the way to the images
+— in order to update the detector on rare compositions — it
+is hard to obtain significantly stronger performance. While
+augmentations in the feature space can be effective [16, 71],
+their adoption for large-scale out-of-distribution generaliza-
+tion is underexplored. Second, by making a simplification
+and keeping GT bounding boxes for perturbed scene
+graphs, we limit (1) the amount of perturbations we can
+make (if we permit many nodes to be perturbed, then it
+is hard to expect the same layout), and (2) the diversity
+of spatial compositions, which might be an important
+aspect of compositional generalization. We attempted to
+verify that using ORACLE-ZS perturbations, which are
+created by directly using ZS triplets from the test set.
+Using ORACLE-ZS with GT bounding boxes (our default
+setting) surprisingly does not result in large improvements.
+However, when we replace GT boxes with the ones taken
+from the corresponding samples of the test set, the results
+improve significantly. This demonstrates that: (1) our GAN
+model may benefit from reliable bounding box prediction
+(e.g. [28]); (2) GRAPHN perturbations are already effective
+(close to ORACLE-ZS) and improving the results further by
+relying solely on perturbations is challenging. Third, the
+quality of generated features, especially, for novel and rare
+compositions is currently limited, which is also carefully an-
+alyzed in [8]. Addressing this challenge can further improve
+results both of ORACLE-ZS and non-ORACLE-ZS models.
+
+C. Additional visualizations
+
+Figures 19-21 show additional examples of different per-
+turbations applied to scene graphs from Visual Genome (on
+top of each figure we show graph G along with the corre-
+sponding image). Perturbed nodes are highlighted in red.
+Red edges denote triplets missing both in the training and
+test sets. Thick red edges denote triplets only present in the
+test set, i.e. zero-shots. Blue edges denote triplets present in
+the training set, where the number indicates the total number
+of such triplets in the training set. These visualization show
+that in case of RAND, most of the created triplets are implau-
+sible as a result of random perturbations. NEIGH leads to
+very likely compositions, but less often provides rare plausi-
+ble compositions. In contrast, GRAPHN can create plausible
+compositions that are rare or more frequent depending on α.
+
+604020020406010080604020020406060402002040601008060402002040600.00.51.01.52.02.53.03.54.00.040.020.000.020.04PeopleFoodAnimalsVehiclesConstructions1005005010075502502550751001005005010010075502502550751000.000.250.500.751.001.251.501.752.000.040.020.000.020.04Riding/Sitting onOf/Part ofWearing1510505101520302010010RealFakeRAND
+
+NEIGH
+
+GRAPHN
+
+Figure 19. Visualizations of perturbations for image 2350517 from Visual Genome.
+
+17
+
+2
+=
+α
+
+5
+=
+α
+
+0
+1
+=
+α
+
+0
+2
+=
+α
+
+0
+5
+=
+α
+
+RAND
+
+NEIGH
+
+GRAPHN
+
+Figure 20. Visualizations of perturbations for image 2343590 from Visual Genome.
+
+18
+
+2
+=
+α
+
+5
+=
+α
+
+0
+1
+=
+α
+
+0
+2
+=
+α
+
+0
+5
+=
+α
+
+RAND
+
+NEIGH
+
+GRAPHN
+
+Figure 21. Visualizations of perturbations for image 1159620 from Visual Genome.
+
+19
+
+2
+=
+α
+
+5
+=
+α
+
+0
+1
+=
+α
+
+0
+2
+=
+α
+
+0
+5
+=
+α
+
+

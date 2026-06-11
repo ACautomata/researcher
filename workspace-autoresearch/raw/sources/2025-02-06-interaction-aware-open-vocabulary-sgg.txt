@@ -1,0 +1,1391 @@
+Taking A Closer Look at Interacting Objects:
+Interaction-Aware Open Vocabulary Scene Graph Generation
+Lin Li 1 Chuhan Zhang 1 Dong Zhang 1 Chong Sun 2 Chen Li 2 Long Chen 1
+Abstract
+Today’s open vocabulary scene graph generation
+(OVSGG) extends traditional SGG by recognizing
+novel objects and relationships beyond predefined
+categories, leveraging the knowledge from pre-
+trained large-scale models. Most existing meth-
+ods adopt a two-stage pipeline:weakly supervised
+pre-training with image captions and supervised
+fine-tuning (SFT) on fully annotated scene graphs.
+Nonetheless, they omit explicit modeling of in-
+teracting objects and treat all objects equally,
+resulting in mismatched relation pairs. To this
+end, we propose an interaction-aware OVSGG
+framework INOVA. During pre-training, INOVA
+employs an interaction-aware target generation
+strategy to distinguish interacting objects from
+non-interacting ones. In SFT, INOVA devises an
+interaction-guided query selection tactic to pri-
+oritize interacting objects during bipartite graph
+matching. Besides, INOVA is equipped with an
+interaction-consistent knowledge distillation to
+enhance the robustness by pushing interacting ob-
+ject pairs away from the background. Extensive
+experiments on two benchmarks (VG and GQA)
+show that INOVA achieves state-of-the-art perfor-
+mance, demonstrating the potential of interaction-
+aware mechanisms for real-world applications.
+1. Introduction
+Scene graph generation (Xu et al., 2017) (SGG) aims to map
+an image into a structured semantic representation, where
+objects are expressed as nodes and their relationships are as
+edges within the graph. Recently, with the burgeoning of
+large-scale models, e.g., vision-language models (VLMs)
+and multimodal large language models (MLLMs), open
+vocabulary SGG (He et al., 2022; Li et al., 2024b; Chen
+et al., 2024b) (OVSGG) has emerged as a promising area.
+1The Hong Kong University of Science and Technology,
+Hong Kong 2Tencent, China. Correspondence to: Long Chen
+<longchen@ust.hk>.
+A group of people pose 
+for a picture while a man 
+holds two surfboards.
+Object Detector
+man, surfboard
+man, hold, surfboard
+Generated Supervision
+SFT
+VLM Pre-training
+Caption Parser
+Guide
+Pretraining
+VLM
+Relation
+Classifier
+…
+{Object Classes}
+{Relation Classes}
+Class Box
+FFN
+FFN
+Class Box
+FFN
+FFN
+Class Box
+No Object
+…
+Matched Object Pair
+Bipartite Graph Matching
+prompt
+man
+man
+man
+man
+surfboard
+surfboard
+…
+hold?
+Target
+horse
+riding
+man
+Guide
+Figure 1. Overview of the OVSGG framework challenges. 1)
+VLM Pre-training, using solely entity categories for object detec-
+tion causes ambiguity in associating object pairs (e.g., identifying
+the correct “man-surfboard” for the “hold”). 2) SFT, bipartite
+graph matching misaligns non-interacting objects (e.g., “man
+”)
+with interacting target “man” in ⟨man, riding, horse⟩.
+It pushes beyond predefined categories to support the recog-
+nition and generation of novel objects and relationships,
+holding great potential for real-world applications.
+Generally, an end-to-end VLM-based1 OVSGG pipeline
+consists of two stages: VLM Pre-training and Supervised
+Fine-Tuning (SFT). The former involves pre-training a
+VLM on large-scale datasets to realize a visual-concept
+alignment by comparing the given caption and visual re-
+gions. Specifically, due to the lack of region-level infor-
+mation (e.g., bounding box annotations), recent work (He
+et al., 2022; Zhang et al., 2023; Chen et al., 2024b)
+adopts a weakly-supervised strategy to generate ⟨subject,
+predicate, object⟩triplets with bounding boxes as
+pseudo supervisions. As displayed in Figure 1(a), this ap-
+proach extracts semantic graphs from image captions using
+SGG parsers (Schuster et al., 2015), then grounds objects in
+the graphs with pre-trained object detectors (e.g., Faster R-
+CNN (Ren et al., 2015), GLIP (Li et al., 2022a) and Ground-
+ing DINO (Liu et al., 2023)). The latter stage refines the
+model’s performance on task-specific objectives by lever-
+aging high-quality annotations. Concretely, it fine-tunes
+1We primarily discuss VLM-based models here due to the high
+resource demands of MLLM-based approaches.
+1
+arXiv:2502.03856v1  [cs.CV]  6 Feb 2025
+Taking A Closer Look at Interacting Objects: Interaction-Aware Open Vocabulary Scene Graph Generation
+part of VLM’s parameters (Chen et al., 2024b) or adapts
+prompt-tuning (He et al., 2022) on SGG dataset with fully-
+supervised triplet annotations. Leveraging these bounding
+box annotations, a DETR-like structure (Carion et al., 2020)
+with bipartite graph matching is typically used to align pre-
+dicted entities with ground-truth labels. This stage further
+enhances the model’s capability to recognize and generate
+precise scene graphs (c.f. Figure 1(b)).
+Despite impressive, existing OVSGG methods often treat
+all objects equally, ignoring the distinct characteristics of
+the interacting objects. By equally, we mean the lack of
+differentiation between instances within the same category.
+For example, the man involved in a holding action and the
+man without any action are represented in an indistinguish-
+able manner. It can lead to mismatches in relation pairs
+during both pre-training and SFT stages, which induces
+the following drawbacks: ❶Bringing noisy supervision in
+pre-training. As illustrated in Figure 1(a), relying solely
+on entity categories (e.g., man and surfboard) to detect
+objects generates a large number of candidate pairs. This
+ambiguity makes it hard to associate relation (e.g., “hold”)
+to the proper object pair (e.g., “man-surfboard”). Using
+mismatched triplets (e.g., man in red and surfboard in
+pink) further exacerbates the confusion, hindering the train-
+ing of robust SGG models. ❷Leading mismatched bipartite
+graph during SFT. In Figure 1(b), a non-interacting “man
+”
+can be mistakenly associated with man in the triplet annota-
+tion ⟨man, riding, horse⟩. However, the real target is
+another “man
+” engaged in riding. This mismatch further
+complicates the relation classification task, making it harder
+to predict correct interactions.
+In this paper, we take a closer look at interacting objects
+in each stage, and propose the INteraction-aware Open-
+VocAbulary SGG framework (INOVA). INOVA follows a
+dual-encoder-single-decoder architecture (Liu et al., 2023),
+comprising three key components: the visual and text en-
+coders, the cross-modality decoder, and the entity and rela-
+tion classifiers. During the VLM pre-training stage, INOVA
+introduces an interaction-aware target generation strat-
+egy that employs bidirectional interaction prompts to guide
+the grounding of interacting object pairs. These prompts
+incorporate interaction tokens that capture contextual de-
+pendencies and relational semantics, enabling the model to
+distinguish interacting objects from non-interacting ones
+through the attention mechanism (Vaswani, 2017). For the
+SFT stage, we devise a two-step interaction-guided query
+selection mechanism to prioritize interacting objects and
+incorporate relational context into the query selection pro-
+cess. This mechanism mitigates the interference of inactive
+objects and reduces mismatches in bipartite graph matching,
+ensuring robust relation prediction. Additionally, to distin-
+guish interacting objects (engaged in both seen and unseen
+triplets) from the background and address the challenge of
+catastrophic knowledge forgetting (Chen et al., 2024b) dur-
+ing SFT, we adopt an interaction-consistent knowledge
+distillation (KD). It utilizes a teacher model pre-trained on
+image-caption data to guide the student model in preserving
+both point-wise semantic alignment and inter-pair relational
+consistency. By explicitly modeling the relative dependen-
+cies between interaction-based and non-interaction pairs, it
+enhances the model’s robustness in handling novel triplet
+combinations and background.
+To evaluate INOVA, we conducted comprehensive experi-
+ments on benchmark Visual Genome (VG) (Krishna et al.,
+2017) and GQA (Hudson & Manning, 2019) datasets to
+validate its effectiveness in addressing the key challenges of
+OVSGG. In summary, our contributions are threefold:
+• We reveal key limitations in existing OVSGG frame-
+works, i.e., treating all objects equally, which neglects
+the distinct characteristics of interacting objects and
+results in mismatched relation pairs.
+• We propose the INOVA framework that incorporates
+interaction-aware target generation, interaction-guided
+query selection, and interaction-consistent KD to pay
+attention to interacting objects, alleviating mismatched
+relation pairs and interference of irrelevant objects.
+• Extensive experiments on two prevalent SGG bench-
+marks demonstrate the effectiveness of INOVA.
+2. Related Work
+OVSGG. This task bridges the gap between closed-set
+SGG and real-world requirements by leveraging VLMs or
+MLLMs to generalize beyond predefined categories (Rad-
+ford et al., 2021; Liu et al., 2023). Current approaches fall
+into two main categories: 1) VLM-based Methods. These ap-
+proaches primarily rely on contrastive pre-training to align
+visual and textual embeddings. By comparing visual fea-
+tures of unseen objects or relations and their semantic coun-
+terparts in common semantics spaces, these models (e.g.,
+CLIP (Radford et al., 2021) and Grounding DINO (Liu
+et al., 2023)) enables zero-shot generalization. Recent ad-
+vancements, such as He et al. (He et al., 2022), explore
+visual-relation pre-training and prompt-based fine-tuning
+for OVSGG. Yu et al. (Yu et al., 2023) leverage CLIP to
+align relational semantics in multimodal spaces, while Chen
+et al. (Chen et al., 2024b) use a student-teacher framework to
+improve open-set relation prediction. Besides, other meth-
+ods integrate category descriptions (Li et al., 2024a) or
+scene-level descriptions (Chen et al., 2024a) to enrich the
+semantic context and improve the discrimination among
+different relationships. 2) MLLM-based Methods. These
+tactics extend the capabilities of VLMs by incorporating
+auto-regressive language models, predicting objects and
+relations in an open-ended manner. Specifically, they uti-
+lize the sequential prediction capabilities of MLLMs, e.g.,
+2
+Taking A Closer Look at Interacting Objects: Interaction-Aware Open Vocabulary Scene Graph Generation
+BLIP (Li et al., 2023) and LLaVA (Liu et al., 2024), to
+model scene graphs as structured sequences. For exam-
+ple, PGSG (Li et al., 2024b) and OpenPSG (Zhou et al.,
+2025) employ auto-regressive modeling to iteratively pre-
+dict objects and relations, providing fine-grained relational
+reasoning for open-set triplets. ASMv2 (Wang et al., 2025)
+builds on LLaVA (Liu et al., 2024) with instruction fine-
+tuning, unifying text generation, object localization, and
+relation comprehension. Despite their power, MLLM-based
+methods typically require huge computing resources. In this
+paper, we focus on VLM-based methods and propose an
+interaction-aware framework that explicitly models object
+interactions and enhances generalization to novel categories.
+Weakly Supervised SGG. This task aims to train models
+using language descriptions instead of fully annotated scene
+graphs. Existing works usually extract entities and rela-
+tions from captions using language parsers (Schuster et al.,
+2015), then ground corresponding regions. Grounding meth-
+ods include contrastive learning-based graph matching (Shi
+et al., 2021), semantic matching rules (Zhong et al., 2021),
+knowledge distillation from pre-trained VLMs (Li et al.,
+2022b), and aligning regions and words for scene graph
+supervision (Zhang et al., 2023). Recent large language
+model (LLM)-based approaches, e.g., LLM4SGG (Kim
+et al., 2024) uses LLM’s reasoning capabilities to refine
+triplet extraction and alignment, mitigating semantic over-
+simplification. Similarly, GPT4SGG (Chen et al., 2023)
+synthesizes holistic and region-specific narratives, using the
+generative power of GPT-4 (OpenAI, 2023) to capture both
+global context and local details. In this paper, we propose
+a simple and efficient method that only use LLM to gen-
+erate counter-actions involved in bidirectional interaction
+prompts to improve interacting object detection accuracy.
+Knowledge Distillation (KD). This strategy trains a smaller
+“student” model to replicate the outputs of a larger “teacher”
+model, commonly used in open-vocabulary learning to trans-
+fer knowledge from VLMs. It encourages the student to
+mimic the teacher’s enriched hidden space, enabling gener-
+alization from base to novel concepts. Prior work (Gu et al.,
+2021; Zang et al., 2022) explores KD in open vocabulary
+object detection by using L1/MSE loss to align the student
+detector’s features with the teacher VLM’s regional visual
+features. However, this hard alignment may fail to capture
+complex feature structures. Later work (Bangalath et al.,
+2022) aligns the similarity of inter-embeddings, aiding in the
+acquisition of structured knowledge. Recent work extends
+to multi-scale level (Wang et al., 2023) or bags-of-region
+level (Wu et al., 2023), contrasting with InfoNCE loss. This
+paper adopts an interaction-consistent KD that combines
+point-to-point concept retention and structure-aware interac-
+tion retention distillation, preserving teacher’s knowledge
+and identifying novel relationships beyond backgrounds.
+3. Methodology
+3.1. OVSGG Pipeline Review
+Formulation. Given an image I, SGG aims to construct a
+structured semantic graph G = (V, E). Each node vi ∈V is
+defined by its bounding box (bbox) and category, while each
+edge eij ∈E represents the relationship between vi and vj.
+In open-vocabulary settings, the label set C for nodes and
+edges is divided into base classes CB and novel classes CN,
+such that CB ∪CN = C and CB ∩CN = ∅. CB contains seen
+classes during training, while CN includes unseen classes
+that the model is expected to generalize to during inference.
+3.1.1. ARCHITECTURE
+As illustrated in Figure 2(b), an end-to-end OVSGG frame-
+work (Chen et al., 2024b) typically follows a dual-encoder-
+single-decoder architecture (Liu et al., 2023), involving
+three main components: the visual and text encoders, the
+cross-modality decoder, the entity and relation classifiers.
+Visual and Text Encoders. The visual encoder (VE) ex-
+tracts multi-scale visual features V ∈RNv×d by the image
+backbone (e.g., Swin Transformer (Liu et al., 2021)). For
+the text encoder (TE), input prompts are constructed by
+concatenating all predefined object and relation categories
+into a single sequence, e.g., “[CLS] man. horse. [SEP]
+riding. above. [PAD]”, following (Chen et al., 2024b).
+Using this prompt, TE extracts object features To ∈RNo×d
+and relation features Tr ∈RNr×d using a pre-trained lan-
+guage model (e.g., BERT (Devlin et al., 2019)). Here, Nv,
+No, and Nr denote the numbers of image, object, and rela-
+tion tokens, respectively. d is the feature dimension.
+Cross-Modality (CM) Decoder. It refines the represen-
+tations of K object queries {qi}K
+i=1 through a series of
+operations, including a self-attention layer, an image cross-
+attention layer for visual features, and a cross-attention layer
+for text features derived from prompts (Liu et al., 2023).
+These refined queries are then passed through a feed-forward
+network (FFN) to predict object bbox coordinates. Follow-
+ing (Chen et al., 2024b; Shit et al., 2022), a global relation
+query qrel is introduced to capture spatial and semantic
+dependencies among objects in the image, complementing
+the local interactions represented by the object queries.
+Entity and Relation Classifiers. The entity/relation clas-
+sifier compares node/edge features with text features of
+object/relation classes in a shared semantic space for open-
+vocabulary recognition.Concretely, node features {eo} are
+from refined object queries and edge features {eij} are
+constructed by combining paired object features to capture
+subject-object interactions.To model interactions effectively,
+VS (Zhang et al., 2023) constructs edge features by comput-
+ing the differences and sums of object features. In contrast,
+we follow (Chen et al., 2024b; Shit et al., 2022) to concate-
+3
+Taking A Closer Look at Interacting Objects: Interaction-Aware Open Vocabulary Scene Graph Generation
+Encoder
+A group of people pose for a 
+picture while a man holds two 
+surfboards.
+man
+Caption Parser
+surfboard
+surfboard
+Interaction-Aware Target Generation
+Attention in TE
+hold
+hold
+Rule-based 
+Combination
+(a) VLM Pre-training
+Guide
+Pre-training
+VLM
+VE
+TE
+Relation
+Classifier
+…
+Class Box
+FFN
+FFN
+Class Box
+FFN
+FFN
+Class Box
+No Object
+…
+Entity
+Classifier
+Object Pair
+man
+Horse
+man
+riding
+Bipartite Graph Matching
+prompt
+IQS
+…
+…
+Obj Embeds
+Rel Embeds
+man riding
+riding horse
+Interaction 
+Prompt
+Step I
+Top-K Query
+Visual Embeds
+man
+hold surfboard.
+man.
+surfboard held by
+man, hold, surfboard
+Bidirectional Interaction 
+Prompts
+Llama
+Grounding DINO
+…
+CM
+Decoder
+…
+Interaction Embeds
+…
+…
+…
+Obj Embeds
+Step II
+Visual Embeds
+Top-K Query
+CM
+Decoder
+…
+VLM
+Entity
+Classifier
+Relation
+Classifier
+TE
+IQS
+(b) Supervised Fine-Tuning
+[CLS]man. 
+horse.[SEP]
+riding.above.
+[PAD]
+(Eq. 1)
+(Eq. 3)
+Figure 2. Overview of INOVA for OVSGG. (a) VLM Pre-training: Interaction-aware target generation uses bidirectional interaction
+prompts and rule-based bounding box combinations to generate supervision, enriching object tokens with contextual interaction semantics.
+(b) SFT: A two-step interaction-guided query selection (IQS) prioritizes interacting objects and integrates relational context into object
+tokens, refining queries for the decoder. Bipartite graph matching aligns predictions with ground-truth for entity and relation classification.
+nate a global relation embedding erln (refined representa-
+tion of relation query) with pairwise object embeddings.
+The concatenated features are through a two-layer MLP to
+capture holistic dependencies and interactions for eij.
+3.1.2. TRAINING PROCESS
+Bipartite Graph Matching. During training, it matches
+object queries with ground-truth (GT) annotations by min-
+imizing a cost function based on semantic similarity and
+spatial alignment (Carion et al., 2020). Matched queries are
+used for entity classification and linked to the matched GT’s
+subordinate triplet, serving as input for edge representations.
+Training Objectives. Following (Chen et al., 2024b), there
+are three training losses: 1) Bbox Regression Loss: Com-
+bines L1 Lreg and GIoU loss Lgiou (Rezatofighi et al.,
+2019) to ensure accurate object localization with precise po-
+sitions and bounding box overlaps. 2) Entity Classification
+Loss: Applies Focal Loss (Lin et al., 2017) Lobj to alleviate
+imbalance-distribution issue by focusing on hard-to-classify
+and underrepresented object categories. 3) Relation Classi-
+fication Loss: Uses binary cross-entropy (BCE) loss Lrel to
+align predicted relation scores with GT annotations.
+3.2. INOVA
+As illustrated in Figure 2, INOVA follows a two-stage train-
+ing process, incorporating interaction-aware target gener-
+ation during pre-training and interaction-guided query se-
+lection in SFT to alleviate mismatches caused by uniform
+treatment of objects in each stage. Besides, an interaction-
+consistent KD further enhances the model’s ability to distin-
+guish interaction-based pairs from background noises.
+3.2.1. INTERACTION-AWARE TARGET GENERATION
+To effectively identify interacting objects in weakly an-
+notated data during pre-training,we devise an interaction-
+aware target generation tactic that uses bidirectional triplets
+rather than relying on a direct combination of all entity
+classes (e.g., “man. surfboard.”) for object detection.
+To be specific, after the semantic graph parsing process, we
+employ Grounding DINO (Liu et al., 2023) as the object
+detector and design bidirectional interaction prompt to
+guide the object localization. The bidirectional interaction
+prompt is constructed by combining two perspectives for
+each interaction triplet: one reflecting the action from the
+subject’s viewpoint (e.g., “man hold surfboard”) and
+another from the object’s perspective (e.g., surfboard
+held by man”). The former is directly derived from
+the components of the interaction triplet, while the latter
+converse the subject and object with a counter-action (e.g.,
+“held by”) generated by an LLM (e.g., Llama2 (Touvron
+et al., 2023))2. The dual-perspective construction process
+brings two key advantages: 1) Modeling Context Informa-
+2The generation process of counter-action is in the Appendix
+C.
+4
+Taking A Closer Look at Interacting Objects: Interaction-Aware Open Vocabulary Scene Graph Generation
+tion: Through the attention mechanism in the text encoder
+of Grounding DINO, the bidirectional interaction prompt
+integrates contextual interaction information into object to-
+kens. As shown in Figure 2(a), the attention mechanism
+enables the token “man” to absorb relevant interaction se-
+mantics, such as “hold surfboard”, ensuring that the
+grounded object “man” is correctly aligned with its interac-
+tion context. 2) Enhancing Object Role Awareness: By re-
+versing operation, the object (e.g., “surfboard”) of given
+triplet becomes the syntactic subject of the whole sentence
+(e.g., “surfboard held by man”). As the central of
+the rephrased sentence, the syntactic subject receives height-
+ened attention, improving its accuracy in localization.
+Furthermore, inspired by (Li et al., 2022b; Kim et al., 2024),
+we adopt a rule-based combination that combines overlap-
+ping subject and object bounding boxes to form reliable
+triplet supervision by Intersection over Union (IoU) score.
+3.2.2. INTERACTION-GUIDED QUERY SELECTION
+During SFT, we introduce a two-step selection strategy for
+query initialization and refinement to prioritize interacting
+objects, mitigating the bipartite graph mismatched problem
+by reducing non-interacting candidates.
+Step I. This step aims to directly identify the most relevant
+visual tokens that are likely to participate in object interac-
+tions. Intuitively, the visual features of interacting objects
+should exhibit strong correlations with both object and re-
+lation semantics. To achieve this, for each visual token
+vi ∈Vv, a relevance score si is computed by combining its
+maximum similarity with object and relation class tokens:
+si =
+ max(viT⊤
+o )
+γ ·
+ max(viT⊤
+r )
+1−γ,
+(1)
+where max(viT⊤
+o ) computes the maximum similarity be-
+tween the visual token vi and all object class tokens in To,
+while max(viT⊤
+r ) computes the maximum similarity be-
+tween vi and all relation class tokens in Tr. The parameter
+γ ∈[0, 1] balances their contributions.
+Based on the relevance scores, the top K query indices,
+denoted as IK, are selected by the following procedure:
+IK = TopK({si | i = 1, 2, . . . , Nv}).
+(2)
+The visual features and the position embedding (Liu et al.,
+2023) corresponding to the selected indices IK are used to
+initialize queries for further decoding operations.
+Step II. Nevertheless, the object and relation tokens are
+encoded individually in Step I, which limits capturing in-
+teraction semantics and distinguishing among objects. To
+this end, Step II explicitly models interaction semantics by
+integrating relational context into the object tokens. Specif-
+ically, after the initial forward pass, the model predicts
+a set of visual relation triplets ⟨subject, predicate,
+object⟩.
+These triplets are decomposed into interac-
+tion pairs ⟨subject, predicate⟩and ⟨predicate,
+object⟩, which serve as interaction prompts. These
+prompts are encoded through the TE of VLM to get inter-
+action tokens embeddings Tin. The decomposition pro-
+cess has dual advantages: First, by leveraging interaction
+prompts, the TE’s attention mechanism integrates interac-
+tion information into the object tokens, enabling the model
+to capture contextual dependencies and enhance its under-
+standing of relationships. For instance, the token “man”
+can incorporate the semantic meaning of the interaction
+“riding” to obtain “man
+” in Figure 2(b). Second, de-
+composing triplets into pairs avoids direct interference be-
+tween object tokens, effectively preserving their unique
+characteristics. As illustrated in Figure 2(b), “man
+” and
+“horse
+” are independently processed, preventing unnec-
+essary dependencies across unrelated categories and main-
+taining the individual semantics of each object.
+Interaction Query Selection. For each visual token vi, the
+interaction relevance score sin
+i is calculated by measuring
+the maximum similarity with interaction tokens:
+sin
+i
+= max(viT⊤
+in).
+(3)
+The query indices set prioritizes the top L tokens with the
+highest interaction relevance:
+Iin
+L = TopL({sin
+i
+| i = 1, 2, . . . , Nv}).
+(4)
+Missing Query Selection. However, relying solely on inter-
+action relevance may fail to identify objects absent from
+the initially predicted triplets yet crucial for comprehensive
+scene understanding. To address this, the object relevance
+score so
+i is computed similarly, but using object tokens To.
+The remaining K −L query indices are selected based on
+object relevance, excluding those already chosen:
+Io
+K−L = TopK−L({so
+i | i /∈Iin
+L , i = 1, 2, . . . , Nv}).
+(5)
+The final query indices set combines these two subsets:
+IK = Iin
+L ∪Io
+K−L.
+(6)
+Combining Step I and Step II, the query selection achieves
+both interaction relevance and comprehensive integration
+of relational context. Step I identifies interaction-relevant
+tokens by balancing object and relation semantics, while
+Step II refines the representation by embedding relational
+context into object tokens through interaction prompts. This
+two-step strategy effectively reduces non-interacting candi-
+dates and mitigates mismatches in the bipartite graph. For
+ease of understanding, the pseudo-codes is left in Appendix
+D.
+3.2.3. INTERACTION-CONSISTENT KD
+Beyond the localization and classification objectives men-
+tioned in Sec. 3.1.2, we adopt interaction-consistent knowl-
+edge distillation to enhance the model’s ability to distinguish
+5
+Taking A Closer Look at Interacting Objects: Interaction-Aware Open Vocabulary Scene Graph Generation
+Background
+Teacher
+Student
+Teacher
+Student
+Background
+(a) VRD
+(b) RRD
+LV RD
+LRRD
+eT
+eS
+Mij
+T
+Figure 3. Illustration of interaction-consistent KD.
+interacting pairs from background pairs and address catas-
+trophic forgetting of learned relational semantics mentioned
+in (Chen et al., 2024b). Specifically, it leverages the VLM
+pre-trained in the first stage as the teacher model. The stu-
+dent network is designed as a pseudo-siamese structure of
+the teacher model, initialized with the teacher’s parameters.
+Interaction-consistent KD combines visual-concept reten-
+tion distillation and relative-interaction retention distillation
+to align the student model with the teacher’s semantic space
+while maintaining inter-pair relational consistency. The
+entire loss function contains two complementary objectives:
+Visual-concept Retention Distillation (VRD): As proposed
+in (Chen et al., 2024b), this objective ensures that the stu-
+dent’s edge features remain point-wise consistent with the
+teacher’s semantic space for negative samples, thereby pre-
+serving semantic alignment. The loss is defined as:
+LV RD =
+1
+|N|
+X
+e∈N
+∥eS −eT∥1,
+(7)
+where eS and eT denote the edge features of the student and
+teacher models, and N is the set of negative samples.
+Relative-interaction Retention Distillation (RRD): While
+VRD effectively preserves point-wise semantic consistency,
+it fails to ensure the relative relationships between triplets,
+i.e., distinguishing interaction pairs from backgrounds (c.f.
+Figure 3(a)).
+RRD explicitly models inter-pair relativ-
+ity (Bangalath et al., 2022) by aligning the structure similar-
+ity of triplet embeddings between the teacher and student
+models. The structure similarity matrices for the teacher and
+student models, MT and MS, are normalized by L2 norm:
+Mij
+T =
+ei
+T · ej⊤
+T
+∥ei
+T · ej⊤
+T ∥2
+,
+Mij
+S =
+ei
+S · ej⊤
+S
+∥ei
+S · ej⊤
+S ∥2
+.
+(8)
+The RRD loss then aligns these similarity matrices by mini-
+mizing the Frobenius norm ∥· ∥F between them:
+LRRD =
+1
+|N|2 ∥MS −MT∥2
+F .
+(9)
+Final Objectives: Combine localization and classification
+losses with above complementary objectives to achieve
+point-wise semantic alignment and relational consistency:
+L = Lreg + Lgiou + Lobj + Lrel + β1LV RD + β2LRRD. (10)
+The weights β1 and β2 control the relative importance of
+semantic alignment and relational consistency.
+4. Experiments
+4.1. Experiment setup
+Datasets. We evaluated INOVA on two SGG benchmarks:
+1) VG (Krishna et al., 2017) contains annotations for 150
+object categories and 50 relation categories across 108,777
+images. Following standard setup (Xu et al., 2017), 70%
+of the images are used for training, 5,000 for validation,
+and the remaining for testing. For a fair comparison, we
+excluded images overlapping with the pre-training dataset
+of Grounding DINO (Liu et al., 2023), retaining 14,700
+test images as in (Zhang et al., 2023).2) GQA (Hudson &
+Manning, 2019) uses the GQA200 split (Dong et al., 2022;
+Sudhakaran et al., 2023), including 200 object categories
+and 100 predicate categories. We randomly sampled 70%
+of the object and predicate categories as the base, and more
+details can be found in the Appendix A.
+Metrics. We conducted experiments under the challenging
+Scene Graph Detection (SGDET) protocol (Xu et al., 2017;
+Krishna et al., 2017), which requires detecting objects and
+identifying relationships between object pairs without GT
+object labels or bounding boxes. We reported: 1) Recall@K
+(R@K): The proportion of ground-truth triplets correctly
+predicted within the top-K confident predictions. 2) Mean
+R@K (mR@K): The average R@K across all categories.
+Implementation Details. Due to space constraints, detailed
+implementation is provided in the Appendix A.
+4.2. Comparison with State-of-the-Art Methods
+Setting. Following (Chen et al., 2024b), we compared our
+INOVA with existing SOTA methods, i.e., VS (Zhang et al.,
+2023), OvSGTR (Chen et al., 2024b), and RAHP (Liu et al.,
+2025) under two OVSGG settings: 1) OvR-SGG: Evaluates
+generalization to unseen relations while retaining original
+object categories. Fifteen of 50 relation categories in VG150
+are removed during training, with performance measured
+on “Base+Novel (Relation)” and “Novel (Relation)”. 2)
+OvD+R-SGG: Assesses handling of unseen objects and re-
+lations simultaneously. Both novel objects and relations are
+excluded during training, evaluated on “Joint Base+Novel”,
+“Novel (Object)”, and “Novel (Relation)”.
+Results. We conducted quantitative experiments on the VG
+dataset (Krishna et al., 2017) in both the OvR-SGG and
+OvD+R-SGG setups, with results presented in Table 1 and
+Table 2, respectively. Notably, INOVA consistently outper-
+forms the latest state-of-the-art methods across all metrics.
+In the OvR-SGG setup, INOVA surpasses the RAHP (Swin-
+T) by +1.78% R@100 within the novel relation categories,
+demonstrating superior generalization and reduced overfit-
+ting. With the Swin-B backbone, INOVA achieves R@100
+over OvSGTR across both base and novel relations, and
++4.94% R@100 in novel relations alone, further emphasiz-
+6
+Taking A Closer Look at Interacting Objects: Interaction-Aware Open Vocabulary Scene Graph Generation
+Table 1. Experimental results of OvR-SGG setting on VG (Krishna et al., 2017) test set.
+Base+Novel (Relation)
+Novel (Relation)
+Method
+Backbone
+R@20
+R@50
+R@100
+R@20
+R@50
+R@100
+IMP (Xu et al., 2017)
+CVPR’17
+-
+-
+12.56
+14.65
+-
+0.00
+0.00
+MOTIFS (Zellers et al., 2018)
+CVPR’18
+-
+-
+15.41
+16.96
+-
+0.00
+0.00
+VCTREE (Tang et al., 2019)
+CVPR’19
+-
+-
+15.61
+17.26
+-
+0.00
+0.00
+TDE (Tang et al., 2020)
+CVPR’20
+-
+-
+15.50
+17.37
+-
+0.00
+0.00
+VS3 (Zhang et al., 2023)
+CVPR’23
+Swin-T
+-
+15.60
+17.30
+-
+0.00
+0.00
+OvSGTR (Chen et al., 2024b)
+ECCV’24
+-
+20.46
+23.86
+-
+13.45
+16.19
+RAHP (Liu et al., 2025)
+AAAI’25
+-
+20.50
+25.74
+-
+15.59
+19.92
+INOVA (Ours)
+17.49
+23.22
+27.40
+12.90
+17.89
+21.70
+OvSGTR (Chen et al., 2024b)
+ECCV’24
+Swin-B
+-
+22.89
+26.65
+-
+16.39
+19.72
+INOVA (Ours)
+18.77
+24.81
+29.28
+14.72
+20.04
+24.66
+Table 2. Experimental results of OvD+R-SGG setting on VG (Krishna et al., 2017) test set.
+Joint Base+Novel
+Novel (Obj)
+Novel (Rel)
+Method
+Backbone R@20 R@50 R@100 R@20 R@50 R@100 R@20 R@50 R@100
+IMP (Xu et al., 2017)
+CVPR’17
+-
+-
+0.77
+0.94
+-
+0.00
+0.00
+-
+0.00
+0.00
+MOTIFS (Zellers et al., 2018)
+CVPR’18
+-
+-
+1.00
+1.12
+-
+0.00
+0.00
+-
+0.00
+0.00
+VCTREE (Tang et al., 2019)
+CVPR’19
+-
+-
+1.04
+1.17
+-
+0.00
+0.00
+-
+0.00
+0.00
+TDE (Tang et al., 2020)
+CVPR’20
+-
+-
+1.00
+1.15
+-
+0.00
+0.00
+-
+0.00
+0.00
+VS3 (Zhang et al., 2023)
+CVPR’23
+Swin-T
+-
+5.88
+7.20
+-
+0.00
+0.00
+-
+0.00
+0.00
+OvSGTR (Chen et al., 2024b)
+ECCV’24
+10.02
+13.50
+16.37
+10.56
+14.32
+17.48
+7.09
+9.19
+11.18
+INOVA (Ours)
+12.61
+17.43
+21.27
+12.48
+17.16
+21.10
+11.38
+15.90
+19.46
+OvSGTR (Chen et al., 2024b)
+ECCV’24
+Swin-B
+12.37
+17.14
+21.03
+12.63
+17.58
+21.70
+10.56
+14.62
+18.22
+INOVA (Ours)
+13.50
+18.88
+23.19
+13.46
+18.84
+23.29
+12.37
+17.50
+21.73
+ing its robustness. In the more challenging OvD+R-SGG
+scenario, INOVA continues to outperform the competition.
+Specifically, on the joint base and novel classes, INOVA
+gains +4.90% and +2.16% R@100 over OvSGTR with the
+Swin-T and Swin-B backbones, respectively. These results
+validate INOVA’s superior performance and robust general-
+ization across both relation and object domains.
+4.3. Diagnostic Experiment
+To ensure a comprehensive evaluation, we performed a se-
+ries of ablation studies on the VG dataset (Krishna et al.,
+2017) in the challenging OvD+R-SGG scenario.
+Key Components Analysis. The results are summarized in
+Table 3, with the first row representing the baseline OVSGG
+pipeline with Visual-concept Retention Distillation proposed
+in (Chen et al., 2024b). From this analysis, four key conclu-
+sions can be drawn: First, incorporating Interaction-aware
+Target Generation (ITG) leads to consistent improvements
+across all metrics, including a 3.94% R@100 gain on the
+joint base and novel classes compared to the baseline. This
+demonstrates that ITG effectively improves performance by
+considering interaction contexts in supervision generation.
+Second, introducing Interaction-guided Query Selection
+(IQS) further refines the query selection process. By pri-
+oritizing interacting objects and minimizing mismatched
+assignments, IQS achieves notable improvements, such as
+3.00% R@100 gains, highlighting its ability to enhance pre-
+cision by focusing on interacting object pairs. Third, lever-
+aging Relative-interaction Retention Distillation (RRD) en-
+sures relational consistency during training, resulting in
+people, ride, bike
+bikes, on, boat
+original
+ITG
+Figure 4. Interaction-aware target generation.
+significant performance boosts. RRD contributes 2.83%
+R@100 gains, improving the model’s ability to handle novel
+classes effectively. Fourth, the integration of all three com-
+ponents (i.e., ITG, IQS, and RRD) yields the best overall
+performance, with 1.92%∼8.28% improvements across all
+evaluation metrics. However, the improvement is less pro-
+nounced than expected, since each strategy prioritizes inter-
+acting objects, which may lead to diminishing returns by
+progressively reducing non-interacting objects. Despite this,
+the combined results still demonstrates enhanced relational
+understanding and serve as a valuable tool for improving
+performance in complex scenarios.
+Supervision Analysis. We investigated ITG’s impact in the
+pre-training process (c.f. Table 4). As seen, models pre-
+trained on COCO (Chen et al., 2015) captions with INOVA
+7
+Taking A Closer Look at Interacting Objects: Interaction-Aware Open Vocabulary Scene Graph Generation
+Table 3. Analysis of key components on OvD+R-SGG setting of VG150 (Krishna et al., 2017) test set. ITG, IQS, and RRD stand for
+Interaction-aware Target Generation, Interaction-guided Query Selection, and Relative-interaction Retention Distillation in interaction-
+consistent knowledge distillation, respectively. The general OVSGG pipeline with visual-concept retention distillation as the baseline.
+Components
+Joint Base+Novel
+Novel (Obj)
+Novel (Rel)
+ITG
+IQS
+RRD
+R@20
+R@50
+R@100
+R@20
+R@50
+R@100
+R@20
+R@50
+R@100
+10.02
+13.50
+16.37
+10.56
+14.32
+17.48
+7.09
+9.19
+11.18
+11.43
+15.67
+19.20
+11.57
+15.65
+19.32
+10.07
+14.00
+17.32
+11.37
+15.71
+19.37
+11.43
+15.80
+19.61
+9.84
+13.92
+17.38
+11.92
+16.67
+20.31
+11.75
+16.51
+20.16
+10.72
+15.10
+18.52
+11.84
+16.17
+19.55
+11.36
+16.09
+19.65
+10.73
+14.40
+17.83
+12.27
+17.11
+20.81
+12.16
+17.03
+20.80
+11.04
+15.60
+19.01
+12.42
+17.22
+21.10
+12.29
+17.08
+20.99
+11.16
+15.51
+19.16
+12.61
+17.43
+21.27
+12.48
+17.16
+21.10
+11.38
+15.90
+19.46
+Table 4. Comparison with pre-training methods. All models are pre-trained on image-caption data and tested on VG150 (Krishna et al.,
+2017) test set directly. Our models trained on COCO captions are used as pre-trained models for OvR-SGG and OvD+R-SGG settings.
+SGG model
+Backbone
+Grounding
+R@20
+R@50
+R@100
+LSWS (Ye & Kovashka, 2021)
+CVPR’21
+-
+-
+-
+3.28
+3.69
+MOTIFS (Zellers et al., 2018)
+CVPR’18
+-
+Li et al. (Li et al., 2022b)
+5.02
+6.40
+7.33
+Uniter (Chen et al., 2020)
+ECCV’20
+-
+SGNLS (Zhong et al., 2021)
+-
+5.80
+6.70
+Uniter (Chen et al., 2020)
+ECCV’20
+-
+Li et al. (Li et al., 2022b)
+5.42
+6.74
+7.62
+VS3 (Zhang et al., 2023)
+CVPR’23
+Swin-T
+GLIP-L (Li et al., 2022a)
+5.59
+7.30
+8.62
+OvSGTR (Chen et al., 2024b)
+ECCV’24
+Grounding DINO (Liu et al., 2023)
+6.61
+8.92
+10.90
+INOVA (Ours)
+Grounding DINO (Liu et al., 2023)
+7.86
+10.81
+13.31
+OvSGTR (Chen et al., 2024b)
+ECCV’24
+Swin-B
+Grounding DINO (Liu et al., 2023)
+6.88
+9.30
+11.48
+INOVA (Ours)
+Grounding DINO (Liu et al., 2023)
+8.28
+11.61
+14.33
+man
+zebra
+original
+original
+holding-guided
+laying on-guided
+Figure 5. Interaction-guided query selection.
+variants consistently outperform others, achieving 13.31%
+R@100 with Swin-T and 14.22% R@100 with Swin-B.
+These results demonstrate the effectiveness of incorporating
+ITG in the VLM pre-training process.
+In addition, we visualized the object detection results from
+ITG and the original methods that solely use object cate-
+gories for detection. As displayed in Figure 2, the original
+method produces redundant objects, complicating the iden-
+tification of subject-object interactions. For instance, given
+the “⟨people, ride, bike⟩” triplet, the baseline detects
+multiple instances of “people” and “bike”, obscuring the
+interaction. In contrast, ITG leverages bidirectional interac-
+tion prompts and attention mechanisms to accurately local-
+ize the interaction-relevant objects. A similar enhancement
+is observed in the “⟨bikes, on, boat⟩” triplet, where ITG
+focuses on interaction-relevant entities.
+Query Visualization. To demonstrate the effectiveness of
+IQS, we visualized the top-50 selected queries in Figure 5.
+As seen, the original approach makes no distinction be-
+tween instances within the same category, such as “man” or
+“zebra”, resulting in both interacting and non-interacting
+instances receiving a similar number of queries. This in-
+discriminate query generation increases the likelihood of
+incorrect matches during bipartite graph matching, as irrel-
+evant regions compete with interaction-relevant instances.
+Conversely, IQS prioritizes queries for interacting instances
+(“man holding” or “zebra laying on” in Figure 5), increasing
+discrimination among objects with the same categories.
+5. Conclusion
+This work presents an interaction-aware framework INOVA
+for OVSGG. Unlike previous works that treat all objects
+equally, INOVA emphasizes the distinction between interact-
+ing and non-interacting objects, which is crucial for exact re-
+lation recognition. By adopting interaction-aware target gen-
+eration, interaction-guided query selection, and interaction-
+consistent knowledge distillation, INOVA effectively mit-
+igates issues like mismatched relation pairs and irrelevant
+object interference. INOVA shows significant improvements
+across two mainstream OVSGG benchmarks. We anticipate
+that INOVA will not only set a new standard for OVSGG but
+also inspire further exploration of interaction-driven method-
+ologies in VLMs for more accurate scene understanding.
+8
+Taking A Closer Look at Interacting Objects: Interaction-Aware Open Vocabulary Scene Graph Generation
+Impact Statement
+This paper presents work whose goal is to improve open-
+vocabulary scene graph generation. While our method, IN-
+OVA, focuses on technical advancements in introducing
+interaction-aware mechanisms, we acknowledge the broader
+implications of such technology. Enhanced scene graph gen-
+eration could enable more robust applications in areas like
+assistive technologies, autonomous systems, and content-
+based image retrieval. However, as with many ML systems,
+biases in training data or deployment contexts could propa-
+gate unintended societal effects. We encourage future work
+to rigorously evaluate fairness and robustness when apply-
+ing such models in critical domains.
+References
+Bangalath, H., Maaz, M., Khattak, M. U., Khan, S. H., and
+Shahbaz Khan, F. Bridging the gap between object and
+image-level representations for open-vocabulary detec-
+tion. In NeurIPS, volume 35, pp. 33781–33794, 2022.
+Carion, N., Massa, F., Synnaeve, G., Usunier, N., Kirillov,
+A., and Zagoruyko, S. End-to-end object detection with
+transformers. In ECCV, pp. 213–229, 2020.
+Chen, G., Li, J., and Wang, W. Scene graph generation with
+role-playing large language models. NeurIPS, 2024a.
+Chen, X., Fang, H., Lin, T., Vedantam, R., Gupta, S., Doll´ar,
+P., and Zitnick, C. L. Microsoft COCO captions: Data
+collection and evaluation server. CoRR, abs/1504.00325,
+2015.
+Chen, Y., Li, L., Yu, L., Kholy, A. E., Ahmed, F., Gan, Z.,
+Cheng, Y., and Liu, J. UNITER: universal image-text
+representation learning. In ECCV, pp. 104–120, 2020.
+Chen, Z., Wu, J., Lei, Z., Zhang, Z., and Chen, C. Gpt4sgg:
+Synthesizing scene graphs from holistic and region-
+specific narratives.
+arXiv preprint arXiv:2312.04314,
+2023.
+Chen, Z., Wu, J., Lei, Z., Zhang, Z., and Chen, C. Ex-
+panding scene graph boundaries: Fully open-vocabulary
+scene graph generation via visual-concept alignment and
+retention. In ECCV, 2024b.
+Devlin, J., Chang, M., Lee, K., and Toutanova, K. BERT:
+pre-training of deep bidirectional transformers for lan-
+guage understanding. In NAACL-HLT, pp. 4171–4186,
+2019.
+Dong, X., Gan, T., Song, X., Wu, J., Cheng, Y., and Nie, L.
+Stacked hybrid-attention and group collaborative learning
+for unbiased scene graph generation. In CVPR, pp. 19427–
+19436, 2022.
+Gu, X., Lin, T.-Y., Kuo, W., and Cui, Y. Open-vocabulary
+object detection via vision and language knowledge dis-
+tillation. arXiv preprint arXiv:2104.13921, 2021.
+He, T., Gao, L., Song, J., and Li, Y.
+Towards open-
+vocabulary scene graph generation with prompt-based
+finetuning. In ECCV, pp. 56–73, 2022.
+Hudson, D. A. and Manning, C. D. Gqa: A new dataset for
+real-world visual reasoning and compositional question
+answering. In CVPR, pp. 6700–6709, 2019.
+Kim, K., Yoon, K., Jeon, J., In, Y., Moon, J., Kim, D., and
+Park, C. Llm4sgg: Large language models for weakly
+supervised scene graph generation. In CVPR, pp. 28306–
+28316, 2024.
+Krishna, R., Zhu, Y., Groth, O., Johnson, J., Hata, K.,
+Kravitz, J., Chen, S., Kalantidis, Y., Li, L.-J., Shamma,
+D. A., et al. Visual genome: Connecting language and vi-
+sion using crowdsourced dense image annotations. IJCV,
+123:32–73, 2017.
+Li, J., Li, D., Savarese, S., and Hoi, S. Blip-2: Bootstrapping
+language-image pre-training with frozen image encoders
+and large language models. In International conference
+on machine learning, pp. 19730–19742. PMLR, 2023.
+Li, L., Xiao, J., Chen, G., Shao, J., Zhuang, Y., and Chen, L.
+Zero-shot visual relation detection via composite visual
+cues from large language models. NeurIPS, 36, 2024a.
+Li, L. H., Zhang, P., Zhang, H., Yang, J., Li, C., Zhong, Y.,
+Wang, L., Yuan, L., Zhang, L., Hwang, J., Chang, K., and
+Gao, J. Grounded language-image pre-training. In CVPR,
+pp. 10955–10965, 2022a.
+Li, R., Zhang, S., Lin, D., Chen, K., and He, X. From pixels
+to graphs: Open-vocabulary scene graph generation with
+vision-language models. In CVPR, pp. 28076–28086,
+2024b.
+Li, X., Chen, L., Ma, W., Yang, Y., and Xiao, J. Integrating
+object-aware and interaction-aware knowledge for weakly
+supervised scene graph generation. In ACMMM, pp. 4204–
+4213, 2022b.
+Lin, T., Goyal, P., Girshick, R. B., He, K., and Doll´ar, P.
+Focal loss for dense object detection. In ICCV, pp. 2999–
+3007, 2017.
+Liu, H., Li, C., Wu, Q., and Lee, Y. J. Visual instruction
+tuning. NeurIPS, 36, 2024.
+Liu, S., Zeng, Z., Ren, T., Li, F., Zhang, H., Yang, J., Li,
+C., Yang, J., Su, H., Zhu, J., and Zhang, L. Grounding
+DINO: marrying DINO with grounded pre-training for
+open-set object detection. CoRR, abs/2303.05499, 2023.
+9
+Taking A Closer Look at Interacting Objects: Interaction-Aware Open Vocabulary Scene Graph Generation
+Liu, T., Li, R., Wang, C., and He, X. Relation-aware hierar-
+chical prompt for open-vocabulary scene graph genera-
+tion. In AAAI, 2025.
+Liu, Z., Lin, Y., Cao, Y., Hu, H., Wei, Y., Zhang, Z., Lin,
+S., and Guo, B. Swin transformer: Hierarchical vision
+transformer using shifted windows. In ICCV, pp. 9992–
+10002, 2021.
+OpenAI, R. Gpt-4 technical report. arxiv 2303.08774. View
+in Article, 2(5), 2023.
+Radford, A., Kim, J. W., Hallacy, C., Ramesh, A., Goh, G.,
+Agarwal, S., Sastry, G., Askell, A., Mishkin, P., Clark,
+J., Krueger, G., and Sutskever, I. Learning transferable
+visual models from natural language supervision.
+In
+ICML, pp. 8748–8763, 2021.
+Ren, S., He, K., Girshick, R., and Sun, J. Faster r-cnn:
+Towards real-time object detection with region proposal
+networks. NeurIPS, 28, 2015.
+Rezatofighi, H., Tsoi, N., Gwak, J., Sadeghian, A., Reid,
+I. D., and Savarese, S. Generalized intersection over
+union: A metric and a loss for bounding box regression.
+In CVPR, pp. 658–666, 2019.
+Schuster, S., Krishna, R., Chang, A., Fei-Fei, L., and Man-
+ning, C. D. Generating semantically precise scene graphs
+from textual descriptions for improved image retrieval.
+In Proceedings of the fourth workshop on vision and
+language, pp. 70–80, 2015.
+Shi, J., Zhong, Y., Xu, N., Li, Y., and Xu, C. A simple
+baseline for weakly-supervised scene graph generation.
+In ICCV, pp. 16393–16402, 2021.
+Shit, S., Koner, R., Wittmann, B., Paetzold, J., Ezhov, I., Li,
+H., Pan, J., Sharifzadeh, S., Kaissis, G., Tresp, V., et al.
+Relationformer: A unified framework for image-to-graph
+generation. In ECCV, pp. 422–439. Springer, 2022.
+Sudhakaran, G., Dhami, D. S., Kersting, K., and Roth, S.
+Vision relation transformer for unbiased scene graph gen-
+eration. In ICCV, pp. 21882–21893, 2023.
+Tang, K., Zhang, H., Wu, B., Luo, W., and Liu, W. Learning
+to compose dynamic tree structures for visual contexts.
+In CVPR, pp. 6619–6628, 2019.
+Tang, K., Niu, Y., Huang, J., Shi, J., and Zhang, H. Unbiased
+scene graph generation from biased training. In CVPR,
+pp. 3713–3722, 2020.
+Touvron, H., Martin, L., Stone, K., Albert, P., Almahairi,
+A., Babaei, Y., Bashlykov, N., Batra, S., Bhargava, P.,
+Bhosale, S., et al. Llama 2: Open foundation and fine-
+tuned chat models. arXiv preprint arXiv:2307.09288,
+2023.
+Vaswani, A. Attention is all you need. NeurIPS, 2017.
+Wang, L., Liu, Y., Du, P., Ding, Z., Liao, Y., Qi, Q., Chen,
+B., and Liu, S. Object-aware distillation pyramid for
+open-vocabulary object detection. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pp. 11186–11196, 2023.
+Wang, W., Ren, Y., Luo, H., Li, T., Yan, C., Chen, Z., Wang,
+W., Li, Q., Lu, L., Zhu, X., et al. The all-seeing project
+v2: Towards general relation comprehension of the open
+world. In ECCV, pp. 471–490. Springer, 2025.
+Wu, S., Zhang, W., Jin, S., Liu, W., and Loy, C. C. Aligning
+bag of regions for open-vocabulary object detection. In
+CVPR, pp. 15254–15264, 2023.
+Xu, D., Zhu, Y., Choy, C. B., and Fei-Fei, L. Scene graph
+generation by iterative message passing. In CVPR, pp.
+3097–3106, 2017.
+Ye, K. and Kovashka, A. Linguistic structures as weak
+supervision for visual scene graph generation. In CVPR,
+pp. 8289–8299, 2021.
+Yu, Q., Li, J., Wu, Y., Tang, S., Ji, W., and Zhuang, Y.
+Visually-prompted language model for fine-grained scene
+graph generation in an open world. In ICCV, pp. 21560–
+21571, 2023.
+Zang, Y., Li, W., Zhou, K., Huang, C., and Loy, C. C. Open-
+vocabulary detr with conditional matching. In ECCV, pp.
+106–122. Springer, 2022.
+Zellers, R., Yatskar, M., Thomson, S., and Choi, Y. Neural
+motifs: Scene graph parsing with global context.
+In
+CVPR, pp. 5831–5840, 2018.
+Zhang, Y., Pan, Y., Yao, T., Huang, R., Mei, T., and Chen,
+C. W. Learning to generate language-supervised and
+open-vocabulary scene graph using pre-trained visual-
+semantic space. In CVPR, pp. 2915–2924, 2023.
+Zhong, Y., Shi, J., Yang, J., Xu, C., and Li, Y. Learning to
+generate scene graph from natural language supervision.
+In ICCV, pp. 1823–1834, 2021.
+Zhou, Z., Zhu, Z., Caesar, H., and Shi, M. Openpsg: Open-
+set panoptic scene graph generation via large multimodal
+models. In ECCV, pp. 199–215. Springer, 2025.
+10

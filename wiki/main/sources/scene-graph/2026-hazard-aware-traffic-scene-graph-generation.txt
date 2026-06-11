@@ -1,0 +1,1306 @@
+Hazard-Aware Traffic Scene Graph Generation
+Yaoqi Huang, Julie Stephany Berrio, Mao Shan, and Stewart Worrall
+Fig. 1: Overview of our Hazard-Aware Traffic Scene Graph Generation (HATS) model. The main scene graph branch (top) comprises
+three modules: 1) a Panoptic Segmentation (PS) Module for holistic perception of the surrounding environment, 2) an Ego-path Related
+Entities Selection (ERES) module that identifies and selects relevant candidate entities, and 3) a Traffic Scene Graph Generation (TSGG)
+module that computes ego-centric, traffic-specific relations among prominent hazards. The auxiliary knowledge branch (bottom) provides
+supplementary features and historical context to support entity representation and severity prediction within the TSGG module.
+Abstract— Maintaining situational awareness in complex
+driving scenarios is challenging. It requires continuously priori-
+tizing attention among extensive scene entities and understand-
+ing how prominent hazards might affect the ego vehicle. While
+existing studies excel at detecting specific semantic categories
+and visually salient regions, they lack the ability to assess safety-
+relevance. Meanwhile, the generic spatial predicates either for
+foreground objects only or for all scene entities modeled by
+existing scene graphs are inadequate for driving scenarios. To
+bridge this gap, we introduce a novel task, Traffic Scene Graph
+Generation, which captures traffic-specific relations between
+prominent hazards and the ego vehicle. We propose a novel
+framework that explicitly uses traffic accident data and depth
+cues to supplement visual features and semantic information
+for reasoning. The output traffic scene graphs provide intuitive
+guidelines that stress prominent hazards by color-coding their
+severity and notating their effect mechanism and relative
+location to the ego vehicle. We create relational annotations
+on Cityscapes dataset and evaluate our model on 10 tasks
+from 5 perspectives. The results in comparative experiments
+and ablation studies demonstrate our capacity in ego-centric
+reasoning for hazard-aware traffic scene understanding.
+All authors are with Australian Center for Robotics (ACFR), The Univer-
+sity of Sydney, NSW, Australia. y.huang, j.berrio, m.shan,
+s.worrall}@acfr.usyd.edu.au.
+I. INTRODUCTION
+Despite statistics confirming distracted driving as one of
+the causes of traffic injuries and deaths [1], it remains
+underappreciated [2]. In this context, helping drivers identify
+what truly deserves their attention becomes critical. Such
+guidance must raise situational awareness without distracting
+from the core driving maneuvers [3]. Beyond accurate envi-
+ronment perception [4], this requires precise identification
+of hazards and instantly interpretable output. To address
+these demands, we propose Hazard-Aware Traffic Scene
+Graph Generation (HATS), a model capable of (1) analyzing
+the entire traffic scenario, (2) identifying prominent hazards
+that warrant priority attention, (3) recognizing their traffic-
+specific relations to the ego vehicle, and (4) generating intu-
+itive hazard-aware Traffic Scene Graphs (TSGs) to guide at-
+tention allocation. Rather than limiting recognition to specific
+semantic classes, such as traffic lights [5], our model aims
+to provide a comprehensive interpretation of the entire traffic
+scene. The Panoptic Segmentation (PS) module first localizes
+and classifies all entities as non-overlapping instances [6],
+enabling holistic scene perception. The Traffic Scene Graph
+Generation (TSGG) module then links these discrete entities
+arXiv:2603.03584v2  [cs.CV]  4 May 2026
+
+to the ego vehicle, forming a systematic scene depiction.
+Our model identifies prominent hazards that deserve priority
+attention [7] through two successive screenings. First, the
+Ego-path Related Entities Selection (ERES) module narrows
+candidates to those that could impact the ego path, including
+foreground road users (e.g. pedestrians with right-of-way)
+and background infrastructure (e.g. traffic devices), extending
+beyond the scope of dangerous road users [8] or road
+obstacles. The resulting proposals are then further distilled
+to stress ego-centric relations with prominent hazards.
+To ensure the utility of TSGs, we compute traffic-specific
+relations rather than generic visual-based ones such as ‘on’ or
+‘in’ [9]. In this study, we explore accidents-aware relations.
+As illustrated in Fig. 1, the Knowledge Graph (KG) branch
+first structures isolated traffic accident data from public
+authorities [10], [11] into an integrated KG via a four-stage
+pipeline, followed by triplet attribute-aware KG embedding
+(KGE). The Scene Graph (SG) branch then jointly ana-
+lyzes visual features, geometry cues, semantic information,
+and prior knowledge to reason the relations between each
+candidate entity and the ego vehicle in three perspectives
+(mechanism, side, and severity), producing triplets such as
+⟨sidewipe, right, caution⟩. As shown in Fig. 3, in the final
+TSG, entities are color-coded across five severity levels to
+emphasize prominent hazards and suppress irrelevant ones.
+Each prominent hazard is annotated with a tag indicating its
+predicted relative side and the interaction mechanism with
+respect to the ego vehicle.
+We summarize our key contributions as follows.
+• We propose TSGG, a new ego-centric problem formu-
+lation emphasizing prominent hazards and their traffic-
+specific relations, supported by relational annotations on
+Cityscapes as a baseline for future work.
+• We propose a four-stage pipeline structuring isolated
+traffic accident data into a unified KG, paired with a KGE
+method that handles hyper-relational edges and multi-
+attributed nodes, outperforming baselines on three tasks.
+• To our knowledge, it is the first work to leverage traffic
+accident data for traffic image interpretation, explicitly
+incorporating KGE as a supplementary modality and
+guiding severity assessment with historical accident
+records.
+II. RELATED WORK
+A. Graph-based Traffic Scene Understanding
+Scene graph generation (SGG) offers an explicitly struc-
+tured representation with nodes as entities and edges as
+relations [12]. However, general-purpose SGs are not capable
+of describing traffic scenes. Due to numerous traffic partici-
+pants, the loosely enclosing bounding boxes tend to overlap
+heavily. The long-tail relation distribution pushes models
+to favor simple, frequent relations such as ‘on’. Although
+this may produce acceptable R@K [13], it undermines the
+practicality and interpretability of the graph [14], particularly
+in traffic scenes. Panoptic Scene Graph (PSG) [15] extends
+scene graphs to include background-foreground relations via
+panoptic segmentation, but its application to traffic scenarios
+risks further obscuring critical triplets due to the increased
+number of entities and more intricate relations.
+The key challenge is to represent the relationships be-
+tween entities [16]. The distance, direction and lane-vehicle
+containment relations for vehicles are explored in [8] using
+rule-based methods. Behavioral relationships among vehi-
+cles, pedestrians, and obstacles are studied in [17], such as
+‘waiting for’. The behavior recognition study [18] implicitly
+modeled interactions between the ego vehicle and specific
+entities, without explicitly analyzing or categorizing specific
+relations. Novelly, [19] visualized the corresponding relations
+between roads and components in traffic signs, helping
+drivers to grasp upcoming road information and restrictions.
+Meanwhile, few benchmark datasets are designed for TSG.
+HDD dataset [20] has real and artificial traffic scenes, anno-
+tating entities in nine categories with bounding boxes and
+their spatial or behavioral relations to the ego vehicle. PSG
+dataset [15] offers panoptic segmentation labels and involves
+a few traffic images with spatial or behavioral relations, but
+these samples are insufficient for traffic-specific learning.
+B. Prior Knowledge and Knowledge Embedding
+SGG studies have supplemented visual features with exter-
+nal common sense knowledge for better relation reasoning,
+including statistical correlations [14], lexical databases such
+as WordNet [21], and well-structured semantic networks such
+as ConceptNet [22]. While common sense is undoubtedly
+an invaluable source of prior knowledge, specific domain
+knowledge might be more crucial if the application context
+shifts from general natural images to traffic scenarios. Mean-
+while, existing studies directly analyze traffic data to draw
+conclusions about traffic accidents, whether from surveil-
+lance and dashcam videos [23], [24], intersection traffic data
+[25], or social media [26]. However, explicitly structuring
+traffic data as prior knowledge to facilitate understanding of
+traffic scene in other modality remains an unexplored area.
+KGs offer a principled organization of such domain knowl-
+edge. KGE methods further map entities and relations into
+low-dimensional vector spaces to capture relational patterns.
+While seminal Graph Neural Networks (GNN) excel in gen-
+eral graph representation learning, they lack explicit relation
+embedding modeling and need modifications to support
+multi-relational KGs [27]. Real-world KGs often contain
+hyper-relational facts beyond standard binary triplets. StarE
+[27] addresses this with qualifier-aware message passing that
+jointly aggregates qualifiers alongside the main triplet while
+preserving their semantic roles. However, vanilla StarE [27]
+offers no native support for arbitrary per-node properties,
+limiting its applicability in feature-critical settings.
+III. METHODOLOGY
+A. Ego-path Related Entities Selection
+Our PS module adopts a ResNet50-based Mask2Former
+[28]. While it comprehensively segments all entities, many
+are irrelevant to the immediate navigation of the ego vehicle.
+
+Computing triplets over all of them would be computation-
+ally expensive and could introduce noise that degrades the
+efficacy of TSGs. We therefore introduce the path-aware
+ERES module. It filters candidates to those relevant to the
+ego path and models the interaction between the ego path and
+traffic entities through a learnable cross-attention mechanism.
+(I) We extract a path token from the shared mask-feature
+map Frgb ∈RB×Crgb×Hm×Wm using the resized binary path
+mask Mp ∈RB×1×Hm×Wm. We then project it with a
+learnable mapping ϕrgb
+p
+to obtain the path representation Fp.
+Pool(F, M) =
+P
+h,w F:,:,h,w · M:,:,h,w
+P
+h,w M:,:,h,w + ϵ
+(1)
+Fp = ϕrgb
+p
+ Pool(Frgb, Mp)
+
+∈RB×1×D
+(2)
+(II) At its core, this module employs a multi-head cross-
+attention mechanism to quantify the relevance of each entity
+to the ego path, with the path representation serving as
+queries. The entity embeddings Ee ∈RB×O×D, derived
+from Mask2Former decoder and projected through a lin-
+ear transformation, provide keys and values. The attention
+weights produced Aw ∈RB×O indicate the spatial and
+semantic relevance of each entity to the ego path. The path-
+conditioned entity summary Ae ∈RB×D represents ‘what
+other entities the path cares about in general’.
+Aw, Ae = MHA(Fp, Ee, Ee)
+(3)
+(III) For each entity o, we compute fused features F(b,o)
+fused
+by combining three complementary signals, where γctx and
+γgate are learnable parameters. Finally, a two-layer MLP
+classifier predicts relevance logits R ∈RB×O×2 that are
+used to select relevant queries for subsequent SGG module.
+F(b,o)
+fused = E(b,o)
+e
++ γctx · A(b)
+e
++ γgate · A(b,o)
+w
+· F(b)
+p
+(4)
+R(b,o) = W2 · ϕGELU(W1[F(b,o)
+fused; A(b,o)
+w
+] + b1) + b2
+(5)
+Π(b) =
+
+o
+ arg max
+c∈{0,1} R(b,o)
+[c]
+= 1
+
+(6)
+B. Knowledge Graph Construction
+The source traffic accident data used to build our KG is de-
+rived from field crash investigation files [10], [11] distributed
+by the (US Department of Transportation, National Highway
+Traffic Safety Administration (NHTSA). As indicated in
+Table I, our KG is built through a four-stage pipeline, with
+strategies to ensure per-stage and overall quality.
+(I) We construct nodes from the complete yearly NHTSA
+dataset, which comprises 39 CSV files documenting various
+crash features. We retain variables that are visually identifi-
+able in traffic scene images or serve as essential descriptors
+of scene characteristics An extraction layer codified as a
+contract governs inner-node structure (e.g., name, label, type,
+and properties) and inter-node hierarchy (e.g., entity and at-
+tribute), aligning heterogeneous data and enabling cross-table
+mapping. A decoding layer then normalizes and cleans the
+data prior to graph ingestion to prevent duplicates and ensure
+idempotence, ultimately producing 16,039 nodes across 26
+types instantiating four-level entities and five-level attributes.
+(II) The Schema-driven structural relation wiring stage
+is designed to materialize the deterministic relations pre-
+scribed by the table schema. The structural relations explic-
+itly encoded in Stage I, including attribution, consequence,
+membership, contact, and taxonomy, are decoded here into
+122,263 edges across 25 types, connecting the previously
+created nodes. The coherence between nodes and edges
+(e.g. V ehicle and V ehicle_Involved) and between edges
+(e.g. Occupant_Involved and Has_Occupant), as well as
+the consistency between the KG and the source tables, are
+automatically verified and followed by targeted manual unit
+tests in the edges. Full compliance in these examinations
+further confirms the validity of Stage I.
+(III) Beyond explicit structural relations, we enrich the
+KG with the causality underlying each crash, introduc-
+ing 31,104 causal edges in three types. Edge properties
+such as Implicated_By(source = actor|victim, role =
+event|factor, witness) preserve provenance, explicitly re-
+vealing the actor at-fault, the exonerated participants, and the
+critical factors and events that led to each crash.
+(IV) We introduce bridge nodes and mapping edges to
+align the KG with external taxonomies, linking existing
+nodes to semantic categories, and mapping existing edges to
+our designed graph predicate schema. These cross-ontology
+alignment hooks promote homogeneity between the KG, up-
+stream segmentation, and downstream scene graph structure.
+Ultimately, we elevated multiple isolated flat tables into
+our integrated traffic accident KG. It contains 16,066 nodes
+and 153,488 edges, aligned across ontologies. We then export
+our heterogeneous multi-relational KG = (Nkg, Ekg, Tkg) in
+triplet format τ = (νhead, ε, νtail), where τ ∈Tkg, νhead, νtail ∈
+Nkg and ε ∈Ekg. Compared with other common-sense KGs,
+our KG provides extensive domain-specific knowledge and
+negative facts for subsequent KGE and SGG.
+C. Knowledge Graph Embedding
+Our KGE module uses rich node and edge properties to
+encode triplets rather than conventional ID-based embed-
+dings [29]. The relation-aware message is adaptively mod-
+ulated by qualifier-derived parameters. A transformer-based
+triplet scorer further enables attention-driven interaction.
+(I) Node embeddings are initialized by fusing all respec-
+tive node properties. We first create embeddings for seven
+categorical properties: three universal ones for all node types
+(name, type, and level), and four type-specific ones (collision
+manner for CRASH nodes, class for VEHICLE nodes, and
+most severe injury and treatment for OCCUPANT nodes). For
+property k, we define an embedding matrix Ek
+cat ∈R|Ck|×d,
+where |Ck| is the vocabulary size of property k and d is
+the dimension of the model. For node νi with K categorical
+properties (K ≤7), its categorical value of property k is ck
+νi,
+with its overall categorical embedding denoted below.
+hcat
+νi =
+K
+X
+k=1
+Ek
+cat[ck
+νi]
+(7)
+
+TABLE I: Core component explanations and statistics of the Traffic Accident Knowledge Graph (side-by-side node/edge view)
+Node section
+Edge section
+Stg
+Class
+Type(count)
+Stg
+Class
+Type(count)
+Head→Tail
+I
+Environment
+Condition
+LIGHTCOND(6)
+RELTOJUNCT(5)
+WEATHER(12)
+SURFCOND(9)
+II
+Schema-
+driven
+Relation
+LightCondition(3324)
+RelationToJunction(3340)
+WeatherCondition(3322)
+SurfaceCondition(3326)
+Crash →
+Environment Condition
+SURFTYPE(6)
+ALIGNMENT(4)
+SurfaceType(5764)
+RoadwayAlignment(5758)
+Vehicle→Env. Condition
+Crash Attributes
+MANCOLL(7)
+CAIS(9)
+CollisionManner(3272)
+MostSevereInjuryInCrash(3331)
+Crash→Crash Attribute
+Vehicle
+Attributes
+VEHCLASS(29)
+CRASHCAT(6)
+CRASHCONF(10)
+CONSEQ(8)
+DAMPLANE(9)
+DAMSEV(4)
+VAIS(10)
+PREMOVE(20)
+ROLLINITYP(11)
+InstanceOf(5935)
+CrashCategory(5765)
+CrashConfiguration(5765)
+GeneralConsequence(567)
+VehicleDamagePosition(5862)
+DamageSeverityLevel(4513)
+MostSevereInjuryInVehicle(5935)
+Pre-crashVehicleMovement(5756)
+Post-crashRolloverType(5499)
+Vehicle→
+Vehicle Attribute
+Occupant Attributes
+TREATMENT(10)
+MAIS(9)
+TreatmentReceived(5782)
+MostSevereInjury(6487)
+Occupant→Occupant Attr.
+Crash
+CRASH(3331)(in 7 manners)
+VehicleInvolved(5935)
+OccupantInvolved(6487)
+EntityInvolved(2476)
+Crash→Passenger
+/Driver/Entity/Vehicle
+Vehicle
+VEHICLE(5935)(in 29 classes)
+ContactWith(3294)
+Vehicle→Vehicle
+Occupant
+OCCUPANT(6487)(Driver/Passenger)
+HasOccupant(6487)
+Vehicle→Occupant
+Scene Entity
+OBJCONT(35)
+TRAFDEV(9)
+Contactwith(2517)
+SignBestControlsTraffic(5764)
+Vehicle→Entity/Device
+Cause
+CRITEVENT(50)
+CRITCAT(8)
+III
+Causality
+LeadTo(9141)
+MakeCrashImminentFor(11891)
+Vehicle/Entity/Event/Factor
+→Crash/Vehicle/Entity
+ImplicatedBy (actor reports)(5163) / (victim reports)(4909)
+Vehicle/Entity→Event/Factor
+IV
+Bridging Node
+CITYSCAPES(19)
+MECHANISM(8)
+IV
+Bridging
+CorrespondsTo (cityscapes)(57) / (mechanisms)(64)
+Stg-I Node→Bridging Node
+In particular, we embed five numerical properties for CRASH
+nodes, including vehicle count, event count, and three crash
+time features. As stated in (8), the embedding xnum
+νi
+∈R5 is
+encoded into d dimensions using a 2-layer MLP with ReLU,
+where W3 ∈Rd×5, W4 ∈Rd×d, and b3, b4 ∈Rd.
+hnum
+νi
+= W4 · ϕReLU(W3xnum
+νi
++ b3) + b4
+(8)
+We then obtain literal embeddings hlit
+i
+∈Rd for CRASH
+nodes by combining their categorical and numerical embed-
+dings, while other nodes use categorical embeddings directly.
+hlit
+νi =
+(
+hcat
+νi + hnum
+νi ,
+if both exist
+hcat
+νi ,
+else
+(9)
+Finally, we fuse hlit
+νi with the node ID embedding h(0)
+νi
+through a linear mixer, where Wlit ∈Rd×d and blit ∈Rd.
+hνi = h(0)
+νi + Wlithlit
+νi + blit
+(10)
+(II) We embed edge properties of our Causality edges,
+Bridging egdes, and ‘Contact_with’ edge as ‘qualifier’ [27].
+For edge ε, the set of qualifiers is Qε = {(rq
+j, vq
+j)}|Qε|
+j=1 , where
+rq
+j is the qualifier type and vq
+j is the qualifier value, such
+as (source : actor). First, we create an embedding matrix
+for the qualifier relations Eqr ∈R|Rq|×d and another one
+for the qualifier values Eqv ∈R|Vq|×d. Then we aggregate
+embeddings qj of all qualifiers associated with each edge to
+obtain a qualifier vector per-edge hqual
+ε
+. For edges without
+properties, there is no qualifier and thus hqual
+ε
+= 0.
+hqual
+ε
+=
+|Qε|
+X
+j=1
+qj; qj = Eqr[rq
+j] + Eqv[vq
+j]
+(11)
+(III) We stack L layers of relation-aware message pass-
+ing to iteratively refine node representations. In layer ℓ∈
+{0, . . . , L −1}, we update each node using messages from
+its one-hop neighbors, so that each node embedding hL
+ν
+can aggregate information from up to L-hop neighborhoods.
+Edge qualifiers act as modulators through feature-wise linear
+modulation (FiLM) [30] to adaptively scale and shift mes-
+sages. First, for each triplet τ = (νhead, ε, νtail), we compute
+the initial message ˜mε passed from νhead using a relation-
+specific linear transformation, where rel is the relation type
+for ε, Wrel ∈Rd×d, and brel ∈Rd. The message is then
+modulated using the qualifier vector hqual
+ε
+.
+˜mε = Wrelhℓ
+νhead + brel
+(12)
+γε = Wγhqual
+ε
++ bγ; βε = Wβhqual
+ε
++ bβ
+(13)
+mε = (1 + γε) ⊙˜mε + βε
+(14)
+Finally, the messages are aggregated at each destination node
+νtail, where E(νtail) denotes the set of its incoming edges.
+hℓ+1
+νtail = LN
+
+hℓ
+νtail +
+X
+ε∈E(νtail)
+mε
+
+
+(15)
+(IV) After L layers of message passing, we stack the head
+node embedding hL
+νhead and a relation token rε, where Erel ∈
+R|Nr|×d has one d-dimensional row per relation type. We
+feed this 2-token sequence through a Transformer encoder
+to produce the query representation z. The triplet score is
+computed by comparing z with all tail embeddings hL
+νtail.
+rε = Erel[rel] + Wseqhqual
+ε
++ bseq
+(16)
+z = TransformerEncoder([hL
+νhead; rε])1 ∈Rd
+(17)
+skge(τ) = z⊤hL
+νtail
+(18)
+(V) Since each head-edge pair may have multiple positive
+tail nodes and each head-tail pair may admit several positive
+relations, we adopt a 1-to-N scoring strategy with filtered
+multi-label classification to train our model. For each head-
+edge query (νhead, ε), we construct a smoothed multi-hot
+
+target vector y ∈R|Nkg|, where yi = 1 −θ if τ
+=
+(νhead, ε, νi) is a positive triplet; otherwise yi = θ. We
+score all candidate triplets and compute the binary cross-
+entropy loss Ltail for the tail prediction. Then, we define
+a reciprocal relation rel−1 for each rel and use the same
+procedure to compute the loss Lhead of head prediction for
+each (νtail, ε′) query. The final objective is to minimize the
+loss that combines both directions.
+L = 1
+2(Ltail + Lhead)
+(19)
+D. Traffic Scene Graph Generation
+The TSGG module produces ego-centric graphs by inte-
+grating visual features, 3D structural cues, semantic informa-
+tion, and prior knowledge. A lightweight disparity encoder
+complements the RGB backbone. A gated fusion strategy
+combines these multiple cues into a robust ego–entity pair
+descriptor. Dedicated relation heads then infer the effect
+mechanism, relative side, and severity level for each relevant
+entity, yielding ego-centric relational triplets.
+(I) To complement RGB features with geometry cues
+for downstream reasoning, we build a lightweight disparity
+encoder for single-channel disparity images. It mirrors the
+ResNet stride schedule with a single 3×3 residual block per
+stage. A compact Feature Pyramid Network (FPN) aggregates
+these stages to produce a single fused disparity feature map
+Fdisp ∈RB×Cdisp×H×W at the resolution of the mask-feature.
+(II) Each candidate entity o ∈Π(b) in each image b
+is depicted using four complementary representations. The
+visual representation h(b,o)
+vis
+is obtained by projecting the
+concatenation of RGB and disparity features with ϕvis. The
+two feature vectors are extracted from the mask-feature map
+Frgb and the disparity-feature map Fdisp within the entity
+mask M(b,o)
+e
+. The semantic representation h(b,o)
+sem
+projects
+the concatenation of the decoder embedding E(b,o)
+e
+and
+the path-relevance logits R(b,o) with ϕsem. The geometry
+representation h(b,o)
+geo
+encodes the overlap score with the ego
+path and the proximity to the ego vehicle with the projection.
+The KGE representation h(b,o)
+kge
+is retrieved and projected from
+the KG embedding of the bridging node corresponding to the
+predicted entity semantic class. We then build representations
+hep and hev for the ego path and the ego vehicle in the same
+way as hvis but using the corresponding mask Mp or Mv.
+They are replicated across all entities in the same image.
+After getting the compact representation of each ego-entity
+pair ˆh(b,o)
+pair , we obtain the final pair descriptor hpair ∈RDpair
+using a learned gating mechanism. It allows the model to
+adaptively weight each cue per pair and per channel via
+g(b,o)
+pair
+∈(0, 1)6Dpair for the downstream heads.
+ˆhpair =
+
+hep ∥hev ∥hvis ∥hsem ∥hgeo ∥hkge
+
+(20)
+hpair =
+X 
+σ
+
+W6ϕGELU
+ W5LN(ˆhpair)
+
+⊙ˆhpair (21)
+(III) We inject structured traffic accident priors us-
+ing multi-head attention for severity prediction. We deter-
+mine 7 severity-related KG node groups N kg
+sev that include
+5
+10
+20
+40
+60
+80
+0.4
+0.5
+0.6
+0.7
+Percentage (%) of Training Images Used for Training
+Accuracy of
+Mechanism Classification
+Fold 1
+Fold 2
+Fold 3
+Fold 4
+Fold 5
+Mean ± Std
+Mean
+Fig. 2: Inference performance vs. training set size (5%–80% of total
+training set). For each size, five models were trained with five-fold
+splits, with 20% of training images held out for validation per fold.
+CAIS, VAIS, MAIS, DAMSEV, CONSEQ, TREATMENT, and
+ROLLINITYP. The aligned pair query h
+′
+pair attends to the
+specific node embeddings hνtp in each group tp, producing
+a compact type-specific prior vector. All type priors are then
+concatenated and normalized for severity head.
+h(b,o)
+prior = LN
+
+tp∈N kg
+sevϕprior
+ MHA(h
+′(b,o)
+pair
+, hνtp, hνtp)
+
+(22)
+(IV) The Mechanism Head classifies the potential effect
+mechanism of each entity towards the ego vehicle s(b,o)
+mech ∈
+R8. The pair descriptor is aligned with the KGE space and
+matched with the 8 mechanism prototypes in KGE hνmech
+using cosine similarity with a learned temperature tem. The
+Side Head predicts the relative position to the ego vehicle
+s(b,o)
+side
+∈R3. Similarly to (20) and (21), it first fuses the 5
+image-based representations (hep, hev, hvis, hsem, and hgeo)
+with an element-wise gating network and then classifies the
+fused vector ˆhside with a 2-layer MLP. The Severity Head
+classifies each entity into 4 levels s(b,o)
+sev
+∈R4 based on how
+seriously it deserves attention. It analyzes the concatenated
+vector hsev of the pair descriptor and the prior vector hprior.
+smech = tem·cos
+
+ϕReLU
+ LN(W7hpair+b7)
+
+, hνmech
+
+(23)
+sside = W9ϕGELU
+ W8LN(ˆhside) + b8
+
++ b9
+(24)
+ssev = W11ϕGELU
+ LN(W10hsev + b10)
+
++ b11
+(25)
+IV. EXPERIMENTS AND RESULTS
+Due to the absence of suitable benchmark datasets for this
+task, we build upon the Cityscapes dataset [31], leveraging
+its traffic images and panoptic segmentation labels. We create
+our own relation labels, describing the effect mechanism
+(control, edge_proximity, fixed_object_near_edge, head_on,
+intersection, rear_end, sideswipe, cross_traffic_conflict), rel-
+ative side (left, front, right), and severity level (info, caution,
+imminent, relevant_but_not_critical) of each relevant entity.
+Due to the high cost of annotation, we labeled 820 images
+for training and testing. Hyperparameters were selected using
+5-fold cross-validation. As shown in Fig. 2, the model perfor-
+mance exhibits a strong positive correlation with the training
+set size, increasing from 0.437±0.016 at 5% of total training
+images to 0.684±0.005 at 80%. The decreasing standard
+deviation demonstrates that larger training sets produce more
+stable and generalizable models. The continued upward trend
+
+suggests that our model would benefit from additional train-
+ing data beyond the currently available images. Additionally,
+the 8:1:1 ratio was used to split the 153,488 triplets in our
+KG to train, validate and test our KGE module.
+The experimental platform uses a single A40 GPU. Our
+KG branch uses the training strategy elaborated in Sec. III-C,
+while SG branch uses complementary loss functions for three
+modules. The PS module adopts sigmoid cross-entropy mask
+loss, cross-entropy classification loss, and dice loss [28]. The
+ERES module and three TSGG heads are supervised by re-
+spective frequency-balanced softmax focal loss. A warm-up
+schedule is applied to establish a stable initialization. During
+the warm-up period, all TSGG heads are zeroed out, allowing
+the ERES module to receive focused gradient updates and
+the PS module to be jointly fine-tuned. After warming up,
+the supervisory focus shifts towards the TSGG heads, while
+still fine-tuning the ERES module at reduced weight, and the
+PS module is frozen. Optimization is performed using the
+AdamW optimizer. The best checkpoint is selected based
+on the accuracy of mechanism classification, as the 8-way
+prediction task is the most demanding among TSGG heads
+and offers a more discriminative selection than R@K.
+A. Tasks and Metrics
+(I) Our KGE module is evaluated on three tasks: subject
+prediction (inferring the head entity given the relation and
+tail), object prediction (inferring the tail entity given the head
+and relation), and triplet prediction (assessing the complete
+triplet). Following [27], we use hits (H@K) to measure the
+percentage of correct entities in top K results and Mean
+Reciprocal Rank (MRR@K) to evaluate the ranking position
+of correct entities.
+(II) HP measures the importance of each traffic entity for
+the driving safety of the ego vehicle [7]. Here, we evaluate
+how our model prioritizes ego-path relevant entities. We use
+mAP@K to assess overall hazards prioritization, MRR@K to
+evaluate the rank of the first risky hazard, and Normalized
+Discounted Cumulative Gain (NDCG@K) to check ranking
+quality normalized by ideal order (K=3, 5, 10).
+(III) Graph generation inherently involves three subtasks
+[32]. Predicate Classification (PredCls) predicts relationships
+given object categories and locations, which consumes GT
+segments as inputs incompatible with one-stage designs.
+Scene Graph Classification (SGCls) predicts object cate-
+gories and relations given locations, inapplicable to panoptic-
+segmentation-based models. Hence, here we only report
+results on Scene Graph Detection (SGDet) that jointly predict
+all components of images, while PredCls-compatible models
+[33], [34] are included in comparison IV. Following [15],
+since R@K is dominated by frequent relations, we also report
+mR@K to evaluate performance uniformly across all relation
+classes (K = {20, 50, 100}). For two-stage baselines [33],
+[34], we pretrain their segmentation branch on Cityscapes
+and freeze it during the relation training stage.
+(IV) We also evaluate how models identify relevant en-
+tities and prominent hazards. SGG methods [33], [34] serve
+as a baseline due to the lack of dedicated classifiers, using
+TABLE II: Comparison on Three Subtasks of KGE (%)
+Object Prediction
+Subject Prediction
+Triplet Prediction
+Method
+MRR
+H@1
+H@10
+MRR
+H@1
+H@10
+MRR
+H@1
+H@10
+StareE [27]
+38.66
+31.50
+52.63
+77.21
+67.97
+93.36
+57.94
+49.73
+73.00
+OUR-1HOP
+88.04
+79.81
+99.77
+96.76
+94.38
+99.74
+92.40
+87.09
+99.75
+OUR-3HOP
+88.31
+80.54
+99.77
+95.96
+92.77
+99.80
+92.14
+86.66
+99.79
+TABLE III: Comparison on Hazards Prioritization (%)
+MAP@K
+MRR@K
+NDCG@K
+Method
+K=3
+K=5
+K=10
+K=3
+K=5
+K=10
+K=3
+K=5
+K=10
+CFHP [7]
+31.66
+45.64
+60.97
+58.41
+73.90
+77.78
+37.94
+53.40
+56.95
+OUR
+54.87
+68.04
+82.90
+78.33
+88.34
+96.60
+64.19
+77.48
+89.47
+structured predicates to distinguish relevant entities from
+irrelevant ones, and to derive hazards severity scores from
+the level of imminent, caution, and info. The classic metrics
+precision (P), recall (R), F1, Area Under the Curve (AUC)
+and Binary Mean Absolute Error (B-MAE) are employed.
+(V) To investigate the contribution of each architectural
+component in HATS, we conduct a systematic ablation study
+by progressively removing the ERES module, KGE priors,
+and depth cues from the full model. We report the relation
+retrieval performance of each variant on severity, side, and
+mechanism using R@K and mR@K (K = {1, 2, 3}).
+B. Results and Discussions
+(I) Table II reports the performance of our KGE module
+when using 1-hop and 3-hop message passing, compared
+to the baseline model [27]. The consistent gains yielded
+by our module across all three tasks validate our three
+key designs. First, literal-aware node initialization jointly
+encodes categorical and numeric node properties, enabling
+richer representation of traffic entity characteristics. Second,
+FiLM is used to adaptively scale and shift messages via
+learned parameters derived from the qualifier vector, giving
+the model more expressive and dynamic control over how
+edge properties influence message propagation. Third, the
+transformer-based triplet scorer allows attention-driven inter-
+action between the head entity and the relation before scoring
+against tail candidates. Additionally, we explicitly maintain
+separate vocabularies for the relation, supporting hetero-
+geneous qualifier schemas across relations. The substantial
+performance, with H@10 scores near 99.8%, confirms that
+our KGE module captures rich and complete literal and
+structural patterns from the KG, validating its reliability as a
+prior knowledge source for scene understanding.
+(II) Table III presents the evaluation results on classic
+HP metrics at crucial cutoff values. Our HATS consistently
+outperforms CFHP [7] across all metrics, with especially
+large gains at lower K values. It indicates that our model
+ranks the most critical hazards much more accurately and
+consistently at the top positions, allowing immediate driver
+alert in time-critical situations. This stems from several
+novel designs working in concert. First, the ERES module
+establishes a strong foundation by learning to attend to path-
+relevant entities through cross-attention between the ego path
+and traffic entities. The discrimination is further refined by
+
+TABLE IV: Comparison on SGDet Task (%)
+Method
+R@20 / mR@20
+R@30 / mR@30
+R@50 / mR@50
+MOTIFS [33]
+25.99 / 7.39
+29.65 / 9.37
+29.68 / 9.38
+VCTREE [34]
+26.95 / 4.12
+29.60 / 5.23
+29.60 / 5.23
+PSGTR [15]
+17.95 / 5.53
+23.71 / 12.20
+23.72 / 12.21
+OUR
+30.47 / 53.75
+50.00 / 67.63
+62.79 / 76.13
+the TSGG heads during joint training. Moreover, the KGE
+representation in the pair descriptor, grounded in real-life
+traffic accident data, encodes structured domain knowledge
+about hazard severity and consequence patterns that pure
+visual methods lack. The prior aggregator further reinforces
+this by attending over severity-related KG node groups,
+injecting accident priors directly into the severity head.
+(III) The SGCls results in Table IV validate the challenges
+identified in Sec. II regarding the application of SG and PSG
+in traffic scenarios. Since majority traffic entities are irrele-
+vant to the main driving maneuver with only a few critical to
+attend, the baseline models favor frequent predicates at the
+expense of the tail categories, resulting in low mR@K. By
+contrast, our ERES and TSGG modules decompose the predic-
+tion into well-defined subtasks toward the unified objective.
+The ERES module explicitly filters the dominant ‘irrelevant’
+predicate from the relation prediction space, rebalancing
+the distribution toward meaningful hazard-aware predicates.
+The pair descriptor that integrates visual, geometric, seman-
+tic, and knowledge-based representations encourages TSGG
+heads to reason from multiple complementary aspects, rather
+than being blinded by superficial frequency. The gains in both
+R@K and mR@K demonstrate that HATS strikes a balance
+between maximizing the retrieval of correct relations in the
+surrounding environment and maintaining a consistent pre-
+diction quality of less frequent but safety-critical interactions.
+(IV) Table V reflects the precision-recall imbalance of
+baselines in relevance classification, suggesting that their
+conservative predicate predictions struggle to identify all
+relevant entities, likely due to their lack of path-awareness.
+Our ERES module directly addresses this by modeling the
+interaction between the ego path and each entity through
+learnable cross-attention. The fused feature (4) that combines
+entity content, global context summary, and a gated path-
+conditioned signal provides a richer and more targeted rep-
+resentation for relevance classification. The strong relevance
+performance is further attributed to the joint training after
+warm-up. The exclusive operation in the TSGG module on
+the filtered candidates and the explicit leverage of relevance
+logits in constructing semantic representation fed into all
+TSGG heads allow task-specific gradients to flow back into
+the ERES module for continuous refinement. In prominence
+classification, HATS still outperforms specialized competitor
+[7] and visual-driven baselines, attributable to the multi-
+source pair descriptor and accident-informed severity head.
+(V) Table VI highlights the critical role of the ERES
+module: removing it alone results in more than a 40%
+drop in R@1 across all three tasks. The nearly identical
+performance of HATS w/o ERES+KGE+Depth and HATS w/o
+ERES further indicates that ERES is a prerequisite for KGE
+and depth cues to be effective. Without ERES, all panoptic
+TABLE V: Comparison on Two Classification Tasks (%)
+Task
+Method
+P(%)
+R(%)
+F1(%)
+AUC(%)
+MAE↓
+Entity
+Relevance
+MOTIFS-predcls [33]
+82.96
+43.46
+53.42
+81.14
+0.323
+MOTIFS-sgdet [33]
+85.73
+50.90
+61.61
+77.11
+0.270
+VCTREE-predcls [34]
+83.59
+43.40
+53.05
+81.63
+0.315
+VCTREE-sgdet [34]
+88.15
+36.87
+49.84
+76.19
+0.319
+PSGTR [15]
+87.62
+31.74
+44.24
+62.88
+0.327
+OUR
+96.96
+94.07
+95.03
+97.20
+0.047
+Entity
+Prominence
+MOTIFS-predcls [33]
+85.10
+66.68
+72.51
+76.61
+0.370
+MOTIFS-sgdet [33]
+86.25
+61.33
+69.70
+72.56
+0.367
+VCTREE-predcls [34]
+83.70
+66.53
+71.90
+75.33
+0.378
+VCTREE-sgdet [34]
+85.44
+58.27
+67.23
+69.75
+0.416
+PSGTR [15]
+87.53
+38.32
+50.92
+62.20
+0.477
+CFHP [7]
+88.14
+49.77
+62.49
+62.39
+0.233
+OUR
+95.85
+87.78
+90.89
+92.17
+0.103
+TABLE VI: Ablation Study of HATS components
+Relation
+Method
+R@1/mR@1
+R@2/mR@2
+R@3/mR@3
+Severity
+HATS w/o ERES
+31.27 / 35.32
+44.42 / 50.05
+48.42 / 54.89
+HATS w/o KGE
+42.03 / 44.99
+60.00 / 63.02
+65.39 / 68.89
+HATS w/o Depth
+41.21 / 43.15
+60.47 / 61.69
+65.02 / 66.96
+HATS w/o KGE+Depth
+39.46 / 43.25
+58.39 / 61.09
+63.61 / 66.43
+HATS w/o ERES+KGE+Depth
+26.29 / 31.68
+42.01 / 47.91
+47.56 / 53.39
+HATS
+80.10 / 80.72
+92.19 / 92.76
+93.93 / 94.99
+Side
+HATS w/o ERES
+38.68 / 39.23
+48.29 / 49.13
+49.37 / 50.46
+HATS w/o KGE
+51.33 / 50.54
+65.11 / 65.00
+66.70 / 66.87
+HATS w/o Depth
+51.20 / 51.22
+65.31 / 65.23
+66.34 / 66.41
+HATS w/o KGE+Depth
+49.65 / 50.39
+63.33 / 63.30
+64.80 / 64.99
+HATS w/o ERES+KGE+Depth
+37.40 / 37.62
+47.31 / 47.21
+48.63 / 48.76
+HATS
+82.40 / 81.18
+93.73 / 93.06
+94.53 / 94.01
+Mechanism
+HATS w/o ERES
+30.33 / 32.32
+39.14 / 42.45
+42.46 / 45.58
+HATS w/o KGE
+42.52 / 43.62
+57.27 / 59.85
+62.78 / 65.21
+HATS w/o Depth
+35.65 / 37.59
+51.97 / 52.82
+59.23 / 59.51
+HATS w/o KGE+Depth
+36.47 / 37.97
+52.12 / 54.33
+58.98 / 61.26
+HATS w/o ERES+KGE+Depth
+30.55 / 34.62
+40.48 / 45.61
+44.38 / 49.52
+HATS
+73.16 / 73.65
+84.01 / 85.91
+88.62 / 90.37
+Fig. 3: Our ego-centric hazard-aware TSGs of traffic images
+queries, including irrelevant entities such as sky and distant
+parked cars are passed to TSGG heads with uniform weights,
+overwhelming relation prediction with unstructured context
+and hindering the learning of discriminative representations,
+regardless of feature richness. HATS w/o KGE results suggest
+the significance of the structured KGE priors in separating
+geometrically or visually similar but semantically distinct
+scenarios, such as an approaching vehicle from opposite
+lane implying a serious head-on crash. Without KGE, TSGG
+heads must search for clues from the high-dimensional but
+unstructured appearance features alone, which is especially
+unrecoverable for severity prediction. Depth features explic-
+itly encode relative distance and lateral offset of each entity
+that could directly impact severity and effect mechanism, for
+instance, a sidewipe from the adjacent car versus irrelevance
+from a parking car over the barrier. Without disparity-derived
+cues, pair descriptor will force TSGG heads to rely on RGB
+appearance and semantic embeddings, which are insufficient
+to resolve spatial ambiguity, evidenced by the drops in HATS
+w/o Depth. The marginal improvement of HATS w/o KGE+Depth
+over HATS w/o Depth suggests that KGE priors, deprived of
+the depth-derived geometric grounding, introduce conflicting
+
+semantic bias that slightly degrades prediction. This feature
+interference effect further validates our joint design. Overall,
+the huge gap between any single-component ablation and the
+full model demonstrates that all components are mutually
+reinforcing and jointly necessary for an optimal capacity.
+V. CONCLUSIONS
+In this paper, we present HATS, an ego-centric hazard-
+aware TSGG framework that addresses the limitations of
+existing SGG and PSG methods in safety-critical autonomous
+driving contexts. Its supplementary KG branch embeds struc-
+tured real-life traffic accident records through literal-aware
+node initialization, FiLM-based qualifier-aware message pass-
+ing, and a transformer-based triplet scorer. Its main SG
+branch consists of three modules. The ERES module built
+upon PS module picks relevant candidates through learnable
+cross-attention between the ego path and traffic entities for
+downstream TSGG module. The dedicated TSGG heads,
+supported by the diverse-feature-enriched pair descriptor
+and the knowledge-grounding prior aggregator, decompose
+relation prediction into structured subtasks, jointly trained
+to understand the effect mechanism, the relative side, and
+the severity level with respect to the ego vehicle. Ablation
+studies confirm the indispensable and synergistic role of
+each module in overall performance. Extensive experiments
+demonstrate the outperformance of HATS in HP, relevance
+classification, prominence classification, SGDet, and relation
+predictions. These results validate the effectiveness of inte-
+grating structured accident knowledge with ego-centric visual
+reasoning for comprehensive yet hazard-aware traffic scene
+understanding. Our future work will extend HATS to video-
+based reasoning and stronger segmentation backbones to
+improve performance in broader driving environments.
+REFERENCES
+[1] P. Choudhary, A. Gupta, and N. R. Velaga, “Perceived risk vs actual
+driving performance during distracted driving: A comparative analysis
+of phone use and other secondary distractions,” Transp. Res. Part F:
+Traffic Psychol. and Behav., vol. 86, pp. 296–315, apr 2022.
+[2] World Health Org., Mobile phone use: A growing problem of driver
+distraction. Geneva: World Health Org., 2011.
+[3] N. M. Yusof, J. Karjanto, M. Z. Hassan, J. Terken, F. Delbressine,
+and M. Rauterberg, “Reading during fully automated driving: A study
+of the effect of peripheral vis. and haptic inf. on situation awareness
+and mental workload,” IEEE Trans. on Intell. Transp. Syst., vol. 23,
+no. 10, pp. 19136–19144, 2022.
+[4] D. Fagnant and K. Kockelman, “Preparing a nation for autonomous
+vehicles: Opportunities, barriers and policy recommendations,” Transp.
+Res. Part A: Policy and Pract., vol. 77, 07 2015.
+[5] X. Yang, J. Yan, W. Liao, X. Yang, J. Tang, and T. He, “ SCRDet++:
+Detecting Small, Cluttered and Rotated Objects via Instance-Level
+Feature Denoising and Rotation Loss Smoothing ,” IEEE Trans. on
+Pattern Anal. & Mach. Intell., vol. 45, pp. 2384–2399, Feb. 2023.
+[6] A. Kirillov, K. He, R. Girshick, C. Rother, and P. Dollár, “Panoptic
+segmentation,” in CVPR, pp. 9396–9405, 2019.
+[7] Y. Huang and X. Wang, “Hazards prioritization with cogn. attention
+maps for supporting driving decision-making,” IEEE Trans. on Intell.
+Transp. Syst., vol. 25, no. 11, pp. 16221–16234, 2024.
+[8] S.-Y. Yu, A. V. Malawade, D. Muthirayan, P. P. Khargonekar, and
+M. A. A. Faruque, “Scene-graph augmented data-driven risk assess-
+ment of auton. vehicle decisions,” IEEE Trans. on Intell. Transp. Syst.,
+vol. 23, no. 7, pp. 7941–7951, 2022.
+[9] R. Krishna, Y. Zhu, O. Groth, J. Johnson, K. Hata, J. Kravitz, S. Chen,
+Y. Kalantidis, L.-J. Li, D. A. Shamma, M. S. Bernstein, and L. Fei-
+Fei, “Vis. genome: Connecting lang. and vision using crowdsourced
+dense image annotations,” Int. J. Comput. Vision, vol. 123, p. 32–73,
+May 2017.
+[10] N. H. T. S. Admin., NHTSA Field Crash Investigation 2021 Coding
+and Editing Manual. Nat. Highway Traffic Saf. Admin., 2022.
+[11] G. A. Radja, E.-Y. Noh, and F. Zhang, Crash Investigation Sampling
+System 2021 Analytical User’s Manual. Nat. Highway Traffic Saf.
+Admin., 2022.
+[12] J. Johnson, R. Krishna, M. Stark, L.-J. Li, D. A. Shamma, M. S.
+Bernstein, and L. Fei-Fei, “Image retrieval using scene graphs,” in
+CVPR, pp. 3668–3678, 2015.
+[13] C. Lu, R. Krishna, M. Bernstein, and L. Fei-Fei, “Vis. relationship
+detection with lang. priors,” in Eur. Conf. on Comput. Vision, 2016.
+[14] T. Chen, W. Yu, R. Chen, and L. Lin, “Knowl.-embedded routing
+network for scene graph gener.,” in CVPR, pp. 6156–6164, 2019.
+[15] J. Yang, Y. Z. Ang, Z. Guo, K. Zhou, W. Zhang, and Z. Liu, “Panoptic
+scene graph gener.,” in ECCV, 2022.
+[16] Y. Cong, M. Y. Yang, and B. Rosenhahn, “Reltr: Relation transformer
+for scene graph generation,” IEEE Trans. on Pattern Anal. and Mach.
+Intell., 2023.
+[17] Y. Tian, A. Carballo, R. Li, and K. Takeda, “Rsg-net: Towards
+rich sematic relationship prediction for intell. vehicle in complex
+environments,” in IV, pp. 546–552, 2021.
+[18] C. Li, Y. Meng, S. H. Chan, and Y.-T. Chen, “Learning 3d-aware ego-
+centric spatial-temporal interaction via graph convolutional networks,”
+in ICRA, pp. 8418–8424, 2020.
+[19] Y. Guo, F. Yin, X.-H. Li, X. Yan, T. Xue, S. Mei, and C.-L. Liu, “Vis.
+traffic knowl. graph gener. from scene images,” in 2023 IEEE/CVF
+Int. Conf. on Comput. Vision (ICCV), pp. 21547–21556, 2023.
+[20] Y. Zhou, Y. Zhang, Z. Zhao, K. Zhang, and C. Gou, “Toward driving
+scene understanding: A paradigm and benchmark dataset for ego-
+centric traffic scene graph representation,” IEEE J. of Radio Freq.
+Identification, vol. 6, pp. 962–967, 2022.
+[21] G. A. Miller, “Wordnet: a lexical database for english,” Commun.
+ACM, vol. 38, p. 39–41, Nov. 1995.
+[22] R. Speer, J. Chin, and C. Havasi, “Conceptnet 5.5: an open multilingual
+graph of general knowledge,” in AAAI, p. 4444–4451, 2017.
+[23] T. You and B. Han, “Traffic Accident Benchmark for Causality
+Recognit.,” in ECCV, 2020.
+[24] T. Suzuki, H. Kataoka, Y. Aoki, and Y. Satoh, “Anticipating traffic
+accidents with adaptive loss and large-scale incident db,” in CVPR,
+pp. 3521–3529, 2018.
+[25] D.-J. Lin, M.-Y. Chen, H.-S. Chiang, and P. K. Sharma, “Intell.
+traffic accident prediction model for internet of vehicles with deep
+learning approach,” IEEE Trans. on Intell. Transp. Syst., vol. 23, no. 3,
+pp. 2340–2349, 2022.
+[26] S. Salam, M. S. Islam, F. Ahmed, L. Khan, D. Kim, N. Allo, and
+O. Nwariaku, “Exploring the roles of social media data to identify the
+locations and severity of road traffic accidents,” in 2021 IEEE 4th Int.
+Conf. on Artif. Intell. and Knowl. Eng. (AIKE), pp. 62–71, 2021.
+[27] M. Galkin, P. Trivedi, G. Maheshwari, R. Usbeck, and J. Lehmann,
+“Message passing for hyper-relational knowl. graphs,” in Proc. of the
+2020 Conf. on Empirical Methods in Natural Lang. Process., (Online),
+pp. 7346–7359, Assoc. for Comput. Linguistics, Nov. 2020.
+[28] B. Cheng, I. Misra, A. G. Schwing, A. Kirillov, and R. Girdhar,
+“Masked-attention mask transformer for universal image segmenta-
+tion,” in CVPR, 2022.
+[29] Y. Lin, Z. Liu, M. Sun, Y. Liu, and X. Zhu, “Learning entity
+and relation embeddings for knowledge graph completion,” in AAAI,
+p. 2181–2187, 2015.
+[30] E. Perez, F. Strub, H. de Vries, V. Dumoulin, and A. Courville, “Film:
+visual reasoning with a general conditioning layer,” in AAAI, 2018.
+[31] M. Cordts, M. Omran, S. Ramos, T. Rehfeld, M. Enzweiler, R. Be-
+nenson, U. Franke, S. Roth, and B. Schiele, “The cityscapes dataset
+for semantic urban scene understanding,” in CVPR, 2016.
+[32] D. Xu, Y. Zhu, C. Choy, and L. Fei-Fei, “Scene graph gener. by
+iterative message passing,” in CVPR, 2017.
+[33] R. Zellers, M. Yatskar, S. Thomson, and Y. Choi, “Neural Motifs:
+Scene Graph Parsing with Global Context ,” in CVPR, pp. 5831–5840,
+2018.
+[34] K. Tang, H. Zhang, B. Wu, W. Luo, and W. Liu, “Learning to compose
+dynamic tree structures for vis. contexts,” in CVPR, 2019.
+

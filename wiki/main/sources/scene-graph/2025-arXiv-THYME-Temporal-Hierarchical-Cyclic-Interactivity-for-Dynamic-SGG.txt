@@ -1,0 +1,2189 @@
+1
+THYME: Temporal Hierarchical-Cyclic Interactivity
+Modeling for Video Scene Graphs in Aerial Footage
+Trong-Thuan Nguyen, Member, IEEE, Pha Nguyen, Member, IEEE, Jackson Cothren, Member, IEEE,
+Alper Yilmaz, Senior Member, IEEE, Minh-Triet Tran, Member, IEEE, and Khoa Luu, Senior Member, IEEE
+Fig. 1: An exemplar video from the proposed AeroEye-v1.0 dataset, captured by a drone, is annotated with five interactivity types: appearance, situation,
+position, interaction, and relation. Specifically, the proposed THYME approach then generates frame-by-frame scene graphs, hierarchically aggregating
+per-frame object features and refining them through cyclic temporal attention. Therefore, our proposed THYME approach accurately tracks the white sedan
+turning out, the police SUV converging, and the gray sedan being impacted, effectively capturing subtle transitions in interactivity. (Best viewed in colors)
+Abstract—The rapid proliferation of video in applications
+such as autonomous driving, surveillance, and sports analytics
+necessitates robust methods for dynamic scene understanding.
+Despite advances in static scene graph generation and early
+attempts at video scene graph generation, previous methods often
+suffer from fragmented representations, failing to capture fine-
+grained spatial details and long-range temporal dependencies
+simultaneously. To address these limitations, we introduce the
+Temporal Hierarchical Cyclic Scene Graph (THYME) approach,
+which synergistically integrates hierarchical feature aggregation
+with cyclic temporal refinement to address these limitations. In
+particular, THYME effectively models multi-scale spatial context
+and enforces temporal consistency across frames, yielding more
+accurate and coherent scene graphs. In addition, we present
+AeroEye-v1.0, a novel aerial video dataset enriched with five
+types of interactivity that overcome the constraints of existing
+datasets and provide a comprehensive benchmark for dynamic
+scene graph generation. Empirically, extensive experiments on
+ASPIRe and AeroEye-v1.0 demonstrate that the proposed THYME
+approach outperforms state-of-the-art methods, offering improved
+scene understanding in ground-view and aerial scenarios.
+Index Terms—Video Scene Graph Generation, Video Under-
+standing, Hierarchical Graph, Graph Transformer, Aerial Footage
+Trong-Thuan Nguyen is with University of Arkansas; University of Science,
+VNU-HCM; Vietnam National University, Ho Chi Minh, Viet Nam. Pha
+Nguyen, Jackson Cothren, Khoa Luu are with University of Arkansas. Alper
+Yilmaz is with Ohio State University. Minh-Triet Tran is with University of
+Science, VNU-HCM; Vietnam National University, Ho Chi Minh, Viet Nam.
+I. INTRODUCTION
+The proliferation of video data across various domains,
+including autonomous driving, aerial surveillance, robotics,
+sports analytics, and urban monitoring, has increased the need
+for methods to generate semantically rich and temporally
+coherent representations of dynamic scenes. Video Scene Graph
+Generation (VidSGG) addresses this challenge by constructing
+spatio-temporal graphs where nodes correspond to object
+trajectories and edges encode both spatial relations (e.g., in front
+of, adjacent to) and transient interactions (e.g., approaching,
+heading, overtaking, colliding). Although substantial progress
+has been made in image-based Scene Graph Generation
+(SGG), primarily driven by large-scale datasets such as Visual
+Genome [24], VG-150 [49], and OpenPSG [51], extending
+these techniques to the video domain presents considerable
+challenges. One of them is addressing temporal inconsistencies
+resulting from variations in appearance, occlusions, and the re-
+entry of objects. These factors can undermine the continuity and
+integrity of object identities over time. Additionally, the multi-
+scale nature of real-world video content requires hierarchical
+reasoning mechanisms that can capture fine-grained spatial
+details while maintaining coherent global structures over time.
+Recent developments in VidSGG continue to exhibit notable
+limitations in capturing the full complexity of dynamic scenes.
+Although effective in extracting fine-grained spatial information,
+arXiv:2507.09200v1  [cs.CV]  12 Jul 2025
+2
+frame-level methods [27], [5], [16], [12] often result in
+inconsistent relational predictions over time, particularly in
+the form of predicate flickering, and struggle to detect brief
+or subtle interactions. In contrast, video-level methods [41],
+[9], [25], [13], [44] that integrate temporal context tend to
+overlook fleeting relational dynamics and dilute the precision
+of spatial configurations, especially under aerial or oblique
+viewpoints where object scale and orientation vary significantly.
+Even the most state-of-the-art models [52], [32], [33] offer
+only partial improvements, frequently underrepresenting micro-
+interactions and nuanced spatial semantics. These observations
+underscore the need for a new approach to jointly model
+temporally coherent trajectories and preserve the structural
+richness of spatial relations in complex visual environments.
+A significant challenge in Video Scene Graph Generation
+is balancing detailed spatial representations for each frame
+and consistent relational transitions over time. Although frame-
+centric pipelines are adept at capturing intricate geometric
+details, they often fail to produce cohesive and unified scene
+graphs, especially when objects are in motion, obscured, or
+reintroduced to the scene. In contrast, models that strive
+for temporal consistency typically rely on aggregation over
+extended periods, which can limit their responsiveness to brief
+yet critical interactions. Moreover, current benchmarks, most
+notably Action Genome [17], ASPIRe [32] and AeroEye [33],
+pose additional hurdles to advancement. Specifically, they offer
+narrow predicate vocabularies and lack sufficient viewpoint
+diversity, significantly impeding the adaptability of current
+methods to the rich and complex scenarios in video data.
+To address these gaps, we propose the new Temporal
+Hierarchical Cyclic Interactivity Model for Video Scene Graphs
+(THYME) approach, which first performs multi-scale intra-
+frame aggregation to preserve local structure and then applies
+cyclic temporal attention to ensure long-range coherence. In
+addition, we introduce AeroEye-v1.0, a new aerial video
+data set annotated with five distinct interactivity types ( i.e.
+appearance, situation, position, interaction, and relation),
+providing the detailed, viewpoint-diverse supervision necessary
+for fine-grained and temporally aware scene understanding.
+The contributions of this work can be summarized as follows:
+• We propose the Temporal Hierarchical Cyclic Interactivity
+Model for Video Scene Graphs (THYME) approach, a
+novel architecture that synergistically integrates hierarchi-
+cal feature aggregation and cyclic temporal refinement.
+This design enables THYME to capture multi-scale
+spatial details and long-range temporal dependencies
+more effectively than previous methods, resulting in more
+comprehensive and balanced scene graph representations.
+• In contrast to existing methods that struggle to capture
+fine-grained spatial details and long-range temporal depen-
+dencies, THYME effectively integrates hierarchical feature
+aggregation with cyclic temporal refinement. Therefore,
+it generates a more accurate and coherent scene graph
+by preserving spatial context across multiple scales while
+ensuring temporal consistency across video frames.
+• We introduce AeroEye-v1.0, a new aerial video dataset
+with detailed annotations across five types of interactivity.
+AeroEye-v1.0 is designed to tackle the unique challenges
+of dynamic scene graph generation in aerial environments.
+• To the best of our knowledge, AeroEye-v1.0 is one of the
+first datasets that can represent the most significant and
+richly annotated aerial video benchmark for VidSGG, as
+compared in Table I. It provides comprehensive annota-
+tions across five types of interactivity (i.e., appearance,
+situation, position, interaction, and relationship), enabling
+fine-grained characterization of object behaviors and
+spatial dynamics. In addition, our AeroEye-v1.0 dataset
+includes footage captured from aerial, oblique, and ground
+perspectives, offering a diverse and challenging corpus
+for dynamic scene graphs in aerial environments.
+• Experimental results demonstrate that THYME establishes
+a new state-of-the-art on the ASPIRe and AeroEye-v1.0
+benchmarks, achieving consistent improvements of 2 to 3%
+in recall and mean recall over the baseline methods. These
+performance margins support the efficiency of THYME’s
+dynamic scene graph generation efficiency across wild
+ground-view footage and drone-captured aerial videos.
+The remainder of this paper is organized as follows. Sec. II
+reviews related work in SGG and video understanding. Sec. IV
+presents the THYME approach. Sec. V introduces the AeroEye-
+v1.0 dataset and its annotation methodology. In Sec. VI, we
+present our experimental setup, results, and analyses. Finally,
+Sect. VII concludes our research and describes future directions.
+II. RELATED WORK
+A. Background
+Hierarchical graph representations have emerged as a natural
+way to model the temporal and multi-scale nature of video data.
+In particular, low-level features extracted from raw pixels or
+early convolutional layers are first organized into fine-grained
+structures in these approaches, such as objects, regions, or
+atomic actions. These local entities are progressively aggregated
+into higher-level semantic nodes, constructing a contextual
+information pyramid. Specifically, this hierarchical structure
+enables models to capture short-term interactions, such as
+localized object relationships [34], [7], [20], and long-term
+dependencies [53], [2], [15], including scene transitions [58],
+[55] or action progressions [26], [40].
+Transformer-based architectures have revolutionized se-
+quential modeling and are increasingly applied to graphs.
+Specifically, graph transformers [54] extend the self-attention
+mechanism in conventional transformers to non-Euclidean data
+structures by allowing every node in a graph to dynamically
+attend to every other node. This capability is particularly
+beneficial in video understanding, where temporal evolution
+and spatial layout are deeply intertwined. In addition, graph
+transformers capture long-range dependencies while integrating
+structural biases and positional encodings that respect the under-
+lying graph connectivity. By leveraging self-attention [43], these
+models compute adaptive weights for nodes and selectively
+aggregate relevant contextual information. Such mechanisms
+have proven crucial in tasks such as action recognition [30],
+[35], [8], video question answering [47], [48], [10], and
+trajectory prediction [29], [18], [50], where modeling complex
+interrelations over time dramatically improves performance.
+3
+TABLE I: Comparisons of scene graph generation datasets. The upper block lists image-based scene graph generation datasets, while the lower block presents
+video-based scene graph generation datasets. The symbol # indicates the number of corresponding items. The best values within each block are highlighted .
+Datasets
+#Videos #Frames #ObjCls #RelCls #Scenes
+Interactivity Types
+Viewpoints
+Appearance Situation Position Interaction Relation aerial oblique ground
+Visual Genome [24]
+-
+108K
+33K
+42K
+-
+✗
+✗
+✗
+✓
+✓
+✗
+✗
+✓
+VG-150 [49]
+-
+88K
+150
+50
+-
+✗
+✗
+✗
+✓
+✓
+✗
+✗
+✓
+VrR-VG [28]
+-
+59K
+1.6K
+117
+-
+✗
+✗
+✗
+✓
+✓
+✗
+✗
+✓
+GQA [14]
+-
+85K
+1.7K
+310
+-
+✗
+✗
+✗
+✓
+✓
+✗
+✗
+✓
+PSG [51]
+-
+49K
+80
+56
+-
+✗
+✗
+✗
+✓
+✓
+✗
+✗
+✓
+VidOR [37]
+10K
+55.4K
+80
+50
+1
+✗
+✗
+✗
+✓
+✓
+✗
+✗
+✓
+Action Genome [17]
+10K
+234.3K
+25
+25
+-
+✗
+✗
+✗
+✓
+✓
+✗
+✗
+✓
+VidSTG [56]
+10K
+55.4K
+80
+50
+1
+✗
+✗
+✗
+✓
+✓
+✗
+✗
+✓
+EPIC-KITCHENS [6]
+700
+11.5K
+21
+13
+1
+✗
+✗
+✗
+✓
+✓
+✗
+✗
+✓
+PVSG [52]
+400
+153K
+126
+57
+7
+✗
+✗
+✗
+✓
+✓
+✗
+✓
+✗
+SportsHHI [46]
+80
+11.4K
+1
+34
+2
+✗
+✗
+✗
+✓
+✗
+✗
+✗
+✓
+ASPIRe [32]
+1.5K
+1.6M
+833
+4.5K
+7
+✓
+✓
+✓
+✓
+✓
+✗
+✗
+✓
+AeroEye [33]
+2.3K
+261.5K
+57
+384
+29
+✗
+✗
+✓
+✗
+✗
+✓
+✓
+✓
+AeroEye-v1.0 (Ours)
+2.3K
+261.5K
+57
+687
+29
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+✓
+B. Datasets and Benchmarks
+Datasets. SGG has traditionally centered on image-based
+datasets, most notably Visual Genome [24]. Visual Genome
+provides a comprehensive collection of static images annotated
+with objects and their relationships. Its comprehensiveness has
+established it as a primary benchmark for SGG, despite being
+restricted to 3rd-person imagery. The following works have
+refined or extended Visual Genome’s foundational dataset. For
+example, VG-150 [49] curates a more tractable subset, VrR-
+VG [28] enriches spatial relationships, and GQA [14] aligns the
+structure of the scene graph with reasoning tasks. Specifically,
+PSG [51] integrates panoptic segmentation with scene graphs,
+providing a holistic visual representation of the scene.
+Recognizing the importance of temporal dynamics, VidSGG
+datasets have emerged to capture transformations of relation-
+ships between frames. VidVRD [39] provides an early bench-
+mark dataset featuring 1K videos annotated with bounding
+boxes and spatiotemporal relations. This strategy is subse-
+quently scaled by VidOR [37] and Action Genome [17], each
+comprising 10K videos with extensive annotations (e.g., 50K
+instances for VidOR and 476.3K for Action Genome). Similarly,
+VidSTG [56] is based on grounding interactions within video
+data, while EPIC-KITCHENS [6] provides extensive footage of
+kitchen activities. Building on PSG [51], PVSG [52] integrates
+panoptic segmentation to improve scene representation, while
+SportsHHI [46] focuses on capturing sports-related interactions.
+In pursuit of diverse perspectives, ASPIRe [32] incorpo-
+rates views of ego and 3rd-person views, facilitating multi-
+viewpoint and temporal modeling. Likewise, AeroEye [33]
+uniquely encompasses drone views, broadening the scope of
+SGG to aerial surveillance. Table I presents a comprehensive
+overview of these datasets, comparing their annotation scales,
+object and relation classes, and respective viewpoints.
+Benchmarks. Image Scene Graph Generation (ImgSGG) fo-
+cuses on detecting and classifying object relationships in static
+images, the primary challenge being the accurate categorization
+of these relationships according to a predefined set of predicates.
+Specifically, transformer-based methods [27], [12], [16], [45]
+and generative models [25], [22], [11] have significantly
+advanced ImgSGG by leveraging attention mechanisms and
+generative frameworks to encode complex dependencies. Bench-
+mark datasets such as Visual Genome [24], VG-150 [49], VrR-
+VG [28], and PSG [51] offer large-scale annotations that drive
+model development. Thus, progress in ImgSGG has enabled
+models to capture nuanced relational semantics in static scenes.
+Further enhancements have been achieved through bias
+reduction and the integration of external knowledge. Specif-
+ically, methods such as those proposed in EOA [3] and C-
+SGG [19] improve the recall of rare predicates and mitigate
+the biases inherent in SGG. In addition, segmentation and
+panoptic methods, exemplified by Segmentation-SG [21] and
+PSGFormer [51], enrich frame-level representations by in-
+corporating pixel-level cues, producing more context-aware
+graphs. Moreover, open-vocabulary methods supported by
+vision-language models, which enable the recognition of unseen
+object classes and relationships, as well as the integration of
+LLMs as demonstrated in LLM4SGG [23] and text-based scene
+graph frameworks such as TextPSG [57].
+Video Scene Graph Generation (VidSGG) extends ImgSGG
+by incorporating the temporal dimension, requiring models to
+capture evolving interactions across consecutive frames and ag-
+gregate spatiotemporal cues to construct coherent scene graphs.
+In particular, the methods utilize temporal modeling [36],
+[4] and further extend to hierarchical structures [41], [32]
+or transformer-based architectures [9], [31] that leverage self-
+attention to manage long-range dependencies. Benchmarks
+such as Action Genome [17], PVSG [52], ASPIRe [32], and
+AeroEye [33] offer diverse tasks reflecting the scope of
+spatiotemporal understanding, thereby substantiating the role of
+VidSGG in applications that demand robust temporal modeling.
+C. Video Scene Graph Generation
+Current VidSGG methods are generally divided into two
+primary categories based on the granularity of their scene graph
+representation: video-level SGG, which captures persistent
+relationships across entire videos, and frame-level SGG, which
+focuses on dynamic interactions within individual frames.
+4
+Video-level Scene Graph Generation. Video-level SGG
+conceptualizes object trajectories as graph nodes to encapsulate
+stable and persistent relationships throughout a video. This
+approach leverages temporal continuity by modeling spatial
+and temporal statistical dependencies, thereby establishing
+relational associations. Early methodologies used techniques
+such as Conditional Random Fields (CRFs) [42], abstraction
+methods [36], and iterative relation inference on fully connected
+spatio-temporal graphs [38]. More recent advances have
+incorporated transformer-based frameworks to further enhance
+video performance. For example, unified frameworks that
+integrate scene graph generation with human-object interaction
+detection [13] and generative transformer approaches, such
+as IS-GGT [25], have been developed to efficiently capture
+persistent relationships across video frames.
+Recently, video-level methods have increasingly emphasized
+explicit temporal modeling. PVSG [52] integrates panoptic
+segmentation masks with temporal scene graphs to ensure
+high-fidelity spatial detail and robust temporal coherence.
+Similarly, TRACE [41] effectively leverages spatio-temporal
+context, while methods like DSG-DETR [9] and OED [44]
+focus on modeling extended temporal relationships across
+object tracklets. These video-level SGG methods collectively
+underscore the efficacy of handling temporal consistency to
+construct scene graphs that comprehensively represent videos.
+Frame-level Scene Graph Generation. Frame-level SGG
+constructs a scene graph for each frame, capturing dynamic
+interactions and providing a detailed description of scene
+dynamics as relationships transition between frames. Notably,
+transformer-based methods have been widely adopted because
+of their ability to infer relationships from features via attention
+mechanisms directly. For example, SGTR [27], RelTR [5],
+EGTR [16], and DSGG [12] employ encoder–decoder frame-
+works augmented with techniques such as bipartite graph match-
+ing, graph-aware query formulation, and relation distillation,
+thus achieving state-of-the-art performances while maintaining
+computational efficiency per frame basis.
+Building on these transformer-based methods, CYCLO [33]
+introduces a cyclic attention mechanism to capture the periodic
+and overlapping relationships inherent in video. In contrast,
+HIG [32] employs hierarchical structures to model fine-grained
+and high-level interactivity patterns, thus improving the robust-
+ness of generated scene graphs. Moreover, recent work has
+addressed the issues of bias reduction and context augmentation
+at the frame level in SGG. Methods such as TEMPURA [31]
+and Fast C-SGG [19] integrate context augmentation, memory-
+guided training, and uncertainty attenuation to mitigate the
+adverse effects of biased annotations, ensuring that per-frame
+predictions remain robust even in complex scenes. Collectively,
+these methodologies, including transformer-based architectures,
+hierarchical modeling, and bias reduction techniques, have
+advanced frame-level SGG by enabling accurate and efficient
+per-frame scene graph generation and providing a robust
+foundation for temporal integration and dynamic scene analysis.
+III. PROBLEM ANALYSIS AND THE PROPOSED
+CONTRIBUTIONS
+A. Prior Scene-Graph Modeling Methods and Their Limitations
+Video-level SGG captures long-term relationships by tracking
+objects and modeling persistent interactions throughout a
+video. TRACE [41] and PVSG [52] establish stable relational
+structures, making them effective for long-term surveillance and
+human-object interaction tracking applications. For example,
+in traffic monitoring, these models can track vehicles across
+an intersection to determine right-of-way violations. However,
+these methods assume that the relationships remain stable
+over time, which is not always true in dynamic environments
+where interactions frequently change. A pedestrian may briefly
+interact with a cyclist before moving toward a different object,
+making static relationship tracking ineffective. These methods
+rely on object tracking, which can lead to error propagation. If
+a vehicle is lost due to occlusion, the entire relationship chain
+may break, leading to incorrect predictions.
+In contrast, frame-level SGG constructs independent scene
+graphs for each frame, enabling fine-grained relational mod-
+eling. Transformer-based approaches such as SGTR [27],
+EGTR [16], and DSGG [12] effectively capture momentary
+object-object interactions. For example, in a sports analytics
+application, a frame-based model can detect a player passing
+a ball at a specific moment. However, since these models lack
+temporal coherence, they treat each frame as an isolated entity,
+leading to inconsistent relationship tracking across frames.
+If a model detects a pass in one frame but loses context
+in the next, it may fail to register the receiver’s movement,
+resulting in fragmented tracking. These models also incur high
+computational costs, since they generate a scene graph at every
+frame. Without temporal memory mechanisms, they struggle
+to maintain contextual awareness, making them unreliable in
+fast-paced scenarios where relationships constantly shift.
+To address the aforementioned limitations, HIG [32] (see
+Fig. 2a) introduces a hierarchical framework that merges
+single-frame interactivities into multi-frame interlacements,
+thereby constructing structured representations across multiple
+temporal scales. This approach effectively preserves both
+fine-grained interactions and higher-order relational patterns,
+enabling the maintenance of object relationships over extended
+temporal sequences. Unlike frame-based models, HIG integrates
+temporal dependencies by linking relational information across
+abstraction levels, thus offering a more holistic understanding
+of scene dynamics. A notable strength of HIG is its capacity
+to capture five distinct types of interactivity (i.e., appearance,
+situation, position, interaction, and relation), facilitating nu-
+anced modeling of multi-object interactions. However, the
+framework lacks mechanisms for cyclic modeling, which limits
+its effectiveness in representing recurrent behaviors, such as
+vehicles stopping at traffic lights. Its dependence on fixed
+temporal segmentation further restricts adaptability to non-
+uniform interaction durations, such as the variable pacing of
+basketball plays. Moreover, while HIG demonstrates strong
+hierarchical aggregation capabilities, it does not explicitly
+enforce frame-to-frame consistency, which may result in
+representational errors in scenarios characterized by rapid shifts.
+5
+Fig. 2: (a) HIG [32] stacks single-frame progressively coarser layers; however, its fixed temporal windows and acyclic flow limit the modeling of recurrence
+and frame-to-frame coherence. (b) CYCLO [33] employs a ring-shaped spatio-temporal transformer whose cyclic attention links the clip’s tail back to its head,
+preserving long-range context and preventing relation drift, yet operates at a single spatial scale and omits explicit semantic axes. (Best viewed in colors)
+CYCLO [33] (see Fig. 2b) introduces a cyclic spatio-
+temporal graph transformer that connects the end of a video
+sequence to its beginning, thereby preserving historical context
+and mitigating relational fragmentation in extended video
+streams. Its cyclic attention mechanism maintains temporal di-
+rectionality, allowing relational dynamics to evolve sequentially
+rather than being treated as independent across frames. This
+design proves particularly effective in domains such as sports
+analytics, where continuity of action is critical; for example, in
+a tennis rally, CYCLO ensures that the ball’s trajectory remains
+temporally coherent across exchanges. Despite these strengths,
+CYCLO does not incorporate hierarchical structuring, which
+limits its ability to model multi-scale interactions in complex
+environments, such as crowd dynamics or group behaviors.
+Furthermore, CYCLO does not explicitly distinguish between
+different types of interactivity. Instead, it emphasizes spatial and
+temporal dependencies. As a result, it is less equipped to capture
+the semantic granularity necessary for scene understanding.
+B. Our Proposed Approach and Its Advantages
+One of the primary advantages of our THYME approach
+lies in integrating hierarchical feature aggregation with cyclic
+temporal refinement. As detailed in Sec. IV and demonstrated
+in recent work [32], hierarchical aggregation enables our model
+to fuse spatial features across multiple levels of abstraction
+progressively. This design effectively captures fine-grained
+details and global context, crucial for understanding cluttered or
+densely populated scenes. Unlike methods such as SGTR [27]
+and those discussed in [16], our approach leverages multi-scale
+representations to accurately delineate subtle relationships.
+In addition, the proposed THYME approach incorporates
+a cyclic temporal refinement mechanism to ensure continuity
+across video frames. As described in Sec. IV-C and motivated
+by the design rationale in [33], the cyclic attention module
+connects the final frame back to the first. This design reinforces
+long-range temporal dependencies and mitigates challenges
+such as transient occlusions. As a result, our approach achieves
+more balanced scene graph representations, reducing bias
+toward frequently occurring relationships and enhancing the
+detection of rare but meaningful interactions. The effective-
+ness of these integrated modules is further validated by the
+experimental results presented in Sec. VI, which are consistent
+with the findings of previous studies [41], [44]. Furthermore,
+our method demonstrates strong generalizability across diverse
+viewpoints: evaluations on both ground-view and aerial datasets
+(see Secs. V and VI) show that our approach adapts well to
+varying scenarios, thus broadening the applicability of VidSGG.
+IV. THE PROPOSED THYME APPROACH
+In this section, we introduce the proposed Temporal Hier-
+archical Cyclic Interactivity Model for Video Scene Graphs
+approach, which leverages a hierarchical structure for temporal
+modeling while preserving coherent temporal dynamics for
+VidSGG. In our formulation, a video scene graph is defined
+as G = (V, E), where each node S_ i  \in \mathcal {V} represents an object
+tracked throughout the video with a unified feature, and each
+edge (S_i , S _ j) \in \mathcal {E} is labeled with a predicate p  \in \mathcal {C}_p that
+describes the relationship between objects.
+The proposed THYME approach unfolds in four stages.
+First,
+per frame feature extraction generates robust object
+embeddings for each frame. Next, hierarchical feature aggre-
+gation progressively builds layered spatial representations that
+capture fine-grained details. This is followed by cyclic temporal
+refinement, which ensures consistent temporal dynamics across
+6
+person-1
+person-2
+ball-1
+dribbling
+players
+catching
+DETR
+Fig. 3: Overview of the Hierarchical Cyclic Scene Graph approach for Video Scene Graph Generation (VidSGG). Our approach begins by extracting per-frame
+features using a DETR [1] detector. These features are then hierarchically aggregated into intermediate graphs that capture spatial relationships at various levels
+of abstraction. A transformer-based cyclic attention mechanism [33] refines these graphs over time, iteratively updating and aligning object representations.
+Finally, the refined features are integrated into a comprehensive scene graph that encapsulates spatial and temporal object relationships. (Best viewed in colors)
+video frames. Finally, these cues are integrated through scene
+graph construction to yield a video scene graph G = (V, E)
+that models the relationships between objects over time.
+A. Per-Frame Feature Extraction
+Given an input video \ifmmode \lbrace \else \textbraceleft \fi I_t\}_{t=1}^{T}
+, where each frame I_ t
+ \in \mathbb {R}^{H_0 \times W_0 \times 3}, we employ the DETR [1] object detector to extract
+the features of the object. For each frame t, the detector
+produces N_t object query embeddings \ifmm
+o
+d e \lbrace \else \textbraceleft \fi q_{i}^{(t)} \in \mathbb {R}^{d_0}\}_{i=1}^{N_t}
+, where
+d_0 denotes the feature dimensionality. These embeddings
+encode both object appearance and spatial layout. We formally
+define the set of per-frame object instances as V_ t  = \{
+S
+_
+{i}^
+{
+( t)} 
+\mid S_{i}^{(t)} \equiv q_{i}^{(t)}\ }, where S_{i
+}^{(t)}
+is the feature of object i in frame t.
+B. Hierarchical Feature Aggregation
+To capture intra-frame dynamics, we refine per-frame fea-
+tures using a hierarchical aggregation strategy. Specifically, we
+initialize each object’s feature as \pro
+t
+ect \
+m a t hcal
+  {F}^{(0)}_t(S_{i}^{(t)}) = q_{i}^{(t)}
+for every
+per-frame object S_{i
+}^{(t)}
+in frame t, as described in Sec. IV-A.
+At each hierarchical level l  \in  \ { 1 , \dots , L_h\}, where L_h
+is the number of levels, the feature of S_{i
+}^{(t)}
+is updated by
+aggregating information from its neighborhood. Specifically,
+the neighborhood comprises all objects in the frame t, i.e.,
+\prote
+c t  \mathcal  {N}(S_{i}^{(t)}) = \mathcal {V}_t. Formally, an attention mechanism computes
+the relevance score between subject S_{i
+}^{(t)}
+and each object
+S_{j}^{(t)} \in \mathcal {N}(S_{i}^{(t)})
+, as defined in Eqn. (1).
+  a_
+{i j
+}^{
+(
+t)} = 
+\
+frac 
+{ \ e xp \!\
+l
+eft (
+ \
+m
+a
+thca
+l  {F}^{(
+l
+- 1)}
+_
+t(S_{i
+}
+^{(t)
+} )  \cdot 
+\
+mathc
+a l
+ {F}^{(l-1)}_t(S_{j}^{(t)}) \right )}{\sum _{S_{k}^{(t)} \in \mathcal {N}(S_{i}^{(t)})} \exp \!\left ( \mathcal {F}^{(l-1)}_t(S_{i}^{(t)}) \cdot \mathcal {F}^{(l-1)}_t(S_{k}^{(t)}) \right )}. \label {eq:attention_weight_refined} 
+(1)
+Then, the feature of S_{i
+}^{(t)}
+at level l is updated via Eqn. (2).
+  \s
+m all \
+m a t h
+c
+a
+l
+ 
+{F}^
+{
+(l )}_t(
+S
+_
+{i}^
+{(
+t
+) }) =  \sig
+m
+a \!\
+l e f t ( \
+s
+u
+m  _{S_{j}^{(t)} \in \mathcal {N}(S_{i}^{(t)})} a_{ij}^{(t)} \, \left ( W^{(l)}\, \mathcal {F}^{(l-1)}_t(S_{j}^{(t)}) + b^{(l)} \right ) \right ), \label {eq:aggregation_refined} 
+(2)
+where W ^{(
+l
+)} \in \mathbb {R}^{d_l \times d_{l-1}} and b^{(
+l
+)} \in \mathbb {R}^{d_l} are learnable
+parameters, and \sigma (\cdot ) represents the ReLU activation function.
+C. Temporal Refinement via Cyclic Attention
+To capture inter-frame dynamics, we refine high-level
+features using a transformer encoder with cyclic attention [33].
+For each tracked object S_i (i.e., its unified trajectory across
+frames), we construct a temporal sequence \ifmmode \lbrace \else \textbraceleft \fi X_{t'}(S_i)\}_{t'=1}^{T'}
+,
+where each element is given by X_{t'}( S _i) = \mathcal {F}^{(L_h)}_{t'}(S_i)
+. Here,
+T ' represents the number of time steps after temporal pooling,
+which may differ from T. Specifically, the extracted features
+are then projected into query, key, and value spaces using
+learnable matrices W^ Q, W^ K, and W^ V , as defined in Eqn. (3).
+  \begi n  { split} Q
+_{t'}(S _ i )  &= W^Q\
+, X_{t' } ( S _i), \\ K_{t'}(S_i) &= W^K\, X_{t'}(S_i),\\ V_{t'}(S_i) &= W^V\, X_{t'}(S_i). \end {split} \label {eqn:extract_refined}
+(3)
+The cyclic attention is then computed as defined in Eqn. (4).
+  \label  
+{ eqn
+:
+ca_
+refined} \text {
+CA} _ {t'}(S_i) = \sum _{\tau =0}^{T'-1} \alpha _{t',\tau }(S_i) \, V_{(t'+\tau ) \mod T'}(S_i), 
+(4)
+where the attention weights are computed using Eqn. (5).
+  \label {
+eqn
+: ca_w_refined} \
+alp h a _{t
+',\
+t
+au  }(
+S _i)  = 
+\ frac {\exp \!\le
+ft (  \fra
+c {
+Q_{t'}(S_i) \cdot K_{(t'+\tau ) \mod T'}(S_i)}{\sqrt {d_a}} \right )}{\sum _{\tau '=0}^{T'-1} \exp \!\left ( \frac {Q_{t'}(S_i) \cdot K_{(t'+\tau ') \mod T'}(S_i)}{\sqrt {d_a}} \right )}. 
+(5)
+In Eqn. (5), the modulo operation enforces a cyclic structure,
+allowing the last time step to attend to the first. In particular,
+the cyclic attention output is then integrated with the original
+features through a transformer encoder block, which applies
+Layer Normalization (LN) and a position-wise feedforward
+network, resulting in the refined object feature \prote c t \hat  {\mathcal {F}}(S_i) \in \mathbb {R}^{d_{L_h}} .
+D. Scene Graph Construction
+We construct the video scene graph \ p rot ect \mathcal  {G} = (\mathcal {V}, \mathcal {E}) using unified
+object representations, where \ p rot e ct \ma t hcal  {V} = \{ S_i \mid \hat {\mathcal {F}}(S_i) \in \mathbb {R}^{d_{L_h}} \}. For
+each pair of objects (S_i , S_j), a predicate r_{ i j} \in \mathcal {C}_r is predicted.
+To extract relation representations, we leverage self-attention
+outputs from the DETR decoder. At each decoder layer k  
+\in  \ { 1 , \dots , L_d\}, where L_d is the total number of layers, the query
+and the key matrices Q^k , K ^k \in \mathbb {R}^{N \times d_\text {model}} are projected using
+7
+the learnable parameters W _
+S^k and W _
+O^k, which form the repre-
+sentation of the relationship R_
+a ^
+k
+ = \
+le ft [
+ 
+Q^k W_S^k;\, K^k W_O^k \right ]
+. From
+the final decoder layer, we obtain R_ z
+ 
+= \lef t [ Z
+^{L_d} W_S;\, Z^{L_d} W_O \right ]
+,
+where Z^{ L _d} \in \mathbb {R}^{N \times d_\text {model}} is the final object query embeddings.
+These relation representations are further refined through a
+gating mechanism, following the method in [16]. Specifically,
+for each decoder layer k, the gating coefficient is computed
+as g_
+a ^ k
+ 
+= 
+\si
+gma \!\left (R_a^k W_G\right )
+, while for the final layer, it is given by
+g_ z  = \sigma \!\left (R_z W_G\right ), where W_G is a shared weight matrix. Finally,
+the predicted scene graph is obtained as defined in Eqn. (6).
+  \ l
+a
+bel {e
+q n:
+f
+ina
+l
+_g
+r a ph
+_
+r
+e fi n ed
+} 
+\hat {G} = \sigma \!\left (\text {MLP}_\text {rel}\!\left (\sum _{k=1}^{L_d} \left (g_a^k \odot R_a^k\right ) + g_z \odot R_z\right )\right ), 
+(6)
+where \odot denotes element-wise multiplication and \protect \text  {MLP}_\text {rel}
+outputs scores over predicate classes for each object pair.
+E. Loss Function
+Following [32], we adopt Focal Loss for edge classification.
+Let \pr
+o
+tect \tilde  {p}_t\!\left (\mathcal {F}^{(l)}_t(S_{i}^{(t)})\right )
+denote the predicted probability for the
+feature \protect \mathcal  {F}^{(l)}_t(S_{i}^{(t)})
+, where \alpha _t is a balancing factor, and \gamma 
+controls the focusing effect. Mathematically, the loss at level l
+is defined in Eqn. (7).
+ 
+ 
+\beg
+i n {sp
+l i
+t
+}  \m
+a
+t h cal
+ 
+{L}\
+! \left
+ (
+\ma
+thc
+a
+l {
+F
+}^{(
+l )}_t(
+S _
+{i
+}^{(t)})\right ) &= -\alpha _t \left (1 - \tilde {p}_t\!\left (\mathcal {F}^{(l)}_t(S_{i}^{(t)})\right )\right )^\gamma \\ &\log \!\left (\tilde {p}_t\!\left (\mathcal {F}^{(l)}_t(S_{i}^{(t)})\right )\right ). \end {split} \label {eqn:level_loss_refined}
+(7)
+The total loss across hierarchical levels is computed by
+aggregating the losses at each level, as defined in Eqn. (8).
+  \lab e
+l 
+{
+eqn
+:
+t
+otal
+_ loss_
+r e
+f
+ined} \mathcal {L}_{\text {total}} = \sum _{l=1}^{L_h} \mathcal {L}\!\left (\mathcal {F}^{(l)}_t(S_{i}^{(t)})\right ). 
+(8)
+V. PROPOSED AEROEYE-V1.0 DATASET
+A. The Previous Datasets and Their Limitations
+The AeroEye dataset [33] offers valuable annotations for
+object interactions and spatial relationships, but it has notable
+limitations. Although it captures object positions and interac-
+tions, it omits key visual features such as color, size, and shape,
+and it does not provide information about the environmental
+context, often referred to as the situation in which the objects
+are placed. Moreover, it fails to differentiate between various
+types of interactions and relationships. For example, when one
+car tows another, explicitly labeling the interaction as “towing”
+and the relationship as “assisting” clarifies the dynamics.
+Similarly, the ASPIRe dataset [32] introduces five distinct
+types of interactivity, a promising step toward richer annotations.
+However, its focus on ground-view scenes captured from a
+third-person perspective excludes aerial or drone viewpoints,
+which are increasingly vital for comprehensive scene analysis.
+To address these limitations, our new AeroEye-v1.0 dataset
+introduces five annotation types: Appearance, Situation, Posi-
+tion, Interaction, and Relation. These enhancements support
+richer representations of object behaviors, spatial relationships,
+interactions, and environmental contexts, thereby facilitating
+the creation of more comprehensive video scene graphs.
+B. Our Dataset Annotation
+AeroEye-v1.0 builds on the AeroEye [33] dataset. In par-
+ticular, AeroEye-v1.0 includes five distinct interactivity types
+defined in [32]. (i) Appearance annotations describe the visual
+characteristics, including type (e.g., sedan, SUV), color, size
+(e.g., short, long), and shape. (ii) Situation annotations provide
+contextual information about the environment in which objects
+interact, such as the setting (urban, rural), weather conditions
+(sunny, rainy), time of day (day, night), and events (e.g., traffic
+congestion, accidents, floods). (iii) Position annotations describe
+the spatial relationships between objects, for example, “in
+front of”, or “beside”. (iv) Interaction annotations capture the
+dynamic actions between objects, such as “crashing”, “towing”,
+or “overtaking”, thereby highlighting how objects behave
+relative to one another over time. (v) Relation annotations
+define the functional connections between objects, such as
+“assisting”, “escorting”, or “guiding”. These annotations clarify
+the roles and relationships between objects.
+In our annotation process, every frame is annotated so
+that each object, represented by a bounding box, is assigned
+appearance and situation annotations. When spatial relation-
+ships between objects (i.e., their positions) are annotated,
+additional interaction and relation annotations further detail
+their relationships, as illustrated in Fig. 4. However, in parked
+cars, where the positions are recorded as “in front of”, “behind”,
+or “next to”, no interaction or relation annotations are applied.
+C. The Dataset Statistics
+The AeroEye-v1.0 dataset comprises 2,260 videos spanning
+261,503 frames, captured by drones in various urban, suburban
+and rural environments. This varied data acquisition provides
+a rich foundation for analyzing dynamic scenes from multiple
+perspectives. The dataset includes 56 unique object categories,
+with over 2 million bounding boxes and corresponding tracking
+annotations. Each bounding box is enriched with appearance
+and situation annotations that capture every visual detail of the
+objects and the environmental context.
+Specifically, the AeroEye-v1.0 dataset provides 157 ap-
+pearance predicates and 128 situation predicates. Individually,
+spatial annotations between pairs of objects are annotated using
+135 distinct position predicates, resulting in approximately
+752K position annotations. In addition, dynamic interactions
+are captured with 142 unique interaction predicates, yielding
+approximately 318K interaction annotations, while 125 unique
+relation predicates result in roughly 178K relation annotations.
+Significantly, AeroEye-v1.0 surpasses previous VidSGG
+benchmarks across all key dimensions, including the number of
+videos, annotated frames, object and predicate vocabulary, and
+viewpoint diversity, i.e., aerial, oblique, and ground perspectives.
+In addition, AeroEye-v1.0 is the only drone-captured video
+dataset to annotate all five types of interactivity necessary for
+fine-grained VidSGG. As detailed in Table I, these advantages
+position our AeroEye-v1.0 dataset as the most comprehensive
+and challenging dataset to advance dynamic scene graph
+generation in aerial environments.
+8
+Appearance: white and black police car
+Situation: parking on a grassy field
+car-1
+person-3
+person-1
+person-2
+Appearance: black uniforms
+Situation: walking on a grassy field
+Appearance: black uniforms
+Situation: walking on a grassy field
+Appearance: dark jacket
+Situation: walking on a grassy field
+arresting
+arresting
+to the right
+to the left
+to the left
+to the right
+to the left
+to the right
+polices
+Fig. 4: Example from AeroEye-v1.0. The scene graph is annotated with nodes denoting objects (bounding boxes), each with appearance and situation annotations.
+Edges include position annotations (curved arrows), interaction annotations (straight arrows), and relation annotations (dashed lines). (Best viewed in colors)
+TABLE II: Effect of factor size on R@20 and mR@20 across different
+interactivity types on the AeroEye-v1.0 dataset. Best scores are bolded.
+Factor
+Interactivity Type
+R@20
+mR@20
+1/4
+Appearance
+14.12
+0.60
+Situation
+4.33
+0.55
+Position
+12.32
+0.87
+Interaction
+10.87
+0.12
+Relation
+13.03
+0.85
+1/2
+Appearance
+15.22
+0.64
+Situation
+5.03
+0.57
+Position
+13.52
+0.97
+Interaction
+11.87
+0.14
+Relation
+14.03
+0.90
+3/4
+Appearance
+16.48
+0.65
+Situation
+5.63
+0.62
+Position
+15.62
+1.06
+Interaction
+13.17
+0.16
+Relation
+16.13
+0.95
+Full
+Appearance
+16.52
+0.68
+Situation
+5.53
+0.61
+Position
+15.52
+1.05
+Interaction
+13.07
+0.16
+Relation
+16.03
+0.95
+VI. EXPERIMENTS
+A. Implementation Details
+Datasets. We evaluate on two challenging and diverse datasets:
+ASPIRe [32] and AeroEye-v1.0. The ASPIRe dataset comprises
+dynamic videos captured in real-world ground-level scenarios
+and includes rich annotations across five interactivity types,
+i.e., Appearance, Situation, Position, Interaction, and Relation,
+making it a strong benchmark for ground-view scene graph
+generation. In contrast, the AeroEye-v1.0 dataset contains aerial
+videos that pose unique challenges, such as high object density,
+varying object scales, and complex spatial relationships.
+Metrics. Following [52], [32], [33], we evaluate methods
+using Recall (R) and mean Recall (mR) at multiple thresholds,
+specifically, predictions from the top-20, top-50, and top-100.
+B. Ablation Study
+1) Number of Hierarchical Levels: Table II presents an
+ablation study on the number of hierarchical levels of THYME,
+demonstrating that deeper aggregation significantly improves
+the model’s ability to fuse multi-scale spatial features and
+capture temporal information between interactivity types on
+AeroEyev1.0. For example, using only 1/4 of the full hierarchy
+yields 14.12% R@20 and 0.60% mR@20 in the Appearance
+category. In contrast, using the full depth boosts these metrics
+to 16.52% and 0.68%, highlighting the benefits of richer feature
+representations. Similar trends are observed in the Situation
+category (R@20 increasing from 4.33% to 5.53%), and in
+double-actor attributes: Position (from 12.32% to 15.52%),
+Interaction (from 10.87% to 13.07%), and Relation (from
+13.03% to 16.03%). In particular, most performance gains
+occur when increasing from 1/4 to 3/4 of the full depth, with
+only marginal improvements beyond that point. It suggests
+the existence of an optimal hierarchical depth that balances
+fine-grained detail extraction with global context aggregation
+without incurring diminishing returns. These findings highlight
+the role of hierarchical structure in our THYME approach
+for dynamic scene graph generation, enabling the model to
+effectively capture inter-object dynamics through progressively
+refined feature representations across abstraction levels.
+2) Temporal Attention Mechanism: The ablation results in
+Table III, based on experiments with the temporal attention
+mechanism, show that cyclic temporal attention consistently
+outperforms standard self-attention across all interactivity
+types. For example, in the Appearance category, replacing
+standard attention with cyclic attention increases R@20 from
+15.12% to 16.52% and mR@20 from 0.65% to 0.68%. Similar
+improvements are observed in Situation (R@20: 4.83% to
+5.53%, mR@20: 0.59% to 0.61%), Position (13.42% to
+9
+TABLE III: Comparison between attention mechanisms on R@20 and mR@20
+across interactivity types on the AeroEye-v1.0 dataset. Best scores are bolded.
+Mechanism
+Interactivity Type
+R@20
+mR@20
+Standard Attention
+Appearance
+15.12
+0.65
+Situation
+4.83
+0.59
+Position
+13.42
+0.92
+Interaction
+11.07
+0.14
+Relation
+14.03
+0.85
+Cyclic Attention
+Appearance
+16.52
+0.68
+Situation
+5.53
+0.61
+Position
+15.52
+1.05
+Interaction
+13.07
+0.16
+Relation
+16.03
+0.95
+TABLE IV: Effect of different window sizes on R@20 and mR@20 across
+interactivity types on the AeroEye-v1.0 dataset. Best scores are bolded.
+Window Size
+Interactivity Type
+R@20
+mR@20
+1/2
+Appearance
+15.32
+0.66
+Situation
+5.03
+0.59
+Position
+14.02
+0.97
+Interaction
+12.07
+0.15
+Relation
+15.03
+0.90
+3/4
+Appearance
+16.52
+0.68
+Situation
+5.53
+0.61
+Position
+15.52
+1.05
+Interaction
+13.07
+0.16
+Relation
+16.03
+0.95
+Full
+Appearance
+16.22
+0.67
+Situation
+5.43
+0.60
+Position
+15.22
+1.03
+Interaction
+12.77
+0.15
+Relation
+15.73
+0.93
+15.52%, 0.92% to 1.05%), Interaction (11.07% to 13.07%,
+0.14% to 0.16%), and Relation (14.03% to 16.03%, 0.85% to
+0.95%). These gains, ranging from approximately 1.4% to 2.0%
+percentage points in R@20 and the corresponding increases
+in mR@20, underscore the effectiveness of cyclic attention
+in modeling long-range temporal dependencies and capturing
+periodic patterns over time. By mitigating the loss of crucial
+contextual information, this mechanism enhances the model’s
+ability to generate more discriminative video scene graphs.
+3) Temporal Window Size: Table IV presents an ablation
+study on temporal window size, showing that increasing
+temporal context consistently improves both Recall (R@20)
+and mean Recall (mR@20) across all interactivity types. With
+a smaller window size of 1, the model achieves lower scores.
+For example, Appearance registers 15.32% R@20 and 0.66
+mR@20, while Position reaches 14.02% and 0.97% mR@20.
+Expanding the window to 3/4 leads to improved results,
+with appearance reaching 16.22% R@20 and 0.67% mR@20,
+and position achieving 15.22% and 1.03% mR@20. These
+improvements indicate that a greater temporal context enables
+better feature fusion and more accurate dynamic modeling.
+Especially, the best performance is achieved with the full
+window, where Appearance attains 16.52% R@20 and 0.68%
+mR@20, and Position reaches 15.52% and 1.05% mR@20.
+Although the performance gains from 3/4 to full window are
+marginal, the full window setting consistently yields the highest
+scores. This suggests that capturing the complete temporal
+context is particularly beneficial for modeling single-actor and
+TABLE V: Comparisons of video scene graph generation methods on the
+ASPIRe dataset. The table reports Recall (R) and mean Recall (mR) at top-
+20, top-50, and top-100 predictions for five interactivity types: Appearance,
+Situation, Position, Interaction, and Relation. Evaluated methods include state-
+of-the-art models (IMP, MOTIFS, VCTree, GPSNet, STTran, and TEMPURA),
+our previous approaches (HIG and CYCLO), and the proposed THYME.
+Method
+Interactivity Type
+R/mR@20
+R/mR@50
+R/mR@100
+IMP
+Appearance
+-
+-
+-
+Situation
+-
+-
+-
+Position
+9.70 / 0.49
+9.70 / 0.49
+9.70 / 0.49
+Interaction
+12.79 / 0.08
+12.79 / 0.08
+12.79 / 0.08
+Relation
+11.51 / 0.32
+11.51 / 0.32
+11.51 / 0.32
+MOTIFS
+Appearance
+-
+-
+-
+Situation
+-
+-
+-
+Position
+6.89 / 0.48
+8.49 / 0.38
+8.70 / 0.40
+Interaction
+8.83 / 0.12
+10.33 / 0.12
+10.63 / 0.12
+Relation
+8.72 / 0.32
+10.26 / 0.32
+10.55 / 0.32
+VCTree
+Appearance
+-
+-
+-
+Situation
+-
+-
+-
+Position
+4.18 / 0.39
+6.75 / 0.40
+8.59 / 0.42
+Interaction
+6.23 / 0.10
+9.58 / 0.10
+11.63 / 0.10
+Relation
+6.51 / 0.27
+9.82 / 0.28
+11.51 / 0.28
+GPSNet
+Appearance
+-
+-
+-
+Situation
+-
+-
+-
+Position
+12.89 / 1.26
+12.89 / 1.26
+12.89 / 1.26
+Interaction
+10.89 / 0.11
+10.89 / 0.11
+10.89 / 0.11
+Relation
+9.87 / 0.35
+9.87 / 0.35
+9.87 / 0.35
+HIG (Ours)
+Appearance
+15.02 / 0.60
+18.60 / 0.64
+20.11 / 0.65
+Situation
+5.01 / 0.56
+7.02 / 0.55
+12.01 / 0.63
+Position
+13.02 / 0.09
+24.52 / 1.33
+42.33 / 1.13
+Interaction
+12.02 / 0.11
+24.65 / 0.12
+41.65 / 0.14
+Relation
+10.26 / 0.29
+23.72 / 0.34
+41.47 / 0.39
+STTran
+Appearance
+-
+-
+-
+Situation
+-
+-
+-
+Position
+13.52 / 0.51
+24.92 / 1.38
+42.80 / 1.31
+Interaction
+12.27 / 0.14
+24.84 / 0.17
+41.85 / 0.21
+Relation
+12.03 / 0.51
+23.93 / 0.81
+42.85 / 1.01
+CYCLO (Ours)
+Appearance
+-
+-
+-
+Situation
+-
+-
+-
+Position
+16.32 / 0.97
+29.41 / 1.60
+48.67 / 1.65
+Interaction
+15.27 / 0.20
+28.32 / 1.27
+46.15 / 2.32
+Relation
+18.34 / 0.90
+28.17 / 1.70
+50.23 / 2.60
+TEMPURA
+Appearance
+-
+-
+-
+Situation
+-
+-
+-
+Position
+13.71 / 0.85
+26.07 / 1.45
+43.94 / 1.49
+Interaction
+12.53 / 0.17
+25.03 / 0.22
+42.03 / 0.27
+Relation
+15.29 / 0.84
+24.95 / 1.61
+46.44 / 1.52
+THYME (Ours)
+Appearance
+18.23 / 1.07
+21.67 / 1.61
+23.12 / 2.72
+Situation
+6.57 / 0.26
+8.64 / 1.76
+14.23 / 2.67
+Position
+18.52 / 1.22
+31.03 / 2.42
+50.05 / 2.53
+Interaction
+19.52 / 0.32
+30.03 / 1.42
+48.04 / 2.47
+Relation
+21.02 / 1.12
+32.03 / 1.82
+54.05 / 2.93
+double-actor interactivity types in dynamic video scenes.
+C. Comparison with State-of-the-Arts
+1) Performance on ASPIRe: Table V demonstrates that our
+THYME approach consistently outperforms state-of-the-art
+methods on the ASPIRe dataset across interactivity types.
+In particular, STTran, which employs a spatio-temporal
+transformer to model video data, shows notable improvement
+over earlier baselines. However, its performance on double-
+actor attributes remains limited, achieving only 13.52% R@20
+and 0.51 mR@20 in Position and 12.27% R@20 and 0.14
+mR@20 in Interaction. Similarly, TEMPURA builds on STTran
+by incorporating debiasing mechanisms and uncertainty-aware
+classification, resulting in modest performance gains. Neverthe-
+less, TEMPURA still struggles to capture the complex temporal
+dynamics inherent in multi-object relationships.
+HIG provides a foundation for our approach by employing
+a hierarchical structure. Although it improves upon static
+10
+TABLE VI: Comparisons of various methods on the AeroEye-v1.0 dataset
+for video scene graph generation. The table reports Recall (R) and mean
+Recall (mR) at top-20, top-50, and top-100 predictions across five interactivity
+types: Appearance, Situation, Position, Interaction, and Relation. Baseline
+methods (IMP, MOTIFS, VCTree, and GPSNet) are compared with our previous
+approaches (HIG and CYCLO) and the proposed THYME.
+Method
+Interactivity Type
+R/mR@20
+R/mR@50
+R/mR@100
+IMP
+Appearance
+-
+-
+-
+Situation
+-
+-
+-
+Position
+8.47 / 0.41
+8.52 / 0.39
+8.57 / 0.42
+Interaction
+11.13 / 0.07
+12.03 / 0.08
+12.71 / 0.13
+Relation
+10.02 / 0.28
+10.51 / 0.28
+10.00 / 0.28
+MOTIFS
+Appearance
+-
+-
+-
+Situation
+-
+-
+-
+Position
+6.50 / 0.45
+7.75 / 0.35
+7.83 / 0.38
+Interaction
+8.03 / 0.11
+9.00 / 0.15
+9.54 / 0.17
+Relation
+7.92 / 0.31
+9.12 / 0.35
+9.52 / 0.42
+VCTree
+Appearance
+-
+-
+-
+Situation
+-
+-
+-
+Position
+3.81 / 0.35
+5.03 / 0.36
+6.51 / 0.38
+Interaction
+5.53 / 0.08
+7.55 / 0.09
+8.79 / 0.12
+Relation
+5.82 / 0.25
+7.13 / 0.27
+8.51 / 0.29
+GPSNet
+Appearance
+-
+-
+-
+Situation
+-
+-
+-
+Position
+11.47 / 0.83
+11.23 / 0.95
+11.54 / 1.12
+Interaction
+9.47 / 0.12
+9.53 / 0.15
+9.76 / 0.21
+Relation
+8.62 / 0.42
+8.73 / 0.47
+8.97 / 0.53
+STTran
+Appearance
+-
+-
+-
+Situation
+-
+-
+-
+Position
+12.22 / 0.75
+21.82 / 1.15
+37.22 / 1.05
+Interaction
+10.52 / 0.08
+20.52 / 0.10
+36.52 / 0.10
+Relation
+8.52 / 0.22
+18.52 / 0.32
+35.52 / 0.42
+HIG (Ours)
+Appearance
+14.51 / 0.55
+17.62 / 0.62
+19.15 / 0.67
+Situation
+4.53 / 0.57
+6.55 / 0.62
+10.58 / 0.72
+Position
+12.51 / 0.85
+22.53 / 1.26
+38.72 / 1.73
+Interaction
+11.57 / 0.19
+21.95 / 0.21
+38.14 / 0.32
+Relation
+9.57 / 0.25
+20.54 / 0.36
+37.58 / 0.35
+TEMPURA
+Appearance
+-
+-
+-
+Situation
+-
+-
+-
+Position
+13.22 / 0.82
+23.22 / 1.25
+39.22 / 1.37
+Interaction
+11.81 / 0.12
+21.80 / 0.14
+37.80 / 0.16
+Relation
+11.47 / 0.33
+21.53 / 0.45
+40.42 / 0.76
+CYCLO
+Appearance
+-
+-
+-
+Situation
+-
+-
+-
+Position
+13.52 / 0.75
+25.03 / 1.35
+40.12 / 1.40
+Interaction
+12.61 / 0.14
+23.05 / 0.23
+38.82 / 0.24
+Relation
+14.51 / 0.83
+22.52 / 1.41
+45.38 / 1.55
+THYME (Ours)
+Appearance
+16.52 / 0.68
+19.53 / 0.72
+21.07 / 0.83
+Situation
+5.53 / 0.61
+7.57 / 0.76
+11.51 / 0.85
+Position
+15.52 / 1.05
+26.03 / 1.45
+42.03 / 2.15
+Interaction
+13.07 / 0.16
+24.53 / 1.22
+41.53 / 2.26
+Relation
+16.03 / 0.95
+26.53 / 1.74
+48.03 / 2.38
+modeling approaches, HIG exhibits limitations in achieving
+temporal consistency and producing balanced predictions across
+frequent and rare predicate classes. Furthermore, CYCLO
+advances this further by introducing cyclic temporal refinement,
+which improves the temporal modeling of dynamic interactions.
+However, CYCLO fails to capture multi-scale spatial context
+and long-range temporal dependencies within video scenes.
+THYME distinguishes itself by combining cyclic temporal
+refinement with hierarchical feature aggregation. This dual
+mechanism enables the extraction of features at multiple levels
+of abstraction, enhancing temporal consistency and spatial
+context modeling. Therefore, THYME achieves significant
+performance gains. For single-actor attributes, it records 18.23%
+R@20 and 1.07 mR@20 in Appearance, and 6.57% R@20
+and 0.26 mR@20 in Situation, clearly outperforming STTran,
+TEMPURA, and HIG. The improvements are even more
+pronounced for double-actor attributes, where THYME achieves
+18.52% R@20 and 1.22 mR@20 in Position, 19.52% R@20
+and 0.32 mR@20 in Interaction, and 21.02% R@20 and 1.12
+mR@20 in Relation, surpassing HIG and CYCLO.
+These improvements, particularly in mean Recall, highlight
+THYME’s ability to generate more balanced and discriminative
+predictions across varying predicate frequencies, resulting in
+more comprehensive scene graphs, as illustrated in Fig. 5.
+2) Performance on AeroEye-v1.0.: The experimental results
+in Table VI demonstrate a progressive improvement in dynamic
+scene graph generation performance on the AeroEye-v1.0
+dataset, with our proposed THYME approach achieving the
+highest scores across most interactivity types. Traditional
+methods such as IMP, MOTIFS, VCTree, and GPSNet primarily
+rely on static or limited spatio-temporal cues. As a result,
+they exhibit relatively low Recall and mean Recall values,
+particularly in capturing dynamic interactions. For example,
+IMP achieves only 8.47% Recall for Position and 11.13% for
+Interaction at R@20, while VCTree and GPSNet show only
+modest improvements. These results highlight the inherent
+limitations of prior methods that fail to utilize temporal context.
+Transformer-based methods, such as STTran, show notice-
+able improvements over traditional methods, achieving 12.22%
+R@20 in Position and 10.52% in Interaction. However, STTran
+struggles with complex interactivity, as indicated by its low
+Relation score of 8.52% R@20. In addition, HIG promotes
+dynamic interactivity modeling with 12.51% R@20 in Position
+and 11.57% in Interaction, along with improved mR. Moreover,
+TEMPURA slightly improves performance, reaching 13.22%
+R@20 in Position and 11.47% in Relation. Despite these gains,
+existing models face challenges in handling long-tail predicate
+distributions and capturing subtle interactivity transitions.
+Notably, THYME achieves substantial improvements across
+all interactivity: 16.52% R@20 in Appearance, 5.53% in
+Situation, and significantly higher scores for double-actor
+attributes (15.52% in Position, 13.07% in Interaction, and
+16.03% in Relation). In addition, the mean Recall values
+also improve considerably, with THYME reaching 1.05% for
+Position, 0.16% for Interaction, and 0.95% for Relation at
+mR@20. These results outperform the second-best method
+(e.g., CYCLO) by 2–3% in terms of Recall on double-actor
+attributes, enabling the generation of more comprehensive scene
+graphs for drone-captured video, as further illustrated in Fig. 6.
+D. Qualitative Results
+In Fig. 5, HIG and CYCLO encounter difficulties when
+objects are occluded or missing from the scene (e.g., person-3
+and ball-1). Due to its lack of temporal refinement, HIG fails to
+predict subsequent relationships once an object disappears. HIG
+cannot effectively leverage prior context to generate accurate
+predictions when the object is no longer visible, as illustrated
+in Fig. 5a. CYCLO, on the other hand, attempts to address this
+issue by relying on periodic interactions, following sequences
+such as catching” to dribbling” to “hitting.” However, this
+reliance on fixed interaction patterns makes it vulnerable to
+errors when key objects like ball-1 are occluded, as the model
+struggles to adapt to disruptions in the expected sequence, as
+shown in Fig. 5b. In contrast, our approach offers a dynamic
+solution. When ball-1 disappears from the scene, THYME
+11
+person-1
+person-2
+person-3
+ball-1
+hitting
+players
+players
+players
+person-1
+person-2
+person-3
+ball-1
+catching
+players
+players
+players
+person-1
+person-2
+person-3
+ball-1
+catching
+players
+players
+players
+person-1
+person-2
+person-3
+ball-1
+players
+players
+players
+person-1
+person-2
+person-3
+ball-1
+hitting
+players
+players
+players
+person-1
+person-2
+person-3
+ball-1
+catching
+players
+players
+players
+person-1
+person-2
+person-3
+ball-1
+dribbling
+players
+players
+players
+person-1
+person-2
+person-3
+ball-1
+hitting
+players
+players
+players
+person-1
+person-2
+person-3
+ball-1
+hitting
+players
+players
+players
+person-1
+person-2
+person-3
+ball-1
+catching
+players
+players
+players
+person-1
+person-2
+person-3
+ball-1
+players
+players
+players
+person-1
+person-2
+person-3
+ball-1
+holding
+players
+players
+players
+a) HIG
+b) CYCLO
+c) HIERCY
+Fig. 5: Qualitative comparison on the ASPIRe dataset. Green edges denote correct predictions, while red edges is incorrect predictions. (Best viewed in colors)
+employs an advanced tracking mechanism enabled by its
+hierarchical structure and leverages cyclic attention to maintain
+a refined understanding of the object’s temporal trajectory.
+In Fig. 6, the scenario where a police car is chasing another
+car captured from a drone view, HIG struggles to capture the
+evolving dynamics, particularly the shift in relative position
+between the two vehicles. As the police car changes from
+being behind to alongside the other car, HIG fails to recognize
+this change, continuing to predict “chasing” without updating
+to “approaching” or anticipating the “crashing”"" event. On
+the other hand, CYCLO relies on periodic interaction patterns
+and struggles with predicting the correct position between
+the cars. This leads to an incorrect shift from "approaching"
+back to “chasing”, failing to capture the nuanced interactions
+and missing the prediction of the crash. THYME, however,
+successfully tracks the changing positions and speed of the
+vehicles, updating its prediction history from “chasing” to
+“approaching” as the cars move closer. THYME’s cyclic
+temporal refinement allows it to predict the progression of
+interactions accurately, ultimately forecasting the “crashing”
+event by leveraging both spatial and temporal features across
+multiple levels of abstraction, outperforming HIG and CYCLO
+in capturing the dynamic changes in the video scene.
+VII. CONCLUSION
+In this work, we have introduced the THYME approach,
+which integrates hierarchical feature aggregation with cyclic
+temporal refinement to capture multi-scale spatial details
+and maintain temporal consistency in video scene graph
+generation. In addition, we have presented AeroEye-v1.0,
+a novel aerial video dataset enriched with comprehensive
+annotations across appearance, situation, position, interaction,
+and relation. Moreover, our extensive experiments on the
+ASPIRe and AeroEye-v1.0 datasets have demonstrated that the
+proposed THYME approach significantly outperforms existing
+state-of-the-art methods, yielding more accurate and consistent
+scene graph representations in ground-view and aerial scenarios.
+Future work can include integrating multimodal cues, such
+as audio and textual information, to enrich the scene represen-
+tations and exploring domain adaptation techniques to extend
+our approach to a broader range of real-world scenarios. In
+addition, our objective is to investigate advanced mechanisms
+for bias reduction and the incorporation of additional contextual
+cues to handle long-tail predicate distributions better.
+12
+chasing
+car-1
+car-2
+behind
+in front of
+chasing
+car-1
+car-2
+behind
+in front of
+chasing
+car-1
+car-2
+behind
+in front of
+approaching
+car-1
+car-2
+next to
+next to
+chasing
+car-1
+car-2
+approaching
+car-1
+car-2
+approaching
+car-1
+car-2
+chasing
+car-1
+car-2
+chasing
+car-1
+car-2
+behind
+in front of
+approaching
+car-1
+car-2
+next to
+next to
+approaching
+car-1
+car-2
+next to
+next to
+crashing
+car-1
+car-2
+next to
+next to
+a) HIG
+b) CYCLO
+c) HIERCY
+Fig. 6: Qualitative comparison on the AeroEye-v1.0 dataset. Green edges is correct predictions, while red edges is incorrect predictions. (Best viewed in colors)
+REFERENCES
+[1] Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier,
+Alexander Kirillov, and Sergey Zagoruyko. End-to-end object detection
+with transformers. In European conference on computer vision, pages
+213–229. Springer, 2020. 6
+[2] Orcun Cetintas, Guillem Brasó, and Laura Leal-Taixé. Unifying short
+and long-term tracking with graph hierarchies. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+pages 22877–22887, 2023. 2
+[3] Zhanwen Chen, Saed Rezayi, and Sheng Li. More knowledge, less bias:
+Unbiasing scene graph generation with explicit ontological adjustment.
+In Proceedings of the IEEE/CVF Winter Conference on Applications of
+Computer Vision, pages 4023–4032, 2023. 3
+[4] Yuren Cong, Wentong Liao, Hanno Ackermann, Bodo Rosenhahn,
+and Michael Ying Yang.
+Spatial-temporal transformer for dynamic
+scene graph generation. In Proceedings of the IEEE/CVF international
+conference on computer vision, pages 16372–16382, 2021. 3
+[5] Yuren Cong, Michael Ying Yang, and Bodo Rosenhahn. Reltr: Relation
+transformer for scene graph generation. IEEE Transactions on Pattern
+Analysis and Machine Intelligence, 45(9):11169–11183, 2023. 2, 4
+[6] Dima Damen, Hazel Doughty, Giovanni Maria Farinella, Antonino
+Furnari, Evangelos Kazakos, Jian Ma, Davide Moltisanti, Jonathan Munro,
+Toby Perrett, Will Price, et al. Rescaling egocentric vision: Collection,
+pipeline and challenges for epic-kitchens-100. International Journal of
+Computer Vision, pages 1–23, 2022. 3
+[7] Long Hoang Dang, Thao Minh Le, Vuong Le, and Truyen Tran.
+Hierarchical object-oriented spatio-temporal reasoning for video question
+answering. arXiv preprint arXiv:2106.13432, 2021. 2
+[8] Jeonghyeok Do and Munchurl Kim.
+Skateformer: skeletal-temporal
+transformer for human action recognition. In European Conference on
+Computer Vision, pages 401–420. Springer, 2024. 2
+[9] Shengyu Feng, Hesham Mostafa, Marcel Nassar, Somdeb Majumdar, and
+Subarna Tripathi. Exploiting long-term dependencies for generating
+dynamic scene graphs.
+In Proceedings of the IEEE/CVF Winter
+Conference on Applications of Computer Vision, pages 5130–5139, 2023.
+2, 3, 4
+[10] Difei Gao, Luowei Zhou, Lei Ji, Linchao Zhu, Yi Yang, and Mike Zheng
+Shou. Mist: Multi-modal iterative spatial-temporal transformer for long-
+form video question answering.
+In Proceedings of the IEEE/CVF
+conference on computer vision and pattern recognition, pages 14773–
+14783, 2023. 2
+[11] Gege Gao, Weiyang Liu, Anpei Chen, Andreas Geiger, and Bernhard
+Schölkopf. Graphdreamer: Compositional 3d scene synthesis from scene
+graphs. arXiv preprint arXiv:2312.00093, 2023. 3
+[12] Zeeshan Hayder and Xuming He. Dsgg: Dense relation transformer for
+an end-to-end scene graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition, pages 28317–
+28326, 2024. 2, 3, 4
+[13] Tao He, Lianli Gao, Jingkuan Song, and Yuan-Fang Li. Toward a unified
+transformer-based framework for scene graph generation and human-
+object interaction detection. IEEE Transactions on Image Processing,
+32:6274–6288, 2023. 2, 4
+[14] Drew A Hudson and Christopher D Manning. Gqa: A new dataset for
+real-world visual reasoning and compositional question answering. In
+Proceedings of the IEEE/CVF conference on computer vision and pattern
+recognition, pages 6700–6709, 2019. 3
+[15] Guangyu Huo, Yong Zhang, Boyue Wang, Junbin Gao, Yongli Hu, and
+Baocai Yin. Hierarchical spatio–temporal graph convolutional networks
+and transformer network for traffic flow forecasting. IEEE Transactions
+13
+on Intelligent Transportation Systems, 24(4):3855–3867, 2023. 2
+[16] Jinbae Im, JeongYeon Nam, Nokyung Park, Hyungmin Lee, and
+Seunghyun Park. Egtr: Extracting graph from transformer for scene
+graph generation.
+In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, pages 24229–24238, 2024. 2,
+3, 4, 5, 7
+[17] Jingwei Ji, Ranjay Krishna, Li Fei-Fei, and Juan Carlos Niebles. Action
+genome: Actions as compositions of spatio-temporal scene graphs. In
+Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, pages 10236–10247, 2020. 2, 3
+[18] Xiaosong Jia, Penghao Wu, Li Chen, Yu Liu, Hongyang Li, and Junchi
+Yan. Hdgt: Heterogeneous driving graph transformer for multi-agent
+trajectory prediction via scene encoding. IEEE transactions on pattern
+analysis and machine intelligence, 45(11):13860–13875, 2023. 2
+[19] Tianlei Jin, Fangtai Guo, Qiwei Meng, Shiqiang Zhu, Xiangming Xi,
+Wen Wang, Zonghao Mu, and Wei Song. Fast contextual scene graph
+generation with unbiased context augmentation. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+pages 6302–6311, 2023. 3, 4
+[20] Weike Jin, Zhou Zhao, Pengcheng Zhang, Jieming Zhu, Xiuqiang He, and
+Yueting Zhuang. Hierarchical cross-modal graph consistency learning
+for video-text retrieval. In Proceedings of the 44th International ACM
+SIGIR Conference on research and development in information retrieval,
+pages 1114–1124, 2021. 2
+[21] Siddhesh
+Khandelwal,
+Mohammed
+Suhail,
+and
+Leonid
+Sigal.
+Segmentation-grounded scene graph generation. In Proceedings of the
+IEEE/CVF International Conference on Computer Vision, pages 15879–
+15889, 2021. 3
+[22] Kibum Kim, Kanghoon Yoon, Jaehyeong Jeon, Yeonjun In, Jinyoung
+Moon, Donghyun Kim, and Chanyoung Park. Llm4sgg: Large language
+model for weakly supervised scene graph generation. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2024. 3
+[23] Kibum Kim, Kanghoon Yoon, Jaehyeong Jeon, Yeonjun In, Jinyoung
+Moon, Donghyun Kim, and Chanyoung Park. Llm4sgg: Large language
+models for weakly supervised scene graph generation. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+pages 28306–28316, 2024. 3
+[24] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson, Kenji Hata,
+Joshua Kravitz, Stephanie Chen, Yannis Kalantidis, Li-Jia Li, David A
+Shamma, et al. Visual genome: Connecting language and vision using
+crowdsourced dense image annotations. International journal of computer
+vision, 123:32–73, 2017. 1, 3
+[25] Sanjoy Kundu and Sathyanarayanan N Aakur. Is-ggt: Iterative scene
+graph generation with generative transformers. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+pages 6292–6301, 2023. 2, 3, 4
+[26] Linjie Li, Yen-Chun Chen, Yu Cheng, Zhe Gan, Licheng Yu, and Jingjing
+Liu. Hero: Hierarchical encoder for video+ language omni-representation
+pre-training. arXiv preprint arXiv:2005.00200, 2020. 2
+[27] Rongjie Li, Songyang Zhang, and Xuming He. Sgtr: End-to-end scene
+graph generation with transformer. In proceedings of the IEEE/CVF
+conference on computer vision and pattern recognition, pages 19486–
+19496, 2022. 2, 3, 4, 5
+[28] Yuanzhi Liang, Yalong Bai, Wei Zhang, Xueming Qian, Li Zhu, and Tao
+Mei. Vrr-vg: Refocusing visually-relevant relationships. In Proceedings
+of the IEEE/CVF international conference on computer vision, pages
+10403–10412, 2019. 3
+[29] Yao Liu, Lina Yao, Binghao Li, Xianzhi Wang, and Claude Sammut.
+Social graph transformer networks for pedestrian trajectory prediction in
+complex social scenarios. In Proceedings of the 31st ACM International
+Conference on Information & Knowledge Management, pages 1339–1349,
+2022. 2
+[30] Yanan Liu, Hao Zhang, Dan Xu, and Kangjian He. Graph transformer net-
+work with temporal kernel attention for skeleton-based action recognition.
+Knowledge-Based Systems, 240:108146, 2022. 2
+[31] Sayak Nag, Kyle Min, Subarna Tripathi, and Amit K Roy-Chowdhury.
+Unbiased scene graph generation in videos.
+In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+pages 22803–22813, 2023. 3, 4
+[32] Trong-Thuan Nguyen, Pha Nguyen, and Khoa Luu. Hig: Hierarchical
+interlacement graph approach to scene graph generation in video
+understanding. In Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, 2024. 2, 3, 4, 5, 7, 8
+[33] Trong-Thuan Nguyen, Pha Nguyen, Li Xin, Cothren Jackson, Yilmaz
+Alper, and Khoa Luu. CYCLO: Cyclic graph transformer approach to
+multi-object relationship modeling in aerial videos. In The Thirty-eighth
+Annual Conference on Neural Information Processing Systems, 2024. 2,
+3, 4, 5, 6, 7, 8
+[34] Anwesan Pal, Yiding Qiu, and Henrik Christensen. Learning hierarchical
+relationships for object-goal navigation. In Conference on Robot Learning,
+pages 517–528. PMLR, 2021. 2
+[35] Yunsheng Pang, Qiuhong Ke, Hossein Rahmani, James Bailey, and Jun
+Liu. Igformer: Interaction graph transformer for skeleton-based human
+interaction recognition. In European Conference on Computer Vision,
+pages 605–622. Springer, 2022. 2
+[36] Xufeng Qian, Yueting Zhuang, Yimeng Li, Shaoning Xiao, Shiliang Pu,
+and Jun Xiao. Video relation detection with spatio-temporal graph. In
+Proceedings of the 27th ACM international conference on multimedia,
+pages 84–93, 2019. 3, 4
+[37] Xindi Shang, Donglin Di, Junbin Xiao, Yu Cao, Xun Yang, and Tat-Seng
+Chua. Annotating objects and relations in user-generated videos. In
+Proceedings of the 2019 on International Conference on Multimedia
+Retrieval, pages 279–287, 2019. 3
+[38] Xindi Shang, Yicong Li, Junbin Xiao, Wei Ji, and Tat-Seng Chua. Video
+visual relation detection via iterative inference. In Proceedings of the
+29th ACM international conference on Multimedia, pages 3654–3663,
+2021. 4
+[39] Xindi Shang, Tongwei Ren, Jingfan Guo, Hanwang Zhang, and Tat-Seng
+Chua. Video visual relation detection. In Proceedings of the 25th ACM
+international conference on Multimedia, pages 1300–1308, 2017. 3
+[40] Yuhan Shen and Ehsan Elhamifar.
+Progress-aware online action
+segmentation for egocentric procedural task videos. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+pages 18186–18197, 2024. 2
+[41] Yao Teng, Limin Wang, Zhifeng Li, and Gangshan Wu. Target adaptive
+context aggregation for video scene graph generation. In Proceedings
+of the IEEE/CVF International Conference on Computer Vision, pages
+13688–13697, 2021. 2, 3, 4, 5
+[42] Yao-Hung Hubert Tsai, Santosh Divvala, Louis-Philippe Morency, Ruslan
+Salakhutdinov, and Ali Farhadi.
+Video relationship reasoning using
+gated spatio-temporal energy graph. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition, pages 10424–
+10433, 2019. 4
+[43] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion
+Jones, Aidan N Gomez, Łukasz Kaiser, and Illia Polosukhin. Attention
+is all you need. Advances in neural information processing systems, 30,
+2017. 2
+[44] Guan Wang, Zhimin Li, Qingchao Chen, and Yang Liu. Oed: Towards
+one-stage end-to-end dynamic scene graph generation. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+pages 27938–27947, 2024. 2, 4, 5
+[45] Jinghao Wang, Zhengyu Wen, Xiangtai Li, Zujin Guo, Jingkang Yang, and
+Ziwei Liu. Pair then relation: Pair-net for panoptic scene graph generation.
+IEEE Transactions on Pattern Analysis and Machine Intelligence, 2024.
+3
+[46] Tao Wu, Runyu He, Gangshan Wu, and Limin Wang. Sportshhi: A dataset
+for human-human interaction detection in sports videos. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2024. 3
+[47] Junbin Xiao, Angela Yao, Zhiyuan Liu, Yicong Li, Wei Ji, and Tat-
+Seng Chua. Video as conditional graph hierarchy for multi-granular
+question answering. In Proceedings of the AAAI Conference on Artificial
+Intelligence, volume 36, pages 2804–2812, 2022. 2
+[48] Junbin Xiao, Pan Zhou, Angela Yao, Yicong Li, Richang Hong,
+Shuicheng Yan, and Tat-Seng Chua. Contrastive video question answering
+via video graph transformer. IEEE Transactions on Pattern Analysis and
+Machine Intelligence, 45(11):13265–13280, 2023. 2
+[49] Danfei Xu, Yuke Zhu, Christopher B Choy, and Li Fei-Fei. Scene graph
+generation by iterative message passing. In Proceedings of the IEEE
+conference on computer vision and pattern recognition, pages 5410–5419,
+2017. 1, 3
+[50] Biao Yang, Fucheng Fan, Rongrong Ni, Hai Wang, Ammar Jafaripourn-
+imchahi, and Hongyu Hu. A multi-task learning network with a collision-
+aware graph transformer for traffic-agents trajectory prediction. IEEE
+Transactions on Intelligent Transportation Systems, 25(7):6677–6690,
+2024. 2
+[51] Jingkang Yang, Yi Zhe Ang, Zujin Guo, Kaiyang Zhou, Wayne Zhang,
+and Ziwei Liu. Panoptic scene graph generation. In European Conference
+on Computer Vision, pages 178–196. Springer, 2022. 1, 3
+[52] Jingkang Yang, Wenxuan Peng, Xiangtai Li, Zujin Guo, Liangyu Chen,
+Bo Li, Zheng Ma, Kaiyang Zhou, Wayne Zhang, Chen Change Loy,
+et al. Panoptic video scene graph generation. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+pages 18675–18685, 2023. 2, 3, 4, 8
+[53] Di Yao, Haonan Hu, Lun Du, Gao Cong, Shi Han, and Jingping Bi.
+Trajgat: A graph-based long-term dependency modeling approach for
+trajectory similarity computation.
+In Proceedings of the 28th ACM
+14
+SIGKDD conference on knowledge discovery and data mining, pages
+2275–2285, 2022. 2
+[54] Seongjun Yun, Minbyul Jeong, Raehyun Kim, Jaewoo Kang, and
+Hyunwoo J Kim. Graph transformer networks. Advances in neural
+information processing systems, 32, 2019. 2
+[55] Ce Zhang, Simon Stepputtis, Joseph Campbell, Katia Sycara, and Yaqi
+Xie. Hiker-sgg: Hierarchical knowledge enhanced robust scene graph
+generation. In Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pages 28233–28243, 2024. 2
+[56] Zhu Zhang, Zhou Zhao, Yang Zhao, Qi Wang, Huasheng Liu, and Lianli
+Gao. Where does it exist: Spatio-temporal video grounding for multi-form
+sentences. In Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pages 10668–10677, 2020. 3
+[57] Chengyang Zhao, Yikang Shen, Zhenfang Chen, Mingyu Ding, and
+Chuang Gan. Textpsg: Panoptic scene graph generation from textual
+descriptions. In Proceedings of the IEEE/CVF International Conference
+on Computer Vision, pages 2839–2850, 2023. 3
+[58] Yifeng Zhu, Jonathan Tremblay, Stan Birchfield, and Yuke Zhu. Hi-
+erarchical planning for long-horizon manipulation with geometric and
+symbolic scene graphs.
+In 2021 IEEE International Conference on
+Robotics and Automation (ICRA), pages 6541–6548. Ieee, 2021. 2

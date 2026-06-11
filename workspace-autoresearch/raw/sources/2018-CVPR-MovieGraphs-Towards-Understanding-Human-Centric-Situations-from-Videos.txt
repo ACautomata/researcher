@@ -1,0 +1,2805 @@
+MovieGraphs: Towards Understanding Human-Centric Situations from Videos
+Paul Vicol1,2
+Makarand Tapaswi1,2
+Lluís Castrejón3
+Sanja Fidler1,2
+1University of Toronto
+2Vector Institute
+3Montreal Institute for Learning Algorithms
+{pvicol, makarand, fidler}@cs.toronto.edu, lluis.enric.castrejon.subira@umontreal.ca
+http://moviegraphs.cs.toronto.edu
+worried
+frustrated
+his leg braces slow him down
+compassionate
+encourages
+to run
+0:00-0:10
+0:24-0:28.5
+0:19.5-1:02
+0:56-1:02
+0:56-1:02
+female
+kid
+Jenny Curran
+Jenny Curran
+friend
+hit
+hit
+enemy
+enemy
+chases
+Bullies
+Bullies
+that he is a dummy
+that he is a dummy
+0:00-0:13
+0:00-0:13
+with rocks
+caucasian
+caucasian
+male
+male
+scared
+scared
+aggressive
+aggressive
+he is different from them
+he is different from them
+violent
+hateful
+to get him
+0:34-1:02
+to not get beaten
+runs from
+runs from
+Forrest Gump
+Forrest Gump
+caucasian
+caucasian
+kid
+kid
+insults
+insults
+Legend
+Character
+Attribute
+Relationship
+Interaction
+Summary Int.
+Topic
+Reason
+Timestamp
+Field Road 
+Situation: 
+Description: 
+Scene: 
+Bullying 
+As Jenny and Forrest are on the road, three
+boys start throwing rocks at Forrest. 
+Jenny urges him to run from them. While 
+Forrest runs, his leg braces fall apart. 
+Video Clip
+Bullying 
+Escape 
+Family altercation 
+Bedtime 
+Football game 
+Talk with stranger 
+Playing 
+Bus ride 
+Figure 1: An example from the MovieGraphs dataset. Each of the 7637 video clips is annotated with: 1) a graph that captures the characters
+in the scene and their attributes, interactions (with topics and reasons), relationships, and time stamps; 2) a situation label that captures the
+overarching theme of the interactions; 3) a scene label showing where the action takes place; and 4) a natural language description of the
+clip. The graphs at the bottom show situations that occur before and after the one depicted in the main panel.
+Abstract
+There is growing interest in artiﬁcial intelligence to build
+socially intelligent robots. This requires machines to have
+the ability to “read” people’s emotions, motivations, and
+other factors that affect behavior. Towards this goal, we in-
+troduce a novel dataset called MovieGraphs which provides
+detailed, graph-based annotations of social situations de-
+picted in movie clips. Each graph consists of several types of
+nodes, to capture who is present in the clip, their emotional
+and physical attributes, their relationships (i.e., parent/child),
+and the interactions between them. Most interactions are
+associated with topics that provide additional details, and
+reasons that give motivations for actions. In addition, most
+interactions and many attributes are grounded in the video
+with time stamps. We provide a thorough analysis of our
+dataset, showing interesting common-sense correlations be-
+tween different social aspects of scenes, as well as across
+scenes over time. We propose a method for querying videos
+and text with graphs, and show that: 1) our graphs contain
+rich and sufﬁcient information to summarize and localize
+each scene; and 2) subgraphs allow us to describe situa-
+tions at an abstract level and retrieve multiple semantically
+relevant situations. We also propose methods for interac-
+tion understanding via ordering, and reason understanding.
+MovieGraphs is the ﬁrst benchmark to focus on inferred
+properties of human-centric situations, and opens up an
+exciting avenue towards socially-intelligent AI agents.
+1. Introduction
+An important part of effective interaction is behaving
+appropriately in a given situation. People typically know
+how to talk to their boss, react to a worried parent or a
+naughty child, or cheer up a friend. This requires proper
+reading of people’s emotions, understanding their mood,
+1
+arXiv:1712.06761v2  [cs.CV]  15 Apr 2018
+motivations, and other factors that affect behavior. Further-
+more, it requires understanding social and cultural norms,
+and being aware of the implications of one’s actions. The
+increasing interest in social chat bots and personal assis-
+tants [1, 5, 22, 26, 31, 47] points to the importance of teach-
+ing artiﬁcial agents to understand the subtleties of human
+social interactions.
+Towards this goal, we collect a novel dataset called
+MovieGraphs (Fig. 1) containing movie clips that depict
+human-centric situations. Movies are a rich source of infor-
+mation about behavior, because like people in the real world,
+movie characters face a variety of situations: they deal with
+colleagues at work, with family at home, with friends, and
+with enemies. Past situations lead to new situations, relation-
+ships change over time, and we get to see the same character
+experience emotional ups and downs just as real people do.
+The behavior of characters depends on their interpersonal
+relationships (e.g. family or friends), as well as on the social
+context, which includes the scene (e.g. bar) and situation
+(e.g. date). We use graphs to describe this behavior because
+graphs are more structured than natural language, and allow
+us to easily ground information in videos.
+The MovieGraphs dataset consists of 7637 movie clips
+annotated with graphs that represent who is in each clip,
+the interactions between characters, their relationships, and
+various visible and inferred properties such as the reasons
+behind certain interactions. Each clip is also annotated with
+a situation label, a scene label (where the situation takes
+place), and a natural language description. Furthermore, our
+graphs are visually and temporally grounded: characters in
+the graph are associated with face tracks in the clip, and most
+interactions are associated with the time intervals in which
+they occur.
+We provide a detailed analysis of our dataset, show-
+ing interesting common-sense correlations between differ-
+ent social aspects of situations. We propose methods for
+graph-based video retrieval, interaction understanding via
+ordering, and understanding motivations via reason predic-
+tion. We show that graphs contain sufﬁcient information
+to localize a video clip in a dataset of movies, and that
+querying via subgraphs allows us to retrieve semantically
+meaningful clips. Our dataset and code will be released
+(http://moviegraphs.cs.toronto.edu), to inspire fu-
+ture work in this exciting domain.
+The rest of this paper is structured as follows: in Sec. 2,
+we discuss related work; Sec. 3 describes our dataset; Sec. 4
+introduces the models we use for video retrieval, interaction
+ordering, and reason prediction; Sec. 5 presents the results
+of our experiments; and we conclude in Sec. 6.
+2. Related Work
+Video Understanding.
+There is increasing effort in de-
+veloping video understanding techniques that go beyond
+classifying actions in short video snippets [23, 30], towards
+parsing more complex videos [6, 40, 41]. A large body of
+work focuses on identifying characters in movies or TV se-
+ries [8, 13, 37, 43] and estimating their poses [11]. Steps
+towards understanding social aspects of scenes have included
+classifying four visual types of interactions [35], and predict-
+ing whether people are looking at each other [29]. [10, 33]
+ﬁnd communities of characters in movies and analyze their
+social networks. In [14], the authors predict coarse social
+interaction groups (e.g. monologue or dialog) in ego-centric
+videos collected at theme parks. In the domain of affective
+computing, the literature covers user studies of social behav-
+ior [18]. However, we are not aware of any prior work that
+analyzes and models human-centric situations at the level of
+detail and temporal scale that we present here. Additionally,
+our annotations are richer than in Hollywood2 [3] (action
+labels vs interaction graphs), and more detailed than Large
+Scale Movie Description Challenge (LSMDC) [4] (single
+sentence vs short descriptions).
+Video Q&A.
+Other ways to demonstrate video understand-
+ing include describing short movie clips [38, 42, 46, 53] and
+answering questions about them [17, 20, 32, 45]. However,
+these models typically form internal representations of ac-
+tions, interactions, and emotions, and this implicit knowl-
+edge is not easy to query. We believe that graphs may lead
+to more interpretable representations.
+Graphs as Semantic Representations.
+Recently, there
+has been increasing interest in using graphs as structured
+representations of semantics. Johnson et al. [19] introduce
+scene graphs to encode the relationships between objects in
+a scene and their attributes, and show that such graphs im-
+prove image retrieval compared to unstructured text. Recent
+work aims to generate such scene graphs from images [49].
+While retrieval methods using structured prediction ex-
+ist, ours is the ﬁrst to use video. Thus the potentials in our
+model are very different, as we deal with a different prob-
+lem: analyzing people. Our graphs capture human behavior
+(e.g. encourages) that is inferred from facial expressions,
+actions, and dialog. In contrast, [19] deals with spatial rela-
+tionships between objects in images (e.g. in front of).
+Semantic Role Labeling.
+[27, 50, 51] deal with recogniz-
+ing situations in images. This task involves predicting the
+dominant action (verb) as well as the semantic frame, i.e. a
+set of action-speciﬁc roles. However, these works focus on
+static images with single actions, while we focus on movie
+clips (videos and dialogs) and tackle different tasks.
+3. The MovieGraphs Dataset
+We construct a dataset to facilitate machine understand-
+ing of real-world social situations and human behaviors. We
+annotated 51 movies; each movie is ﬁrst split into scenes
+2
+TRAIN
+VAL
+TEST
+TOTAL
+# Movies
+34
+7
+10
+51
+# Video Clips
+5050
+1060
+1527
+7637
+Desc #Words
+35.53
+34.47
+34.14
+35.11
+Desc #Sents
+2.73
+2.45
+2.91
+2.73
+Characters
+3.01
+2.97
+2.9
+2.98
+Interactions
+3.18
+2.48
+3.11
+3.07
+Summary Int.
+2
+2.06
+2.05
+2.02
+Relationships
+3.12
+2.77
+3.52
+3.15
+Attributes
+13.59
+14.53
+13.79
+13.76
+Topics
+2.64
+2.7
+2.68
+2.65
+Reasons
+1.66
+1.53
+2.17
+1.74
+Timestamps
+4.23
+4.34
+4.68
+4.34
+Avg. Duration
+43.96
+43.90
+45.61
+44.28
+Table 1: Statistics of the MovieGraphs dataset across train, vali-
+dation, and test splits. We show the number of movies and clips;
+their average duration (sec); the number of words/sentences in
+descriptions; and average counts of each type of node per graph.
+automatically [44] and then the boundaries are reﬁned man-
+ually such that each clip corresponds to one social situation.
+We developed a web-based annotation tool that allows
+human annotators to create graphs of arbitrary size by explic-
+itly creating nodes and connecting them via a drag-and-drop
+interface. Two key points of our dataset are that each anno-
+tator: 1) creates an entire graph per clip, ensuring that each
+graph is globally coherent (i.e., the emotions, interactions,
+topics make sense when viewed together); and 2) annotates
+a complete movie, so that the graphs for consecutive clips
+in a movie are also coherent—this would not be possible if
+annotators simply annotated randomly-assigned clips from a
+movie. We provide details on annotation and dataset below.
+3.1. Annotation Interface
+Our annotation interface allows an annotator to view
+movie clips sequentially. For each clip, the annotator was
+asked to specify the scene and situation, write a natural lan-
+guage summary, and create a detailed graph of the situation,
+as depicted in Fig. 1. We describe each component of the
+annotation:
+The scene label provides information about the location
+where the situation takes place, e.g. ofﬁce, theater, airport.
+The situation label corresponds to the high-level topic
+of the clip, and summarizes the social interactions that occur
+between characters, e.g. robbery, wedding.
+The description provides a multi-sentence, natural lan-
+guage summary of what happens in the clip, based on video,
+dialog, and any additional information the annotator inferred
+about the situation.
+The graph represents a human’s understanding of a given
+situation. Our graphs feature 8 different types of nodes, with
+edges between them to indicate dependencies. We allow the
+annotator to choose the directionality of each edge. A graph
+consists of the following node types:
+Character nodes represent the people in a scene. We
+Chloe
+Nola
+Chris
+Happy
+Sad
+Scared
+Legend:
+Surprised
+Angry
+lovers
+spouses
+talk about pregnancy
+realizing the truth
+talk about the aﬀair
+ﬂirting
+Figure 2: Emotional timelines of the three main characters in
+“Match Point.” The emotions are correlated with situations and
+relationships between characters.
+provide a comprehensive list of character names obtained
+from IMDb1, which the annotators can drag and drop onto
+the graph canvas.
+Attributes can be added to character nodes. The cate-
+gories of attributes are: age, gender, ethnicity, profession,
+appearance, mental and emotional states.
+Relationship nodes can link two or more characters. The
+relationships can refer to: family (e.g. parent, spouse), friend-
+ship/romance (e.g. friend, lover), or work (e.g. boss, co-
+worker). A relationship node can be tagged with a start/end
+token if it starts or ends in a given clip (e.g. the spouse re-
+lationship starts in a wedding clip). Otherwise, we assume
+that the characters were already in the relationship prior to
+the scene (e.g. already married).
+Interaction nodes can be added to link two or more char-
+acters. Interactions can be either verbal (e.g. suggests, warns)
+or non-verbal (e.g. hugs, sits near). They can be directed
+(from one character to another, e.g. A helps B), or bidirec-
+tional if the interaction is symmetric (e.g. A and B argue).
+A summary interaction captures the gist of several local
+interactions. Typically there is a single directed summary
+interaction from each character to the other (e.g. argues),
+while there may be many local ones (e.g. asks, replies).
+Topic nodes can be added to interactions to add further
+details. For example, the interaction suggests may have the
+topic to quit the job.
+Reason nodes can be added to interactions and attributes
+to provide motivations. For example, apologizes (interac-
+tion) can be linked to he was late (reason). Reasons can
+also be added to emotions: for example, happy (emotion)
+can be linked to she got engaged (reason). Reason nodes
+contain inferred common-sense information. See Table 2 for
+examples of topics and reasons.
+Time stamp nodes ground the graph in the video clip,
+by providing the time interval in which an interaction or
+emotional state takes place (e.g. a character is sad, then (s)he
+becomes happy).
+We also perform automatic face tracking, and ask annota-
+tors to assign a character name to each track (or mark as false
+positive). Thus, character nodes are grounded in videos.
+1http://www.imdb.com/
+3
+0
+1500
+upset
+cheerful
+scared
+nervous
+sad
+confident
+shocked
+annoyed
+angry
+friendly
+surprise
+serious
+confused
+curious
+amused
+quiet
+excited
+calm
+worried
+happy
+Emotions
+0
+3000
+leaves
+yells
+kisses
+argues
+advises
+requests
+suggests
+listens
+looks
+reassures
+greets
+calls
+orders
+gives
+answers
+watches
+talks
+informs
+explains
+asks
+Interactions
+0
+500
+saying goodbye
+business meeting
+planning event
+meeting
+dinner conv.
+escape
+talk about past
+greeting
+party
+car ride
+fight
+intimacy
+wedding
+introduction
+small talk
+family talk
+phone call
+relationship talk
+work talk
+argument
+Situations
+Figure 3: Distributions of the top 20 emotion attributes, interactions, and situations.
+angry
+confused
+honest
+frustrated
+excited
+confident
+worried
+curious
+Mark Zuckerberg
+Eduardo Saverin
+Sean Parker
+Cameron Winklevoss
+Figure 4: Emotional proﬁles from “The Social Network.”
+3.2. Data Collection Procedure
+We hired workers via the freelance website Upwork. We
+worked closely with a small group of annotators, to ensure
+high-quality annotations. The workers went through a train-
+ing phase in which they annotated the same set of clips
+according to an instruction manual. After gathering annota-
+tions, we also had a cross-checking phase, where annotators
+swapped movies and checked each others’ work.
+3.3. Dataset Statistics
+Our dataset consists of 7637 annotated clips from 51
+movies. Dataset statistics are shown in Table 1. The majority
+of the clips contain between 2 and 4 characters, and a graph
+has on average 13.8 attributes and 3.1 interactions. Fig. 3
+shows the distributions of the top 20 emotion attributes, inter-
+actions, and situations. We show correlations between node
+types for a selected set of labels in Fig. 6, and the most com-
+mon social aspects of scenes associated with the situation
+party, to showcase the insight offered by our dataset.
+The dataset annotations allow us to follow a character
+throughout a movie. Fig. 2 shows the emotions experienced
+by the three main characters of the movie “Match Point,”
+clip by clip. The emotions make sense when viewed in the
+context of the situations: when the characters ﬂirt, they are
+happy; when they talk about problematic issues (pregnancy,
+chase
+reunion
+caring for sick
+revenge
+escape
+accident
+rescue
+celebration
+talking about work
+talking about health
+saving someone
+doctor appointment
+introduction
+hospital visit
+argument
+saying goodbye
+talking about relationships
+alien encounter
+car ride
+receiving news
+looking for
+shooting
+having fun
+reunion
+talking about the past
+chase
+running
+ﬁght (ﬁst ﬁght)
+argument
+evacuation
+car crash
+Figure 5: Flow of situations aggregated from all movies.
+the truth, the affair), they are angry. Fig. 4 shows the emo-
+tional proﬁles of characters from the movie “The Social
+Network,” obtained by aggregating the characters’ emotions
+over all clips.
+In movies, like in real life, situations follow from other
+situations. In Fig. 5, we present a tree of situations rooted
+at rescue; this is essentially a knowledge graph that shows
+possible pairwise transitions between situations.
+4. Situation Understanding Tasks
+Graphs are an effective tool for capturing the gist of a
+situation, and are a structured alternative to free-form rep-
+resentations such as textual descriptions. We propose three
+tasks to demonstrate different aspects of situation under-
+standing: 1) video clip retrieval using graphs as queries; 2)
+interaction sorting; and 3) reason prediction. In this section,
+we describe these tasks and propose models to tackle them.
+4.1. Graph-Based Situation Retrieval
+Here we aim to use graphs as queries to retrieve relevant
+clips from our dataset, where each clip consists of video
+and dialog. We assume our query is a graph G = (V, E)
+consisting of different types of nodes vtype ∈V and edges
+between them. We use the notation vch, vatt, vrel, vint,
+vtopic, and vreason to denote character, attribute, relation-
+ship, interaction, topic, and reason nodes. Character nodes
+4
+yells
+hits
+hugs
+kisses
+asks
+answers
+informs
+Interaction
+violent
+nice
+loving
+aggressive
+sad
+angry
+upset
+scared
+Emotion
+parent
+lover
+boss
+friend
+child
+spouse
+enemy
+Relationship
+violent
+nice
+loving
+aggressive
+sad
+angry
+upset
+scared
+Emotion
+intimacy
+party
+rescue
+robbery
+escape
+wedding
+Situation
+agrees
+yells
+kisses
+hits
+threatens
+kills
+dances with
+Interaction
+parent
+colleague
+living room
+bar
+stranger
+asks
+deck
+house
+hotel
+friendly
+watches
+amused
+cheerful
+informs
+dances
+lover
+talks
+party
+excited
+friend
+happy
+Figure 6: Left: Correlations between social aspects of scenes. Right, clockwise from top: The top-5 most common scenes, relationships,
+attributes, and interactions associated with the situation party.
+Interaction: “asks”
+Topic
+Reason
+who she is
+she is pretty
+is this love at ﬁrst sight
+can’t stop looking at her
+if he is sober
+he is the driver
+about the speech
+he’s the best man
+about wedding gifts list
+he needs to buy one
+for help
+he is late again
+if he is for bride or groom
+to determine seating area
+for time alone
+to think
+Table 2: Topics and reasons associated with the interaction “asks”
+in the movie “Four Weddings and a Funeral.”
+are the backbone of the graph: all other nodes (except for
+topics and reasons) link to at least one character node. To
+ease notation, we consider the scene and situation labels as
+disconnected nodes in the graph, vsc and vsi, respectively.
+To perform retrieval, we aim to learn a real-valued func-
+tion Fθ(M, G) that scores the similarity between a movie
+clip M and the query graph G, where Fθ should score the
+highest for the most relevant clip(s). At test time, we are
+interested in retrieving the clip with the highest similarity
+with G. We design Fθ to exploit the structure of the graph
+and evaluate it against a clip in a semantically meaningful
+way. In particular, we reason about the alignment between
+character nodes in the graph and face/person tracks in the
+video. Given an alignment, we score attributes, interactions,
+and other nodes accordingly.
+Each clip M typically contains several video shots. We
+automatically parse each clip to obtain face tracks in each
+shot, and cluster tracks with similar faces across shots. To
+model interactions and relationships, we extend the face de-
+tection boxes to create full-body person tracks. We represent
+each cluster cj with a feature vector xj, and a pair of clusters
+(cj, ck) with a feature vector xjk. Global information about
+the clip is captured with a feature vector xscene. Additional
+details are provided in Sec. 4.1.2.
+We deﬁne a random variable z = (z1, . . . , zN) which
+reasons about the alignment between character nodes vch
+i
+and
+face clusters, zi ∈{1, . . . , K}. Here, N is the number of
+character nodes in the query G, and K is the number of face
+clusters in the clip. We restrict z to map different nodes to
+different clusters, resulting in all permutations z ∈P(K, N).
+In practice, N = 5 and K = 7.
+We deﬁne a function that scores a graph in the video clip
+given an alignment z as follows:
+Fθ(M, G, z) = φsc(vsc) + φsi(vsi)
++
+X
+i
+
+φch(vch
+i , zi) + φatt(Vatt
+i
+, zi)
+
++
+X
+i,j
+φint(Vint
+ij , zi, zj) +
+X
+i,j
+φrel(Vrel
+ij , zi, zj).
+(1)
+The set of attributes associated with character i is Vatt
+i
+=
+{vatt
+k
+: (i, k) ∈E} and the set of interactions between a
+pair of characters (i, j) is Vint
+ij
+= {vint
+k
+: (i, k), (k, j) ∈E},
+where all edges are directed. The set of relationships is
+deﬁned similarly. Here, φ are potential functions which
+score components of the graph in the clip. Each φ also
+depends on the clip M and learned parameters θ, which we
+omit for convenience of notation.
+We now describe each type of potential in more detail. To
+form the query using the graph, we embed each node label
+using word embeddings. For nodes that contain phrases,
+we mean-pool over the words to get a ﬁxed length repre-
+sentation atype (where type is att, int, etc.). In our case,
+atype ∈R100 (GloVe [36]). We learn two linear embeddings
+for each type, W type
+g
+for query node labels and W type
+m
+for
+observations, and score them in a joint space. We share Wg
+across all node types to prevent overﬁtting.
+Video-Based Potentials.
+The attribute unary potential
+computes the cosine similarity between node embeddings
+and visual features:
+φatt(Vatt
+i
+, zi) =
+D
+Wg
+X
+vk∈Vatt
+i
+aatt
+k , W att
+m xatt
+zi
+E
+.
+(2)
+A similar potential is used to score the scene vsc and situation
+vsi labels with video feature xscene (but does not depend on
+5
+z). Furthermore, we score pairwise dependencies as:
+φtype(Vtype
+ij
+, zi, zj) =
+D
+Wg
+X
+vk∈Vtype
+ij
+atype
+k
+, W type
+m
+xzizj
+E
+(3)
+with type ∈{rel, int}.
+Scoring Dialog.
+To truly understand a situation, we need
+to consider not only visual cues, but also dialog. For this, we
+learn a function Q to score a query G with dialog D as:
+Q(D, G) =
+X
+vk∈V
+X
+i
+max
+j ((Wgak,i)T (Wdxdj)) ,
+(4)
+where ak,i is the GloVe embedding of the ith word in node
+vk, and xdj is the embedding of the jth dialog word. This
+ﬁnds the best matching word in the dialog for each word
+in the graph, and computes similarity by summing across
+all graph words. We initialize the matrices Wg and Wd
+to identity, because GloVe vectors already capture relevant
+semantic information. To take into account both video and
+dialog, we perform late fusion of video and dialog scores
+(see Sec. 5.1).
+Person Identiﬁcation.
+To classify each face cluster as one
+of the characters, we harvest character and actor images
+from IMDb. We ﬁne-tune a VGG-16 [34] network on these
+images, combined with our video face crops, using a triplet
+loss (i.e., minimizing the Euclidean distance between em-
+beddings of two positive examples wrt a negative pair). To
+compute φch(vch
+i , zi), we ﬁnd the embedding distance be-
+tween the face track and each movie character, and convert
+it into a probability. For details, see Suppl. Mat. D.
+4.1.1
+Learning and Inference
+Learning.
+Our
+training
+data
+consists
+of
+tuples
+(Gn, Mn, zn):
+for each graph we have an associated
+clip and ground-truth alignment to face clusters. We learn
+the parameters of Fθ using the max-margin ranking loss:
+Lθ =
+X
+(n,n′)
+max(0, 1−(Fθ(Gn, Mn, zn)−Fθ(Gn, Mn′, zn′))) ,
+(5)
+where n′ is an index of a negative example for Gn. In
+practice, we sample three classes of negatives: 1) clips from
+other movies (different characters, therefore easy negatives);
+2) different clips from the same movie (medium difﬁculty);
+or 3) the same clip with different alignments zn′ (same
+characters, aligned with the clip incorrectly, therefore hard
+negatives). We train the dialog model Q(D, G) similarly,
+with a max-margin ranking loss that does not involve z. We
+use the Adam optimizer [21] with learning rate 0.0003.
+Inference.
+We perform an exhaustive search over all clips
+and alignments to retrieve the most similar clip for the query
+graph G:
+M ∗= arg max
+n
+ max
+z
+Fθ(G, Mn, z)
+
+.
+(6)
+4.1.2
+Implementation Details
+Video Features.
+To obtain a holistic video representa-
+tion, we process every ﬁfth frame of the video using the
+Hybrid1365-VGG model [52] and extract pool5 features.
+We mean pool over space and time to obtain one representa-
+tion xscene ∈R512 for the entire clip. For each face cluster,
+we compute age and gender predictions [24] (Eq. 2, xage
+zi ,
+xgen
+zi ) and extract features from another CNN trained to pre-
+dict emotions [25] (Eq. 2, xatt
+zi ). This allows us to score
+unary terms involving attributes.
+We extend the face detections to obtain person detec-
+tions and tracks that are used to score pairwise terms. We
+represent each person track by pooling features of spatio-
+temporal regions in which the person appears. Speciﬁcally,
+xzizj (Eq. 3) is computed by stacking such person track fea-
+tures [xp
+zi; xp
+zj]. Note that ordered stacking maintains edge
+directions (vch
+i
+→vint,rel →vch
+j ).
+Text.
+We evaluate two representations for text modalities:
+(i) TF·IDF [28], where we use the logarithmic form; and (ii)
+GloVe [36] word embeddings. Similar to [45], scoring the
+dialogs with TF·IDF involves representing the graph query
+and dialog text as sparse vectors (R|vocab|) and computing
+their cosine similarity. We explore two pooling strategies
+with word embeddings: 1) max-sum (Eq. 4); and 2) max-sum
+· idf, which weighs words based on rarity.
+4.2. Interaction Ordering
+Predicting probable future interactions on the basis of
+past interactions, their topics, and the social context is a
+challenging task. We evaluate interaction understanding via
+the proxy task of learning to sort a set of interactions into a
+plausible order (Table 5). We present a toy task wherein we
+take the interactions between a pair of characters, and train
+an RNN to choose interactions sequentially from the set, in
+the order in which they would likely occur. We represent
+an interaction and corresponding topic by the concatena-
+tion of their GloVe embeddings, with an additional digit
+appended to indicate the direction of the interaction. We
+train an attention-based decoder RNN to regress interaction
+representations: at each time step, it outputs a vector that
+should be close to the embedding of the interaction at that
+step in the sequence. We use a single-layer GRU [9], and
+condition on a 100-d context vector formed by applying lin-
+ear layers on the situation, scene, relationship, and attribute
+embeddings. We zero-mask one interaction from the input
+set at each time step, to ensure that the model does not se-
+lect the same interaction multiple times. Masking is done
+with teacher-forcing during training, and with the model’s
+predictions at test time. For details, see Suppl. Mat. B.
+4.3. Reason Prediction
+Given information about the scene in the form of at-
+tributes of each character, their relationship, and an interac-
+6
+tion in which they are engaging, we aim to predict plausible
+reasons for why the interaction took place. Scene and situa-
+tion labels are also used, to provide global context.
+As in previous tasks, we ﬁrst represent the relevant nodes
+by their GloVe embeddings. The characters are identity
+agnostic and are represented as a weighted combination of
+their attributes. We encode individual components of the
+sub-graph (scene, situation, interaction, relationship) through
+linear layers and learn a 100-d context vector.
+Our decoder is a single-layer GRU with 100 hidden units
+that conditions on the scene description (context vector), and
+produces a reason, word by word. As is standard, the de-
+coder sees the previous word and context vector at each time
+step to generate the next word. To obtain some variability
+during sampling, we set the temperature to 0.6. We train the
+model end-to-end on the train and val sets (leaving out a few
+samples to choose a checkpoint qualitatively), and evaluate
+on test. Please refer to Suppl. Mat. C for details.
+5. Experimental Results
+The MovieGraphs dataset is split into train, val, and test
+sets with a 10:2:3 ratio of clips (see Table 1), and no overlap-
+ping movies. We learn model parameters on train, choose
+checkpoints on val, and present ﬁnal evaluation on test.
+Face Clustering and Person Identiﬁcation.
+On average,
+our clips have 9.2 valid face tracks which form 2.1 ground-
+truth clusters. For face clustering, we obtain a weighted
+clustering purity of 75.8%, which is reasonable, as we do not
+ﬁlter background characters or false-positive tracks. Person
+identiﬁcation (ID) for a large number of movies spanning
+many decades is hard, due to the differences between IMDb
+gallery images and video face tracks. We obtain a track-level
+identiﬁcation accuracy of 43.7% vs. chance at 13.2%. We
+present details in Suppl. Mat. D.
+5.1. Graph-based Retrieval
+All retrieval results are shown in Table 3. Similar to
+image-text retrieval (e.g. Flickr8k [16]), we use the following
+metrics: median rank and recall at K (1, 5, 10). Unless
+mentioned otherwise, we assume that the entire graph is used
+as part of the query. The ﬁrst two rows show the performance
+of a random retrieval model that may or may not know the
+source movie.
+Description Retrieval.
+Our ﬁrst experiment evaluates the
+similarity between graphs and clip descriptions. We use
+the three models described in Sec. 4.1.2: TF·IDF, max-sum,
+and max-sum · idf. We consistently obtain median rank 1
+(Table 3, rows 3-5), possibly due to descriptive topics and
+reasons, and character names that help localize the scene
+well (see Suppl. Mat. A for an ablation study on node types).
+Dialog Retrieval.
+In our second experiment, we aim to
+retrieve a relevant clip based on dialog, given a graph. This
+Method
+PersonID
+TEST
+CL
+ID
+R@1
+R@5
+R@10
+med.-R
+1
+random, movie unkn.
+-
+-
+0.1
+0.3
+0.7
+764
+2
+random, movie known
+-
+-
+0.7
+3.3
+6.6
+78
+DESCRIPTION
+3
+TF·IDF
+-
+-
+61.6
+83.8
+89.7
+1
+4
+GloVe, max-sum
+-
+-
+62.1
+81.3
+87.2
+1
+5
+GloVe, idf · max-sum
+-
+-
+61.3
+81.6
+86.9
+1
+DIALOG
+6
+TF·IDF
+-
+-
+31.8
+49.8
+57.2
+6
+7
+GloVe, max-sum
+-
+-
+28.0
+42.4
+50.2
+10
+8
+GloVe, idf · max-sum
+-
+-
+28.7
+43.1
+50.2
+10
+MOVIE CLIP
+9
+sc
+-
+-
+1.1
+4.3
+7.7
+141.5
+10
+sc, si
+-
+-
+1.0
+5.4
+8.7
+140
+11
+sc, si, att
+pr
+pr
+2.2
+9.4
+15.5
+84
+12
+sc, si, att, rel, int
+pr
+pr
+2.7
+10.9
+18.9
+59
+13
+sc, si, att, rel, int
+pr
+gt
+7.7
+28.8
+44.9
+13
+14
+sc, si, att, rel, int
+gt
+gt
+13.0
+37.4
+50.4
+10
+15
+sc, si, att, rel, int, dlg
+pr
+pr
+31.6
+50.4
+56.6
+5
+16
+sc, si, att, rel, int, dlg
+gt
+gt
+40.4
+62.1
+71.1
+3
+Table 3: Retrieval results when using the graph as a query. dlg
+refers to dialog. For PersonID, CL and ID indicate clustering and
+identiﬁcation; gt denotes ground-truth, and pr denotes predictions.
+is considerably harder, as many elements of the graph are
+visual (e.g. kisses) or inferred from the conversation (e.g. en-
+courages). We evaluate dialog retrieval with the same models
+used for descriptions. Here, GloVe models (rows 7, 8) per-
+form worse than TF·IDF (row 6) achieving med.-R 10 vs 6.
+We believe that this is because the embeddings for several
+classes of words are quite similar, and confuse the model.
+Movie Clip Retrieval.
+Our third experiment evaluates the
+impact of visual modalities. Note that if the query consists
+only of scene or situation labels, there are multiple clips that
+are potential matches. Nevertheless, starting from a random
+median rank of 764, we are able to improve the rank to
+141.5 (row 9) with the scene label only, and 140 with scene
+and situation labels (row 10). Directly mapping high-level
+situations to visual cues is challenging.
+Similar to the way characters help localize descriptions
+and dialogs, person identiﬁcation helps localization in the
+visual modality. If our query consists only of characters, in
+the best case scenario of using ground-truth (gt) clustering
+and ID, we obtain a median rank of 17. Our predicted (pr)
+clustering works quite well, and obtains median rank 19.
+Owing to the difﬁculty of person ID, using pr clustering and
+ID pushes the median rank to 69.
+Rows 9-16 present an ablation of graph components. We
+start with the scene, situation, attributes, and characters (rows
+9-11) as part of our query graphs. Including interactions
+(+topics) and relationships improves the rank from 84 to 59
+(row 12). In a scenario with gt clusters and ID, we see a
+large improvement in med.-R from 59 to 10 (rows 13, 14).
+7
+female
+Situation: Relationship talk
+adult
+adult
+male
+Scene: Church
+regretful
+C1
+confused
+C2
+scene: banquet hall, situation: argument
+C1: adult, female, 
+heartbroken, angry
+C2: adult, male, 
+honest, remorseful
+scene: church, situation: relationship talk
+C1: adult, female, 
+regretful
+C2: adult, male, 
+confused
+female
+Situation: Family problems
+adult
+young
+male
+Scene: Lobby
+worried
+C1
+delighted
+friendly
+C2
+scene: living room, situation: relationship talk
+C1: adult, female, 
+shocked, curious
+C2: adult, male, 
+nervous, embarassed
+scene: lobby, situation: family problems
+C2: adult, male, 
+friendly, delighted
+C1: young, 
+female, worried
+Figure 7: Identity agnostic sub-graph queries and the top-2 retrieved clips, which are from different movies. We search for video clips that
+have overall similarity with respect to scene and situation, and also character attributes and emotions. The yellow boxes indicate results that
+are quite similar in meaning to the query, and the green boxes indicate ground-truth.
+Fully Sorted Accuracy
+Longest Common Subsequence
+40.5% (27%)
+0.74 (0.67)
+Table 4: Performance of our interaction sorting approach on the
+test set. The number in (·) is random chance.
+Situation: Conversation with friend
+adult
+?
+male
+adult
+<None>
+C2
+male
+thanks
+C1
+colleagues
+Scene: Boat
+GT: for saving him during the war
+PRED: for his help
+Situation: Camping
+adult
+?
+male
+adult
+her 
+confidence
+C2
+female
+mocks
+C1
+strangers
+Scene: Campsite
+GT: he’s got no problem with women
+PRED: the food has an urgent
+Figure 8: Example sub-graphs with GT and predicted reasons. The
+left one is scored Very relevant, and the right Not relevant. However,
+the model’s mistake of relating camping with food is reasonable.
+Late Fusion.
+We combine video and dialog cues using
+late fusion of the scores from the models used in rows 8 and
+12/14, and see a large increase in performance in both pr-pr
+and gt-gt settings (rows 15, 16). This points to the beneﬁts
+offered by dialog in our model.
+Qualitative Results.
+We present an example of sub-graph
+retrieval in Fig. 7. Even with small queries (sub-graphs) and
+identity agnostic retrieval, we obtain interesting results.
+5.2. Interaction Ordering
+We measure ordering performance using two metrics: (i)
+the model’s accuracy at predicting complete sequences; and
+(ii) the length of the longest common subsequence (LCS) be-
+tween the ground-truth and prediction. Quantitative results
+are shown in Table 4. Table 5 shows qualitative examples
+of the orderings predicted by our model. The ﬁrst two se-
+quences are correctly sorted by our model, while the third
+is a failure case. However, even in the failure case, interac-
+tions 2, 3, 4, and 5 are in the correct order (longest common
+subsequence), and the entire sequence is plausible.
+5.3. Reason Prediction
+An interaction can have several distinct and relevant rea-
+sons, making automatic scoring using captioning metrics
+hard. We ask 10 AMT workers to score 100 sub-graphs and
+their predicted reasons as: Very relevant, Semi-relevant, and
+GT
+Pred
+Dir.
+Interaction + [Topic]
+1
+1
+→
+asks [why she’s crying]
+2
+2
+←
+explains to [why she is sad]
+3
+3
+→
+comforts
+1
+1
+→
+waits for [to end the audition]
+2
+2
+←
+informs [audition went bad]
+3
+3
+→
+suggests [they have a drink]
+4
+4
+←
+agrees
+1
+2
+→
+explains [it’s great to know who he wants]
+2
+3
+→
+advises [to go visit her]
+3
+1
+←
+expresses doubt [she may not like him]
+4
+6
+→
+encourages
+5
+4
+←
+thanks [for the advice]
+6
+5
+←
+announces [he is going to her]
+Table 5: Qualitative results for ordering interactions. Each interac-
+tion is shown with its topic in brackets. The interactions are listed
+in their ground-truth order, and the predicted sequence is shown in
+the “Pred” column, where the numbers represent the order in which
+the interaction is predicted. The →indicates that C1 initiates the
+interaction with C2, and ←the reverse.
+Not relevant. Fig. 8 shows two examples, along with their GT
+and predicted reasons. We are able to obtain a clear verdict
+(6 or more annotators agree) on 72 sub-graphs: 11 samples
+are rated very relevant, while 10 more are semi-relevant.
+6. Conclusion
+In this work, we focused on understanding human-centric
+situations in videos. We introduced the MovieGraphs dataset,
+that contains rich annotations of everyday social situations in
+the form of graphs. Our graphs capture people’s interactions,
+emotions, and motivations, many of which must be inferred
+from a combination of visual cues and dialog. We performed
+various statistical analyses of our dataset and proposed three
+tasks to benchmark situation understanding: graph-based
+video retrieval, interaction understanding via ordering, and
+reason prediction. We proposed models for each of the tasks,
+that point to their successes and challenges.
+Acknowledgments. Supported by the DARPA Explainable AI (XAI)
+program, NSERC, MERL, and Comcast. We thank NVIDIA for their
+donation of GPUs. We thank Relu Patrascu for infrastructure support, and
+we thank the Upwork annotators.
+8
+Supplementary Material
+We provide additional details about our dataset, models,
+and results. This supplementary material is structured as
+follows:
+• We present an ablative study of TF·IDF-based retrieval,
+to examine the discriminative power of each node type
+(Sec. A).
+• We present details of our interaction ordering model,
+and more qualitative results (Sec. B).
+• We present details of our reason prediction model, and
+more qualitative results (Sec. C).
+• We provide details of person detection, clustering, and
+identiﬁcation (Sec. D).
+• We describe the annotation interface used to collect the
+data (Sec. E).
+• We present example annotations for one movie from
+the MovieGraphs dataset (Sec. F), as well as additional
+dataset statistics:
+– The distributions of the number of characters, in-
+teractions, and relationships per clip;
+– The top-20 relationships and scenes.
+• We provide additional examples of the MovieGraphs
+dataset (Sec. G), and show visualizations of:
+– The emotional proﬁles and timelines of the main
+characters from several movies;
+– Emotions of characters on both sides of interac-
+tions/relationships;
+– A rooted graph of situations;
+– Examples of interaction annotations.
+A. TF·IDF Ablative Study
+In this section, we present an ablative study of TF·IDF
+graph →description and graph →dialog retrieval. In order
+to gauge the relative discriminative power of each node type
+for retrieval, we perform the retrieval experiment considering
+only information in certain node types.
+We present results on the test set, evaluated using recall
+@ {1, 5, 10} and median rank. Table 6 shows the results
+for graph →description retrieval, and Table 7 shows the
+graph →dialog retrieval results. In both cases, we ﬁnd that
+character, topic, and reason nodes are the most discriminative
+for localizing the correct clip. This aligns with the intuition
+that the most relevant information involves who is in the clip,
+and what the details (topics and reasons) of their interactions
+are.
+Node Types
+R@1
+R@5
+R@10
+medR
+All Node Types
+61.6
+83.8
+89.8
+1
+All \ { Sc., Sit. }
+60.8
+82.1
+88.0
+1
+All \ { Sc., Sit., Char.}
+51.0
+67.8
+74.2
+1
+Scene
+3.1
+9.9
+12.9
+460
+Situation
+5.0
+13.5
+18.3
+382
+Character
+19.0
+45.3
+58.7
+7
+Attribute
+3.7
+9.0
+12.7
+393
+Interaction, Summary
+12.8
+24.6
+29.9
+66
+Interaction
+6.2
+12.8
+16.2
+327
+Summary
+7.2
+15.8
+20.8
+264
+Relationship
+0.6
+1.8
+2.6
+704
+Topic
+35.5
+51.4
+57.3
+5
+Reason
+24.5
+38.0
+42.4
+26
+Table 6: TF·IDF Graph-Description Retrieval Ablation Study
+Node Types
+R@1
+R@5
+R@10
+medR
+All Node Types
+31.8
+49.8
+57.2
+6
+All \ { Sc., Sit. }
+31.9
+49.4
+57.1
+6
+All \ { Sc., Sit., Char.}
+31.5
+46.2
+51.5
+8
+Scene
+0.7
+2.2
+3.1
+718
+Situation
+1.2
+3.5
+4.8
+627
+Character
+6.6
+17.4
+23.2
+58
+Attribute
+1.0
+3.4
+5.7
+603
+Interaction, Summary
+3.3
+6.5
+8.4
+580
+Interaction
+1.8
+4.1
+5.8
+621
+Summary
+1.6
+4.1
+5.8
+656
+Relationship
+0.3
+1.3
+2.0
+765
+Topic
+28.7
+42.6
+47.9
+15
+Reason
+17.4
+28.7
+32.9
+122
+Table 7: TF·IDF Graph-Dialog Retrieval Ablation Study
+B. Interaction Ordering Details
+In this section, we present details of our interaction or-
+dering model, which uses an attention-based RNN to select
+interactions sequentially from an input set to form a plausible
+order.
+Dataset Creation for Interaction Ordering.
+We extract
+all sequences of interactions that occur between each pair of
+characters in each clip. We consider only interactions that
+have time stamps, and sort them ﬁrst based on start time, and
+then by end time to break ties.
+Interaction Sequence Encoding.
+Each training example
+represents a sequence of interactions between a pair of char-
+acters, and consists of: 1) a situation label; 2) a scene label;
+3) the relationship(s) between the two characters; 4) the
+9
+attributes of each character; and 5) a sequence of N interac-
+tions (with associated topics).
+Consider two characters C1 and C2, with attributes Vatt
+C1
+and Vatt
+C2 , respectively. Let the scene and situation labels be
+vsc and vsi, respectively, and the relationships between C1
+and C2 be vrel
+C1→C2 and vrel
+C1←C2, respectively.
+Each interaction vint
+C1,C2 with topic vtop
+C1,C2 is represented
+by the concatenation of the corresponding GloVe embed-
+dings, [aint
+C1,C2; atop
+C1,C2], with an additional digit appended to
+indicate the direction of the interaction: 1 for C1 →C2, -1
+for C1 ←C2, and 0 for C1 ↔C2. We denote the interac-
+tion representation at step i in the sequence by xi, so that a
+sequence of length N is denoted by X = {x1, . . . , xN}.
+Context Encoding.
+We create a global context vector
+(passed to the decoder RNN at each time step) that incorpo-
+rates situation, scene, relationship, and attribute information.
+We restrict attributes to be of age and gender types, and
+compute attribute encodings as follows:
+hC1 = WC1
+X
+k
+αkaatt
+C1k,
+hC2 = WC2
+X
+l
+αlaatt
+C2l
+(7)
+where the attention weights αk and αl are computed using a
+two-layer MLP.
+We encode the relationships between C1 and C2 as fol-
+lows:
+hr1 = Wr1arel
+C1→C2,
+hr2 = Wr2arel
+C1←C2
+(8)
+Bidirectional relationships are treated as separate relation-
+ships in both directions, C1 →C2 and C1 ←C2.
+We encode the scene and situation with linear layers on
+the corresponding GloVe representations:
+hsc
+=
+Wscasc
+(9)
+hsi
+=
+Wsiasi
+(10)
+Finally, we combine the encoded components to form the
+global context vector:
+z = hC1 + hC2 + hr1 + hr2 + hsc + hsi
+(11)
+Attention-Based Decoder RNN.
+We use a single-layer
+Gated Recurrent Unit (GRU) RNN to select items sequen-
+tially from an input set of interactions. At each time step t,
+we compute a local context vector by attending to the input
+elements:
+c(t) =
+N
+X
+i=1
+α(t)
+i xi
+(12)
+where
+α(t) = softmax(s(t))
+(13)
+and
+s(t)
+i
+= (h(t−1))T xi .
+(14)
+The input to the GRU at time t consists of 1) an input element
+x(t) (described below for the train and test settings); 2) the
+local context c(t); and 3) the global context z:
+[x(t); c(t); z] .
+(15)
+The output is computed as a linear transformation on the
+hidden state:
+o(t) = Woh(t)
+(16)
+We score each interaction from the input set by computing
+the inner product between the output o(t) and each of the
+interaction representations xi. The model is trained end-to-
+end with cross-entropy loss on these scores. At test time,
+the input element with the highest score is chosen at each
+time step, and is masked out from the input set so that it
+is not selected again in future steps. At training time, we
+use teacher forcing (i.e., choosing the correct ground-truth
+interaction to be passed forward to the next step, regardless
+of which interaction scored the highest) 50% of the time,
+and the model’s own predictions 50% of the time.
+Results.
+In Table 8 we show additional qualitative
+interaction-ordering results. In examples (a)-(d) the pre-
+dicted order matches the ground-truth, while in examples
+(e)-(i) the predicted order does not match. However, even
+though the orders presented in examples (e)-(i) are not iden-
+tical to the ground-truth orders, they are still plausible.
+C. Reason Prediction Details
+In this section, we present details of our reason prediction
+model. In particular, we build a model that encodes the
+context of the interaction and generates plausible reasons
+using a decoder RNN.
+Context Encoding.
+The context is comprised of: (i) a pair
+of characters C1, C2, represented by their attributes Vatt
+C1 and
+Vatt
+C2 (actual names don’t tell us anything and do not matter);
+(ii) the interaction vint
+C1,C2 for which we wish to predict the
+reason; (iii) the relationship vrel
+C1,C2 between the characters;
+(iv) the scene vsc and situation vsi labels; (v) and optionally,
+a topic vtop
+C1,C2 node associated with the interaction.
+In particular, we restrict attributes to age and gender (as
+others, such as emotions, were found to have little inﬂuence).
+The characters are represented by a weighted combination
+of attributes:
+hC1 =
+X
+k
+αkaatt
+C1k,
+hC2 =
+X
+l
+αlaatt
+C2l
+(17)
+10
+Ex. GT Pred Dir.
+Interaction + [Topic]
+a)
+1
+1
+→
+asks [who was on the phone]
+2
+2
+←
+informs [a friend called]
+3
+3
+→
+orders [to go care for the child]
+b)
+1
+1
+→
+calls to
+2
+2
+←
+ignores
+3
+3
+→
+offers [treat]
+c)
+1
+1
+→
+asks [will they ever be happy]
+2
+2
+←
+answers [that they are happy]
+3
+3
+←
+suggests [they borrow her old crib]
+4
+4
+→
+hushes
+d)
+1
+1
+→
+asks about [identity]
+2
+2
+←
+yells at
+3
+3
+→
+yells [to get out]
+4
+4
+←
+accuses [that he pretends to be a millionaire]
+e)
+1
+4
+→
+confesses to [he did not murder anyone]
+2
+5
+→
+explains to [he went to jail for video pirating]
+3
+3
+←
+reproaches [they thought he was a murderer]
+4
+1
+←
+asks [about his gun]
+5
+2
+→
+shows [he doesn’t have a gun]
+f)
+1
+4
+→
+begs [not to go]
+2
+2
+←
+apologizes
+3
+5
+←
+explains to [she’s retiring]
+4
+3
+←
+encourages [to be strong]
+5
+1
+→
+calls after
+g)
+1
+1
+→
+orders [to shut up]
+2
+2
+←
+accuses [of assault and battery]
+3
+4
+→
+threatens [to beat him up]
+4
+5
+→
+warns [he must make it up to his friend]
+5
+3
+→
+admits [he doesn’t like to yell]
+h)
+1
+1
+→
+informs [they lost all the stuff]
+2
+4
+←
+asks [if ex-worker set the ﬁre]
+3
+3
+→
+explains to [the cause of her husband’s death]
+4
+2
+←
+informs [that they have to succeed]
+5
+5
+→
+reassures [they won’t let them win]
+i)
+1
+3
+→
+asks [why her eyes look old]
+2
+4
+←
+jokes [his eyes look kind]
+3
+2
+←
+explains to [she woke up early]
+4
+1
+→
+interrupts [to stop her from clearing his plate]
+Table 8: Additional qualitative results for interaction ordering. The
+GT column shows the ground-truth order of interactions, the Pred
+column shows the order in which the interactions were chosen by
+the model, and the Dir column shows the direction of the interaction
+between the characters.
+where the attention weights αk, αl are learned using a two-
+layer MLP. a· corresponds to the 100-d GloVe embedding
+for each node.
+In our graphs, interactions and relationships can take
+three possible directions: C1 →C2 (e.g. parent), C1 ←C2
+(e.g. child), and C1 ↔C2 (e.g. friends). We ﬁrst encode a
+direction Ce →Cf:
+he→f
+d
+= WCd · hCe + WCr · hCf ,
+(18)
+where WCd corresponds to the parameters for the doer and
+WCr the receiver. Interactions and relationships are encoded
+as:
+he→f
+i
+=
+he→f
+d
++ Wi · (aint
+C1,C2 + atop
+C1,C2) ,
+(19)
+he→f
+r
+=
+he→f
+d
++ Wr · arel
+C1,C2 ,
+(20)
+he↔f
+i|r
+=
+(he→f
+i|r
++ he←f
+i|r
+)/2 .
+(21)
+The ﬁnal context vector is a linear combination:
+hc = Wpasc + Wsasi + hi + hr .
+(22)
+Decoder RNN.
+We adopt a Gated Recurrent Unit RNN [9]
+with a 100-d hidden state as our decoder. The context is fed
+in at each time-step along with the previous sampled word
+(or START token). We use a temperature sampling scheme
+to generate variability in the predicted reasons.
+Results.
+Fig. 9 shows several more examples of context
+graphs and ground-truth and predicted reasons. Each row
+shows the results for test set samples annotated as Not rele-
+vant (row 1), Semi-relevant (row 2) and Very relevant (row
+3). Note that the results in the last row, while not predicting
+the ground-truth reason, are very plausible, afﬁrming the
+difﬁculty of this task.
+D. Person Detection, Clustering, and Identiﬁ-
+cation
+Data Collection for Face ID.
+We grounded each character
+in the graph with all the face tracks in the clip (obtained with
+OpenFace [7]). As there are on average 1740 face tracks per
+movie, 9.6 per clip, and over 88K in our full dataset (prior to
+removing false positives and track switches), annotating the
+tracks directly would have been time consuming. Instead,
+we ﬁrst linked face tracks that belong to the same person in
+a clip by performing hierarchical agglomerative clustering
+on upper body color histogram features (a character wears
+the same clothing during a clip) corresponding to the face
+tracks. The annotator is then asked to assign character names
+(from those found in the graph) to clusters in the clip. In
+cases where clustering is wrong, we break the cluster into
+face tracks, and the annotator labels each track.
+Face Detection and Tracking.
+Face tracks are extracted
+using the OpenFace tracker [7]. The output of the tracker
+are face detections in each frame, which we need to post-
+process into face tracks. To match detections from one
+frame to the detections in subsequent frames, we compute
+11
+Situation: Family gathering
+teenager
+?
+female
+adult
+pregnancy 
+needs
+C2
+female
+discusses
+C1
+step-mother
+Scene: Living room
+GT: she needs a doctor and vitamins
+PRED: wants her to the date
+Situation: Talk about relationships
+adult
+?
+female
+adult
+the painting 
+as a gift
+C2
+male
+gives
+C1
+friends
+Scene: Car
+GT: to remind him of their friendship
+PRED: he is sorry she can
+Situation: Argument
+adult
+?
+male
+adult
+pretense of 
+kidnapping
+C2
+male
+knows 
+about
+C1
+colleagues
+Scene: Parking lot
+GT: they never had the girl
+PRED: it affects in a market
+NOT RELEVANT
+SEMI - RELEVANT
+VERY RELEVANT
+Situation: Argument
+senior
+?
+female
+adult
+she will
+take a bus
+C2
+male
+informs
+C1
+customer
+Scene: Street
+GT: she doesn’t want him to driver her
+PRED: he’s suspicious of her
+Situation: Talk about relationships
+adult
+?
+male
+adult
+for a bad 
+mood
+C2
+male
+teases
+C1
+friends
+Scene: Office building
+GT: his crush has a girlfriend
+PRED: he didn’t get the job
+Situation: Greeting
+adult
+?
+female
+young
+<None>
+C2
+female
+greet
+C1
+friends
+Scene: House
+GT: they will play bridge
+PRED: they are all like her
+Situation: Talk about medicine
+adult
+?
+male
+adult
+new study 
+about AZT
+C2
+male
+shows
+C1
+none
+Scene: Lab
+GT: AZT is toxic
+PRED: to reassure him
+Situation: Escape
+adult
+?
+none
+none
+<None>
+C2
+male
+believes
+C1
+strangers
+Scene: Ocean
+GT: he has a family
+PRED: to help him
+Situation: Talk about adoption
+adult
+?
+female
+adult
+<None>
+C2
+male
+embrace
+C1
+spouse
+Scene: House
+GT: glad they’ll have a baby
+PRED: he is scared
+Figure 9: Reason prediction results on the test set, grouped by the three evaluation labels.
+the IoU (intersection over union) between each possible pair
+of detections from the different frames. We then compute the
+optimal matching of pairs that maximizes the IoU between
+pairs using the Hungarian algorithm. Since detections might
+be spurious, we allow for gaps of up to 5 frames in which
+the face might not be detected in the same face track and we
+discard every face track that lasts less than 10 frames. We
+note that the quality of our face tracker is primarily limited
+by the face detector, which occasionally results in missing
+face tracks and false positives. Furthermore, while we found
+our post-processing heuristics to work reasonably in practice,
+there are some track switches grouped together. On average,
+we obtain 66 false positive face tracks and track switches per
+movie (corresponding to less than 4% of all tracks).
+Face Features.
+We compute face embeddings for the pur-
+pose of character identiﬁcation and face track clustering.
+Our model builds upon the VGG-Face model of [34]. We
+extend it by (i) reducing the dimensionality of the features
+from 4096 to 128 with a linear projection layer (i.e., a fully
+connected layer without non-linearity), and (ii) making them
+have a unit norm. We initialize our model with the weights
+of [34] and train it using a triplet loss as described in [39]
+with a margin m = 0.2 but without mining hard negatives
+due to limited computational resources.
+To train our model we use our own dataset, comprised of
+images from face tracks and cast pictures from IMDb. Face
+track identities are annotated in the dataset, while IMDb
+pictures have associated identity metadata. Furthermore, we
+ﬁlter IMDb pictures by running a standard face detection
+algorithm [48] and including only those with a single face
+detection. Each triplet in our dataset is formed by a face
+track anchor, a positive example randomly sampled either
+12
+from matching face tracks or IMDb pictures, and a negative
+example also from either non-matching IMDb pictures or
+face tracks. Since a face track contains many images, we ran-
+domly select one of them to represent a face track example
+in a triplet during training. At test time, a face track is repre-
+sented by the average features of its images. We feed face
+crops into our model instead of full images, expanding the
+face detection bounding box by a factor of 2 to also include
+clothing and hair. The context was found to be especially
+helpful for track clustering. Expanded crops are resized to a
+ﬁxed resolution of 224x224 using bilinear interpolation.
+Face Track Clustering.
+We perform face track clustering
+in each movie scene to group together face tracks belong-
+ing to the same characters. To perform clustering, we use
+face features for each of the face tracks and compute pair-
+wise distances between them. We then apply hierarchical
+agglomerative clustering with a cut-off at threshold t = 0.75,
+empirically chosen to minimize the OCI metric on the vali-
+dation set.
+We evaluate our clustering performance in the test set
+with three different metrics: (i) cluster purity, indicating how
+many clusters capture a single identity, (ii) weighted cluster
+purity, in which the purity of a cluster is weighted by the
+number of face tracks in the cluster, and (iii) operator clicks
+index (OCI) [15], indicating the number of face tracks in
+wrong clusters plus the total number of clusters obtained.
+This last metric seeks to evaluate the cost of annotating face
+tracks given a clustering. While evaluating our method, we
+discard wrong face tracks or face tracks that switch faces.
+The performance of our method is shown in Table 9.
+Metric
+Score
+Cluster Purity
+75.7%
+Weighted Purity
+75.8%
+OCI
+6.4
+Table 9: Clustering performance
+Character Identiﬁcation.
+Here we explore the task of as-
+signing character identities to face tracks. We extract face
+features for cast pictures with a single face detection and
+compute pairwise distances with face track images. We then
+rank the images by distance to the face tracks and assign
+character identity probabilities to each face track. We evalu-
+ate our assignments with accuracy in Table 10. We keep the
+top-15 characters that appear in at least 10 graphs, as other-
+wise, movies (including all extras and background) can have
+characters (and actors) that often do not even have pictures
+on IMDb.
+Metric
+Ours
+Random
+Accuracy
+43.7%
+13.2%
+Table 10: Character identiﬁcation
+E. Annotation Interface
+In this section, we describe our data collection proce-
+dure. We developed a custom web-based annotation inter-
+face (Fig. 10) to support our data collection process. An
+annotator ﬁrst selects a movie clip from the list on the left-
+hand side; the clip to be annotated then plays at the top. For
+each clip, the annotator must annotate four elements: 1) a
+scene label; 2) a situation label; 3) a natural language de-
+scription; and 4) a graph. The graph canvas is in the center
+of the page; text boxes for scene and situation labels, as
+well as for the description, are above. In order to create a
+graph, an annotator starts by adding characters. The list of
+characters (from the IMDb cast of the movie) is shown on
+the right; clicking a character name from the list creates the
+corresponding character node in the graph canvas. An un-
+listed character can be added by choosing unlisted character
+and then naming it. All other node types (e.g., attributes,
+interactions, relationships, topics, reasons, and time stamps)
+are added directly in the graph canvas. We provided ini-
+tial vocabularies for scenes and situations which annotators
+could select from, but they were also allowed to add custom
+items to the lists. The interactions, topics, and reasons were
+free-form, and we encouraged the annotators to be concise.
+Workﬂow.
+Each annotator watched a movie from start to
+ﬁnish, annotating each clip in order. This ensured that each
+annotation contained data inferred from the movie up until
+that point in time, and allowed annotators to gain insight
+into the reasons behind each character’s actions. The typical
+workﬂow of the annotator was to watch the clip and ﬁrst
+write the description in natural language, then provide the
+scene and situation label, and ﬁnally create the graph. Good
+data requires proper identiﬁcation of the scene and situation,
+a description thorough enough that people reading it can
+understand what happens in the clip, and a graph detailed
+enough that reading it conveys the gist of the clip, as well.
+Training Annotators on Upwork.
+We hired annotators
+through the freelance service Upwork. Therefore, our setup
+had to overcome some unique challenges, the main one
+being uniformity: the annotators have to agree on the level
+of detail they put in the graph. To support data quality, we
+trained annotators on a common set of clips, and continued
+monitoring the annotations.
+Dividing Movies into Clips.
+To obtain the clips for anno-
+tation, we automatically split each movie into scenes [44]
+13
+Figure 10: The MovieGraphs annotation interface provides four separate areas where annotators type the scene label, the situation label, and
+the natural language description, and where they create the graph. On the left, they select a clip from a sequence of clips, and on the right,
+they select characters from a cast list (obtained from IMDb).
+and then grouped the scenes into clips manually, such that
+each clip corresponds to one coherent social situation (e.g.,
+party). As some situations were longer than others, our clips
+vary in length from around 20 seconds to 2 minutes, with an
+average length of 44 seconds.
+F. MovieGraphs Examples and Statistics
+We show examples of the graph annotations for the movie
+“Jerry Maguire” in Fig. 11. We sample nine graphs from
+various points in the movie, to show the progression of the
+story.
+Fig. 12 shows the top 20 relationships and scenes across
+all movies. The distribution of attribute types is shown in
+Fig. 13. We also present the distributions of the number of
+nodes of different types in each clip: the number of charac-
+ters per clip is shown in Fig. 14; the number of interactions
+in Fig. 15; and the number of relationships in Fig. 16.
+14
+Figure 11: Example annotations of various clips throughout the movie “Jerry Maguire,” showing scenes, situations, and graphs. Each clip is
+also annotated with a natural language description (not shown due to space constraints).
+15
+Figure 12: Distributions of the top 20 relationships and scenes.
+Ethnicity
+19.0%
+Appearance
+1.9%
+Profession
+9.2%
+Gender
+18.7%
+Age
+18.0%
+Emotion
+33.2%
+Figure 13: The distribution of attribute types.
+0
+1
+2
+3
+4
+5
+6
+7
+# Characters
+0
+500
+1000
+1500
+2000
+2500
+3000
+3500
+# Scenes
+Character Distribution
+Figure 14: The distribution of the number of characters per clip,
+over all movies.
+0
+2
+4
+6
+8
+10
+12
+14
+#Interactions
+0
+200
+400
+600
+800
+1000
+1200
+#Scenes
+Interaction Distribution
+Figure 15: The distribution of the number of interactions per clip,
+over all movies.
+0
+1
+2
+3
+4
+5
+6
+7
+8
+# Relationships
+0
+500
+1000
+1500
+2000
+2500
+# Scenes
+Relationship Distribution
+Figure 16: The distribution of the number of relationships per clip,
+over all movies.
+16
+G. More Examples
+Character Emotional Proﬁles.
+We show the emotional
+proﬁles of the main characters in several movies, based on
+the emotions annotated for each character across all the clips
+in a movie. We see that in the movie “Four Weddings and a
+Funeral” (Fig. 17, left), characters are mostly sad, nervous
+(Charles), happy (Carrie), worried (Matthew) and excited
+(Tom), while in the movie “As Good As It Gets” (Fig. 17,
+right), the characters are often upset or grateful (Simon),
+embarrassed or angry (Melvin), happy (Carol), and angry or
+surprised (Frank).
+Emotion Timelines.
+As in real life, characters in movies
+experience many emotions whose progression during the
+story we show in Fig. 18. We used the six basic emotions (an-
+gry, happy, sad, scared, surprised, and disgusted) described
+in [12]. We mapped the various words used to annotate emo-
+tions in the graphs to these six emotions based on [2], with
+some manual additions. Where a character was annotated to
+have several emotions in the same clip, we took the mode of
+these emotions. The emotions are color-coded, as shown in
+the legend for our ﬁgures.
+We then correlated the emotional progression of the main
+characters in each movie with situations and relationships.
+In Fig. 18, we show the progression of emotions of the
+main characters in the movies “The Lost Weekend,” “As
+Good as It Gets”, and “The Social Network.” For example,
+Fig. 18 (top diagram) shows the emotional timeline of four
+characters from the movie “The Lost Weekend.” We show
+that Don, his brother Wick, and Don’s girlfriend Helen plan
+a weekend trip to help Don break his alcohol addiction,
+but he is angry because he doesn’t want to go. Don, still
+angry, goes to drink in a pub, then becomes sad when he
+is rejected by society. He continues drinking, and becomes
+scared during his alcoholic delirium episode. Eventually, he
+and Helen engage in a motivational conversation, and both
+end up happy. The timeline shows that Don is a troubled,
+angry character, while Helen, Wick, and Nat (the bartender)
+are calming inﬂuences.
+Character-Character Emotion Distributions.
+In many
+cases, an interaction is associated with different emotions
+for the “doer” and the “receiver.” We show the distribution
+of emotions felt by characters on the giving and receiving
+ends of interactions (Fig. 19) and relationships (Fig. 20).
+As shown in the top panel of the Fig. 19, for the interac-
+tion attacks, the attacker (Person 1) is often violent, angry,
+and aggressive, while the person being attacked (Person 2)
+is often scared and confused. The emotions of a person who
+begs (Fig. 19, middle panel) are also different (e.g. desper-
+ate, scared, helpless) from the emotions of the person on
+the other end of the interaction, who is often angry, calm,
+or compassionate. Fig. 19 (bottom panel) also shows that a
+person who forgives is forgiving and happy, while the person
+who is forgiven is often apologetic, happy, and grateful.
+People also have different emotions depending on the
+relationship between them, as shown in Fig. 20. For exam-
+ple, a grandparent is often happy, while the grandchild is
+often scared (top panel); a mistress is often worried, and
+sometimes humiliated, while her lover is worried and sneaky
+(middle panel); and a nanny is often compassionate, while
+the child is often sad (bottom panel).
+Rooted Situation Graph.
+We can also see how situations
+follow from one another. Fig. 21 shows possible pairwise
+transitions between situations, starting from the situation
+“date.”
+Interaction Examples.
+Fig. 22 shows example annota-
+tions of interactions, to showcase the fact that dialog is
+important for inferring many interactions, in addition to
+visual cues.
+17
+frustrated
+nervous
+sad
+amused
+worried
+excited
+happy
+cheerful
+Charles
+Carrie
+Tom
+Matthew
+grateful
+embarrassed
+happy
+encouraging
+upset
+annoyed
+angry
+surprise
+Melvin Udall
+Carol Connelly
+Simon Bishop
+Frank Sachs
+Figure 17: Emotional proﬁles of the main characters in “Four Weddings and a Funeral” (left) and “As Good as It Gets” (right). These proﬁles
+were obtained by aggregating the emotions of these characters over the whole movie.
+Don
+Happy
+Scared
+lovers
+planning event (trip)
+Nat
+Wick
+Helen
+brothers
+Disgusted
+Sad
+Surprised
+Angry
+Legend:
+drinking in pub
+talk about health problems
+societal rejection
+motivational
+conversation
+delirium
+bartender
+Simon
+Carol
+Melvin
+Happy
+Scared
+friends
+customer interaction
+Disgusted
+Sad
+Surprised
+Angry
+Legend:
+neighbors
+robbery
+pet-sitting
+ﬁrst date
+talk about family problems
+breaking up
+moving
+argument
+argument
+Eduardo
+Happy
+Scared
+friends
+app testing
+partners
+Disgusted
+Sad
+Surprised
+Angry
+Legend:
+colleague
+deposition
+visiting friends
+planning a lawsuit
+argument
+deposition
+Cameron
+Sean
+Mark
+Figure 18: Emotional timelines for the main characters in “The Lost Weekend” (top), “As Good as It Gets” (middle), and “The Social
+Network” (bottom). The emotional timelines are correlated with situations (shown with arrows above each diagram) and relationships
+between characters (shown with arrows between names on the left). Wherever a character does not appear in a clip, the space is white.
+18
+violent
+angry
+aggressive
+hostile
+persistent
+scared
+confused
+angry
+helpless
+shocked
+Person 1                                                                 Person 2
+P(emotion
+interaction = attacks)
+desperate
+scared
+helpless
+persistent
+crying
+angry
+calm compassionate sad
+helpless
+Person 1                                                                 Person 2
+P(emotion
+interaction = begs)
+forgiving
+polite
+happy
+kind
+proud
+kind
+apologetic
+happy
+grateful
+relaxed
+Person 1                                                                 Person 2
+P(emotion
+interaction = forgives)
+Figure 19: Emotions of characters on either side of an interaction. In each case, Person 1 directs the interaction toward Person 2 (e.g. in the
+top example, Person 1 attacks, Person 2 is being attacked).
+happy
+sad
+indifferent desperate nostalgic
+scared
+sad
+excited
+brave
+desperate
+Person 1                                                                 Person 2
+P(emotion1, emotion2
+relationship = grandparent)
+worried
+excited
+humiliated
+scared
+upset
+worried
+sneaky
+nervous
+brave
+evasive
+Person 1                                                                 Person 2
+P(emotion1, emotion2
+relationship = mistress)
+compassionate sad
+proud
+helpful
+loving
+sad
+crying
+cheerful
+curious
+happy
+Person 1                                                                 Person 2
+P(emotion1, emotion2
+relationship = nanny)
+Figure 20: Emotions of characters on either side of a relationship. Each relationship is directed; in these examples, Person 1 is the
+grandparent, mistress, and nanny, while Person 2 is the grandchild, lover, and child, respectively.
+19
+intimacy
+introduction
+argument
+saying goodbye
+doctor appointment
+talking about problems
+date
+celebration
+talking about work
+talking on the phone
+family gathering
+breakfast
+going to work
+wedding
+talking about the past
+waking up
+visiting
+planning event
+small talk
+argument
+saying goodbye
+talking about relationships
+travel
+car ride
+medical emergency
+letter writing
+talking about work
+talking about relationships
+ﬂirting
+going to school
+discovery
+meeting
+a visit
+party
+gossiping
+small talk
+encouragement
+argument
+talking about rela ionships
+t
+end of bet
+giving advice
+orders
+breakfast
+talking about the past
+laughing
+argument
+talking about relationships
+watching tv
+proposal
+talking on the phone
+talking about work
+talking about sex
+planning event
+pet death
+ﬁght (ﬁst ﬁght)
+argument
+talking about relationships
+travel
+giving a speech
+planning event
+talking about work
+orders
+talking on the phone
+making plans
+talking about work
+party
+talking about pets
+small talk
+losing pet
+gossiping
+argument
+greeting
+confessing about drinking
+alien encounter
+hanging out
+talking about relationships
+Figure 21: A tree showing possible pairwise transitions from one situation to another. For example, the situation date can be followed
+by intimacy. In turn, the situation intimacy can be followed by, among others, talking about the past. Talking about the past is followed
+by many kinds of situations, including argument. The sequence date-intimacy-talking about the past-argument is therefore possible, but
+not necessarily found in the movies we have annotated so far. This longer sequence follows from multiple pairwise transitions between
+situations.
+20
+Figure 22: Examples of interaction annotations. All interactions but the bottom right are inferred mainly from dialog (shown under each
+image); the bottom right interaction is based only on visual cues.
+21
+References
+[1] CMU’s HERB Robotic Platform, http://www.cmu.
+edu/herb-robot/.
+[2] Feeling
+Vocabulary,
+http://www.ryerson.ca/
+~jgingras/pdf/Feeling%20Vocabulary.pdf.
+[3] Hollywood2:
+Human
+Actions
+and
+Scenes
+Dataset,
+http://www.di.ens.fr/~laptev/actions/
+hollywood2/.
+[4] Large Scale Movie Description Challenge, https://
+sites.google.com/site/describingmovies/.
+[5] Microsoft’s
+Tay,
+https://twitter.com/
+tayandyou.
+[6] J.-B. Alayrac, P. Bojanowski, N. Agrawal, I. Laptev, J. Sivic,
+and S. Lacoste-Julien. Unsupervised Learning from Narrated
+Instruction Videos. In CVPR, 2016.
+[7] T. Baltrušaitis, P. Robinson, and L.-P. Morency. OpenFace:
+An Open Source Facial Behavior Analysis Toolkit. In Appli-
+cations of Computer Vision (WACV), 2016.
+[8] P. Bojanowski, F. Bach, I. Laptev, J. Ponce, C. Schmid, and
+J. Sivic. Finding Actors and Actions in Movies. In ICCV,
+2013.
+[9] K. Cho, B. van Merrienboer, C. Gulcehre, D. Bahdanau,
+F. Bougares, H. Schwenk, and Y. Bengio. Learning Phrase
+Representations using RNN Encoder-Decoder for Statisti-
+cal Machine Translation. In Empirical Methods in Natural
+Language Processing (EMNLP), 2014.
+[10] L. Ding and A. Yilmaz. Learning Relations among Movie
+Characters: A Social Network Perspective. In ECCV, 2010.
+[11] M. Eichner, M. Marin-Jimenez, A. Zisserman, and V. Fer-
+rari. 2D Articulated Human Pose Estimation and Retrieval in
+(Almost) Unconstrained Still Images. IJCV, 99(2):190–214,
+2012.
+[12] P. Ekman. An Argument for Basic Emotions. Cognition &
+Emotion, 6(3-4):169–200, 1992.
+[13] M. Everingham, J. Sivic, and A. Zisserman. “Hello! My
+name is ... Buffy” – Automatic Naming of Characters in TV
+Video. In BMVC, 2006.
+[14] A. Fathi, J. K. Hodgins, and J. M. Rehg. Social Interactions:
+A First-Person Perspective. In CVPR, 2012.
+[15] M. Guillaumin, J. Verbeek, and C. Schmid. Is that You?
+Metric Learning Approaches for Face Identiﬁcation. In ICCV,
+2009.
+[16] M. Hodosh, P. Young, and J. Hockenmaier. Framing Image
+Description as a Ranking Task: Data, Models and Evaluation
+Metrics. Journal of Artiﬁcial Intelligence Research, 47:853–
+899, 2013.
+[17] Y. Jang, Y. Song, Y. Yu, Y. Kim, and G. Kim. TGIF-QA:
+Toward Spatio-Temporal Reasoning in Visual Question An-
+swering. arxiv.org/pdf/1704.04497.pdf, 2017.
+[18] N. Jaques, Y. L. Kim, and R. W. Picard. Personality, Attitudes,
+and Bonding in Conversations. In Proc. of Intelligent Virtual
+Agents, 2016.
+[19] J. Johnson, R. Krishna, M. Stark, L.-J. Li, D. Shamma,
+M. Bernstein, and L. Fei-Fei. Image Retrieval using Scene
+Graphs. In CVPR, 2015.
+[20] K.-M. Kim, M.-O. Heo, S.-H. Choi, and B.-T. Zhang. Deep-
+Story: Video Story QA by Deep Embedded Memory Net-
+works. arxiv.org/pdf/1707.00836.pdf, 2017.
+[21] D. Kingma and J. Ba. Adam: A Method for Stochastic Opti-
+mization. arXiv:1412.6980, 2014.
+[22] J. Kory Westlund, J. J. Lee, L. Plummer, F. Faridi, J. Gray,
+M. Berlin, H. Quintus-Bosz, R. Hartmann, M. Hess, S. Dyer,
+K. dos Santos, S. Örn Adhalgeirsson, G. Gordon, S. Spauld-
+ing, M. Martinez, M. Das, M. Archie, S. Jeong, and
+C. Breazeal. Tega: A Social Robot. In International Confer-
+ence on Human-Robot Interaction, 2016.
+[23] I. Laptev, M. Marszalek, C. Schmid, and B. Rozenfeld. Learn-
+ing Realistic Human Actions from Movies. In CVPR, 2008.
+[24] G. Levi and T. Hassner. Age and Gender Classiﬁcation Using
+Convolutional Neural Networks. In CVPR Workshop, 2015.
+[25] G. Levi and T. Hassner. Emotion Recognition in the Wild via
+Convolutional Neural Networks and Mapped Binary Patterns.
+In ICMI, 2015.
+[26] J. Li, M. Galley, C. Brockett, G. P. Spithourakis, J. Gao,
+and B. Dolan. A Persona-Based Neural Conversation Model.
+arXiv:1603.06155, 2016.
+[27] R. Li, M. Tapaswi, R. Liao, J. Jia, R. Urtasun, and S. Fidler.
+Situation Recognition with Graph Neural Networks. In ICCV,
+2017.
+[28] C. D. Manning, P. Raghavan, and H. Schutze. Scoring, Term
+Weighting, and the Vector Space Model. In Introduction to
+Information Retrieval. Cambridge University Press, 2008.
+[29] M. J. Marin-Jimenez, A. Zisserman, M. Eichner, and V. Fer-
+rari. Detecting People Looking at Each Other in Videos. IJCV,
+106(3):282–296, 2014.
+[30] M. Marszałek, I. Laptev, and C. Schmid. Actions in Context.
+In CVPR, 2009.
+[31] M. J. Matariˇc. Socially Assistive Robotics: Human Augmen-
+tation vs. Automation. Science Robotics, 2(4), 2017.
+[32] J. Mun, P. H. Seo, and I. J. B. Han.
+MarioQA:
+Answering Questions by Watching Gameplay Videos.
+arxiv.org/pdf/1612.01669.pdf, 2017.
+[33] S.-B. Park, K.-J. Oh, and G. Jo. Social Network Analysis
+in a Movie Using Character-Net. In Multimedia Tools and
+Applications, 2011.
+[34] O. M. Parkhi, A. Vedaldi, and A. Zisserman. Deep Face
+Recognition. In BMVC, 2015.
+[35] A. Patron-Perez, M. Marszalek, I. D. Reid, and A. Zisserman.
+Structured Learning of Human Interactions in TV Shows.
+PAMI, 34(12):2441–2453, 2012.
+[36] J. Pennington, R. Socher, and C. D. Manning. Glove: Global
+Vectors for Word Representation. In Empirical Methods in
+Natural Language Processing (EMNLP), 2014.
+[37] V. Ramanathan, A. Joulin, P. Liang, and L. Fei-Fei. Linking
+People in Videos with “Their” Names Using Coreference
+Resolution. In ECCV, 2014.
+[38] A. Rohrbach, M. Rohrbach, N. Tandon, and B. Schiele. A
+Dataset for Movie Description. In CVPR, 2015.
+[39] F. Schroff, D. Kalenichenko, and J. Philbin. FaceNet: A
+Uniﬁed Embedding for Face Recognition and Clustering. In
+CVPR, 2015.
+22
+[40] O. Sener, A. Zamir, S. Savarese, and A. Saxena. Unsupervised
+Semantic Parsing of Video Collections. arXiv:1506.08438,
+2015.
+[41] G. A. Sigurdsson, G. Varol, X. Wang, A. Farhadi, I. Laptev,
+and A. Gupta. Hollywood in Homes: Crowdsourcing Data
+Collection for Activity Understanding. In ECCV, 2016.
+[42] M. Tapaswi, M. Bauml, and R. Stiefelhagen. Book2Movie:
+Aligning Video Scenes with Book chapters. In CVPR, 2015.
+[43] M. Tapaswi, M. Bäuml, and R. Stiefelhagen. “Knock! Knock!
+Who is it?” Probabilistic Person Identiﬁcation in TV series.
+In CVPR, 2012.
+[44] M. Tapaswi, M. Bäuml, and R. Stiefelhagen. StoryGraphs:
+Visualizing Character Interactions as a Timeline. In CVPR,
+2014.
+[45] M. Tapaswi, Y. Zhu, R. Stiefelhagen, A. Torralba, R. Urtasun,
+and S. Fidler. MovieQA: Understanding Stories in Movies
+through Question-Answering. In CVPR, 2016.
+[46] A. Torabi, C. Pal, H. Larochelle, and A. Courville. Using
+Descriptive Video Services To Create a Large Data Source
+For Video Annotation Research. arXiv:1503.01070, 2015.
+[47] O. Vinyals and Q. Le.
+A Neural Conversational Model.
+arXiv:1506.05869, 2015.
+[48] P. Viola and M. Jones.
+Rapid Object Detection using a
+Boosted Cascade of Simple Features. In CVPR, 2001.
+[49] D. Xu, Y. Zhu, C. B. Choy, and L. Fei-Fei. Scene Graph
+Generation by Iterative Message Passing. In CVPR, 2017.
+[50] M. Yatskar, V. Ordonez, L. Zettlemoyer, and A. Farhadi. Com-
+monly Uncommon: Semantic Sparsity in Situation Recogni-
+tion. In CVPR, 2017.
+[51] M. Yatskar, L. Zettlemoyer, and A. Farhadi. Situation Recog-
+nition: Visual Semantic Role Labeling for Image Understand-
+ing. In CVPR, 2016.
+[52] B. Zhou, A. Khosla, A. Lapedriza, A. Torralba, and A. Oliva.
+Places: An Image Database for Deep Scene Understanding.
+arXiv:1610.02055, 2016.
+[53] Y. Zhu, R. Kiros, R. Zemel, R. Salakhutdinov, R. Urtasun,
+A. Torralba, and S. Fidler.
+Aligning Books and Movies:
+Towards Story-like Visual Explanations by Watching Movies
+and Reading Books. In ICCV, 2015.
+23

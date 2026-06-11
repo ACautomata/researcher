@@ -1,0 +1,1569 @@
+From Pixels to Graphs: Open-Vocabulary Scene Graph Generation with
+Vision-Language Models
+Rongjie Li1*
+Songyang Zhang2*
+Dahua Lin 2
+Kai Chen 2‡
+Xuming He1,3‡
+1School of Information Science and Technology, ShanghaiTech University
+2Shanghai AI Laboratory
+3Shanghai Engineering Research Center of Intelligent Vision and Imaging
+{lirj2, hexm}@shanghaitech.edu.cn, {zhangsongyang,lindahua,chenkai}@pjlab.org.cn,
+Abstract
+Scene graph generation (SGG) aims to parse a visual
+scene into an intermediate graph representation for down-
+stream reasoning tasks. Despite recent advancements, ex-
+isting methods struggle to generate scene graphs with novel
+visual relation concepts.
+To address this challenge, we
+introduce a new open-vocabulary SGG framework based
+on sequence generation. Our framework leverages vision-
+language pre-trained models (VLM) by incorporating an
+image-to-graph generation paradigm. Specifically, we gen-
+erate scene graph sequences via image-to-text generation
+with VLM and then construct scene graphs from these se-
+quences.
+By doing so, we harness the strong capabili-
+ties of VLM for open-vocabulary SGG and seamlessly in-
+tegrate explicit relational modeling for enhancing the VL
+tasks. Experimental results demonstrate that our design not
+only achieves superior performance with an open vocab-
+ulary but also enhances downstream vision-language task
+performance through explicit relation modeling knowledge.
+1. Introduction
+The main objective of scene graph generation (SGG) is to
+parse an image into a graph representation that describes
+visual scenes in terms of object entities and their relation-
+ship. Such a generated scene graph can serve as a structural
+and interpretable representation of visual scenes, facilitat-
+ing connections between visual perception and reasoning
+[36]. In particular, it has been widely used in various vision-
+language (VL) tasks, including visual question answering
+[8, 10, 11, 29, 32], image captioning [41, 42], referring ex-
+pressions [40] and image retrieval [12].
+Most previous works have focused on addressing the
+*Equal contribution and this work was partially done when Li was
+a research intern at the Shanghai AI Laboratory. ‡ denotes correspond-
+ing author. Code is available: https://github.com/SHTUPLUS/
+Pix2Grp_CVPR2024
+What relation between 
+horse and left person? 
+Short Answer: 
+VLM
+Hold
+VLM
+(         ,              ,          )  
+Rein
+Next
+Ride
+Task Specific
+VLM
+Man
+Boot
+Horse
+Man
+Wear
+Rein
+Predicate Classifier
+Entity ROI
+Generate SG 
+from Image
+As 
+initialization
+(         ,              ,          )  
+(          ,              ,         )  
+Man
+Man
+Horse
+(A)
+(B)
+Figure 1. An illustration of open-vocabulary SGG paradigm
+comparison. (A) previous work adopt the task-specific VLM as
+predicate classifiers from given entity proposals; (B) Our frame-
+work offers a unified framework for generating scene graph with
+novel predicates from images directly and conducting VL tasks.
+SGG problems in a close-world setting. While much effort
+has been made in tackling long-tailed data bias [6, 31, 52]
+and insufficient labeling [3, 19, 50], the typical label space
+of those methods only covers a limited subset of the di-
+verse visual relationships in the real world. This can re-
+sult in incomplete scene representations and also domain
+gaps when used as intermediate representations in down-
+stream vision-language tasks [37]. To address this limita-
+tion, recent works [7, 47, 51] start to tackle the SGG prob-
+lem under various open-vocabulary settings by exploiting
+the image-text matching capability of pre-trained vision-
+language models (VLM). Nevertheless, these attempts typ-
+ically focus on a simplified setting of the open-vocabulary
+SGG task, such as allowing only novel entities [7, 47] (Ov-
+SGG), or a subtask of SGG, such as classifying open-set
+predicates with given entity pairs [7, 51], as shown in part
+This CVPR paper is the Open Access version, provided by the Computer Vision Foundation.
+Except for this watermark, it is identical to the accepted version;
+the final published version of the proceedings is available on IEEE Xplore.
+28076
+A of Fig. 1.
+It remains open to building an end-to-end
+SGG model in a general open-vocabulary setting. More-
+over, those methods often employ an additional pre-training
+step to enhance the representation power of VLM on rela-
+tion modeling, which induces a high training cost for large-
+scale models.
+In this work, we aim to address the open-vocabulary
+SGG problem in a more general setting, i.e., generating
+scene graphs with both known and novel visual relation
+triplets from pixels. To this end, we propose an efficient
+end-to-end framework that leverages the image-to-text gen-
+eration paradigm of pre-trained VLMs, as illustrated in part
+B of Fig. 1. This framework, dubbed Pixels to Scene Graph
+Generation with Generative VLM (PGSG), In particular, we
+formulate the SGG as an image-to-sequence problem and
+introduce a fine-tuning strategy based on generative VLMs.
+In contrast to previous methods relying on image-to-text
+matching VLMs, our generative framework provides a more
+efficient way to utilize the rich visual-linguistic knowledge
+of pre-trained VLMs for relation-aware representation with-
+out requiring additional pre-training of VLMs. In addition,
+by converting SGG into a sequence generation problem, our
+method unifies the SGG task with a diverse set of VL tasks
+under the generative framework, which enables us to trans-
+fer visual relation knowledge to other VL tasks in a seam-
+less manner (e.g., via model initialization).
+Specifically, we develop an image-to-graph generation
+framework consisting of three main components.
+First,
+we introduce scene graph prompts, which transform scene
+graphs into a sequence representation with relation-aware
+tokens. Given those graph prompts, we then employ a pre-
+trained VLM to generate a corresponding scene graph se-
+quence for each input image. Finally, we design a plug-and-
+play relationship construction module to extract locations
+and categories of relation triplets, which produces the out-
+put scene graph. Our generation pipeline only requires fine-
+tuning on target SGG datasets. Such a framework enables
+us to generate scene graphs with diverse predicate concepts
+thanks to the large capacity of pre-trained VLMs. More-
+over, our unified framework supports a seamless adaptation
+strategy, employing our fine-tuned VLM as an initialization
+for image-to-text generative models in various VL tasks.
+We validate our framework on three SGG benchmarks:
+Panoptic Scene Graph [39], OpenImages-V6 [16], and Vi-
+sual Genome [15], achieving state-of-the-art performance in
+the general open-vocabulary setting. Furthermore, we apply
+our SGG-based VLM to multiple VL tasks and obtain con-
+sistent improvements, highlighting our effective relational
+knowledge transfer paradigm.
+In summary, the contribution of our work is threefold:
+• We propose a novel framework for a general open-
+vocabulary SGG problem based on the image-to-text gen-
+erative VLM, which can be seamlessly integrated with
+other VL tasks.
+• Our method introduces a scene graph prompt and a plug-
+and-play relation-aware converter module on top of gen-
+erative VLM, allowing more efficient model learning.
+• Our framework achieves superior performance on the
+general open-vocabulary SGG benchmarks and consistent
+improvements on downstream VL tasks.
+2. Related Work
+Scene Graph Generation Scene graph generation (SGG)
+aims to localize and classify entities and visualize the re-
+lations between them in images. The concept of SGG was
+first introduced in [15]. Initially, it was used as an auxil-
+iary representation to enhance image retrieval [12, 28]. The
+diverse semantic concepts and compositional structures of
+visual relations create a large concept space, making this
+task difficult. Researchers have approached SGG from var-
+ious perspectives, including addressing intrinsic long-tailed
+data bias [2, 18, 20, 22, 31], incorporating scene context to
+model diverse visual concepts [24, 30, 48, 49], and reducing
+labeling costs through weakly or semi-supervised training
+[19, 44, 51, 53]. However, most SGG work focuses on lim-
+ited categories, while few address SGG models’ generaliza-
+tion capabilities. Recent studies, such as [7], have systemat-
+ically investigated this problem by designing VL-pretrained
+models to classify predicates with unseen object categories,
+and [51] have investigated visual relations with unseen ob-
+jects. We generate scene graphs with unseen predicate cat-
+egories to explore a more realistic setting.
+Scene Graph for VL Tasks Scene graphs have been ex-
+tensively studied for improving vision-language (VL) tasks.
+Early works used scene graphs to improve image retrieval.
+Several studies showed that scene graphs can be used for
+image captioning, visual question answering (VQA), and
+visual grounding.
+Adding explicit scene graphs to VL
+models for downstream tasks is difficult. As discussed in
+[26, 34], generated scene graph noise can harm VL mod-
+els. Second, SGG models trained on public datasets with
+few classes often have a large semantic domain gap com-
+pared to visual concepts needed for downstream VL tasks
+[37]. Some works incorporate scene graph representations
+within model training to address these issues [37, 45]. Our
+work aligns with this line: we formulate a unified frame-
+work that allows joint optimization between explicit scene
+graph generation modeling and VL tasks.
+Open-vocabulary Scene Graph Generation Previous re-
+search has predominantly focused on enhancing the gener-
+alization of new entity combinations in visual relationships
+[7, 13, 15, 31, 51]. Notably, He et al. [7] and Yu et al. [47]
+have recently addressed open-vocabulary predicate classifi-
+cation through visual-language pre-training. Nevertheless,
+these methods struggle to effectively detect visual relations
+involving unseen predicates in real-world scenarios. Ad-
+28077
+ditionally, some recent works [23, 27] have attempted to
+handle the challenge of unseen verbs in human-object in-
+teraction detection by employing CLIP as a teacher model
+for feature representation. However, these approaches often
+neglect to explore the synergies between open-vocabulary
+SGG and VL tasks.
+In this study, we introduce a uni-
+fied framework leveraging VLMs to tackle open-vocabulary
+SGG and enhance the reasoning capabilities of VLMs.
+3. Preliminary
+3.1. Scene Graph Generation
+The goal of scene graph generation is to generate a scene
+graph Gsg = {Ve, R} from an image, which consists of
+visual relationships R = {rij}i̸=j and N v entities V =
+{vi}Nv
+i=1. The relation triplet rij = (vi, ce
+ij, vj) represents
+the relationship between the i-th and j-th entities, with a
+predicate category denoted as ce
+ij. The entity vi = {cv
+i , bi}
+consists of a category label cv
+i in entity category space Ov
+and a bounding box bi, indicating its location in the image.
+The predicate category ce
+ij belongs to a category space Oe.
+In this work, we mainly focus on open-vocabulary pred-
+icate SGG settings. For open-vocabulary predicate SGG,
+the predicate category space Oe is divided into: seen base
+classes Oe
+b, and novel unseen classes Oe
+n. Unlike previous
+works [7, 51] tackle detecting relations with entity category
+Ov with unseen open-vocabulary set, or classifying novel
+predicates [7, 47] from given GT entities, we explore a more
+realistic and challenging setting that generates scene graphs
+with unseen predicate concepts.
+3.2. Vision-language Models
+In this work, we use detector-free BLIP [17] and instruct-
+BLIP as base VLM, which achieves state-of-the-art perfor-
+mance on many VL tasks. It performs the image to sequence
+generation task with a vision encoder-text decoder architec-
+ture. The vision encoder, denoted as Fv enc, maps the in-
+put image I to vision features Zv ∈RM×d. For sequence
+generation, the text decoder with token predictor Ft dec out-
+puts hidden states of sequence Hs = [h0, ..., hT ′] ∈RT ′×d
+from encoder features Zv, by auto-regressive generation
+methods such as beam search or nucleus sampling. The
+token sequence ts = [t0, ..., tT ′] ∈DT ′ with token clas-
+sification score Ps = [p0, ..., pT ′]RT ′×|Cvoc| in vocabulary
+space Cvoc.
+4. Our Approach
+4.1. Method Overview
+Our
+proposed
+PGSG
+framework
+formulates
+open-
+vocabulary SGG as an image-to-sequence generation
+task, which is achieved by a network Fsg with parameters
+Θsg .
+Moreover, with a unified formulation, the PGSG
+framework enables a seamless transfer of explicit scene
+graph representation knowledge by Θsg to VL tasks.
+Specifically, our framework is composed of three compo-
+nents: scene graph sequence generation, relation triplet
+construction, and adaptation to downstream VL tasks,
+as shown in Fig. 2. First, we generate the scene graph
+sequence ssg from the input image I by image-to-text
+generation of VLM with the scene graph sequence prompts
+(Sec. 4.2). Second, the relationship construction module
+extracts R from the scene graph sequence ssg to construct
+the scene graph Gsg (Sec. 4.3). In addition, we introduce
+the learning and inference pipeline of our SGG framework
+in Sec. 4.4. Finally, we adapt the VLM with Θsg for trans-
+ferring the explicit scene graph representation knowledge
+to VL tasks (Sec. 4.5).
+4.2. Scene Graph Sequence Generation
+The scene graph sequence ssg is composed of a set of re-
+lation triplets R from Gsg. To achieve this, we propose a
+scene graph sequence prompt:
+“ Generate the scene graph of [triplet sequence] and
+[triplet sequence] ... ”
+It consists of two primary components: the prefix instruc-
+tion ”Generate the scene graph of” and K relation triplet
+sequences, separated by “and” or “,”.
+Specifically, each
+triplet sequence is transformed from the rij by the natural
+language grammar of subject-predicate-object:
+“ tv
+i [ENT] te
+ij [REL] tv
+j [ENT] ”
+The token sequences tv
+i , tv
+i , and te
+ij represent the tokenized
+category names of the subject, object entities cv
+i , cv
+j, and
+predicate ce
+ij. We also introduce specified relation-aware
+tokens, [ENT] and [REL], to represent the compositional
+structure of relationships and the position of entities.
+The text decoder of VLM takes Zv and the prefix instruc-
+tion as input and generates ssg. This procedure is similar to
+standard image captioning. By using the vocabulary space
+of natural language, we can use generalized semantic repre-
+sentation to generate the visual relationship. The following
+modules extract both the spatial and categorical informa-
+tion and construct the instance-aware relation triplet from
+the sequence using relation-aware tokens.
+4.3. Relationship Construction
+As referred to in Sec. 3.1, the standard visual relation triplet
+rij contains the predicate category label ce
+ij, entities with
+position bi, bj, and category cv
+i , cv
+j. The relation construc-
+tion aims to extract spatial and category labels from ssg to
+construct the relation triplets. This relationship construction
+has two submodules: 1) Entity Grounding Module, which
+outputs entity positions, and 2) Category Convert Module,
+which converts language prediction from vocabulary space
+to category space.
+4.3.1
+Entity Grounding Module
+The entity grounding module predicts the bounding box of
+an entity to ground the generated relations within the scene
+28078
+Scene Graph
+Man-1
+Man-2
+Man-3
+Horse-1
+Hold
+Next
+Ride
+Entity 
+Grounding
+Category 
+Conversion
+A scene of man [ent] holding [rel] 
+horse [ent] and man [ent] next to 
+[rel] horse [ent], . . .
+man
+Car
+Man
+Person
+Horse
+. 
+. 
+.
+Zebra
+Holding
+At
+Ride
+Hold
+Next to
+. 
+. 
+.
+Play
+Ride
+Horse
+Scene Graph Sequence
+What color jacket does the person 
+riding the horse wear?
+No
+Generate the scene graph:
+VLM
+VLM
+Parameter 
+Initialization
+Open-vocabulary 
+Scene Graph Generation
+Relationship Construction
+Is the man on the left riding the 
+horse?
+Green
+Finetuning on VL Tasks
+Input Image
+VQA
+Figure 2. Illustration of overall pipeline of our PGSG. We generate scene graph sequences from the images using VLM. Then, the
+relation construction module grounds the entities and converts categorical labels from the sequence. For VL tasks, the SGG training
+provides parameters as initialization for VLM in fine-tuning.
+graph sequence. Unlike existing multi-output VLMs [35,
+43, 45] that output sequences comprising a mixture of co-
+ordinates and words, the entity grounding module predicts
+bounding boxes B ∈R2N×4 of entity token sequence “tv
+i
+[ENT]”, “tv
+j [ENT] ” from N relation triplets of ssg. This
+process significantly enhances the quality of modeling spa-
+tial coordinates for these entities.
+As shown in Fig. 3, for each token sequence “tv
+i [ENT]”,
+we extract the bi by hidden states Hi = [htv
+i
+1 , ..., h[ENT ]
+Tv
+] ∈
+RTv×d of , where Tv is length of tv
+i . We utilize the token
+hidden states as queries Q to re-attend the image features
+Zv through the attention mechanism to more accurately lo-
+cate the objects. We first transform [htv
+i
+1 , ..., h[ENT ]
+Tv
+] into
+query vector qent
+i
+∈Rdq by average pooling and linear
+projection:
+qent
+i
+= 1
+Tv
+Tv
+X
+k=1
+htv
+i
+k · WT
+q.
+(1)
+Subsequently, we decode the bi by cross-attention be-
+tween queries of 2N entity token sequences:
+Q
+=
+{qent
+1
+, ..., qent
+2N } ∈R2N×d and Zv using transformer en-
+coder Fenc(·) and decoder Fdec(·). Finally, the B is pre-
+dicted by the feed-forward network FFN(·).
+ˆQ = Fdec(Q, Fenc(Zv)),
+(2)
+B = FFN( ˆQ).
+(3)
+By introducing this dedicated module, we are able to gen-
+erate standard scene graphs with instance-level spatial pre-
+diction from an image-level scene graph sequence.
+4.3.2
+Category Conversion Module
+During the sequence generation, the category of entities and
+predicates is represented by a token from the language vo-
+cabulary space Cvoc. However, the SGG benchmark cate-
+gory concept space is only part of the language vocabulary.
+To align the open-vocabulary predictions with the category
+space of the target SGG benchmark, we need to convert the
+vocabulary token into a category label. As illustrated in
+Fig. 3, the Category Conversion Module maps the tokens
+prediction score from the vocabulary space Cvoc to the en-
+tity and predicate category space Ov, Oe in the target SGG
+benchmark, respectively.
+The category conversion module is parameter-free,
+which
+transforms
+the
+vocabulary
+score
+Ps
+i, Ps
+ij
+∈
+RTv×|Cvoc| of each entity and the predicate token sequences
+tv
+i and te
+ij into the categorical prediction scores pv
+i ∈R|Ov|
+and pe
+ij ∈R|Oe| respectively. To achieve this transfer, we
+first tokenize target category sets, include entity Ov, and
+predicate Oe into the token sequences te
+c and tv
+c by tok-
+enizer of VLM.
+te
+c = [t1
+1, t1
+2, t2
+1, ...tCe
+TCe], tv
+c = [t1
+1, t1
+2, t2
+1, ...tCv
+TCv ].
+(4)
+Here, the superscript c denotes the category index, and T
+is the sequence length for each tokenized category name.
+Subsequently, we compose pe
+r and pv
+i from ps using the
+corresponding token indices of tv
+c and te
+c:
+pe
+ij = {β1
+2
+2
+X
+i=1
+Ps
+ij[t1
+i ]; ... ; βCe
+TCe
+TCe
+X
+i=1
+Ps
+ij[tCe
+i ]}.
+(5)
+Here, [·] represents the indexing operation, and {·; ·} de-
+notes the concatenation operation. The same procedure is
+28079
+Scene Graph Sequence
+Image
+Encoder
+Transformer
+Encoder - Decoder
++
+Position 
+Encoding
+Position 
+Predictor
+Patch 
+Embedding
+Instance Position Prediction
+man <ent> holding <rel> horse <ent> and man
+<ent> next to <rel> horse <ent>, . . .
+Car
+Man
+Person
+Horse
+. 
+. 
+.
+Zebra
+At
+Ride
+Hold
+Next to
+. 
+. 
+.
+Play
+…
+Horse
+Person
+Vocabulary Score Distribution
+Category Score Distribution
+Novel & Base  Class
+Next to
+Hold
+Indexing by Token
+Predicate
+Entity
+Predicate
+Entity
+𝐐
+𝐇𝒊
+K, V
+Category Set 
+Entity Grounding Module
+Category Conversion Module
+Figure 3. Illustration of entity grounding module and category conversion module. Left): The entity grounding module localizes the
+entities within scene graph sequences by predicting their bounding boxes. Right): The category conversion module maps the vocabulary
+sequence prediction into categorical prediction.
+applied to the scores for entity classification pv
+i . Addition-
+ally, if the generated tokens tv
+i and te
+ij exactly match the
+given category name, we amplify the score of this category
+by βi. To this end, the category conversion module enables
+the evaluation and analysis of SGG performance with re-
+spect to the defined categories.
+4.4. Learning and Inference
+4.4.1
+Learning
+For SGG training, we use a multi-task loss consisting of
+two parts: the loss for standard next token prediction lan-
+guage modeling Llm and the loss for the entity grounding
+module Lpos. The Llm loss follows the same definition as
+in the VLM backbone, which is a standard self-regressive
+language modeling loss. It predicts the next token ti based
+on previously generated tokens (t = [t1, t2, ..., ti−1]) and
+visual features Zv. This prediction is represented as: ti =
+Fvlm(Zv, t; Θsg). To train this VLM, we optimize its pa-
+rameters (Θsg) by maximizing the likelihood of correctly
+predicting each subsequent token in the sequence sequence
+of length K :
+PK
+i=1 log P(ti|Z, t1, t2, ..., ti−1; Θvlm).
+Compared to previous SGG methods, our self-regression-
+based approach effectively captures the semantic relation-
+ships between predicates and entities. The loss Lpos is for
+the bounding box regression of entity grounding module.
+For each box prediction B of scene graph sequence, we
+have GIOU and L1 loss for calculating the distance B and
+GT Bgt: Lpos = GIOU(B, Bgt) + ||B −Bgt||1.
+4.4.2
+Inference
+During inference, we first generate the scene graph se-
+quence using VLMs. The following relationship construc-
+tion module extracts category labels and spatial positions
+for constructing visual relations from the sequences.
+Scene Graph Sequence Generation The scene graph se-
+quence is generated using the image-to-text generation of
+VLMs. Our goal is to generate a diverse set of relationships
+to create a more comprehensive scene graph representa-
+tion. To achieve this, we employ the nucleus sampling strat-
+egy [9] with multiple round sequence generation. Specif-
+ically, for each image, we generate M sequences, whose
+maximum length is L. This strategy encourages the model
+to generate diversely, allowing scene graph predictions to
+capture various visual entities and their relationships.
+Relationship Triplet Construction To construct relation-
+ship triplets ˆrij = (vi, ce
+ij, vj) from the scene graph se-
+quence, we initially extract the token sequence of subject
+and object entities tv
+i , tv
+j, and predicate te
+ij. Specifically,
+we employ a heuristic rule to match patterns such as “sub-
+ject [ENT] predicate [REL] object [ENT]”, allowing us to
+extract these triplets. Subsequently, utilizing a relationship
+construction module, we extract bi, pv
+i of entities vi,and
+bj, pv
+j for vj, with predicate scores pv
+ij. To obtain the cat-
+egory labels of triplets cv
+i , cv
+j, ce
+ij, we select the top 3 cate-
+gories according to prediction scores: pv
+i , pv
+j, and pv
+ij.
+Post-Processing We refine the initial triplets to obtain the
+final relationship triplets through a process of filtering and
+ranking.
+Firstly, we remove self-connected relationships
+where the subject and object entities are the same.
+Then,
+we apply a non-maximum suppression (NMS) strategy to
+eliminate redundant relationships, resulting in a more con-
+cise predicted scene graph. Finally, we rank all relation-
+ships based on the score of each component triplet. This
+score, denoted as St, is calculated as the product of predic-
+tion scores for the involved entities sv
+i , sv
+j and the predicate
+se
+p, extracted from category score distributions pv
+i , pv
+j, pe
+ij
+using their respective category indices.
+4.5. Adaptation to Downstream VL Task
+In our framework, depicted in Fig. 2, we employ a uni-
+fied image-to-text generation approach, facilitating seam-
+less knowledge transfer for relation modeling. We initialize
+the visual encoder Θv enc and text decoder Θt dec parame-
+ters of the Scene Graph Generation (SGG) model, denoted
+as Θsg, for VLMs fine-tuning on VL tasks. Additionally,
+we employ initial pre-trained weights for the token predic-
+tors of text decoders to maintain vocabulary prediction qual-
+ity during fine-tuning. Modules of the VLM not utilized
+28080
+D
+S
+M
+Novel+base
+Novel
+mR50/100
+R50/100
+mR50/100
+VG
+PCls
+CaCao
+10.3 / 12.6
+-
+-
+SVRP
+8.3 / 10.8
+33.5 / 35.9
+-
+PGSG*
+10.8 / 13.9
+26.9 / 33.9
+5.2 / 7.7
+SGCls
+SVRP
+3.2 / 4.5
+19.1 / 21.5
+-
+PGSG*
+8.4 / 11.0
+22.6 / 27.2
+4.8 / 6.0
+SGDet
+VS3
+5.1 / 5.7
+11.0 / 12.8
+0.0 / 0.0
+SGTR†
+3.5 / 5.4
+12.6 / 18.2
+0.0 / 0.0
+PGSG
+6.2 / 8.3
+15.8 / 19.1
+3.7 / 5.2
+PSG
+SGTR†
+6.4 / 8.4
+14.2 / 18.2
+0.0 / 0.0
+PGSG
+14.9 / 18.1
+26.0 / 28.9
+5.1 / 7.5
+OIv6
+SVRP
+-
+-
+-
+SGTR†
+11.0 / 16.7
+36.1 / 38.4
+0.0 / 0.0
+PGSG
+20.8 / 23.0
+41.3 / 43.3
+3.8 / 8.9
+Table 1. The open-vocabulary scene graph generation on VG,
+PSG, and OIV6 datasets † denotes the method is reproduced with
+BLIP visual encoder ViT as the backbone; D denotes the dataset
+name; S is the SGG setting; M represents the model; * denotes
+that we use the grounding truth assignment on predictions.
+during SGG training, such as the text encoder, retain their
+initial pre-trained weights. This adaptive knowledge shar-
+ing from SGG parameters during fine-tuning enhances the
+performance of VL tasks.
+5. Experiments
+5.1. Experiments Configuration
+We evaluate our method on both SGG and downstream VL
+tasks. For SGG benchmarks, we evaluate PGSG on three
+benchmarks: Panoptic Scene Graph Generation (PSG) [39],
+Visual Genome (VG) [15], and OpenImage V6 (OIv6) [16].
+We randomly select 50% predicate categories as novel
+classes for open-vocabulary predicate SGG.
+We assess our method’s performance in the SGG task
+using three evaluation protocols: SGDet, PCls, and SGCls,
+as proposed by [38]. We calculate overall recall (R@K)
+and class-balance metric mean recall (mR@K) on the top K
+predictions. Furthermore, we present mR@K specifically
+for novel classes to illustrate the model’s performance in
+generalizing to unseen predicates.
+For VL tasks, we inspect our model on visual grounding
+on RefCOCO/+/g [25, 46], visual question answering on
+GQA [11] and image captioning on COCO [4].
+We use the BLIP [17] as our VLM backbone, which em-
+ploys ViT-B/16 as the visual backbone and BERTbase as the
+text decoder. For downstream VL tasks, we initialize the pa-
+rameters with the pre-trained SGG model. More implemen-
+tation details can be found in the supplementary materials.
+5.2. Open-vocabulary SGG
+Setup We evaluate our design on the VG, PSG, and
+OIv6 datasets by comparing it with OV-SGG methods:
+CaCao[47], SVRP[7], and VS3[51] in Tab 1.
+The Ca-
+Cao and SVRP have the capability for open-vocabulary
+predicate classification with GT entities. In contrast, the
+VS3 achieves SGDet on close-set predicate, where rela-
+tion triplets have unseen entity categories.
+Additionally,
+we adapt a one-stage SGG method (SGTR [21]) for predic-
+tive open-vocabulary SGG since it has the most balanced
+performance in a close-vocabulary SGG setting. To apply
+close-set SGG methods to predicate open vocabulary, we
+train models on base categories only and set the classifier
+weights of novel categories to zero at inference time.
+VG Our method demonstrates strong performance com-
+pared to previous methods on PCls, SGCls, and SGDet set-
+tings on VG. Since the VLM cannot take a bounding box as
+input, we simulate entity-based relations in PCls and SG-
+Cls settings by directly replacing entity prediction with GT
+entities. Our method improves base+novel class mR@100
+and R@100 by 6.5 and 5.7 over SVRP in SGCls. We out-
+perform SVRP’s task-specific pretrain model with a general
+pretrain VLM in an image-to-text generation fashion.
+For the SGDet setting, we compare with two baselines:
+VS3 and SGTR. Our method outperforms both methods,
+achieving 2.9 and 0.9 on mR@100 and R@100 for all cat-
+egories. It’s worth noting that VS3 and SGTR are unable
+to generalize to novel classes and can only predict relation-
+ships for base categories.
+PSG Our PGSG method achieves significant performance
+gains for both seen base and unseen novel categories on the
+PSG dataset. We observe improvements of 9.4 and 14.3
+on mR@100 and R@100 compared with SGTR equipped
+with a pre-trained ViT backbone in the whole category
+set, respectively.
+For novel predicate categories, PGSG
+outperforms the strong baseline SGTR method by 4.5 on
+mR@100.
+OpenImage Our approach excels on the OpenImage V6
+benchmark (see Tab. 1). Comparing our design to the SGTR
+baseline, we achieve better mR@100 and R@100 with mar-
+gins of 5.3 and 4.9.
+5.3. Close-vocabulary SGG
+Our method is also tested in a closed-vocabulary SGG. Our
+method generates relationships using VLMs without ex-
+plicitly pairing entity proposals, so we compare it to one-
+stage SGG methods with top-down architecture, such as
+PSGTR [39], PSGFormer [39], SGTR [21], RelTR [5],
+ISG [14], SSRCNN [33].
+In zero-shot triplet SGG, our
+method shows good compositional generalization. To en-
+sure a fair comparison, we substituted the category conver-
+sion module for a close-set classifier, aligning with previ-
+ous SGG methods. As shown in Tab. 2, the BGSG with the
+close-set classifier achieves competitive or superior perfor-
+mance when compared to SGG SOTA methods, SGTR, in a
+standard SGG setting.
+Zero-shot Triplets In the middle part of Tab. 2, we eval-
+uate our method’s generalization ability through zero-shot
+triplet SGG. On the PSG dataset, our PGSG method en-
+28081
+D
+B
+M
+Zs-SGG
+Close-SGG
+zR50/100
+mR50/100
+R50/100
+PSG
+R101
+PSGTR
+3.1/6.4
+20.3/21.5
+32.1/35.3
+PSGFormer
+2.2/4.9
+19.3/19.7
+20.4/20.7
+SGTR
+4.1/5.8
+24.3/27.2
+33.1/36.3
+ViT-B*
+SGTR
+3.1/3.6
+22.1/23.5
+30.1/32.0
+PGSG
+5.1/7.5
+14.9/18.1
+26.0/28.9
+PGSG-c
+6.8/8.9
+20.9/22.1
+32.7/33.4
+VG
+X101-FPN
+SSRCNN
+3.1/4.5
+18.6/22.5
+23.7/27.3
+R50
+SVRP
+-
+10.5/12.8
+31.8/35.8
+Swin-L
+VS3
+-
+-
+34.5/39.2
+R101
+RelTR
+2.6/3.4
+6.8/10.8
+21.2/27.5
+ISG
+2.7/3.8
+8.0/8.8
+29.7/32.1
+SGTR
+2.5/5.8
+12.0/15.2
+24.6/28.4
+ViT-B*
+SGTR
+2.1/4.9
+8.7/10.1
+18.1/20.4
+PGSG
+6.2/8.5
+8.9/11.5
+16.7/21.2
+PGSG-c
+4.8/7.6
+10.5/12.7
+20.3/23.6
+Table 2. The close-vocabulary SGDet performance on VG and
+PSG dataset. D: dataset name; B: visual backbone; M: Method;
+ViT-B*: the use BLIP ViT visual encoder as backbone. -c: denotes
+use the close-set classifier.
+hances zR@100 by 4.1 over the ViT SGTR baseline and
+matches the ResNet-101 PSGTR model, despite lower im-
+age input. PGSG performed well on the VG dataset, outper-
+forming SSRCNN by 4.0 on zR@100 and achieving a 3.6
+margin over the ViT SGTR baseline.
+Discussion We also evaluate our method against previous
+SGG approaches under standard close-vocabulary SGG set-
+tings in the Tab. 2. While our method performs similarly
+to prior works using the same ViT backbone in closed-
+vocabulary settings, there remains a gap between our results
+and previous SOTA performances.
+• Limited input resolution: Transformer-based VLMs like
+BLIP use smaller images (384x384), while traditional SGG
+methods (e.g., ResNet-101 FPN, 800x1333) may miss or
+mislocalize small or ambiguous objects, which have been
+shown to pose challenges in SGG tasks [19, 21].
+• Single-stage training: In PGSG, the BLIP is used for SGG
+training directly, as opposed to the conventional two-stage
+training. However, this approach imposes limitations on the
+model’s ability to accurately detect small objects.
+5.4. Ablation Study
+We conduct an ablation study to investigate the impact of
+different model structures and the effectiveness of SGG
+training. Specifically, we compare the design choices re-
+garding the entity grounding module with the scene graph
+prompt on the PSG dataset, which is presented in Tab. 3.
+Entity Grounding Module First, we evaluate the effective-
+ness of Entity Grounding with Relation-aware Tokens for
+predicting entity location in the lower part of Tab. 3. Our ap-
+proach demonstrates notable improvements in entity detec-
+tion quality compared to previous methods such as UniTab
+and OFA, which rely on sequence generation by VLMs in-
+Layer of Entity Grounding Module
+L
+mR20
+mR50
+mR100
+R20
+R50
+R100
+0
+2.0
+3.8
+10.3
+7.1
+13.2
+20.1
+3
+3.2
+8.1
+15.9
+11.0
+18.7
+27.9
+6
+3.0
+8.4
+17.0
+11.1
+19.2
+28.4
+12
+3.2
+8.1
+16.7
+12.1
+18.9
+28.2
+Relation-aware Token for Entity Grounding
+C
+mR20
+mR50
+mR100
+R20
+R50
+R100
+mixture
+1.2
+3.1
+8.5
+6.4
+11.8
+16.3
+tokens
+3.0
+8.4
+17.0
+11.1
+19.2
+28.4
+Table 3. Ablation study for entity grounding module on PSG
+dataset. L: indicates the layer of transformer within entity ground-
+ing module. C: denotes the different design choices for entity
+grounding.
+SL
+Open Vocab SGG
+ZS Trp.
+Time
+Novel+Base
+Novel
+R50/100
+mR50/100
+mR50/100
+R50/100
+Sec
+1024
+16.9/18.8
+22.9/25.0
+6.7/9.9
+3.6/6.4
+6.9
+768
+16.8/18.0
+23.6/24.9
+7.9/10.0
+8.5/8.1
+4.8
+512
+15.3/15.6
+22.0/22.5
+7.4/8.1
+3.5/4.6
+2.2
+256
+12.8/12.8
+18.3/18.3
+5.3/5.3
+2.4/2.4
+1.8
+Table 4. The SGG performance and inference time with dif-
+ferent length of output sequences. SL: output sequence lengths;
+Sec: inference time of second per image.
+corporating both coordinates and text. Moreover, we inves-
+tigate the impact of the number of transformer layers (L) in
+the entity grounding module. As seen in the upper part of
+Tab. 3, we vary L from 0 to 12. Here, L = 0 signifies direct
+prediction of the bounding box from the grounding entity
+query Q, with a performance plateau at L = 6.
+Effectiveness of SGG Supervision To evaluate the impact
+of scene graph supervision on downstream VL tasks, we
+fine-tune the BLIP model after training it on entity-only se-
+quence prompts with the same format:“A photo of entity1
+[ENT] and entity2 [ENT]...”. Fine-tuning is performed on
+the GQA dataset. Results from Tab. 7 show that positional
+supervision does not lead to significant improvements over
+initial pre-training. In contrast, scene graph supervision en-
+hances the performance of GQA, especially for relation and
+attribute questions.
+5.5. Model Analysis
+In this section, we analyze our sequence generation-based
+SGG framework. We explore the impact of different pre-
+fix prompts on scene graph generation and evaluate the di-
+versity, quality, and time consumption of generated scene
+graph sequences. We also present the visualization of gen-
+erated sequences in supplementary.
+Quality of Scene Graph Sequence We use a heuristic
+rule to parse the triplet sequence based on the scene graph
+prompt. To showcase our approach’s effectiveness, we track
+[REL] token occurrences and the number of relation triplets
+across different sequence lengths, as shown in Tab. 5. The
+28082
+SL.
+#Trip.
+#Uni.Trip.
+#[REL]
+% Valid
+1024
+87.2
+53.4
+95.1
+95.3%
+768
+76.1
+40.2
+79.2
+96.0%
+512
+45.0
+34.3
+46.2
+97.4%
+256
+22.4
+20.6
+23.3
+96.1%
+128
+17.4
+11.3
+18.7
+93.0%
+Table 5.
+Analysis for quality of generated Scene graph se-
+quences. SL.: Generated sequence Length; # Trip.: Average of
+number of relation triplets; # U. Trip.: Average of number of
+unique relation triplets; # [REL]: Average of number of occurrence
+of [REL] tokens; % Valid: percentage of valid relation triplets.
+Model
+RC
+RC+
+RCg
+val
+testA
+testB
+val
+testA
+testB
+val
+init
+83.1
+86.0
+77.0
+77.1
+83.1
+69.8
+74.3
+PGSG
+86.0
+88.9
+82.4
+79.8
+84.3
+72.3
+77.8
+Table 6.
+Performance of visual grounding task.
+RC, RC+
+and RCg represents the RefCOCO, RefCOCO+ and RefCOCOg
+datasets respectively.
+results demonstrate that VLM generates the formatted scene
+graph sequence, with the heuristic rule efficiently retrieving
+most relation triplets.
+Time Consumption of Sequence Generation Our frame-
+work also achieves a good trade-off between performance
+and computational cost by varying the lengths of the gen-
+erated sequences. As shown in Tab. 4, PGSG maintains
+comparable performance when the output length is reduced
+by 50%, with comparable inference times to 2-stage SGG
+methods (more comparison is in supplementary).
+5.6. Downstream VL-Tasks
+We apply PGSG to VL tasks, including visual grounding,
+visual question answering, and image captioning. Through
+comparisons with the initial pre-trained model, we as-
+sess how explicit scene representation modeling influences
+vision-language reasoning.
+Visual Question Answering On the GQA benchmark,
+PGSG outperforms the initial pre-trained model by 1.7 in
+overall accuracy, with the largest gains in relation (1.9) and
+object (1.3) questions. Additionally, our unified SGG train-
+ing also boosts BLIPv2 VLM’s zero-shot performance on
+GQA from 32.3 to 33.9, with improvements across all ques-
+tion types.
+Image Captioning We conduct the evolution of image cap-
+tioning on COCO [4].
+The results demonstrate that our
+framework achieves comparable performance to the initial
+pre-trained VLMs, including BLIP and BLIPv2, especially
+the SPICE metric [1], which indicates the scene description
+quality of the generated caption.
+Visual Grounding Our method surpassed initial pre-trained
+model by 2.9 and 5.4 on the validation and test A/B splits
+of RefCOCO and by 2.7, 1.2, and 2.5 for RefCOCO+ and
+RefCOCOg, respectively (see Tab. 6). These results under-
+score the effectiveness of knowledge transfer in SGG mod-
+Model
+Question Type
+Relation
+Attribute
+Object
+Category
+Global
+Overall
+BLIP
+Finetuned
+Init
+54.9
+64.5
+86.6
+62.2
+67.6
+62.5
+PGSG-E
+55.8
+64.3
+87.5
+62.6
+67.9
+63.1
+PGSG
+56.8
+66.3
+87.9
+62.8
+68.1
+64.2
+BLIPv2
+Zeroshot
+Init
+29.8
+28.8
+53.6
+31.1
+28.2
+32.3
+PGSG
+31.3
+29.6
+53.9
+34.3
+26.1
+33.9
+Table 7. Performance comparison between initial pre-trained
+VLM and PGSG on GQA). We report the answering accuracy re-
+spectively according to the question type proposed by benchmark.
+E: denotes the entity-only scene graph sequence for ablation;
+Bleu4
+CIDEr
+SPICE
+BLIP
+Init
+0.44
+132.1
+23.6
+Det-T
+0.43
+132.0
+23.5
+PGSG
+0.41
+131.2
+23.9
+BLIP v2
+Init
+0.42
+145.1
+25.6
+PGSG
+0.43
+145.2
+26.0
+Table 8. Performance comparison on COCO image captioning.
+eling, enhancing reasoning and localization following uni-
+fied SGG training for visual grounding.
+6. Conclusion
+In this paper, we present a VLM-based open-vocabulary
+scene graph generation model that formulates the SGG
+through an image-to-graph translation paradigm, thereby
+addressing the difficult problem of generating open-
+vocabulary predicate SGG. The holistic architecture unifies
+the SGG and subsequent VL tasks, thereby enabling ex-
+plicit relation modeling to benefit the VL reasoning tasks.
+Extensive experimental results validate the validity of the
+proposed model.
+Discussion of Limitations:
+Performance on Close-vocabulary SGG. Due to the inher-
+ent weakness of the visual backbone and labeling noise, our
+PGSG performs suboptimal on VG and PSG datasets in a
+standard setting. Improving the perception performance of
+VLMs with high resolution input is a challenging and im-
+portant issue for future research.
+Study on More VL Models and Tasks. Furthermore, our
+study primarily focuses on the BLIP applied to the SGG
+and BLIP and BLIPv2 for VL tasks: VQA, visual ground-
+ing, and image captioning. However, our approach exhibits
+potential for extension to other VL models and tasks. Ex-
+ploring these possibilities remains for future research.
+Acknowledgement: This work was supported by NSFC
+under Grant 62350610269, National Key R&D Program of
+China 2022ZD0161600, Shanghai Frontiers Science Center
+of Human-centered Artificial Intelligence, MoE Key Lab
+of Intelligent Perception and Human-Machine Collabora-
+tion (ShanghaiTech University), and Shanghai Postdoctoral
+Excellence Program 2022235.
+28083
+References
+[1] Peter Anderson, Basura Fernando, Mark Johnson, and
+Stephen Gould. Spice: Semantic propositional image cap-
+tion evaluation.
+In Computer Vision–ECCV 2016: 14th
+European Conference, Amsterdam, The Netherlands, Octo-
+ber 11-14, 2016, Proceedings, Part V 14, pages 382–398.
+Springer, 2016. 8
+[2] Tianshui Chen, Weihao Yu, Riquan Chen, and Liang Lin.
+Knowledge-embedded routing network for scene graph gen-
+eration. In Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition, pages 6163–6171, 2019. 2
+[3] Vincent S Chen, Paroma Varma, Ranjay Krishna, Michael
+Bernstein, Christopher Re, and Li Fei-Fei. Scene graph pre-
+diction with limited labels. In Proceedings of the IEEE Inter-
+national Conference on Computer Vision, pages 2580–2590,
+2019. 1
+[4] Xinlei Chen, Hao Fang, Tsung-Yi Lin, Ramakrishna Vedan-
+tam, Saurabh Gupta, Piotr Doll´ar, and C Lawrence Zitnick.
+Microsoft coco captions:
+Data collection and evaluation
+server. arXiv preprint arXiv:1504.00325, 2015. 6, 8
+[5] Yuren Cong, Michael Ying Yang, and Bodo Rosenhahn.
+Reltr: Relation transformer for scene graph generation. IEEE
+Transactions on Pattern Analysis and Machine Intelligence,
+2023. 6
+[6] Yuyu Guo, Lianli Gao, Xuanhan Wang, Yuxuan Hu, Xing
+Xu, Xu Lu, Heng Tao Shen, and Jingkuan Song. From gen-
+eral to specific: Informative scene graph generation via bal-
+ance adjustment. In Proceedings of the IEEE/CVF Interna-
+tional Conference on Computer Vision, pages 16383–16392,
+2021. 1
+[7] Tao He, Lianli Gao, Jingkuan Song, and Yuan-Fang Li. To-
+wards open-vocabulary scene graph generation with prompt-
+based finetuning. In Computer Vision–ECCV 2022: 17th Eu-
+ropean Conference, Tel Aviv, Israel, October 23–27, 2022,
+Proceedings, Part XXVIII, pages 56–73. Springer, 2022. 1,
+2, 3, 6
+[8] Marcel Hildebrandt, Hang Li, Rajat Koner, Volker Tresp, and
+Stephan G¨unnemann. Scene graph reasoning for visual ques-
+tion answering. arXiv preprint arXiv:2007.01072, 2020. 1
+[9] Ari Holtzman, Jan Buys, Li Du, Maxwell Forbes, and Yejin
+Choi. The curious case of neural text degeneration. arXiv
+preprint arXiv:1904.09751, 2019. 5
+[10] Drew Hudson and Christopher D Manning. Learning by ab-
+straction: The neural state machine. Advances in Neural In-
+formation Processing Systems, 32, 2019. 1
+[11] Drew A Hudson and Christopher D Manning. Gqa: A new
+dataset for real-world visual reasoning and compositional
+question answering. In Proceedings of the IEEE/CVF con-
+ference on computer vision and pattern recognition, pages
+6700–6709, 2019. 1, 6
+[12] Justin Johnson, Ranjay Krishna, Michael Stark, Li-Jia Li,
+David Shamma, Michael Bernstein, and Li Fei-Fei. Image
+retrieval using scene graphs. In Proceedings of the IEEE con-
+ference on computer vision and pattern recognition, pages
+3668–3678, 2015. 1, 2
+[13] Xuan Kan, Hejie Cui, and Carl Yang. Zero-shot scene graph
+relation prediction through commonsense knowledge inte-
+gration. In Machine Learning and Knowledge Discovery in
+Databases. Research Track: European Conference, ECML
+PKDD 2021, Bilbao, Spain, September 13–17, 2021, Pro-
+ceedings, Part II 21, pages 466–482. Springer, 2021. 2
+[14] Siddhesh Khandelwal and Leonid Sigal.
+Iterative scene
+graph generation. arXiv preprint arXiv:2207.13440, 2022.
+6
+[15] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A Shamma, et al.
+Visual genome:
+Connecting language and vision using crowdsourced dense
+image annotations. International journal of computer vision,
+123(1):32–73, 2017. 2, 6
+[16] Alina Kuznetsova, Hassan Rom, Neil Alldrin, Jasper Ui-
+jlings, Ivan Krasin, Jordi Pont-Tuset, Shahab Kamali, Stefan
+Popov, Matteo Malloci, Alexander Kolesnikov, Tom Duerig,
+and Vittorio Ferrari. The open images dataset v4: Unified
+image classification, object detection, and visual relation-
+ship detection at scale. International Journal of Computer
+Vision(IJCV), 2020. 2, 6
+[17] Junnan Li, Dongxu Li, Caiming Xiong, and Steven Hoi.
+Blip: Bootstrapping language-image pre-training for uni-
+fied vision-language understanding and generation. In In-
+ternational Conference on Machine Learning, pages 12888–
+12900. PMLR, 2022. 3, 6
+[18] Lin Li, Long Chen, Yifeng Huang, Zhimeng Zhang,
+Songyang Zhang, and Jun Xiao. The devil is in the labels:
+Noisy label correction for robust scene graph generation. In
+Proceedings of the IEEE/CVF Conference on Computer Vi-
+sion and Pattern Recognition, pages 18869–18878, 2022. 2
+[19] Lin Li, Long Chen, Hanrong Shi, Hanwang Zhang, Yi Yang,
+Wei Liu, and Jun Xiao. Nicest: Noisy label correction and
+training for robust scene graph generation. arXiv preprint
+arXiv:2207.13316, 2022. 1, 2, 7
+[20] Rongjie Li, Songyang Zhang, Bo Wan, and Xuming He.
+Bipartite graph network with adaptive message passing for
+unbiased scene graph generation.
+In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 11109–11119, 2021. 2
+[21] Rongjie Li, Songyang Zhang, and Xuming He. Sgtr: End-to-
+end scene graph generation with transformer. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, pages 19486–19496, 2022. 6, 7
+[22] Wei Li, Haiwei Zhang, Qijie Bai, Guoqing Zhao, Ning Jiang,
+and Xiaojie Yuan. Ppdl: Predicate probability distribution
+based loss for unbiased scene graph generation. In Proceed-
+ings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, pages 19447–19456, 2022. 2
+[23] Yue Liao, Aixi Zhang, Miao Lu, Yongliang Wang, Xiaobo
+Li, and Si Liu. Gen-vlkt: Simplify association and enhance
+interaction understanding for hoi detection. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, pages 20123–20132, 2022. 3
+[24] Xin Lin, Changxing Ding, Jing Zhang, Yibing Zhan, and
+Dacheng Tao. Ru-net: Regularized unrolling network for
+scene graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 19457–19466, 2022. 2
+28084
+[25] Junhua Mao, Jonathan Huang, Alexander Toshev, Oana
+Camburu, Alan L Yuille, and Kevin Murphy.
+Generation
+and comprehension of unambiguous object descriptions. In
+Proceedings of the IEEE conference on computer vision and
+pattern recognition, pages 11–20, 2016. 6
+[26] Kien Nguyen, Subarna Tripathi, Bang Du, Tanaya Guha, and
+Truong Q Nguyen. In defense of scene graphs for image
+captioning. In Proceedings of the IEEE/CVF International
+Conference on Computer Vision, pages 1407–1416, 2021. 2
+[27] Shan Ning, Longtian Qiu, Yongfei Liu, and Xuming He.
+Hoiclip: Efficient knowledge transfer for hoi detection with
+vision-language models. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 23507–23517, 2023. 3
+[28] Sebastian Schuster, Ranjay Krishna, Angel Chang, Li Fei-
+Fei, and Christopher D Manning. Generating semantically
+precise scene graphs from textual descriptions for improved
+image retrieval. In Proceedings of the fourth workshop on
+vision and language, pages 70–80, 2015. 2
+[29] Jiaxin Shi, Hanwang Zhang, and Juanzi Li. Explainable and
+explicit visual reasoning over scene graphs. In Proceedings
+of the IEEE Conference on Computer Vision and Pattern
+Recognition, pages 8376–8384, 2019. 1
+[30] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan Luo,
+and Wei Liu. Learning to compose dynamic tree structures
+for visual contexts. In Proceedings of the IEEE Conference
+on Computer Vision and Pattern Recognition, pages 6619–
+6628, 2019. 2
+[31] Kaihua Tang, Yulei Niu, Jianqiang Huang, Jiaxin Shi, and
+Hanwang Zhang. Unbiased scene graph generation from bi-
+ased training. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 3716–
+3725, 2020. 1, 2
+[32] Damien Teney, Lingqiao Liu, and Anton van Den Hengel.
+Graph-structured representations for visual question answer-
+ing.
+In Proceedings of the IEEE conference on computer
+vision and pattern recognition, pages 1–9, 2017. 1
+[33] Yao Teng and Limin Wang. Structured sparse r-cnn for direct
+scene graph generation. arXiv preprint arXiv:2106.10815,
+2021. 6
+[34] Dalin Wang, Daniel Beck, and Trevor Cohn. On the role of
+scene graphs in image captioning. In Proceedings of the Be-
+yond Vision and LANguage: inTEgrating Real-world kNowl-
+edge (LANTERN), pages 29–34, 2019. 2
+[35] Peng Wang, An Yang, Rui Men, Junyang Lin, Shuai Bai,
+Zhikang Li, Jianxin Ma, Chang Zhou, Jingren Zhou, and
+Hongxia Yang.
+Ofa: Unifying architectures, tasks, and
+modalities through a simple sequence-to-sequence learning
+framework. In International Conference on Machine Learn-
+ing, pages 23318–23340. PMLR, 2022. 4
+[36] Yu-Siang Wang, Chenxi Liu, Xiaohui Zeng, and Alan Yuille.
+Scene graph parsing as dependency parsing. arXiv preprint
+arXiv:1803.09189, 2018. 1
+[37] Zhecan Wang, Haoxuan You, Liunian Harold Li, Alireza
+Zareian, Suji Park, Yiqing Liang, Kai-Wei Chang, and Shih-
+Fu Chang. Sgeitl: Scene graph enhanced image-text learn-
+ing for visual commonsense reasoning. In Proceedings of
+the AAAI Conference on Artificial Intelligence, pages 5914–
+5922, 2022. 1, 2
+[38] Danfei Xu, Yuke Zhu, Christopher B Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing. In Pro-
+ceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition(CVPR), pages 5410–5419, 2017. 6
+[39] Jingkang Yang, Yi Zhe Ang, Zujin Guo, Kaiyang Zhou,
+Wayne Zhang, and Ziwei Liu. Panoptic scene graph gen-
+eration. arXiv preprint arXiv:2207.11247, 2022. 2, 6
+[40] Sibei Yang, Guanbin Li, and Yizhou Yu. Cross-modal re-
+lationship inference for grounding referring expressions. In
+Proceedings of the IEEE/CVF conference on computer vi-
+sion and pattern recognition, pages 4145–4154, 2019. 1
+[41] Xu Yang, Kaihua Tang, Hanwang Zhang, and Jianfei Cai.
+Auto-encoding scene graphs for image captioning. In Pro-
+ceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition, pages 10685–10694, 2019. 1
+[42] Xuewen Yang, Yingru Liu, and Xin Wang. Reformer: The
+relational transformer for image captioning. arXiv preprint
+arXiv:2107.14178, 2021. 1
+[43] Zhengyuan Yang, Zhe Gan, Jianfeng Wang, Xiaowei Hu,
+Faisal Ahmed, Zicheng Liu, Yumao Lu, and Lijuan Wang.
+Unitab: Unifying text and box outputs for grounded vision-
+language modeling. In Computer Vision–ECCV 2022: 17th
+European Conference, Tel Aviv, Israel, October 23–27, 2022,
+Proceedings, Part XXXVI, pages 521–539. Springer, 2022. 4
+[44] Yuan Yao, Ao Zhang, Xu Han, Mengdi Li, Cornelius Weber,
+Zhiyuan Liu, Stefan Wermter, and Maosong Sun. Visual dis-
+tant supervision for scene graph generation. arXiv preprint
+arXiv:2103.15365, 2021. 2
+[45] Yuan Yao, Qianyu Chen, Ao Zhang, Wei Ji, Zhiyuan Liu,
+Tat-Seng Chua, and Maosong Sun. Pevl: Position-enhanced
+pre-training and prompt tuning for vision-language models.
+arXiv preprint arXiv:2205.11169, 2022. 2, 4
+[46] Licheng Yu, Patrick Poirson, Shan Yang, Alexander C Berg,
+and Tamara L Berg. Modeling context in referring expres-
+sions.
+In Computer Vision–ECCV 2016: 14th European
+Conference, Amsterdam, The Netherlands, October 11-14,
+2016, Proceedings, Part II 14, pages 69–85. Springer, 2016.
+6
+[47] Qifan Yu, Juncheng Li, Yu Wu, Siliang Tang, Wei Ji, and
+Yueting Zhuang.
+Visually-prompted language model for
+fine-grained scene graph generation in an open world. arXiv
+preprint arXiv:2303.13233, 2023. 1, 2, 3, 6
+[48] Alireza Zareian, Svebor Karaman, and Shih-Fu Chang.
+Bridging knowledge graphs to generate scene graphs.
+In
+Proceedings of the European Conference on Computer Vi-
+sion(ECCV), 2020. 2
+[49] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin
+Choi. Neural motifs: Scene graph parsing with global con-
+text. In Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition, pages 5831–5840, 2018. 2
+[50] Ao Zhang, Yuan Yao, Qianyu Chen, Wei Ji, Zhiyuan Liu,
+Maosong Sun, and Tat-Seng Chua. Fine-grained scene graph
+generation with data transfer.
+In Computer Vision–ECCV
+2022: 17th European Conference, Tel Aviv, Israel, Octo-
+ber 23–27, 2022, Proceedings, Part XXVII, pages 409–424.
+Springer, 2022. 1
+28085
+[51] Yong Zhang, Yingwei Pan, Ting Yao, Rui Huang, Tao Mei,
+and Chang-Wen Chen.
+Learning to generate language-
+supervised and open-vocabulary scene graph using pre-
+trained visual-semantic space.
+In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 2915–2924, 2023. 1, 2, 3, 6
+[52] Chaofan Zheng, Xinyu Lyu, Lianli Gao, Bo Dai, and
+Jingkuan Song.
+Prototype-based embedding network for
+scene graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 22783–22792, 2023. 1
+[53] Yiwu Zhong, Jing Shi, Jianwei Yang, Chenliang Xu, and Yin
+Li. Learning to generate scene graph from natural language
+supervision. In Proceedings of the IEEE/CVF International
+Conference on Computer Vision, pages 1823–1834, 2021. 2
+28086

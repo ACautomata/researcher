@@ -1,0 +1,2440 @@
+Synthetic Visual Genome 2:
+Extracting Large-scale Spatio-Temporal Scene
+Graphs from Videos
+Ziqi Gao1, Jieyu Zhang1,2, Wisdom Oluchi Ikezogwo1,2, Jae Sung Park1, Tario
+G You2, Daniel Ogbu4, Chenhao Zheng1,2, Weikai Huang2, Yinuo Yang2,
+Winson Han1, Quan Kong3, Rajat Saini3, and Ranjay Krishna1,2
+1 Allen Institute for AI
+2 University of Washington
+3 Woven by Toyota
+4 Microsoft
+Abstract. We introduce Synthetic Visual Genome 2 (SVG2), a
+large-scale panoptic video scene graph dataset. SVG2 contains over 636K
+videos with 6.6M objects, 52.0M attributes, and 6.7M relations, pro-
+viding an order-of-magnitude increase in scale and diversity over prior
+spatio-temporal scene graph datasets. To create SVG2, we design a fully
+automated pipeline that combines multi-scale panoptic segmentation,
+online–offline trajectory tracking with automatic new-object discovery,
+per-trajectory semantic parsing, and GPT-5-based spatio-temporal rela-
+tion inference. Human verification of SVG2 annotation accuracy confirms
+its reliability (objects: 93.8%, attributes: 88.3%, relations: 85.4%). Build-
+ing on this resource, we train TraSeR, a video scene graph generation
+model. TraSeR augments VLMs with a trajectory-aligned token ar-
+rangement mechanism and new modules: an object-trajectory resampler
+and a temporal-window resampler to convert raw videos and panoptic
+trajectories into compact spatio-temporal scene graphs in a single for-
+ward pass. The temporal-window resampler binds visual tokens to short
+trajectory segments to preserve local motion and temporal semantics,
+while the object-trajectory resampler aggregates entire trajectories to
+maintain global context for objects. On the PVSG, VIPSeg, VidOR and
+SVG2test dataset, TraSeR improves relation detection by +15∼20%,
+object prediction by +30∼40% over the strongest open-source baselines
+and by +13% over GPT-5, and attribute prediction by +15%. When
+TraSeR’s generated scene graphs are sent to a VLM for video question
+answering, it delivers a +1.5∼4.6% absolute accuracy gain over using
+video only or video augmented with Qwen2.5-VL’s generated scene graphs,
+demonstrating the utility of explicit spatio-temporal scene graphs as an
+intermediate representation1.
+Keywords: Video scene graph · VLM · Video understanding
+1 The SVG2 data, model checkpoints, and code are available at https://uwgzq.github.
+io/papers/SVG2/
+arXiv:2602.23543v3  [cs.CV]  6 Mar 2026
+2
+Z. Gao et al.
+Fig. 1: Synthetic Visual Genome 2 (SVG2), a large-scale synthetic panoptic video
+scene graph dataset. SVG2 provides dense panoptic trajectories, fine-grained object
+categories and attributes, and temporally grounded spatialtemporal relations across
+over 636K videos, which is an order-of-magnitude increase in scale and diversity over
+prior datasets.
+1
+Introduction
+Decades of work in human cognition show that people do more than recognizing
+objects in an image; they rapidly extract structured relational information be-
+tween those objects [5,6,19,24]. Image scene graphs make this structure explicit
+and have emerged as a core abstraction in computer vision [27,29]. A scene graph
+is a structured, graphical representation of a visual scene, where nodes correspond
+to objects (e.g., person, bicycle) and their attributes (e.g. blue, rectangular, old),
+and directed edges represent their pairwise relationships (e.g. riding). This repre-
+sentation, which bridges the gap between vision and language, has proven to be a
+powerful intermediate representation [9,14,16,20,23,65], improving captioning [3],
+image retrieval [27], image generation [26], vision-language evaluation [22,36,64],
+AI auditing [30], and robotic navigation [28]. Spatio-temporal scene graphs [25]
+expand this abstraction to video reasoning [10, 15], capturing scene dynamics
+and parsing events into changes in relationships between objects (e.g. riding a
+bicycle to walking).
+Despite their utility, there are very limited high-quality spatio-temporal scene
+graphs available. Due to the high cost and difficulty of dense frame-level manual
+annotation, current datasets remain limited in scale and difficult to expand [33].
+Attempts to annotate only a handful of frames per video have led to incomplete
+annotations that do not capture new objects that appear or disappear [20,25].
+As a result, models trained on such datasets tend to overfit to dataset-specific
+distributions and predicate classifiers. This is exacerbated by the severe long-
+Synthetic Visual Genome 2
+3
+tail bias, sparse and inconsistent annotations, noise, and insufficient temporal
+labeling [39, 48, 54]. Consequently, scene graph prediction models struggle to
+generalize to new scenes with an open vocabulary of new objects, attributes, and
+relationships [40,62].
+We address these limitations with Synthetic Visual Genome 2 (SVG2), a
+large-scale panoptic synthetic video scene graph dataset. SVG2 contains
+over 636K videos, 6.6M objects, 52M attributes, and 6.7M relations This
+dataset is an order-of-magnitude increase in scale and diversity over prior datasets
+(Table 1). Human verification of SVG2 confirms the reliability and accuracy
+of its annotations, yielding 93.8% accuracy for objects, 88.3% for attributes,
+and 85.4% for relations. To create SVG2, we design a holistic, scalable, fully
+automated pipeline for synthesizing high-quality video scene graphs. Our pipeline
+unifies multi-scale panoptic segmentation [49], trajectory tracking with automatic
+new-object discovery, per-trajectory semantic parsing, and GPT-5-based [43]
+spatio-temporal relation inference into a robust video scene graph generation
+framework. Our heuristic online-offline two-stage tracking mechanism enables
+(i) proactively detecting newly emerging instances without human prompts or
+external detectors and (ii) preserving identity consistency across the entire video.
+With SVG2, we design and train TraSeR, a video scene graph
+parsing model that converts raw videos and panoptic trajectories into spatio-
+temporal scene graphs in a single forward pass. Video scene graph parsing is
+technically challenging for two key reasons. First, object categories are globally
+stable, but attributes and relations are temporally local and can change rapidly
+over time. So the model must capture both long-range semantics and fine-grained
+temporal variation. Second, long videos with many objects produce extremely
+long token sequences and a combinatorial number of relation candidates, making
+naive dense encoding and decoding computationally infeasible.
+TraSeR addresses these challenges by augmenting VLMs with two modules:
+a temporal-window resampler and an object-trajectory resampler. The temporal-
+window resampler binds visual tokens to individual object trajectory segments,
+compacting dense patch-level tokens into short, trajectory-aligned, time-aware
+streams that preserve relationship and attribute changes. The object-trajectory
+resampler summarizes across the tokens of a specific object’s trajectory to encode
+global object context.
+Coupled with strong pretrained VLM priors and training on SVG2, TraSeR
+generates structured, temporally consistent scene graphs. Our resampler designs
+translate into clear gains: the object-trajectory resampler yields substantial im-
+provements in object recognition, while the temporal-window resampler drives
+large gains in relation prediction. Empirically, TraSeR improves relation pre-
+diction by +15∼20% over the strongest open-source models [17,21,59], boosts
+object prediction by +30% to +40% over open-source baselines [4,21,58,63] and
+by +13% over GPT-5 [43], and raises attribute prediction by +15% relative to
+open-source state of the art [21,21,59].
+Finally, we evaluate the utility of TraSeR’s generated scene graphs using
+video question answering. For this, we use the AGQA dataset [20] and the
+4
+Z. Gao et al.
+Online-offline Object Tracking
+object 1: 
+A shoe, characterized by its smooth, 
+rounded ...
+object 2: 
+A person is energetically engaged in a 
+dynamic ...
+object 3: 
+A vibrant blue mat, likely used for 
+gymnastics or exercise ...
+...
+Frame-wise panoptic mask generation
+Phase 1:
+Panoptic Trajectory Generation
+Phase 2:
+Object Description & Parsing
+Phase 3:
+Inter-object Relation Extraction 
+Per-trajectory Description
+LLM Structured Parsing
+person 2
+person 2
+person 2
+person 2
+person 2
+person 3
+person 1
+person 1
+person 1
+sign board
+sign board
+bench
+bench
+pole
+pole
+person 1
+person 1
+shoe
+shoe
+shoe
+shoe
+shoe
+trampoline
+trampoline
+trampoline
+trampoline
+trampoline
+mat
+mat
+mat
+mat
+mat
+mat
+mat
+mat
+mat
+wear
+below
+below
+wear
+wear
+jump on
+above
+above
+jump on
+jump on
+stand on
+on
+on
+above
+above
+in front of
+in front of
+behind
+behind
+in front of
+behind
+behind
+person 2
+person 1
+sign board
+bench
+pole
+shoe
+trampoline
+mat
+mat
+person 3
+below
+above
+on
+above
+in front of
+behind
+in front of
+on
+behind
+stand on
+stand on
+approach
+facing
+stand on
+approach
+≈
+≈
+00:00
+00:00
+00:14
+00:02
+00:16
+00:16
+00:20
+00:20
+Non-spatial
+Spatial
+object 1: 
+object 2: 
+object 3: 
+...
+name
+attributes
+shoe
+gray, smooth...
+name
+attributes
+person
+thin, energetic...
+name
+attributes
+mat
+vibrant blue, flat...
+Fig. 2: Overview of SVG2 synthesis pipeline. Phase 1: panoptic trajectory generation
+with online–offline object tracking mechanism that discovers new objects and preserves
+identity consistency. Phase 2: per-trajectory description and semantic parsing. Phase
+3: GPT-5–based spatiotemporal relation inference to produce the final video scene
+graph.
+Perception-Test [45]. When we feed TraSeR’s predicted video scene graphs into
+GPT-4.1, we obtain absolute accuracy gains of +1.5%∼4.6% over baselines using
+video only or video augmented with Qwen2.5-VL’s scene graphs. This result
+suggests that TraSeR is able to surface and summarize useful information that
+even Qwen2.5-VL misses.
+2
+Related work
+Scene graph datasets. Early scene graph research was enabled by the in-
+troduction of Visual Genome [29], which provided large-scale object, attribute,
+and relational annotations. Follow-up datasets focused on improving annota-
+tion quality, coverage, or grounding: VRD [35] offered cleaner predicate labels
+for relationship detection, Open Images V6 [31] expanded to mask-grounded
+relations, and PSG [60] introduced panoptic segmentation as the grounding
+for scene graph nodes. Most recently, Synthetic Visual Genome (SVG) [44]
+scales image scene graphs to the million-image level and provides dense rela-
+tional annotations, approximately 4 times more relations per object than Visual
+Genome. In the video domain, several Video Scene Graph datasets have been
+introduced [13,18,25,41,51–53]. However, large-scale datasets with dense and
+temporally structured annotations remain a challenge [32,62]. Our work aims to
+close these gaps by proposing a robust pipeline to create large-scale video scene
+graph datasets.
+Video scene graph generation. Benefiting from recent progress in video
+segmentation and semantic representation [8, 49, 66, 67], prior efforts in video
+scene graph generation have attempted to develop unified frameworks capable
+Synthetic Visual Genome 2
+5
+of constructing temporally grounded object–relation graphs directly from raw
+video data [12,39–41,47,53,55,62]. Despite these advances, existing approaches
+exhibit notable limitations. Early methods relying on bounding-box-based scene
+graphs [39–41,47,53] struggle to capture fine-grained spatial details, particularly
+for non-rigid objects and amorphous background regions, leading to incomplete or
+imprecise relational reasoning. More recent work [61,62] addresses this problem
+by introducing segmentation-tracking pipelines approach but fails to achieve
+dense object relationships and attributes.
+3
+Synthetic Visual Genome 2
+We introduce SVG2, a large-scale synthetic video dataset built upon our newly
+designed automated VSG generation pipeline. Unlike static image scene graphs,
+video scene graphs must encode temporal dynamics, capturing both the continuous
+motion of visual entities and the evolving interactions among them. Building such
+representations requires solving three core challenges: (1) Consistent and accurate
+instance-level tracking across the entire video, including object emergence and
+disappearance. (2) Exhaustive identification of all objects and their attributes.
+(3) Precise extraction and temporal localization of inter-object relationships,
+covering both spatial and temporal interactions.
+3.1
+Automatic pipeline
+To address these challenges, we propose a fully automated synthesis pipeline
+(Fig. 2) that integrates SAM2 [49], Describe Anything (DAM) [34], and GPT-
+5 [43], producing dense, temporally grounded, and semantically rich video scene
+graphs. More details are provided in Appx. A.
+Phase 1: Panoptic trajectory generation. To obtain dense and temporally
+consistent object trajectories, we leverage SAM2 to produce high-quality panoptic
+masks on each frame using multi-scale grid prompts. These per-frame masks
+serve as candidates for object tracking. Because SAM2 cannot proactively detect
+newly appearing objects and is sensitive to prompt initialization, we introduce a
+two-stage online–offline tracking framework that achieves both dynamic object
+discovery and global temporal consistency. In the online stage, we propagate
+initial masks forward while continuously monitoring uncovered regions. When
+candidate masks cover new or previously untracked areas beyond a threshold,
+the pipeline identifies object emergence, assigns new object IDs, and resumes
+propagation. A conservative asymmetric-overlap matching strategy prevents
+identity switches under occlusion or reappearance. To restore full temporal
+history, the offline stage replays the video once more, reinitializing each object
+at its first appearance and tracking all instances jointly in a single forward pass.
+This produces globally stable, complete trajectories. A lightweight post-filtering
+module removes redundant overlapping tracks and corrects minor mask artifacts
+(Appx. A.1). At IoU = 0.5, our tracking achieves AR of 0.754 (VIPSeg [37]),
+6
+Z. Gao et al.
+0.686 (PVSG [62]), and 0.623 (VidOR [52]), demonstrating robust performance
+across diverse benchmarks.
+Phase 2: Object description and structured parsing. After obtaining
+panoptic segmentation trajectories, we generate detailed textual descriptions
+for each object track using DAM-3B-Video [34]. These descriptions are then
+processed by GPT-4.1-nano [1] to extract the object name and associated ad-
+jectival attributes (e.g., color, shape, etc.). To mitigate synthetic-label noise, we
+introduce a SAM3-based verification step after Phase 2. We prompt SAM3 [8]
+with object labels extracted from the structured annotations to obtain SAM3
+instance trajectories, then match each original trajectory to SAM3 trajectories
+using video-level spatiotemporal IoU with a Hungarian assignment. SAM3 is used
+purely as a verifier: we keep the original masks and discard objects whose labels
+are not supported by the matched SAM3 trajectories.
+Phase 3: Inter-object spatiotemporal relation extraction. We then pass
+sampled frames along with object IDs, names, and bounding boxes to GPT-5
+for inter-object relation inference. Building on prior image scene-graph tax-
+onomies [20,25], we define a video-adapted relation space covering seven types:
+spatial (geometric/positional context), functional (contact and manipulation),
+stateful (persistent attachment or carrying), motion (relative movement over
+time), social (animate-to-animate interaction), attentional (gaze or camera focus),
+and event-level (temporally extended, goal-directed dynamics). Considering that
+spatial relations naturally dominate over non-spatial relations in diverse video
+environments, we split each video into two batches and query GPT-5 separately
+for spatial and non-spatial relation extraction. For spatial relations, we sup-
+press trivial 2D cues (e.g., left of, right of) derivable directly from mask layout,
+prompting GPT-5 to focus on non-trivial relations that require visual evidence.
+Human verification. To assess dataset quality, we randomly sample 1.2K object
+trajectories, 2K attributes and 1.1K relations for manual verification. Human
+annotators report 93.8% accuracy for objects, 88.3% for attributes and 85.4% for
+relations. Among relation errors, about 86% stem from predicate errors under
+occlusion or crowded scenes, and 14% from temporal range errors.
+3.2
+Extracted dataset
+Leveraging our pipeline, we create SVG2, which contains 636K automatically
+annotated videos, and SVG2test, a high-quality expert-annotated diagnostic
+benchmark of 100 videos (More dataset statistics are provided in Appx. B.1).
+SVG2. We sample 43K videos from SA-V [49] and 593K videos from PVD [7].
+SA-V provides strong manually annotated trajectories, but they are temporally
+sparse and limited in panoptic completeness. To address this, we introduce
+a hybrid refinement step during tracking in phase 2: we first propagate the
+human-annotated masks across all frames, then align and compare the resulting
+trajectories with those produced by our pipeline. We preserve synthetic masks in
+regions that lack human annotations. This fusion procedure allows us to retain
+the precision of manual labels while significantly expanding coverage to achieve
+dense panoptic trajectories. We then apply our attribute and relation extraction
+Synthetic Visual Genome 2
+7
+Table 1: Comparison with related benchmarks. Subscripts S/D denote sparse
+(sampled) vs. dense (per-frame) annotations. ‘Cls’ indicates the number of categories. (*)
+AG reports total frame-level relation instances, whereas others report unique trajectory-
+level instances.
+Data
+#Vid
+Ann.
+Type Frame/
+Vid
+#Obj/
+Traj
+Obj
+Cls
+#Rel
+Rel
+Cls
+#Attr
+SA-V [49]
+50.9K
+SAM-2
++ Human
+SegS
+330
+0.6M
+-
+-
+-
+-
+VIPSeg [37]
+2.8K
+Human
+SegS
+23
+38.2K
+124
+-
+-
+-
+VidVRD [53]
+0.8K
+Human
+BoxS
+304
+2.4K
+35
+25.9K
+132
+-
+AG [25]
+7.8K
+Human
+BoxS
+808
+26.2K
+35
+1.4M*
+26
+-
+VidOR [52]
+7.0K
+Human
+BoxD
+1K
+34.6K
+80
+0.3M
+50
+-
+PVSG [62]
+338
+Human
+SegS
+375
+6.3K
+125
+3.6K
+62
+-
+VIPSegval [37]
+343
+Human
+SegS
+23
+4.7K
+124
+-
+-
+-
+VidVRDtest [53] 0.2K
+Human
+BoxD
+258
+0.6K
+35
+4.8K
+132
+-
+AGtest [25]
+1.8K
+Human
+BoxS
+679
+7.9K
+35
+0.5M*
+26
+-
+VidORval [52]
+835
+Human
+BoxD
+1K
+4.0K
+80
+30.1K
+50
+-
+PVSGval [62]
+62
+Human
+SegS
+365
+1.3K
+108
+1.0K
+58
+-
+SVG2 (Ours)
+636K Our pipeline SegD
+479
+6.6M
+54.2K 6.7M 35.3K
+52M
+SVG2test(Ours)
+100
+Human
+SegD
+160
+3.2K
+749
+3.3K
+249
+9.7K
+stages, resulting in 0.66M object instances, 5.01M attributes and 0.72M
+spatiotemporal relations. For the 593K sampled PVD subset, we operate the
+pipeline fully automatically. We then generate 5.89M object instances, 46.95M
+attributes and 5.99M spatiotemporal relations. This large-scale synthetic stage
+substantially broadens the diversity of SVG2 (Tab. 1).
+SVG2test. Existing benchmarks support only closed-set object and relation
+evaluation [52,62], with no benchmark jointly assessing objects, attributes and re-
+lations over an open vocabulary. We therefore construct SVG2test, a high-quality
+expert-annotated diagnostic benchmark. We select 100 diverse videos from SA-
+V [49] and VSPW [38]. Reflecting how humans perceive scenes hierarchically,
+annotators follow a multi-granularity panoptic protocol: coarse instance masks
+are produced first, then decomposed into salient parts (e.g., a bicycle into frame,
+wheels, and handlebars), with open-vocabulary categories, multi-class attributes,
+and time-localized relations assigned and consistency-verified throughout. As
+shown in Tab. 1, this multi-stage, hierarchical labeling process yields substantially
+denser and more diverse per-video annotations than existing splits (with vocabu-
+laries 4× to 6× larger and explicit multi-class attributes), enabling evaluation of
+fine-grained compositional VSG prediction beyond closed-set graphs.
+4
+TraSeR
+The integration of multiple VLMs [34,42,43] in our pipeline ensures high-quality
+trajectory-level annotations but incurs considerable computational overhead and
+complexity. Yet, existing VLMs lack native support for panoptic mask trajectory
+conditioning (typically trained on bbox/point data). To this end, we propose
+TraSeR, a trajectory-grounded VLM that produces structured video scene
+graphs in one pass from raw videos and panoptic object trajectories (Figure 3).
+Unlike free-form video-language tasks (e.g. VideoQA), VSG generation requires
+accurate alignment between visual semantics and spatio-temporal scene structure,
+8
+Z. Gao et al.
+Fig. 3: TraSeR architecture. TraSeR first performs trajectory-aligned token
+arrangement, grounding ViT tokens to instance trajectories to form identity-preserving
+token streams. It then applies an object-trajectory resampler to aggregate global
+semantics over each full trajectory, and a temporal-window resampler to preserve
+fine-grained motion and temporal cues. The resulting tokens are decoded by the language
+model into a structured video scene graph.
+structured prediction of hierarchical graph elements (objects, attributes, relations)
+rather than natural language, and fine-grained localization with temporal rea-
+soning over video patches to capture interactions, motion, and state changes. To
+address these challenges, we first bind video patches directly to object trajectories
+via trajectory-aligned token arrangement, restoring and preserving consistent
+object identities over time. We then compress aligned tokens through a dual
+resampler module: an object-trajectory resampler aggregates global semantic
+context, and a temporal-window resampler retains fine-grained local motion and
+temporal dynamics.
+4.1
+Trajectory-Aligned Token Arrangement
+We first arrange visual tokens based on object trajectory. Given the sampled
+frame at time t, we define Mo,t ∈{0, 1}H×W as the binary segmentation mask
+for object o. In ViT, each output token corresponds to a spatiotemporal region
+obtained by merging g consecutive frames and an (m × m) grid of base ViT
+patches (each of size P × P pixels). Thus, a token indexed by (tg, hm, wm) covers
+a pixel volume of size (g × mP × mP) in the original video. We compute a
+coverage score C for object o at token (tg, hm, wm) by averaging the mask values
+over the exact pixel support of each token, followed by a temporal max over the
+frames:
+  \mathcal {
+C}_
+{o, t_g, 
+h
+_m, w_m} = \max _{k \in [0,
+ 
+g-1]} \left ( \operatorname {avgpool}_{mP}(M_{o, t_g \cdot g + k})[h_m, w_m] \right ), 
+(1)
+where avgpool(·, mP) denotes 2D average pooling on the pixel-level mask. The
+kernel size and stride are set to (m × P), matching the token’s exact spatial
+Synthetic Visual Genome 2
+9
+pixel footprint. Tokens are assigned to object o if their coverage score exceeds a
+threshold τeff ∈[0, 1]:
+  I
+_
+o = \le ft 
+\{  (t_g, h_m,  w_m)
+ 
+\;\middle |\; \mathcal {C}_{o, t_g, h_m, w_m} \ge \tau _{\mathrm {eff}} \right \}. 
+(2)
+This yields a deterministic set of object-associated visual tokens grounded directly
+by segmentation evidence. After obtaining the set of object-associated tokens,
+we temporally sort them according to their tg indices to form an ordered token
+trajectory for each object. We concatenate these trajectories across all objects,
+and introduce a special [TRJ] token to separate objects and explicitly encode
+trajectory boundaries. This arrangement produces a structured token stream
+where each object’s trajectory is explicitly segmented and identity-conditioned,
+providing the LLM with clear object grounding and temporal continuity priors
+before decoding.
+4.2
+Dual Resampler Module
+After trajectory-aligned token arrangement, each object o yields a variable-length
+token set Xo ∈R|Io|×Din. Directly feeding all tokens into a language model
+is computationally prohibitive and can bias attention toward densely sampled
+frames and repeatedly selected tokens, which affects stable training. To obtain
+compact yet semantically faithful representations, we introduce two resampler
+modules that progressively aggregate tokens from pixel-level to object-level and
+temporal-window-level summaries.
+Object-trajectory Resampler. Given Xo, we introduce M learnable latent
+queries L ∈RM×Dlatent and resample all arranged tokens of object o using a
+Perceiver-Resampler [2] fθ:
+  Z _o = f _{\
+th e ta }(X_o, L), \qquad Z_o \in \mathbb {R}^{M \times D_{\text {out}}}. 
+(3)
+In this stage, Zo captures the global semantics of object o over its entire temporal
+span.
+Temporal-window Resampler. While object-Level Resampler reduces token
+count and abstracts global semantics for each video, it may lose time sensitivity,
+which is crucial for capturing per-object dynamics and inter-object temporal
+relations. We therefore partition the video into disjoint windows {w} of length
+∆t. Let X(w)
+o
+be the subset of tokens of object o that fall into window w. Using
+another group of M ′ latent queries L′, we resample each window of each object
+independently:
+  Z_
+o
+^ {(w)} = 
+f
+_ {\th
+eta 
+'
+} (X _o^{(w)}, L'), \qquad Z_o^{(w)} \in \mathbb {R}^{M' \times D_{\text {out}}}. 
+(4)
+If object o is absent in w, no summary is produced for that window, yielding a
+presence-adaptive, variable-length sequence across time. To expose temporal posi-
+tions explicitly to the language model, we also add timestamp embeddings before
+each temporal resampled token. Finally, the output for object o concatenates the
+global summary and all window summaries in temporal order:
+  \ math cal 
+{ Z }_o 
+=  [ Z _ o; {Z}_o^{(1)}; {Z}_o^{(2)}; \dots ]. 
+(5)
+10
+Z. Gao et al.
+Table 2: We evaluate VLMs on four VidSGG benchmarks using panoptic object
+trajectories. We report performance across four metrics: triplet recall, relation recall,
+object accuracy, and attribute recall. The results in this table are reported under the
+lenient semantic criterion, with a temporal IoU threshold of 0.5 for relations and
+triplets. TraSeR outperforms all open-source baselines and surpasses GPT-5 in object
+and attribute prediction.
+Tripet
+Relation
+Object
+Attribute
+Model
+PVSG VidOR SVG2test PVSG VidOR SVG2test VIPSeg PVSG VidOR SVG2test
+SVG2test
+AvgRank
+API call only
+GPT-4.1 [1]
+6.0
+10.8
+6.4
+7.3
+11.9
+7.5
+59.9
+51.4
+86.6
+58.5
+15.8
+3
+Gemini-2.5 PRO [11]
+7.4
+9.8
+8.7
+8.8
+11.0
+9.9
+56.7
+31.7
+82.9
+49.8
+13.6
+4
+GPT-5 [43]
+16.6
+19.7
+17.9
+18.3
+21.7
+19.4
+68.1
+54.2
+88.5
+65.5
+24.1
+2
+Open weights only
+Qwen2.5-VL-3B [4]
+0.1
+0.2
+0.2
+0.1
+0.4
+0.3
+22.1
+10.4
+45.0
+24.2
+1.4
+12
+MiniCPM-V 4.5 [63]
+0.1
+3.0
+1.1
+0.2
+4.0
+2.4
+40.0
+14.3
+59.1
+38.5
+8.4
+8
+InternVL3.5-4B [58]
+0.2
+0.4
+0.1
+0.3
+0.5
+0.2
+33.7
+20.4
+66.4
+35.0
+7.4
+11
+GLM-4.1-9B-Thinking [17]
+0.3
+3.9
+1.8
+0.5
+5.0
+2.9
+46.5
+17.8
+61.1
+28.5
+9.1
+6
+Qwen3-VL-4B [59]
+0.1
+0.7
+1.4
+0.1
+0.8
+1.6
+34.1
+21.8
+65.8
+35.6
+8.3
+10
+Qwen3-VL-4B-Thinking [59]
+0.1
+2.3
+3.3
+0.4
+3.4
+3.6
+35.8
+18.3
+67.6
+37.1
+8.8
+7
+Fine-tuned baselines
+FT-Qwen2.5-VL-3B (First Bbox)
+0.1
+1.6
+0.1
+0.9
+4.5
+0.5
+25.5
+25.9
+51.7
+36.7
+10.4
+9
+FT-Qwen2.5-VL-3B (Bbox Traj.)
+0.5
+1.8
+1.4
+1.6
+4.2
+3.0
+35.1
+33.6
+56.9
+46.1
+13.4
+5
+TraSeR
+16.1
+22.9
+16.7
+16.9
+25.0
+18.7
+86.5
+72.7
+91.4
+79.0
+27.1
+1
+The two resamplers are complementary: object-trajectory Resampler provides
+an object-centric global semantics, while Temporal-window Resampler restores
+temporal granularity. The resulting representation Zo for each object is compact,
+object-aware, and time-aware, being well-suited for structured decoding in the
+language model.
+4.3
+Training
+Training datasets. We train TraSeR by combining our synthetic SVG2, which
+provides complete scene-graph supervision, with established human-annotated
+benchmarks. Specifically, we integrate video instance segmentation datasets
+(LV-VIS [56], OVIS [46], VIPSeg [37]) for robust temporal grounding under
+occlusion, and video relation datasets (VidOR [52], VidVRD [53]) to enrich
+relational reasoning. To ensure architectural compatibility, we use SAM2 to
+convert bounding box annotations from VidOR and VidVRD into segmentation
+masks. Finally, we unify these heterogeneous datasets using task-specific templates
+that serialize annotations into a standardized autoregressive format, effectively
+blending dense synthetic structures with complex real-world dynamics.
+Implementation Details. We build on the Qwen2.5-VL-3B and set τeff=0.5
+during trajectory-aligned token arrangement. In the resampling stage, we use
+two three-layer Perceiver-Resamplers with 32 learnable latent queries each. We
+finetune the model for one epoch (37K steps), freezing the Qwen2.5-ViT backbone
+to preserve pretrained visual priors while jointly training the vision–language
+projector, object-trajectory and temporal-window resamplers, and the language
+model with learning rates of 5×10−5, 1×10−4, and 2×10−5, respectively. This
+schedule enables the new resampling modules to adapt more aggressively without
+destabilizing pretrained components. Models are trained on a single node with
+8×H100 GPUs.
+Synthetic Visual Genome 2
+11
+5
+Experiment
+We compare our model against various proprietary and open-source VLM baselines
+using a standardized setup in which all models receive identical object trajectories
+and structured prompting templates. We evaluate open-vocabulary video scene
+graph generation, assessing object, attribute, relation, and triplet prediction across
+multiple academic benchmarks and our SV G2test. We introduce an LLM-based
+judge that enables open-vocabulary evaluation through semantic, hierarchy-aware
+matching, overcoming the closed-set constraints of traditional metrics. Finally,
+we perform extensive ablations on training data composition and architectural
+components to isolate their individual contributions.
+Baselines. We compare TraSeR with leading proprietary and open-source
+VLMs, including Gemini-2.5-Pro [11], GPT-4.1 [1], GPT-5 [43], Qwen-3-VL-
+4B [57], InternVL-3.5-4B [58], GLM-4.1-9B-Thinking [17], and MiniCPM-4.5 [63].
+Since existing VLMs cannot effectively process panoptic mask trajectories, we
+supply the baselines with dense bounding box trajectories to maximize their
+supported spatial-temporal context. We construct instruction-aligned prompting
+templates for baselines and require all models to output structured scene-graph
+predictions following a JSON schema. To disentangle the benefits of our architec-
+ture from the data effects, we fine-tune Qwen2.5-VL-3B on either first-appearance
+or full bounding-box trajectories, determining whether standard fine-tuning alone
+is sufficient to generate high-quality VSGs.
+Evaluation Setup. We evaluate video scene graph generation under the open-
+vocabulary (OV-VSGGen) setting, where the model generates a complete scene
+graph from ground-truth object trajectories. This entails four prediction sub-tasks:
+(1) object (labeling each trajectory), (2) attribute (assigning associated charac-
+teristics to objects), (3) relation (detecting interactions between trajectories),
+and (4) triplet (jointly identifying subject-relation-object pairs).
+We evaluate on PVSG [62], VidOR [52], VIPSeg [37], and our SVG2test. While
+VIPSeg is limited to object prediction and PVSG/VidOR focus on objects and
+relations, Our SVG2test provides complete object–attribute–relation annotations,
+enabling holistic VidSGG evaluation.
+Table 3: Validation of the LLM semantic aligner. We report
+Cohen’s κ agreement scores between GPT-4o-mini, Gemini 3
+Flash and human annotators. The high agreement confirms
+the reliability of the automated aligner. “Id+Syn” denotes
+Identical or Synonym matches; “Lenient” includes all valid
+semantic categories.
+Object
+Relation
+Id+Syn Lenient Id+Syn Lenient
+Human vs.
+GPT-4o-mini
+0.901
+0.877
+0.842
+0.791
+Gemini 3 Flash vs.
+GPT-4o-mini
+0.846
+0.724
+0.750
+0.765
+Since VLMs per-
+form open-vocabulary
+autoregressive gener-
+ation, traditional closed-
+set metrics such as Re-
+call@k become inade-
+quate. Standard met-
+rics may unfairly pe-
+nalize
+valid
+predic-
+tions due to lexical di-
+versity (e.g., human
+vs. person). Because
+curating
+a
+manual
+synonym dictionary is
+12
+Z. Gao et al.
+Table 4: Training-data ablation study. Incorporating SVG2 improves triplet and object
+prediction, and boosts object accuracy and attribute recall over academic-only training.
+Training with the full configuration achieves the best overall performance.
+Training
+Triplet
+Relation
+Object
+Attr.
+Rank
+PVSG
+VidOR
+SVG2t
+PVSG
+VidOR
+SVG2t
+VIPSeg
+PVSG
+VidOR
+SVG2t
+SVG2t
+Acad
+1.35
+13.61
+2.68
+12.55
+28.66
+18.74
+32.71
+21.50
+61.09
+25.68
+–
+4
+SA-V
+8.29
+15.84
+13.58
+9.86
+17.12
+16.39
+81.61
+72.92
+90.52
+77.64
+25.96
+3
+Acad+SA-V
+10.70
+19.23
+13.00
+11.12
+21.06
+14.69
+83.10
+73.46
+90.96
+78.14
+22.72
+2
+Acad+SA-V+PVD
+16.91
+22.87
+16.63
+16.13
+25.01
+18.74
+86.53
+72.74
+91.42
+79.01
+27.10
+1
+impossible for unbounded vocabularies, we introduce a two-tiered evaluation
+framework.
+First, we compute a rule-based strict score requiring exact string matches
+between ground-truth and predicted elements. Second, to accurately reflect
+the model’s true semantic understanding without unfairly penalizing language
+diversity, we compute a lenient score using an LLM-assisted semantic aligner.
+To prevent the self-referential bias of free-form grading, we strictly constrain
+GPT-4o-mini [42] to act purely as a pairwise lexical matcher. Guided by a
+rigidly structured prompt, it classifies ground-truth and predicted elements into
+five categories: Identical, Synonym, Hypernym/Hyponym, Semantic Overlap, or
+Mismatch. Any category other than Mismatch is considered a correct prediction
+in lenient settings.
+This dual-metric framework applies to objects, attributes, and relations. Re-
+lations additionally require strict temporal grounding (interval IoU > threshold).
+Triplets are only considered correct if the subject, object, and relation all meet
+the semantic match criteria and the temporal intersection rules. This evaluation
+approach ensures a rigorous, bias-mitigated assessment of open-vocabulary scene
+graphs.
+To validate our automated aligner (GPT-4o-mini), we assess its alignment
+with human evaluators and an independent model (Gemini 3 Flash). Evaluating
+a stratified subset of 250 objects and 150 relations, we observe substantial
+inter-annotator agreement (Cohen’s κ) between the judge and humans (Tab. 3).
+This confirms that our constrained matching approach effectively mitigates
+hallucination, establishing the automated metric as a highly reliable proxy for
+human judgment.
+5.1
+Scene graph generation results.
+Consistent with our evaluation framework, Table 2 reports model performance
+under the lenient semantic criterion with a temporal IoU threshold of 0.5. Results
+under the strict exact-match score and a relaxed IoU threshold are detailed in
+Appx. E. Our light-weight model achieves strong improvements across all bench-
+marks (Tab. 2), outperforming open-source baselines by substantial margins,
+approximately +15% in triplet detection, +15% in relation detection, +35%
+in object prediction, and +15% in attribute recognition. TraSeR also surpasses
+proprietary models such as GPT-4.1 and Gemini-2.5-Pro, and even outperforms
+Synthetic Visual Genome 2
+13
+GPT-5 on object and attribute prediction, highlighting the effectiveness of our
+model design and training data. We further observe a pronounced performance
+gap between open-source and proprietary VLMs, especially on longer and more
+complex videos such as those in PVSG that require precise temporal localization
+of dynamic relations. This underscores the importance of our large-scale, high-
+quality open video scene graph dataset (SVG2) that provides the rich temporal
+and dense object–attribute–relation annotations. Both fine-tuned baselines still
+underperform TraSeR, confirming that our performance gains stem from our
+object-centric temporal design rather than mere task-specific fine-tuning. Stan-
+dard fine-tuning alone is insufficient to capture temporal scene dynamics. As
+detailed in Appx. E, TraSeR maintains its substantial lead over all baselines
+even when evaluated under the rule-based strict score and a lower IoU threshold.
+5.2
+Video question answering with scene graphs.
+We further assess the role of structured video scene graphs in video QA. We
+sample 1K open-ended questions from the AGQA 2.0 benchmark [20] and 500
+multiple-choice questions from the Perception-Test benchmark [45]. For each
+associated video, we first use our pipeline (Phase 1) to generate panoptic object
+trajectories, and then predict the corresponding video scene graphs using both
+our trained TraSeR and the baseline Qwen2.5-VL-3B model.
+Table 5: GPT-4.1 VQA performance on AGQA
+2.0 and Perception-Test. Using TraSeR’s video
+scene graphs consistently improves performance
+over baselines.
+Input
+AGQA 2.0
+Perception-Test
+video-only
+25.9
+66.8
+Video+
+QWen2.5-VL-3B’s VSG
+24.8
+68.6
+Video+
+TraSeR’s VSG
+26.3
+71.4
+During
+testing,
+we
+sample
+video frames at 1 fps and feed
+them into GPT-4.1 under three
+conditions: (1) video-only input,
+(2) video plus scene graphs gen-
+erated by Qwen2.5-VL, and (3)
+video plus scene graphs gener-
+ated by our TraSeR. The results,
+summarized in Tab. 5, show that
+incorporating high-quality video
+scene graphs (e.g. those generated
+by TraSeR) reliably improves
+VideoQA accuracy (+0.4% on AGQA 2.0 and +4.6% on Perception Test). We also
+conduct a blind-video evaluation on AGQA. We instruct a blind LLM (GPT-4.1-
+mini) to answer questions using only the text-based scene graph, without visual
+input. TraSeR’s graphs achieve 13.22% accuracy, outperforming Qwen2.5-VL’s
+graphs by +6.5%. We attribute this gain to the structured and fine-grained spa-
+tiotemporal information captured by the video scene graphs, which complements
+the raw visual input and allows the VLM to reason more effectively.
+5.3
+Ablation Study
+Training data Ablations. We compare four training configurations: academic
+datasets only (Acad) (Sec. 4.3), the SVG2 SA-V subset (SA-V), their combination
+(Acad + SA-V), and the full setup adding the PVD subset (Acad + SA-V +
+14
+Z. Gao et al.
+Table 6: Model architecture ablation study. Combining the object-trajectory and
+temporal-window resamplers yields the best VSG generation performance. Segmentation-
+aligned token arrangement further provides superior grounding compared to bbox-based
+signal. (*)Variants without resamplers cannot support long-video inference; therefore,
+PVSG results are reported on the PVSG VidOR subset only.
+Variants
+Triplet
+Relation
+Object
+Temporal-window
+resampler
+Object-trajectory
+resampler
+Supervision PVSG* VidOR PVSG* VidOR PVSG* VidOR
+✗
+✗
+Seg.
+7.03
+13.56
+7.15
+14.58
+73.34
+90.79
+✗
+✓
+Seg.
+2.44
+8.23
+2.68
+9.04
+77.10
+89.62
+✓
+✗
+Seg.
+8.52
+15.00
+8.63
+16.78
+77.84
+89.76
+✓
+✓
+Bbox
+8.69
+15.01
+9.39
+15.19
+73.05
+89.76
+✓
+✓
+Seg.
+10.14
+15.02
+11.38
+16.30
+78.21
+90.15
+PVD). Since academic datasets lack attribute annotations, we evaluate models
+trained on them only for object and relation outputs. As shown in Tab. 4, the
+full configuration achieves the best overall performance. Training solely on Acad
+overfits to specific benchmarks like VidOR. This results in poor generalization
+to PVSG and SVG2test, alongside low object accuracy. Incorporating SA-V and
+PVD yields substantial gains, demonstrating that our dataset’s dense, temporally
+aligned annotations, diverse categories, and visual variability are crucial for
+learning structured scene graphs.
+Model ablations. Table 6 reports ablations on our architectural choices, trained
+for three epochs on the SVG2 SA-V subset. Using only the object-trajectory
+resampler eases model training but collapses temporal grounding, while the
+temporal-window resampler is essential for accurate dynamic relation localization.
+Combining both yields the best balance of object-level and temporal alignment.
+We also compare supervision signals for token arrangement: replacing segmen-
+tation trajectories with bounding boxes significantly degrades performance on
+PVSG, as longer, more dynamic videos make coarse box signals too noisy for
+stable grounding.
+6
+Limitations and Discussion
+While SVG2 inherits the current boundaries of the automated models used to
+synthesize it, this approach unlocks a scale, density, and consistency that is
+practically unattainable through manual annotation. Importantly, it initiates a
+virtuous cycle: as foundation models naturally advance, they can be continuously
+leveraged to refine and elevate future iterations of the dataset. Architecturally,
+TraSeR is currently designed as a trajectory-grounded model. A compelling
+direction for future work is to extend this approach into a unified, fully end-
+to-end framework capable of natively proposing and tracking objects alongside
+VSG generation. Finally, spatio-temporal scene graphs remain a foundational
+representation for complex video reasoning. With the introduction of SVG2,
+we see a promising opportunity to integrate large-scale, structured VSG data
+directly into the training pipelines of general VLMs, potentially unlocking much
+deeper compositional and temporal understanding.
+Synthetic Visual Genome 2
+15
+7
+Conclusion
+We present Synthetic Visual Genome 2 (SVG2), a large-scale synthetic
+panoptic video scene graph dataset of over 636K videos with dense object,
+attribute, and relation annotations. SVG2 is an order-of-magnitude expansion
+over prior resources, which was built entirely through an automated pipeline.
+Leveraging this dataset, we introduce TraSeR, which augments a VLM with
+object-trajectory and temporal-window resamplers to produce complete video
+scene graphs in a single forward pass.
+Acknowledgements
+This work is funded by Toyota Motor, Inc.
+References
+1. Achiam, J., Adler, S., Agarwal, S., Ahmad, L., Akkaya, I., Aleman, F.L., Almeida,
+D., Altenschmidt, J., Altman, S., Anadkat, S., et al.: Gpt-4 technical report. arXiv
+preprint arXiv:2303.08774 (2023)
+2. Alayrac, J.B., Donahue, J., Luc, P., Miech, A., Barr, I., Hasson, Y., Lenc, K.,
+Mensch, A., Millican, K., Reynolds, M., Ring, R., Rutherford, E., Cabi, S., Han,
+T., Gong, Z., Samangooei, S., Monteiro, M., Menick, J., Borgeaud, S., Brock,
+A., Nematzadeh, A., Sharifzadeh, S., Binkowski, M., Barreira, R., Vinyals, O.,
+Zisserman, A., Simonyan, K.: Flamingo: a visual language model for few-shot
+learning (2022), https://arxiv.org/abs/2204.14198
+3. Anderson, P., Fernando, B., Johnson, M., Gould, S.: Spice: Semantic propositional
+image caption evaluation. In: European conference on computer vision. pp. 382–398.
+Springer (2016)
+4. Bai, S., Chen, K., Liu, X., Wang, J., Ge, W., Song, S., Dang, K., Wang, P., Wang,
+S., Tang, J., Zhong, H., Zhu, Y., Yang, M., Li, Z., Wan, J., Wang, P., Ding, W.,
+Fu, Z., Xu, Y., Ye, J., Zhang, X., Xie, T., Cheng, Z., Zhang, H., Yang, Z., Xu, H.,
+Lin, J.: Qwen2.5-vl technical report (2025), https://arxiv.org/abs/2502.13923
+5. Biederman, I.: Recognition-by-components: a theory of human image understanding.
+Psychological review 94(2), 115 (1987)
+6. Biederman, I.: On the semantics of a glance at a scene. In: Perceptual organization,
+pp. 213–253. Routledge (2017)
+7. Bolya, D., Huang, P.Y., Sun, P., Cho, J.H., Madotto, A., Wei, C., Ma, T., Zhi, J.,
+Rajasegaran, J., Rasheed, H., Wang, J., Monteiro, M., Xu, H., Dong, S., Ravi, N.,
+Li, D., Dollár, P., Feichtenhofer, C.: Perception encoder: The best visual embeddings
+are not at the output of the network. arXiv:2504.13181 (2025)
+8. Carion, N., Gustafson, L., Hu, Y.T., Debnath, S., Hu, R., Suris, D., Ryali, C., Alwala,
+K.V., Khedr, H., Huang, A., Lei, J., Ma, T., Guo, B., Kalla, A., Marks, M., Greer, J.,
+Wang, M., Sun, P., Rädle, R., Afouras, T., Mavroudi, E., Xu, K., Wu, T.H., Zhou,
+Y., Momeni, L., Hazra, R., Ding, S., Vaze, S., Porcher, F., Li, F., Li, S., Kamath,
+A., Cheng, H.K., Dollár, P., Ravi, N., Saenko, K., Zhang, P., Feichtenhofer, C.: Sam
+3: Segment anything with concepts (2025), https://arxiv.org/abs/2511.16719
+9. Chang, X., Ren, P., Xu, P., Li, Z., Chen, X., Hauptmann, A.: Scene graphs: A
+survey of generations and applications. arXiv preprint arXiv:2104.01111 2 (2021)
+16
+Z. Gao et al.
+10. Cherian, A., Hori, C., Marks, T.K., Le Roux, J.: (2.5+ 1) d spatio-temporal scene
+graphs for video question answering. In: Proceedings of the AAAI Conference on
+Artificial Intelligence. vol. 36, pp. 444–453 (2022)
+11. Comanici, G., Bieber, E., Schaekermann, M., et al.: Gemini 2.5: Pushing the frontier
+with advanced reasoning, multimodality, long context, and next generation agentic
+capabilities (2025), https://arxiv.org/abs/2507.06261
+12. Cong, Y., Liao, W., Ackermann, H., Rosenhahn, B., Yang, M.Y.: Spatial-temporal
+transformer for dynamic scene graph generation. In: Proceedings of the IEEE/CVF
+International Conference on Computer Vision (ICCV). pp. 16372–16382 (October
+2021)
+13. Darkhalil, A., Shan, D., Zhu, B., Ma, J., Kar, A., Higgins, R., Fidler, S., Fouhey,
+D., Damen, D.: Epic-kitchens visor benchmark: Video segmentations and object
+relations (2022), https://arxiv.org/abs/2209.13064
+14. Farshad, A., Yeganeh, Y., Chi, Y., Shen, C., Ommer, B., Navab, N.: Scenegenie:
+Scene graph guided diffusion models for image synthesis. In: Proceedings of the
+IEEE/CVF International Conference on Computer Vision. pp. 88–98 (2023)
+15. Gao, K., Chen, L., Niu, Y., Shao, J., Xiao, J.: Classification-then-grounding: Refor-
+mulating video scene graphs as temporal bipartite graphs. In: Proceedings of the
+IEEE/CVF conference on computer vision and pattern recognition. pp. 19497–19506
+(2022)
+16. Gao, Z., Huang, W., Zhang, J., Kembhavi, A., Krishna, R.: Generate any scene:
+Scene graph driven data synthesis for visual generation training (2025), https:
+//arxiv.org/abs/2412.08221
+17. GLM, T., Zeng, A., Xu, B., Wang, B., et al.: Chatglm: A family of large language
+models from glm-130b to glm-4 all tools (2024), https://arxiv.org/abs/2406.
+12793
+18. Grauman, K., Westbury, A., Byrne, E., Chavis, Z., Furnari, A., Girdhar, R.,
+Others: Ego4d: Around the world in 3,000 hours of egocentric video (2022), https:
+//arxiv.org/abs/2110.07058
+19. Greene, M.R.: Scene perception and understanding (03 2023). https://doi.org/10.
+1093/acrefore/9780190236557.013.883, https://oxfordre.com/psychology/
+view/10.1093/acrefore/9780190236557.001.0001/acrefore-9780190236557-e-
+883
+20. Grunde-McLaughlin, M., Krishna, R., Agrawala, M.: Agqa: A benchmark for com-
+positional spatio-temporal reasoning. In: Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition. pp. 11287–11297 (2021)
+21. Hong, W., Yu, W., Gu, X., Wang, G., Gan, G., Tang, H., Cheng, J., Qi, J., Ji, J.,
+Pan, L., et al.: Glm-4.1 v-thinking: Towards versatile multimodal reasoning with
+scalable reinforcement learning. arXiv e-prints pp. arXiv–2507 (2025)
+22. Hsieh, C.Y., Zhang, J., Ma, Z., Kembhavi, A., Krishna, R.: Sugarcrepe: Fixing
+hackable benchmarks for vision-language compositionality. Advances in neural
+information processing systems 36, 31096–31116 (2023)
+23. Huang, W., Zhang, J., Jia, T., Zheng, C., Gao, Z., Park, J.S., Krishna, R.: Sos:
+Synthetic object segments improve detection, segmentation, and grounding (2025),
+https://arxiv.org/abs/2510.09110
+24. Hummel, J.E., Biederman, I.: Dynamic binding in a neural network for shape
+recognition. Psychological review 99(3), 480 (1992)
+25. Ji, J., Krishna, R., Fei-Fei, L., Niebles, J.C.: Action genome: Actions as compositions
+of spatio-temporal scene graphs. In: Proceedings of the IEEE/CVF conference on
+computer vision and pattern recognition. pp. 10236–10247 (2020)
+Synthetic Visual Genome 2
+17
+26. Johnson, J., Gupta, A., Fei-Fei, L.: Image generation from scene graphs. In: Pro-
+ceedings of the IEEE conference on computer vision and pattern recognition. pp.
+1219–1228 (2018)
+27. Johnson, J., Krishna, R., Stark, M., Li, L.J., Shamma, D., Bernstein, M., Fei-Fei,
+L.: Image retrieval using scene graphs. In: Proceedings of the IEEE conference on
+computer vision and pattern recognition. pp. 3668–3678 (2015)
+28. Kim, J., Oh, M., Myung, H.: Tacs-graphs: Traversability-aware consistent scene
+graphs for ground robot indoor localization and mapping. arXiv preprint
+arXiv:2506.14178 (2025)
+29. Krishna, R., Zhu, Y., Groth, O., Johnson, J., Hata, K., Kravitz, J., Chen, S.,
+Kalantidis, Y., Li, L.J., Shamma, D.A., Bernstein, M.S., Li, F.F.: Visual genome:
+Connecting language and vision using crowdsourced dense image annotations (2016),
+https://arxiv.org/abs/1602.07332
+30. Künzel, S., Munz-Körner, T., Tilli, P., Schäfer, N., Vidyapu, S., Thang Vu, N.,
+Weiskopf, D.: Visual explainable artificial intelligence for graph-based visual question
+answering and scene graph curation. Visual Computing for Industry, Biomedicine,
+and Art 8(1), 9 (2025)
+31. Kuznetsova, A., et al.: The open images dataset v6. International Journal of
+Computer Vision (2020)
+32. Li, X., Zhang, W., Pang, J., Chen, K., Cheng, G., Tong, Y., Loy, C.C.: Video
+k-net: A simple, strong, and unified baseline for video segmentation (2022), https:
+//arxiv.org/abs/2204.04656
+33. Li, Y., Li, Z., Chen, H., Xu, L.: Unbiased video scene graph generation via visual
+and semantic dual debiasing. In: Proceedings of the Computer Vision and Pattern
+Recognition Conference. pp. 19047–19056 (2025)
+34. Lian, L., Ding, Y., Ge, Y., Liu, S., Mao, H., Li, B., Pavone, M., Liu, M.Y., Darrell,
+T., Yala, A., et al.: Describe anything: Detailed localized image and video captioning.
+arXiv preprint arXiv:2504.16072 (2025)
+35. Lu, C., Krishna, R., Bernstein, M., Fei-Fei, L.: Visual relationship detection with
+language priors. In: European Conference on Computer Vision (ECCV) (2016)
+36. Ma, Z., Hong, J., Gul, M.O., Gandhi, M., Gao, I., Krishna, R.: Crepe: Can
+vision-language foundation models reason compositionally? In: Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition. pp.
+10910–10921 (2023)
+37. Miao, J., Wang, X., Wu, Y., Li, W., Zhang, X., Wei, Y., Yang, Y.: Large-scale
+video panoptic segmentation in the wild: A benchmark. In: Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition (CVPR). pp.
+21033–21043 (June 2022)
+38. Miao, J., Wei, Y., Wu, Y., Liang, C., Li, G., Yang, Y.: Vspw: A large-scale dataset
+for video scene parsing in the wild. In: Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition (CVPR). pp. 4133–4143 (June 2021)
+39. Nag, S., Min, K., Tripathi, S., Chowdhury, A.K.R.: Unbiased scene graph generation
+in videos (2023), https://arxiv.org/abs/2304.00733
+40. Nguyen, T.T., Nguyen, P., Cothren, J., Yilmaz, A., Luu, K.: Hyperglm: Hypergraph
+for video scene graph generation and anticipation (2025), https://arxiv.org/abs/
+2411.18042
+41. Nguyen, T.T., Nguyen, P., Luu, K.: Hig: Hierarchical interlacement graph approach
+to scene graph generation in video understanding (2024), https://arxiv.org/abs/
+2312.03050
+18
+Z. Gao et al.
+42. OpenAI: Gpt-4o mini: advancing cost-efficient intelligence. https://openai.
+com/index/gpt-4o-mini-advancing-cost-efficient-intelligence/ (2024), ac-
+cessed: 2025-02-19
+43. OpenAI: Gpt-5 system card. Tech. rep., OpenAI (Aug 2025), https://cdn.openai.
+com/gpt-5-system-card.pdf
+44. Park, J.S., Ma, Z., Li, L., Zheng, C., Hsieh, C.Y., Lu, X., Chandu, K., Kong, Q.,
+Kobori, N., Farhadi, A., Choi, Y., Krishna, R.: Synthetic visual genome (2025),
+https://arxiv.org/abs/2506.07643
+45. Patraucean, V., Smaira, L., Gupta, A., Recasens, A., Markeeva, L., Banarse,
+D., Koppula, S., Malinowski, M., Yang, Y., Doersch, C., et al.: Perception test: A
+diagnostic benchmark for multimodal video models. Advances in Neural Information
+Processing Systems 36, 42748–42761 (2023)
+46. Qi, J., Gao, Y., Hu, Y., Wang, X., Liu, X., Bai, X., Belongie, S., Yuille, A.,
+Torr, P.H.S., Bai, S.: Occluded video instance segmentation: A benchmark (2021),
+https://arxiv.org/abs/2102.01558
+47. Qian, X., Zhuang, Y., Li, Y., Xiao, S., Pu, S., Xiao, J.: Video relation detection with
+spatio-temporal graph. In: Proceedings of the 27th ACM international conference
+on multimedia. pp. 84–93 (2019)
+48. Qiu, Y., Nagasaki, Y., Hara, K., Kataoka, H., Suzuki, R., Iwata, K., Satoh, Y.:
+Virtualhome action genome: A simulated spatio-temporal scene graph dataset with
+consistent relationship labels. In: Proceedings of the IEEE/CVF Winter Conference
+on Applications of Computer Vision. pp. 3351–3360 (2023)
+49. Ravi, N., Gabeur, V., Hu, Y.T., Hu, R., Ryali, C., Ma, T., Khedr, H., Rädle, R.,
+Rolland, C., Gustafson, L., et al.: Sam 2: Segment anything in images and videos.
+arXiv preprint arXiv:2408.00714 (2024)
+50. Ren, T., Liu, S., Zeng, A., Lin, J., Li, K., Cao, H., Chen, J., Huang, X., Chen,
+Y., Yan, F., Zeng, Z., Zhang, H., Li, F., Yang, J., Li, H., Jiang, Q., Zhang, L.:
+Grounded sam: Assembling open-world models for diverse visual tasks (2024)
+51. Rodin, I., Furnari, A., Min, K., Tripathi, S., Farinella, G.M.: Action scene graphs
+for long-form understanding of egocentric videos. In: Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition. pp. 18622–18632 (2024)
+52. Shang, X., Di, D., Xiao, J., Cao, Y., Yang, X., Chua, T.S.: Annotating objects and
+relations in user-generated videos. In: Proceedings of the 2019 on International
+Conference on Multimedia Retrieval. p. 279–287 (2019)
+53. Shang, X., Ren, T., Guo, J., Zhang, H., Chua, T.S.: Video visual relation detection.
+In: Proceedings of the 25th ACM International Conference on Multimedia. pp.
+1300–1308 (2017)
+54. Tang, K., Niu, Y., Huang, J., Shi, J., Zhang, H.: Unbiased scene graph generation
+from biased training. In: Proceedings of the IEEE/CVF conference on computer
+vision and pattern recognition. pp. 3716–3725 (2020)
+55. Teng, Y., Wang, L., Li, Z., Wu, G.: Target adaptive context aggregation for video
+scene graph generation. In: Proceedings of the IEEE/CVF International Conference
+on Computer Vision (ICCV). pp. 13688–13697 (October 2021)
+56. Wang, H., Yan, C., Wang, S., Jiang, X., Tang, X., Hu, Y., Xie, W., Gavves, E.:
+Towards open-vocabulary video instance segmentation (2023), https://arxiv.org/
+abs/2304.01715
+57. Wang, P., Bai, S., Tan, S., Wang, S., Fan, Z., Bai, J., Chen, K., Liu, X., Wang, J.,
+Ge, W., Fan, Y., Dang, K., Du, M., Ren, X., Men, R., Liu, D., Zhou, C., Zhou, J.,
+Lin, J.: Qwen2-vl: Enhancing vision-language model’s perception of the world at
+any resolution (2024), https://arxiv.org/abs/2409.12191
+Synthetic Visual Genome 2
+19
+58. Wang, W., Gao, Z., Gu, L., Pu, H., Cui, L., Wei, X., Liu, Z., Jing, L., Ye, S., Shao, J.,
+Wang, Z., Chen, Z., et al.: Internvl3.5: Advancing open-source multimodal models in
+versatility, reasoning, and efficiency (2025), https://arxiv.org/abs/2508.18265
+59. Yang, A., Li, A., Yang, B., Zhang, B., Hui, B., Zheng, B., Yu, B., Gao, C., Huang,
+C., Lv, C., et al.: Qwen3 technical report. arXiv preprint arXiv:2505.09388 (2025)
+60. Yang, J., Ang, Y.Z., Guo, Z., Zhou, K., Zhang, W., Liu, Z.: Panoptic scene graph
+generation (2022), https://arxiv.org/abs/2207.11247
+61. Yang, J., Cen, J., Peng, W., Liu, S., Hong, F., Li, X., Zhou, K., Chen, Q., Liu, Z.:
+4d panoptic scene graph generation. Advances in Neural Information Processing
+Systems 36, 69692–69705 (2023)
+62. Yang, J., Peng, W., Li, X., Guo, Z., Chen, L., Li, B., Ma, Z., Zhou, K., Zhang,
+W., Loy, C.C., Liu, Z.: Panoptic video scene graph generation (2023), https:
+//arxiv.org/abs/2311.17058
+63. Yao, Y., Yu, T., Zhang, A., Wang, C., Cui, J., Zhu, H., Cai, T., Li, H., Zhao, W.,
+He, Z., Chen, Q., Zhou, H., Zou, Z., Zhang, H., Hu, S., Zheng, Z., Zhou, J., Cai, J.,
+Han, X., Zeng, G., Li, D., Liu, Z., Sun, M.: Minicpm-v: A gpt-4v level mllm on
+your phone (2024), https://arxiv.org/abs/2408.01800
+64. Zhang, J., Huang, W., Ma, Z., Michel, O., He, D., Gupta, T., Ma, W.C., Farhadi,
+A., Kembhavi, A., Krishna, R.: Task me anything. ArXiv abs/2406.11775 (2024),
+https://api.semanticscholar.org/CorpusID:270560772
+65. Zhang, J., Xue, L., Song, L., Wang, J., Huang, W., Shu, M., Yan, A., Ma, Z.,
+Niebles, J.C., Savarese, S., Xiong, C., Chen, Z., Krishna, R., Xu, R.: Provision:
+Programmatically scaling vision-centric instruction data for multimodal language
+models (2024), https://arxiv.org/abs/2412.07012
+66. Zheng, C., Zhang, J., Salehi, M., Gao, Z., Iyengar, V., Kobori, N., Kong, Q., Krishna,
+R.: One trajectory, one token: Grounded video tokenization via panoptic sub-object
+trajectory. In: Proceedings of the IEEE/CVF International Conference on Computer
+Vision. pp. 23156–23166 (2025)
+67. Zheng, C., Zhang, J., Zhang, J., Huang, W., Kumar, A., Kong, Q., Tuzel, O.,
+Li, C.L., Krishna, R.: Trajtok: Learning trajectory tokens enables better video
+understanding. arXiv preprint arXiv:2602.22779 (2026)
+20
+Z. Gao et al.
+A
+Pipeline Details
+A.1
+Panoptic Trajectory Generation
+Frame-wise panoptic mask generation We first employ SAM2 [49] to
+automatically produce initial per-frame panoptic segmentation masks. SAM2
+is selected for its strong generalization across diverse visual domains and its
+ability to generate high-quality masks without task-specific tuning. To ensure
+comprehensive spatial coverage, we apply a multi-grid point prompting strategy
+using three grids (32×32, 16×16, and 4×4), enabling the model to capture both
+large regions and fine details. Table 7 shows key parameters that are configured
+to balance segmentation quality and runtime efficiency.
+Table 7: Configuration of the SAM2AutomaticMaskGenerator employed in Phase 1 to
+produce dense per-frame segmentation proposals.
+Parameter
+Value
+point_grids
+{32×32, 16×16, 4×4}
+points_per_batch
+64
+pred_iou_thresh
+0.75
+stability_score_thresh
+0.85
+stability_score_offset
+1.0
+box_nms_thresh
+0.7
+crop_n_layers
+2
+crop_nms_thresh
+0.7
+crop_overlap_ratio
+0.5
+min_mask_region_area
+200
+use_m2m
+True
+multimask_output
+False
+However, the raw SAM2 outputs often contain redundant or highly overlapping
+masks, including fragmented sub-object regions and densely stacked proposals that
+inflate computational cost and complicate downstream tracking. To mitigate these
+issues, we introduce an optional coverage-optimized mask filter. All candidate
+masks are first sorted by area, favoring large, semantically coherent regions.
+Each mask is retained only if its overlap with the already selected set is below
+a 90% threshold, which empirically balances redundancy removal and coverage
+preservation. Filtering continues until the union of selected masks reaches the
+pre-computed full coverage of all SAM2 proposals.
+This filtering step significantly reduces mask quantity while preserving essen-
+tial scene content, thereby lowering memory usage and improving the stability
+and efficiency of subsequent tracking stages.
+Online–offline Object Tracking: After generating candidate masks on frames,
+we apply a online–offline object tracking mechanism. This design tackles key
+challenges in video object tracking: it enables the detection of newly appearing
+objects during tracking, ensures temporal consistency of segmentation masks, and
+Synthetic Visual Genome 2
+21
+maintains dense annotations across frames. By dynamically adapting to scene
+changes, this mechanism enhances the continuity and accuracy of object-level
+representations throughout the video.
+Online Tracking. The online tracking stage initializes object tracking by loading
+the filtered candidate masks (M′) from the first frame and registering them with
+the SAM2 video predictor, denoted by the online tracking function Fonline:
+  \ m a thcal {T}_{ 1}, \mathcal {R} = \mathcal {F}_\text {online}(\mathcal {M}') \,. \label {eq:1} 
+(6)
+Here, T1 denotes tracked masks from the first pass, and R = (idj, tj, mj) records
+the initial appearance of each object, including its identifier idj, the frame of
+first appearance tj, and the initial mask mj. Each mask is assigned a unique
+object identifier that will be maintained throughout the tracking process.
+The SAM2 video predictor then propagates these masks across subsequent
+frames. Although SAM2 provides state-of-the-art video segmentation through
+memory attention and large-scale pretraining, it heavily depends on manually
+provided visual prompts such as points, bounding boxes, or masks. As a result,
+SAM2 lacks the capability to autonomously discover and incorporate newly ap-
+pearing objects into its memory during propagation. Extensions such as Grounded
+SAM2 [50] have explored integrating open-vocabulary object detectors to identify
+new objects in videos. However, these methods often disrupt tracking consistency
+by failing to maintain consistent object identities and operate only locally, which
+can compromise existing tracking information.
+To enable reliable discovery of new objects, we introduce a key innovation in
+the online object tracking: a dynamic mechanism for continuous monitoring of
+tracking quality and the emergence of new objects. For each frame t, the set of
+currently tracked objects is
+  \ mathca l {O} _ t = \{  (i d_ j, m_{t ,j }) \m id  \text {object } id_j \text { is tracked at frame } t \} \,, \label {eq:2} 
+(7)
+where mt,j denotes the segmentation mask of object idj. The pipeline then
+computes their combined coverage
+  C
+_
+t = \bigvee _
+{(id _j, m_{t,j}) \in \mathcal {O}t} m_{t,j} \,, 
+(8)
+and the untracked region is Ut = ¬Ct, where ¬ denotes the logical NOT operation
+applied pixel-wise. Meanwhile, the union of candidate masks from the automatic
+generation stage is
+  D
+_
+t = 
+\
+b igvee _{m \in \mathcal {M}'_t} m \,, 
+(9)
+and the overlap between untracked and newly detected areas is
+  O_{\te x t { ov erlap}} = U_t \land D_t \,. 
+(10)
+To determine whether a significant portion of the untracked region is explained
+by these candidate masks, we compute the normalized overlap ratio:
+  \frac {A(
+O_{\t
+e xt {overlap
+}})}{ A(U_t)} \g e q \ tau _{\text {detection}}, \quad \text {where } \tau _{\text {detection}} = 0.1 \,, 
+(11)
+22
+Z. Gao et al.
+where A(·) denotes the area of a mask. If this ratio exceeds a predefined detec-
+tion threshold τdetection, the pipeline interprets this as a tracking breakpoint,
+suggesting that new objects have entered the scene or that existing objects have
+undergone substantial changes in appearance.
+At this breakpoint, forward propagation temporarily halts, and the pipeline
+evaluates the candidate masks in M′
+t. Masks that exhibit high overlap with Ut
+and do not correspond to any currently tracked object are assigned new unique
+identifiers and appended to the tracking state R. This enables us to dynamically
+expand the tracking scope, ensuring the integration of objects that emerge mid-
+sequence. Importantly, the appearance of each new object is recorded precisely,
+capturing the frame index t along with its initial segmentation mask. This object
+entry record supports the offline tracking stage, which further refines tracking
+across the entire video.
+After incorporating new objects, the pipeline performs identity matching to
+maintain temporal consistency. For each newly added mask mnew, we compute
+its overlap with all existing tracked masks, using an asymmetric overlap ratio
+defined as:
+  r
+_
+j =  \fra c  {\su m _ {x
+,y} \le
+ft ( m _{\te x t {new}} \land m_{t,j} \right )(x, y)}{A(m_{\text {new}})} \quad \forall (id_j, m_{t,j}) \in \mathcal {O}_t \,. 
+(12)
+Unlike IoU, this overlap metric is asymmetric and specifically measures how much
+of the new object is covered by an existing one, which is more robust in handling
+partial occlusion scenarios where smaller objects may only be partially visible.
+Next, the pipeline identifies the tracked mask with the maximum overlap
+  id_{\tex t
+ 
+{
+a
+ssigne
+d} } = \ begin {
+cas
+es} id_{j_{\m ax } }
+ & \text {if } r_{\max } \ge \tau _{\text {match}}, \\ \displaystyle \max _{(id_j, m_{t,j}) \in \mathcal {O}_t} id_j + 1 & \text {otherwise,} \end {cases} 
+(13)
+where rmax = max rj. If sufficient overlap exists, the mask continues an existing
+trajectory; otherwise, a new object ID is assigned. This conservative matching
+strategy prevents identity switches and maintains consistent IDs even under
+occlusion, reappearance, or new-object entry.
+Offline Tracking. During the online tracking phase, new objects are only
+discovered and registered when specific breakpoint conditions are met. Because
+these breakpoints are evaluated periodically, a newly appearing object may
+not be registered at the exact moment it enters the scene, resulting in delayed
+initialization and incomplete trajectories prior to its registration. To address this,
+the offline propagation stage leverages the complete object entry information
+collected during the online pass to generate refined, full-length tracks:
+  \mathcal {T } = \mathcal {F}_\text {offline}(\mathcal {R})\,. 
+(14)
+This propagation begins by resetting the SAM2 tracking state. Each object
+recorded in the online pass is re-initialized at its true entry frame using its
+initial mask. This enables all objects to be tracked from their correct starting
+Synthetic Visual Genome 2
+23
+points in a single continuous pass, ensuring consistent identities across the full
+sequence. Unlike the online propagation, which may halt at detection breakpoints,
+the offline propagation performs uninterrupted propagation through all frames
+for maximal stability and efficiency. On 100 sampled SVG2 videos, online-only
+propagation attains mask coverage 0.435, while online+offline improves to 0.486.
+Lightweight Post-filtering. We apply a lightweight post-filtering step to
+refine the panoptic trajectories produced in Phase 1. Given the set of instance
+mask trajectories, we first remove redundant tracks by detecting near-duplicates
+through trajectory-level overlap consistency: pairs of tracks that exhibit sustained,
+high overlap over their co-visible frames are treated as duplicates, and only the
+more stable trajectory is retained. We then apply a mild morphological cleanup
+to the remaining masks to suppress small artifacts and smooth boundaries. This
+post-filtering yields a more compact and cleaner set of trajectories for downstream
+VSG construction.
+A.2
+Object Description and Parsing
+We adopt the Describe Anything Model (DAM) [34] to generate detailed semantic
+descriptions for each object trajectory. DAM is specifically designed for localized
+vision–language understanding: given a region of interest, it produces fine-grained
+descriptions grounded strictly on that region mask while still leveraging global
+scene context. Compared to generic VLMs that focus on whole-image captioning,
+DAM is trained with a large-scale Detailed Local Captioning dataset, enabling
+it to reliably describe small, partially occluded, or visually complex objects.
+This makes DAM particularly well aligned with our goals, where each tracked
+trajectory requires accurate semantics.
+We use the DAM-3B-Video variant. For each object trajectory, we compute
+the mask area over its full lifetime, select the top 8 frames with the largest visible
+regions, and order them temporally. These frames and their binary masks form
+a short masked clip that is fed into DAM-3B-Video, along with an instruction
+prompt requesting a detailed description. The resulting output provides high-
+quality, fine-grained textual descriptions that serve as input to our structured
+parsing module.
+To convert DAM’s free-form descriptions into structured semantics, we use
+GPT-4.1-nano [1] for object name and attribute list parsing, balancing quality
+and cost. The parsing prompt is shown in Table 14. In practice, we find that
+asking the model to also output relations, motions, and other elements helps it
+separate concepts more clearly, resulting in a cleaner and more accurate attribute
+list.
+API Usage. We use gpt-4.1-nano-2025-04-14 for object name and attribute
+list parsing, processing ∼10B input tokens and generating ∼60B output tokens.
+A.3
+Inter-object Relation Extraction
+After Phase 1 and Phase 2, we obtain panoptic object trajectories and an
+object name for each trajectory. To further exploit the reasoning and grounding
+24
+Z. Gao et al.
+capabilities of VLMs, we use GPT-5 to extract inter-object relations. We first
+compute the bounding box trajectory for each object from its segmentation
+masks. To balance the relationship annotation density and computational cost,
+we sample the video at 1 FPS. For each sampled frame, we provide GPT-5 with
+the timestamp, the frame’s height and width, and a list of visible objects along
+with their IDs and bounding boxes. The sampled frames and their corresponding
+metadata are fed to GPT-5 in an alternating sequence.
+In practice, we observe that prompting GPT-5 to output all relation types
+in a single pass biases the model heavily toward spatial relations, causing many
+informative non-spatial relations to be missed. To mitigate this, we perform
+relation extraction in two separate passes using two dedicated prompts (Tables 15
+and 16)—one for spatial relations and one for non-spatial relations. For spatial
+relations, we prohibit trivial relations such as left of or right of, which can be
+determined directly from bounding boxes, and instead encourage the model to
+focus on relations that require genuine visual cues. For non-spatial relations,
+we designate ID = −1 as the video recorder (observer), enabling the model
+to extract salient relations between the camera and the objects. This two-pass
+strategy produces a more diverse and comprehensive set of relations for our
+dataset.
+API Usage. We use gpt-5-2025-08-07 Batch API for relation extraction,
+processing ∼14B input tokens and generating ∼5B output tokens.
+B
+SVG2 Dataset Details
+B.1
+Data Statistics
+The SVG2 video samples are sourced from the SA-V dataset (43K) and the PVD
+dataset (593K). The synthesized annotations cover approximately 6.6M instance-
+level labels and trajectories, 52M attributes, and about 6.7M relationships.
+Figure 4 shows the distribution of object categories in SVG2, illustrating the
+diversity and coverage of our dataset across various semantic classes. Figure 5
+presents the distribution of attribute annotations, demonstrating the richness
+of fine-grained visual properties captured by our pipeline. Figure 6 provides an
+overview of relationship categories in SVG2, and Figure 7 further shows the
+detailed distribution for each of the seven relationship types: spatial, motion,
+functional, stateful, social, attentional, and event-level. Table 8 details the average
+video duration and frame rate statistics.
+Table 8: Video duration and frame rate (FPS) statistics.
+Dataset
+Duration (s)
+FPS
+SVG2-SAV
+13.8 ± 3.3
+24.0 ± 0.0
+SVG2-PVD
+16.6 ± 9.7
+29.6 ± 8.1
+SVG2
+16.4 ± 9.4
+29.2 ± 8.0
+SV G2test
+13.6 ± 6.3
+11.8 ± 8.4
+Synthetic Visual Genome 2
+25
+Fig. 4: Distribution of object categories in SVG2. The dataset covers a diverse range of
+semantic classes including persons, vehicles, animals, furniture, and various everyday
+objects.
+B.2
+Visualizations
+To further illustrate the structure of the SVG2 dataset, we present three an-
+notation visualization examples, see Figures 8, 9, and 10. These visualizations
+illustrate the panoptic object trajectories generated in Phase 1, fine-grained
+object semantics extracted from DAM and parsed into structured attributes, and
+inter-object relations derived from GPT-5 under both spatial and non-spatial
+prompting strategies.
+26
+Z. Gao et al.
+Fig. 5: Distribution of attribute annotations in SVG2. The attributes span visual
+properties such as color, material, state, and other fine-grained descriptors.
+B.3
+Human Annotation Workflow
+We rely on expert human annotators to building our SV G2test benchmark. We
+curate expert annotators to create dense, panoptic video segmentation masks
+with scene graph annotations. We use the SAM2-based [49] annotation app to
+create hierarchical segmentation masks, where the first hierarchy captures objects
+as a whole and finer-grained levels annotate subparts for objects of interest. We
+recruit annotators within our institution who have been trained to use the SAM-2
+editing framework to refine the segmentation masks, producing object labels and
+dense segmentation tracking at different levels of granularity.
+For scene graph annotations, we employ a model-in-the-loop approach. We
+prompt GPT-5 with human-annotated object labels to generate initial attributes
+Synthetic Visual Genome 2
+27
+Fig. 6: Overview of relationship categories in SVG2, showing the distribution across
+spatial, motion, functional, stateful, social, attentional, and event-level relation types.
+and relationships with timestamps, dividing relationships into spatial and tem-
+poral categories. We then use the Prolific2 crowd-sourcing platform to recruit
+workers who have been identified as experts in video annotation. Annotators
+review and edit object labels and attributes, choosing to keep, remove, add, or
+modify each entry. They are required to annotate at least one attribute per
+object and are compensated based on the number of attributes annotated. For
+relationships, annotators perform similar edits, removing incorrect relationship
+labels, adding new relationship labels, fixing mismatched object IDs, or adjust-
+ing timestamps. When object IDs or timestamps are incorrect, annotators can
+select from all available objects in the video or modify the temporal range where
+the relationship applies. Figures 12–13 show the annotation interfaces used for
+verification and editing.
+C
+Model Details
+Our proposed TraSeR introduces a trajectory-aligned token arrangement mech-
+anism, designed to map valid tokens according to the pixel regions covered by
+each object’s trajectory. However, the rearrangement disrupts the original or-
+der and spatial layout of the visual tokens. Therefore, for the token sequence
+associated with each object’s trajectory, we normalize it into the structured
+format illustrated in Figure 11. Specifically, we prepend a pair of special tokens,
+<obj_traj_start> and <obj_traj_end>, to explicitly delineate different trajec-
+tories. Within each trajectory segment, we insert the textual identifier of the
+object (i.e., its corresponding text embedding), which matches the object ID
+used in the video-scene-graph supervision signals. We then continue to leverage
+2 https://www.prolific.com/
+28
+Z. Gao et al.
+(a) Spatial relations
+(b) Motion relations
+(c) Functional relations
+(d) Stateful relations
+(e) Social relations
+(f) Attentional relations
+(g) Event-level relations
+Fig. 7: Detailed distribution of relationship predicates across all seven categories in
+SVG2.
+Synthetic Visual Genome 2
+29
+Fig. 8: Example 1: Visualizations from the SVG2 dataset, illustrating panoptic trajec-
+tories, objects, attributes, and diverse inter-object relations.
+the pretrained special tokens from Qwen2.5-VL to separate the visual tokens
+associated with each object.
+During the compression stage via the dual-resampler, the tokens of each
+object, either as a whole or partitioned into temporal windows, are fed into
+two resamplers, while the special tokens and object-ID embeddings bypass the
+resamplers. The output tokens from the object-trajectory resampler are placed
+first, followed by the tokens produced by the temporal-window resampler for
+each respective window.
+D
+Training Details
+During training, we set the token-arrangement selection threshold τeff to 0.5 to
+balance contextual coverage and token count. Both resamplers are configured
+with three layers and 32 learnable queries. We apply RMSNorm both before and
+30
+Z. Gao et al.
+Fig. 9: Example 2: Visualizations from the SVG2 dataset, illustrating panoptic trajec-
+tories, objects, attributes, and diverse inter-object relations.
+after the cross-attention blocks in each layer. The hidden size of each resampler
+is set to 2048, and the intermediate size of each MLP layer is 4 × 2048.
+We sample video frames at 1 fps and adopt the same resizing strategy as
+Qwen2.5-VL. The ViT backbone is frozen, while the projector, language model,
+and the newly introduced resamplers are trained. For the temporal-window
+resampler, each temporal window spans 4 s, meaning that the token groups
+corresponding to different temporal segments of a trajectory are processed in-
+dependently. The object-trajectory resampler processes all tokens belonging to
+each object in a single pass.
+We use a warmup ratio of 0.03 and a weight decay of 0.01. Training is
+performed on 8 H100 GPUs with a batch size of 1 and gradient accumulation
+steps set to 2.
+Synthetic Visual Genome 2
+31
+Fig. 10: Example 3: Visualizations from the SVG2 dataset, illustrating panoptic trajec-
+tories, objects, attributes, and diverse inter-object relations.
+Fig. 11: Rearranged object-level token sequence example. We introduce two new special
+tokens, <obj_traj_start> and <obj_traj_end>, to delimit individual trajectories.
+Within each trajectory, we explicitly mark the object identity using the text “Object i”,
+and we continue to use the existing special tokens from the Qwen2.5-VL-3B vocabulary
+to separate visual tokens.
+E
+Additional Experiments and Results
+E.1
+Evaluation details
+To ensure a fair comparison across all baseline models, we provide each model
+with the bounding-box trajectory of every object during evaluation. For each
+bounding box, we include both its absolute coordinates and normalized relative
+coordinates, and we explicitly prompt the model with the original frame resolution.
+For models that support direct video input, for example, Gemini 2.5 Pro, we
+supply the bounding boxes and their corresponding timestamps computed from
+frames sampled at 1 fps. For models that do not support video input, such as
+GPT-4.1 and GPT-5, we instead feed the 1 fps (which is the same as TraSeR
+32
+Z. Gao et al.
+Table 9: Comparison results under different evaluation criteria. We evaluate models
+using a relaxed temporal grounding threshold for relations and triplets (IoU 0.1). For
+object evaluation, we report a rule-based ’Strict’ score, which requires an exact string
+match between the predicted and ground-truth labels.
+Triplet (IoU 0.1)
+Relation (IoU 0.1)
+Object (Strict)
+Model
+PVSG VidOR SVG2test PVSG VidOR SVG2test VIPSeg PVSG VidOR SVG2test
+API call only
+GPT-4.1 [1]
+10.3
+15.4
+6.8
+12.3
+17.2
+8.1
+30.0
+15.0
+26.9
+24.9
+Gemini-2.5 PRO [11]
+12.3
+12.8
+9.3
+13.9
+14.3
+10.6
+28.0
+9.2
+20.7
+23.3
+GPT-5 [43]
+23.8
+25.6
+18.9
+24.2
+28.5
+20.5
+38.2
+20.1
+22.2
+33.4
+Open weights only
+Qwen2.5-VL-3B [4]
+0.1
+0.4
+0.3
+0.1
+0.8
+0.6
+15.6
+2.4
+9.5
+9.1
+MiniCPM-V 4.5 [63]
+0.2
+5.0
+1.3
+0.5
+6.6
+2.7
+25.5
+0.5
+12.0
+16.4
+InternVL3.5-4B [58]
+0.6
+2.1
+1.0
+1.8
+2.9
+2.1
+20.9
+2.9
+10.6
+14.7
+GLM-4.1-9B-Thinking [17]
+0.7
+5.7
+2.1
+1.5
+7.2
+3.5
+23.2
+2.6
+10.4
+11.7
+Qwen3-VL-4B [59]
+0.1
+1.1
+1.1
+0.1
+1.4
+1.9
+22.8
+4.4
+14.2
+16.7
+Qwen3-VL-4B-Thinking [59]
+0.1
+3.7
+2.0
+1.5
+5.7
+4.2
+22.9
+0.8
+10.7
+16.6
+Fine-tuned baselines
+FT-Qwen2.5-VL-3B (First Bbox)
+0.1
+3.5
+1.2
+0.9
+10.0
+1.9
+11.5
+5.9
+11.7
+9.8
+FT-Qwen2.5-VL-3B (Bbox Traj.)
+2.5
+3.5
+1.7
+6.6
+8.4
+3.8
+11.0
+7.5
+13.7
+13.1
+TraSeR
+23.8
+32.7
+18.5
+25.4
+36.0
+20.8
+42.1
+29.5
+31.7
+28.8
+inference setting) sampled frames sequentially, alternating each frame with its
+associated metadata and the bounding-box information of all objects in that
+frame.
+All models use prompts following a unified structural template, and their
+outputs are constrained using a predefined JSON schema.
+E.2
+Comparison under different evaluation criteria
+We report additional results under the alternative evaluation criteria introduced
+in Sec. 5. Table 9 presents triplet and relation recall using a relaxed temporal IoU
+threshold of 0.1. For object evaluation, we report the rule-based strict score,
+which requires exact string matches between the predicted and ground-truth
+labels.
+As shown in the table, proprietary models perform reasonably well across
+all tasks, with GPT-5 achieving the strongest overall results among API-access
+models. In contrast, open-weight VLMs display a substantial performance gap,
+particularly on triplet and relation prediction. This underscores the inherent
+difficulty of fine-grained, temporally grounded scene graph extraction for current
+open-source models.
+TraSeR, however, demonstrates clear and consistent improvements across
+all benchmarks. Under the relaxed IoU criterion, it achieves strong triplet and
+relation performance, surpassing all open-weight baselines by large margins.
+Crucially, under the exact-match strict score, TraSeR continues to deliver the
+highest object-level performance across all datasets, frequently exceeding even
+the proprietary API models. These results confirm that our trajectory-aligned
+token arrangement and dual-resampler design significantly enhance fine-grained
+object grounding and temporal consistency, both of which are critical for accurate
+video scene graph generation.
+Synthetic Visual Genome 2
+33
+E.3
+Additional Ablations
+Model architecture. We further investigate the impact of the resampler archi-
+tecture by varying the number of resampler layers and the number of learnable
+queries in the temporal-window resampler. All variants are trained for 3 epochs
+on the SAV subset of SVG2. As shown in Table 11, the performance differences
+across architectural variants are relatively small. The configuration with three
+layers and 32 queries achieves slightly better overall results and inference stability.
+Table 10: Data scale ablation showing consistent average performance gains as training
+data increases.
+Metric / Data scale
+25%
+50%
+75%
+100%
+Triplet
+PVSG
+10.1
+12.2
+13.7
+16.1
+VidOR
+20.7
+20.5
+22.4
+22.9
+SVG2test
+17.5
+18.9
+15.7
+16.7
+Relation
+PVSG
+10.8
+13.1
+15.4
+16.9
+VidOR
+22.9
+22.5
+24.7
+25.0
+SVG2test
+19.6
+20.9
+18.3
+18.7
+Object
+PVSG
+76.3
+76.6
+75.5
+72.7
+VidOR
+90.8
+91.2
+91.1
+91.4
+VIPSeg
+85.7
+85.3
+85.7
+86.5
+SVG2test
+79.0
+79.0
+79.1
+79.0
+Attribute
+SVG2test
+22.5
+22.3
+22.9
+27.1
+Avg Rank
+4
+3
+2
+1
+Training data scale. We analyze the effect of training data scale by comparing
+models trained with 25%, 50%, 75%, and 100% of the data. As shown in Table 10,
+increasing the amount of training data consistently improves the average perfor-
+mance across most metrics and benchmarks. For triplet and relation prediction,
+both VidOR and SVG2test exhibit clear gains as data scale grows, confirming
+that learning temporal and relational structures benefits strongly from large
+SVG2 dataset. Attribute prediction on SVG2test shows the most pronounced
+improvement, with a substantial jump from 22.3 to 27.1 when using the full
+dataset. This indicates that our 593K PVD subset in SVG2 provides diverse and
+high-quality object-level annotations. The overall average rank demonstrates that
+larger-scale training yields consistently better performance across all evaluation
+dimensions.
+E.4
+Trajectory Robustness and Temporal Scalability
+Robustness to upstream segmentation. To isolate scene-graph generation
+quality, our primary open-vocabulary VidSGG protocol evaluates models using
+34
+Z. Gao et al.
+Table 11: Ablation study on resampler depth and query count. We evaluate the impact
+of varying the number of layers (Depth) and the number of learnable latent queries
+(#query) within the Temporal-Window Resampler (TWR). *PVSG results are evaluated
+on the VidOR subset.
+Variants
+Triplet
+Relation
+Object
+Depth
+# query of TWR
+PVSG*
+VidOR
+PVSG*
+VidOR
+PVSG*
+VidOR
+2
+16
+12.3
+15.1
+13.5
+16.5
+81.3
+89.9
+3
+16
+12.8
+14.2
+11.7
+15.4
+80.1
+90.2
+2
+32
+12.0
+15.6
+14.7
+17.5
+80.9
+90.0
+3
+32
+13.6
+15.0
+15.6
+16.3
+79.7
+90.2
+ground-truth panoptic trajectories. However, real-world deployment relies on
+predicted upstream segmentation. To assess TraSeR’s sensitivity to trajectory
+quality, we replace the ground-truth inputs with masks generated entirely by our
+automated Phase-1 tracking pipeline, retaining predicted masks that achieve an
+IoU ≥0.3 against the ground truth.
+Table 12 compares performance between these input settings. While using
+predicted trajectories naturally reduces overall metrics due to upstream segmen-
+tation noise and different segmentation granularity, TraSeR remains remarkably
+robust. Even with noisy predicted masks, TraSeR still outperforms GPT-4.1
+and Gemini-2.5 Pro (which were provided perfect ground-truth inputs), and all
+the open-source models across triplet, relation, object, and attribute metrics.
+This demonstrates that TraSeR’s trajectory-aligned token arrangement and
+dual-resampler design effectively mitigate realistic segmentation imperfections,
+proving adaptable to fully automated pipelines.
+Table 12: Sensitivity to upstream trajectory quality. We compare TraSeR using
+ground-truth panoptic segmentation masks (used in all main experiments) versus
+pipeline-predicted masks matched at IoU ≥0.3. Even with noisy and multi-granularity
+predicted trajectories, TraSeR maintains highly competitive performance. †PVSG is
+evaluated on its VidOR subset only.
+Triplet
+Relation
+Object
+Attribute
+Input Trajectory
+PVSG†
+VidOR
+SVG2test
+PVSG†
+VidOR
+SVG2test
+VIPSeg
+PVSG†
+VidOR
+SVG2test
+SVG2test
+pipeline-predicted
+10.0
+4.3
+10.6
+13.4
+6.1
+16.2
+72.2
+63.4
+62.9
+64.1
+17.6
+ground-truth
+19.2
+22.9
+16.7
+20.1
+25.0
+18.7
+86.5
+81.9
+91.4
+79.0
+27.1
+Temporal scalability and long-video generalization. Our SVG2 training
+videos average ∼15 seconds in duration. To evaluate zero-shot temporal generaliza-
+tion, we test TraSeR on the PVSG benchmark’s subsets, which span durations
+up to ∼10× longer: VidOR (avg. 48s), Epic-Kitchens (120s), and Ego4D (166s).
+In our experiments, TraSeR processes these extended sequences directly without
+truncation, successfully handling up to 300 frames (at 1 fps) for the longest videos
+in the test set. Table 13 details this zero-shot temporal generalization. Object
+prediction accuracy remains highly robust across all durations, demonstrating
+Synthetic Visual Genome 2
+35
+that the object-trajectory resampler’s global aggregation extracts semantically
+stable identity representations regardless of video length. Relation and triplet
+performance exhibits a decline, reflecting the inherent difficulty of extrapolating
+fine-grained temporal grounding to horizons far beyond the training distribution.
+One potential strategy to better balance long-form video support is to reduce the
+number of learnable queries within the temporal-window resampler. These results
+highlight the generalization capability of our model while identifying long-video
+VSG as a promising direction for future work: explicitly incorporating longer
+training videos and scalable temporal architectures could substantially close the
+performance gap at extended durations.
+Table 13: Zero-shot temporal generalization across three PVSG subsets spanning
+durations from 48s (VidOR) to 166s (Ego4D). Object prediction remains highly robust
+across all lengths, while relation and triplet performance decreases for longer videos,
+motivating future long-video training strategies.
+Triplet
+Relation
+Object
+Model
+VidOR (48s)
+Epic-Kitchens (120s)
+Ego4D (166s)
+VidOR (48s)
+Epic-Kitchens (120s)
+Ego4D (166s)
+VidOR (48s)
+Epic-Kitchens (120s)
+Ego4D (166s)
+TraSeR
+19.2
+6.5
+5.1
+20.1
+7.4
+7.7
+81.7
+63.2
+66.0
+36
+Z. Gao et al.
+Fig. 12: Crowdworkers editing and annotating objects and attributes from segmentation
+tracking.
+Fig. 13: Crowdworkers verifying and fixing relationships.
+Synthetic Visual Genome 2
+37
+Prompt for Structured Parsing
+Table 14: Prompts for LLM Structured Parsing
+System Prompt:
+## You are an expert in scene understanding. I will give you a short paragraph
+that describes a video clip.
+### Your task is to extract structured information about a single object described
+in the paragraph.
+### Please return a JSON with the following fields:
+-"object": The main object being described (e.g.,"person","dog", "car"). If the
+inference about the object is uncertain based on the description, add "(uncertain)"
+after the object name.
+- "attributes": A list of ONLY the visual/physical attributes that can be directly
+observed about the object itself. Include only:
+* Visual appearance: color, shape, size, texture, pattern, material appearance, style
+* Physical properties: state, transparency, reflectiveness, orientation, material
+* Design elements: stripes, dots, logos, decorative features. DO NOT include: implied
+states, inferred conditions, functional descriptions, or anything that describes the
+object’s interaction with its environment.
+- "relationships": A list of relationships between this object and other entities or the
+environment (e.g., "on top of table", "next to person", "inside container", "facing
+camera", "part of group").
+- "actions": A list of actions that the object is performing or movements it is making
+(e.g., "rotating", "moving", "falling", "bouncing", "sliding").
+### Important distinctions:
+- Attributes = What the object looks like (visual only). Please use ADJECTIVE
+form
+- Relationships = How the object relates to other things spatially, functionally, or
+contextually
+- Actions = What the object is doing or how it’s moving
+Now process the following description:
+[description]
+38
+Z. Gao et al.
+Prompt for Spatial Relationship Extraction
+Table 15: Prompt for Spatial Relationship Extraction
+System Prompt:
+## Role
+You are a detail-oriented **Video Relationship Annotator** responsible for reviewing
+sequences of sampled video frames and extracting a comprehensive set of **spatial
+relationships**. All relationships must be visually grounded, type-consistent, and
+strictly follow the defined schema.
+Begin with a concise checklist (3–7 bullets) of what you will do; keep items conceptual,
+not implementation-level.
+## Task Context
+- Videos are sampled at 1 fps.
+- Each frame contains detected objects with bounding boxes and corresponding
+unique integer IDs.
+- Your analysis should consider all sampled frames jointly and produce relationships
+in accordance with the system instructions.
+## Input Format
+The input is an ordered sequence of (image URL, text) pairs:
+- Each text entry includes:
+- Frame ID (integer index),
+- Frame size (width and height),
+- Detected objects (unique integer IDs, labels, and bounding boxes ’[x1, y1, x2, y2]’).
+- Frames maintain consistent object IDs when possible. If an object is missing in a
+frame, its ID is absent for that frame.
+## Guidelines
+- Objects are always referenced using their bounding boxes ’[x1, y1, x2, y2]’ in each
+frame; base all reasoning on these and their temporal evolution.
+- Extract **only purely spatial (physical or geometric) relationships** visible in the
+3D scene. Do **not** extract any relationships that indicate state, function, action,
+or purpose.
+- **Exclude** all temporal, social, functional, or attentional relationships, as well as
+any stateful or action-based verbs.
+- Each relationship must be visually supported by the frames.
+- Do **NOT** ignore objects that newly appear in the middle of the video; ensure
+to evaluate all newly-detected objects for relationships as soon as they appear.
+- Ensure logical consistency with common sense and real-world physics; do **NOT**
+output implausible or unsupported relationships.
+- Think in terms of **3D spatial layout** by using depth information derived from
+world knowledge and visual cues, not just 2D image positions. Do **NOT** rely
+solely on 2D bounding box coordinates. Do **NOT** output ’left of’ or ’right of’.
+- Use precise, explicit, and non-redundant verbs.
+- Do **NOT** miss any clear and valid spatial relationships between objects.
+### Temporal Grounding
+- Output relationships with one or more time spans ([[start_frame, end_frame],
+Synthetic Visual Genome 2
+39
+...]), as continuous intervals where the relationship is visually supported and both
+objects are present.
+## Output Format
+Return a single valid JSON object following this schema:
+{
+"relationships": [
+[subject_id,
+predicate_verb,
+object_id,
+[[start_frame, end_frame], ...]]
+]
+}
+### Output Specifications
+- Each relationship is a tuple with 4 elements, in order: subject_id (int) |
+predicate_verb (str) | object_id (int) | time_frames (list of [start,end]).
+- If there are no valid relationships, output "relationships": [] .
+- Do not emit error fields or any content outside the defined schema in your output.
+- Always output strictly formatted, valid JSON with the "relationships" key.
+After producing the output, validate that all relationships are visually supported,
+ids and frames are valid integers, and the JSON format strictly matches the schema.
+If validation fails, self-correct before finalizing the output.
+40
+Z. Gao et al.
+Prompt for Non-spatial Relationship Extraction
+Table 16: Prompts for Non-spatial Relationship Extraction.
+System Prompt:
+## Role: You are a detail-oriented **Video Relationship Annotator** tasked with
+reviewing sequences of sampled video frames and extracting a comprehensive set
+of **temporal (non-spatial) relationships**. Ensure that all extracted relationships
+are visually grounded, type-consistent, and strictly adhere to the defined schema.
+You are analyzing videos sampled at 1 fps. Each frame contains detected objects
+with corresponding bounding boxes. Please analyze all frames jointly and output
+temporal relationships according to the system instructions.
+## Relationship Taxonomy: Classify each relationship into exactly ONE category:
+1. **Functional — Contact / Manipulation**
+- Direct physical interaction where an animate subject alters or uses the state of
+another object.
+- Subject: animate | Object: animate or inanimate
+- Exclude: Pure motion or gaze without contact.
+2. **Stateful — Attachment / Possession-like**
+- Visually grounded, time-persistent attachment or carrying relationships that indi-
+cate sustained physical association rather than instantaneous action.
+- Subject: animate or inanimate | Object: animate or inanimate
+- Exclude: Abstract ownership or purely spatial layout.
+3. **Motion — Relative Movement**
+- Temporal changes in relative position or movement trajectory between entities.
+- Subject: movable (animate or movable inanimate) | Object: animate or inanimate
+- Exclude: Static layout or manipulation actions.
+4. **Social — Animate-to-Animate Interaction**
+- Communication, coordination, or interpersonal acts between animate agents.
+- Subject/Object: animate
+- Exclude: One-sided attention or non-social contact.
+5. **Attentional — Gaze / Focus (includes Camera)**
+- Visual attention or camera focus directed at another object or agent.
+- Subject: animate or camera (with object_id = -1) | Object: animate or inanimate
+- Exclude: Communication or manipulation.
+- **For the camera (object_id = -1), only extract main or relevant relationships
+such as its movement or meaningful interaction with other objects; ignore obvious
+relationships such as "observing" or "recording" unless they are non-trivial or central
+to the event.**
+6. **Event-Level — Goal-Directed Multi-Step Activity**
+- Higher-level, time-extended actions combining multiple functional, causality or
+motion relations into a single purposeful event.
+- Subject: animate or inanimate | Object: animate or inanimate
+- Exclude: Single short actions or ungrounded intent.
+## Core Analysis Logic & Constraints
+1. **Object Typing:** - Animate: humans, animals, humanoid robots - Inanimate:
+cars, tools, furniture, etc. - Camera: unseen observer/recorder, always object_id =
+-1
+Synthetic Visual Genome 2
+41
+2. **Typing Rules:** - Functional / Social: Subject must be animate - Motion:
+Subject must be movable - Attentional: Subject must be animate or camera (-1) -
+Social: Both subject and object must be animate
+3. **Extraction Basis:**
+- All relationships must be visually supported and logically consistent with common
+sense. Do **NOT** infer relationships not visually evidenced or that contradict
+common sense.
+- Every object must be referenced by its bounding box coordinates [x1, y1, x2, y2]
+in each frame; all reasoning must rely on these spatial positions, object names and
+their temporal changes.
+- Relationships must have temporal grounding: define one or more time spans
+[[start_frame, end_frame], ...] as continuous frame intervals supported by visual
+evidence. If an object in a labeled relationship disappears from subsequent frames,
+end the relationship at the object’s last visible frame. Do not continue relationships
+if objects become occluded or are missing.
+- Do NOT create self-relations (subject_id == object_id), e.g. (i, verb, i, ...).
+- If two object IDs correspond to the same physical entity, do not report relationships
+between them.
+- Do not ignore objects that newly appear in the middle of the video; evaluate all
+newly-detected objects for relationships as soon as they appear.
+## Input Format
+The input is an ordered sequence of (image URL, text) pairs: - Each text entry gives
+the frame ID, frame size (width and height), and detected objects with unique IDs,
+labels, and bounding boxes [x1, y1, x2, y2]. - Frames are sampled at 1 fps and share
+consistent object IDs.
+## Output Format: Produce a single valid JSON object using this schema:
+{
+"relationships": [
+[subject_id,
+predicate_verb,
+object_id,
+[[start_frame, end_frame], ...],
+relationship_type]
+]
+}
+### Output Details
+- Each tuple must have five elements in this order: subject_id, predicate_verb,
+object_id, time_frames (list of (start,end)), relationship_type (str ∈functional,
+stateful, motion, social, attentional, event_level) - If there are no valid relationships,
+output "relationships": [] .

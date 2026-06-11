@@ -1,0 +1,1268 @@
+Panoptic Scene Graph Generation with Semantics-Prototype Learning
+Li Li1, Wei Ji1*, Yiming Wu2, Mengze Li3*, You Qin1, Lina Wei4, Roger Zimmermann1
+1National University of Singapore
+2The University of Sydney
+3Zhejiang University
+4Hangzhou City University
+lili02@u.nus.edu, weiji0523@gmail.com, mengzeli@zju.edu.cn, e0962995@u.nus.edu
+Abstract
+Panoptic Scene Graph Generation (PSG) parses objects and
+predicts their relationships (predicate) to connect human lan-
+guage and visual scenes. However, different language pref-
+erences of annotators and semantic overlaps between predi-
+cates lead to biased predicate annotations in the dataset, i.e.
+different predicates for the same object pairs. Biased pred-
+icate annotations make PSG models struggle in construct-
+ing a clear decision plane among predicates, which greatly
+hinders the real application of PSG models. To address the
+intrinsic bias above, we propose a novel framework named
+ADTrans to adaptively transfer biased predicate annotations
+to informative and unified ones. To promise consistency and
+accuracy during the transfer process, we propose to observe
+the invariance degree of representations in each predicate
+class, and learn unbiased prototypes of predicates with dif-
+ferent intensities. Meanwhile, we continuously measure the
+distribution changes between each presentation and its pro-
+totype, and constantly screen potentially biased data. Finally,
+with the unbiased predicate-prototype representation embed-
+ding space, biased annotations are easily identified. Experi-
+ments show that ADTrans significantly improves the perfor-
+mance of benchmark models, achieving a new state-of-the-
+art performance, and shows great generalization and effec-
+tiveness on multiple datasets. Our code is released at https:
+//github.com/lili0415/PSG-biased-annotation.
+Introduction
+Panoptic Scene Graph Generation (PSG) (Yang et al. 2022)
+aims to simultaneously detect instances and their relation-
+ships within visual scenes (Chang et al. 2023). Instead of
+coarse bounding boxes used in Scene Graph Generation
+(SGG) (Li et al. 2021b; Xu et al. 2017; Lin et al. 2020; Li
+et al. 2021a; Chen et al. 2020b; Yao et al. 2022, 2021), PSG
+proposed to construct more comprehensive scene graphs
+with panoptic segmentation (Kirillov et al. 2019). PSG
+methods have the potential to bridge the gap between vi-
+sual scenes and human languages and thus has the ability
+to contribute to related vision-language tasks, such as image
+retrieval (Johnson et al. 2015; Wang et al. 2022a,b; Lv et al.
+2023), image captioning (Chen et al. 2020a; Wei et al. 2022),
+*Corresponding Author.
+Copyright © 2024, Association for the Advancement of Artificial
+Intelligence (www.aaai.org). All rights reserved.
+(a) Input Image
+(b) Biased/Unbiased Annotation
+road
+person1
+on
+person2
+on
+train
+person3
+beside
+person6
+person4
+on
+standing on
+on
+on
+person5
+beside
+on
+on
+traffic light
+standing on
+standing on
+standing on
+entering
+standing on
+standing on
+looking at
+standing on
+talking
+?
+Figure 1: (a) Exemplar panoptic segmentation results of an
+input image. (b) present annotation transfer process. Our
+proposed method promotes the original dataset (annotations
+in red) by identifying biased annotation and potentially posi-
+tive samples, and then adaptively and accurately transferring
+them to target triplet pairs (annotation in green).
+and visual question answering (Teney, Liu, and van den Hen-
+gel 2017; Li et al. 2022b; Antol et al. 2015; Xiao et al. 2022;
+Fang et al. 2023).
+However, PSG methods currently suffer from suboptimal
+performance due to biased and noisy information in gener-
+ated scene graphs, stemming from the problem of biased an-
+notations.
+Exploring the inference mechanism of PSG and SGG
+models, it is translating visual scenes to linguistic descrip-
+tions, i.e., mapping visual instances to subjects/objects, and
+their relationships to predicates. We regard the problem
+above as the semantic ambiguity between predicates, and
+the contradictory mappings from visual to linguistics. There
+are a lot of semantic overlaps and hierarchical relationships
+among predicates, e.g., the superclass predicate on for its
+subclass predicate standing on. Because of the semantic
+overlaps and the inconsistent preferences of annotators, con-
+tradictory mappings from visual to linguistics unavoidably
+exist in the training dataset, and deteriorate the long-tail dis-
+tribution problem of the training dataset. As shown in Fig. 1,
+with the difficulty of applying a unified standard for anno-
+tation, annotators tend to annotate general predicate labels
+(e.g., “on” and “beside”) for simplicity instead of informa-
+tive ones (e.g., “standing on” and “looking at”). As a result,
+models cannot learn a consistent mapping from visual to se-
+mantics, instead, they entangle predicate labels and the prior
+knowledge of long-tail distribution, leading to serious harm
+arXiv:2307.15567v3  [cs.CV]  22 Jan 2024
+for model training stage.
+Previous works (Zellers et al. 2018; Yu et al. 2020; Yao
+et al. 2022; Xu et al. 2017; Tang et al. 2019, 2020; Lin
+et al. 2020) exploit numerous model architectures to alle-
+viate the bias problem, but these models trained by biased
+datasets achieve relatively limited performances, and cannot
+fundamentally solve the problem. Zhang et al. (2022) have
+proposed to enhance the training dataset by a data transfer
+framework, which transfers head predicate labeled samples
+to tail predicate labeled ones. However, their framework in-
+accurately transfers a significant number of samples, leading
+to imbalanced performance among predicates.
+To alleviate the biased annotation problem, we propose
+to construct a promised and reasonable dataset, which in-
+cludes plentiful samples with consistent predicate annota-
+tion. Specifically, there exist two types of predicates that
+need to be refined: indistinguishable triplet pairs with se-
+mantic ambiguity and potentially positive samples missed
+by annotators (Zhang et al. 2022). We transfer these two
+kinds of biased annotations to high-quality consistent predi-
+cate annotations (Zhang et al. 2023; Lv et al. 2022).
+We introduce a new adaptive data transfer framework
+named ADTrans for PSG. Our framework emphasizes con-
+sistency during the data transfer process, and performs the
+data transfer process adaptively and accurately. Besides the
+prior knowledge of dataset distribution, we believe textual
+information alignment helps in building consistency dur-
+ing the data transfer process. A general way is leveraging
+language models to extract semantic embeddings, however,
+words embedding vectors generated by language models of-
+ten have high similarity because of the broad class inter-
+section of the open world, leading to the misalignment of
+the textual domain and the relationship domain. Thus, we
+propose a prototype-based predicate representation learning
+method. Unbiased predicate representations are expected to
+share invariant features within each predicate class. Thus,
+we employ contrastive learning to increase intra-class cohe-
+sion and inter-class separation, while focusing more on hard
+samples (visually similar predicates). Meanwhile, we ob-
+serve the invariance degree of representations in each pred-
+icate class, and learn predicate prototypes with dynamic in-
+tensities. We continuously measure the distribution changes
+between each presentation and its prototype, and constantly
+screen potentially biased data. Finally, with the unbiased
+predicate representation embedding space, biased annota-
+tions are easily identified and transferred.
+In summary, the following contributions are made in this
+paper:
+• A novel, plug-and-play framework named ADTrans is
+proposed, which aims at adaptively and accurately per-
+forming data transfer to promise a reasonable dataset
+with informative and standard-unified labels, and more
+solid training samples.
+• We propose a new prototype-based predicate representa-
+tion learning method, aiming at a reasonable information
+alignment process between the textual domain and the
+relationship domain, to promise consistency during the
+data transfer process.
+• Comprehensive experiments demonstrate that the pro-
+posed method shows validity on two datasets, and signif-
+icantly enhances the performance of benchmark models,
+achZieving new state-of-the-art performances.
+Related Work
+Panoptic Scene Graph Generation. SGG has gained in-
+creasing attention from the computer vision community
+for its promising future in high-level vision-language tasks
+(Teney, Liu, and van den Hengel 2017; Li et al. 2022b; An-
+tol et al. 2015; Chen et al. 2020a; Johnson et al. 2015). Early
+two-stage methods divide the whole task into objects locat-
+ing process and relationships prediction process, and strug-
+gle for a better feature extraction network (Xu et al. 2017;
+Zellers et al. 2018; Tang et al. 2019; Lin et al. 2020). More
+recently, a novel task named Panoptic Scene Graph Genera-
+tion (PSG) (Yang et al. 2022), which points out that it will
+contain noisy and ambiguous pixels if only coarse bounding
+boxes are provided, and aims at constructing more compre-
+hensive scene graphs with panoptic segmentation rather than
+coarse bounding boxes. In addition, the provided ground
+truth panoptic segmentation can also significantly promote
+the performance of even the most classic SGG method, IMP
+(Xu et al. 2017).
+Towards Debiasing Scene Graph Generation. (Zellers
+et al. 2018) first introduces the biased prediction problem
+in SGG. (Tang et al. 2019) and (Chen et al. 2019) provide a
+more reasonable metric (Mean Recall) aiming at calculating
+the recall of each predicate label independently. To directly
+face the problem, causal inference framework (Tang et al.
+2020; Zhang and An 2022) is applied to alleviate data bias
+during the inference process, and CogTree (Yu et al. 2020) is
+designed to train models with the ability to make informative
+predictions on predicate labels. More recently, (Zhang et al.
+2022; Li et al. 2023a) argues that performance could be pro-
+moted if there is a reasonable and sound dataset. However,
+the data transfer method in (Zhang et al. 2022) is efficient but
+so rigid and inflexible that a huge number of positive sam-
+ples will be wrongly transferred due to its simple and coarse
+transfer method, which will lead to a remarkable decline in
+recall rate of head predicate labels. In this paper, we provide
+a new approach for SGG and PSG datasets debiasing.
+Method
+In this section, we first introduce the biased annotation iden-
+tifying method. Then we introduce relation representation
+extraction. After that, we provide the detailed semantics-
+prototype learning method. Finally, the data transfer method
+and resampling method are introduced.
+Target Identifying. Following Zhang et al. (2022), we iden-
+tify indistinguishable triplet pairs by checking the inconsis-
+tency between the model’s predictions and the ground truth
+labels. To be more specific, we use a pre-trained model (e.g.
+VCTree(Tang et al. 2019)) to predict predicate labels for ev-
+ery pair of ground truth subject and object pairs in the PSG
+training dataset and identify possible indistinguishable pred-
+icate labels. For potentially positive samples, we also use a
+pre-trained model to predict predicate labels for every pair of
+(!!, #!∗, $!)
+……
+(!#, ##∗, $#)
+All triplet Samples
+Complete
+Sentences
+(!!, #!, $!)
+(!!, #$, $!)
+(!!, #!
+∗, $!)
+Indistinguishable Pairs
+PSG MODEL
+Confusion Matrix
+Similarity 
+Matrix
+(!!, #", $!)
+(!!, #!
+∗, $!)
+Triplet 
+Transfer
+All NA Samples
+Influence Factor
+Potential Positive Pairs
+($! , &!, '!)
+…
+($# , &#, '#)
+($$ , &$, '$)
+($% , &%, '%)
+baseline
+Target Identifying
+Adaptive Data Transfer
+(!!, %&, $!)
+(!$, %&, $$)
+……
+……
+……
+(!#, %&, $#)
+PSG MODEL
+...
+...
+(!!, %&, $!)
+(!$, %&, $$)
+(!!, #!, $!)
+(!$, #$, $$)
+Triplet 
+Transfer
+(!!, #!, $!)
+(!!, #$, $!)
+…
+…
+…
+(!!, ##, $!)
+(!!, #!∗, $!)
+(!$, #$
+∗, $$)
+……
+……
+……
+(!#, ##∗, $#)
+All Triplet Samples
+...
+...
+(!!, #!, $!)
+(!!, #$, $!)
+(!!, #!∗, $!)
+Indistinguishable Pairs
+Potential Positive Pairs
+Visual
+Domain
+Decision Boundary
+Prototype 
+Learning
+BERT
+Invariance
+Filtration
+Filtration
+%!"#$
+Dynamic Approach Speed
+Invariance
+Figure 2: Illustration of the overall pipeline. It learns unbiased semantics-prototypes and the learned prototypes help to promise
+the consistency during data transfer process.
+ground truth subject and object labels that have not yet been
+annotated with predicate labels, also known as NA samples.
+Relation Representation Extraction
+To make the language model more sensitive to predicate se-
+mantics, we fine-tune the language model with contrastive
+relation representation training (Li et al. 2022a).
+Robust Contrastive Training. We first collect all of the
+triplets that appear in the training set. Each triplet will be
+converted to a sentence for language model processing. For
+example, < person, standing on, snow > will be converted
+to The person is standing on the snow.
+Formally, given a sentence si with predicate pi in the
+batch S = {sk}N
+i=k, we can construct its positive set PSi =
+{sk|pi = pk}k̸=i and negative set PN i = {sk|pi ̸= pk}k̸=i.
+With the training data, we use a InfoNCE loss to optimize
+the language model:
+Llm =
+N
+X
+i=1
+−log
+fpos
+fpos + fneg
+,
+(1)
+where:
+fpos =
+X
+sj∈P Si
+esin(hi,hj)/T,
+(2)
+fneg =
+X
+sg∈NGi
+esin(hi,hg)/T.
+(3)
+T is a temperature hyper-parameter, N is batch size, hi,j,g
+are language model generated sentence representations for
+si,j,g, and sim (hi, hj) is the cosine similarity.
+To further boost the sensitivity to predicate similarity, we
+additionally introduce an angular margin m for the posi-
+tive pairs. Formally, instead of using the previously defined
+esim(hi,hj)/T , we use:
+esim(hi,hj)/T →ecos(θi,j+m)/T,
+(4)
+where θi,j is the arc-cosine similarity between i and j. Thus,
+fpos becomes:
+fpos =
+X
+sj∈P Si
+ecos(θi,j+m)/T.
+(5)
+Alignment with Visual Domain. There is typically a do-
+main gap between the visual domain and the textual domain,
+i.e., the textual similar predicates are not visually similar. To
+align the language model with the visual domain (Li et al.
+2023b; Fang et al. 2022), we try to incorporate some visual
+prior knowledge into the language model fine-tuning.
+Specifically, we take advantage of the confusion matrix
+C ∈RQ×Q generated by a pre-trained VCTree model,
+where Q is the number of predicates in the dataset, and Ci,j
+denotes the averaged prediction score for predicate pj on all
+examples annotated with pi. When Ci,j is near to 1 (very
+high), pi and pj are visually similar and when Ci,j is near to
+0 (very low), pi and pj are visually different.
+For the language model training, we expect the language
+model to be aligned with the visual domain similarity judg-
+ment. Thus, the language model should also distinguish the
+visually different predicate pairs but avoid the visually simi-
+lar predicate pairs from being too distant in the feature space.
+The metric 1 −Ci,j can satisfy our requirement.
+Formally, we add 1 −Ci,j as a weight for negative pairs:
+ecos(θi,j)/T →(1 −Ci,j) × ecos(θi,j)/T.
+(6)
+Then, the fneg becomes:
+fneg =
+X
+sg∈P Ni
+(1 −Ci,g) ecos(θi,g)/T.
+(7)
+Invariant Representation Exploration. We propose the in-
+variant representation exploration to further promise the un-
+biased representation of predicates.
+Specifically, we say that an unbiased representation Φ :
+X →H elicits an invariant predictor ω across positive set ε
+if there is an optimizer ω : H →Y simultaneously optimal
+for all samples from the positive set. The learning objective
+can be formulated as:
+ω ∈argmin¯ω:H→Y Oe(ω, Φ).
+(8)
+Eq. 8 tries to learn a feature representation from Φ(·) that
+can induce an optimizer ω(·) which is simultaneously opti-
+mal for all e ∈ε. Thus, we propose the invariant representa-
+tion regularization which can be formulated as:
+Lirm =
+N
+X
+i=1
+λV ar(Li),
+(9)
+where Li = {Llm (j) |pi = pj} denotes the loss values of
+samples from the positive set, and λ is a hyper-parameter.
+The minimization of variances of loss values encourages un-
+biased representation learning for each predicate class (Ar-
+jovsky et al. 2020).
+Semantics-prototype Learning
+The extracted relation representation may be suffered from
+possibly biased annotations. Thus, we utilize dynamic pro-
+totype learning to maximize the discriminative power be-
+tween predicate classes. We measure the invariance within
+each predicate class, and discard biased data by stage. This
+promise unbiased predicate representation embedding space
+for accurate data transfer.
+Dynamic Prototype Updating. To build an unbiased em-
+bedding space for predicates, we further propose to construct
+the prototype space for predicates. Specifically, we specify
+the total prototype space Ptype ∈RL×Q, where L is the
+same as the size of semantic embedding. Then we dynami-
+cally update the prototype space depending on the degree of
+invariance during the robust contrastive training process.
+Given a batch S, we can construct multiple positive sets
+PS = {ps1, ps2, ..., psP } with different predicates, where
+P is the number of different predicates in the batch S.
+For every positive set in the PS with predicate pi, we ob-
+tain its average predicate representation embedding as fol-
+lows:
+Hpi
+aver =
+1
+N pi
+PN pi
+s=1hi,
+(10)
+where N pi denotes the number of samples with predicate pi
+in the batch S, and hi denotes the predicate representation
+embedding. We average the summation of all predicate rep-
+resentations with the same predicate in the batch to get the
+average feature embedding.
+With the help of observed invariant representation, we up-
+date the prototype space for predicate pi with a moving av-
+erage approach:
+P pi
+type = βP pi
+type + (1 −β)
+1
+γV ar(Li)N pi
+|
+{z
+}
+Approach Speed
+(Hpi
+aver −P pi
+type),
+(11)
+where β and γ are hyper-parameters.
+Figure 3: R@100 for predicates under SGDet task among
+plain PSGTR, and PSGTR with ADTrans. ADTrans
+achieves more balanced and effective predicate discrimina-
+tion among predicates with different frequencies than plain
+PSGTR (The horizontal axis, moving from left to right, il-
+lustrates predicates arranged in order of high frequency to
+low frequency).
+Multistage Data Filtration. Biased and noisy samples in
+the training dataset are certain to influence the unbiased
+predicate representation learning process. Thus, We design
+the multistage data filtration to multistage-ly filter out these
+bad samples. Specifically, we take advantage of the invariant
+representation regularization and the sample-prototype dis-
+tribution shift as the measurements for the sample’s quality.
+For every training epoch, we collect V ∈RG from Eq. 9,
+which denotes the variance of loss values of every train-
+ing sample in the training dataset with G samples. Then we
+average the collected variances on predicate labels, getting
+Vaver ∈RQ. For every sample Si with predicate label pi
+and variance Vi in the training dataset, we judge whether it
+is part of potentially biased and noisy samples, which can be
+formulated as:
+Pbn =
+
+Si|Vi > µV i
+aver(Hpi
+aver −P pi
+type)
+	
+,
+(12)
+where V i
+aver denotes the averaged variance on predicate
+label pi, and µ is a hyper-parameter. We further sort Pbn by
+the loss value derived from Eq. 1 and drop out the top D%
+of training data. If there are fewer than 100 samples in a
+predicate class, we do not drop out any more samples from
+it.
+The multistage data filtration avoids the influence of a
+large number of biased annotations (outlier noise). Thus,
+the whole unbiased predicate representation learning pro-
+cess promises the unbiased representation of predicates.
+Data Transfer
+As a result, a similarity matrix S ∈RQ×Q can be generated
+by calculating the cosine similarities between all prototypes.
+For indistinguishable triplets, we directly use the similar-
+ity score as an adaptive transfer ratio.
+Method
+Scene Graph Generation
+R@20 R@50 R@100 mR@20 mR@50 mR@100 PR@20 PR@50 PR@100
+Two-Stage
+IMP (Xu et al. 2017)
+16.5
+18.2
+18.6
+6.52
+7.05
+7.23
+12.9
+13.7
+13.9
++IETrans (Zhang et al. 2022)
+14.5
+15.9
+16.4
+10.2
+11.0
+11.3
+14.5
+15.4
+15.7
++ADTrans
+15.0
+16.5
+17.0
+12.5
+13.5
+14.0
+16.0
+17.1
+17.5
+VCTree (Tang et al. 2019)
+20.6
+22.1
+22.5
+9.70
+10.2
+10.2
+16.0
+16.8
+16.9
++IETrans (Zhang et al. 2022)
+17.5
+18.9
+19.3
+17.1
+18.0
+18.1
+19.6
+20.5
+20.7
++ADTrans
+17.9
+19.5
+19.9
+18.0
+18.9
+19.0
+20.2
+21.2
+21.4
+MOTIFS (Zellers et al. 2018)
+20.0
+21.7
+22.0
+9.10
+9.57
+9.69
+15.5
+16.3
+16.5
++IETrans (Zhang et al. 2022)
+16.7
+18.3
+18.8
+15.3
+16.5
+16.7
+18.2
+19.4
+19.7
++ADTrans
+17.1
+18.6
+19.0
+17.1
+18.0
+18.5
+19.4
+20.4
+20.8
+GPSnet (Lin et al. 2020)
+17.8
+19.6
+20.1
+7.03
+7.49
+7.67
+13.6
+14.4
+14.7
++IETrans (Zhang et al. 2022)
+14.6
+16.0
+16.7
+11.5
+12.3
+12.4
+15.3
+16.2
+16.5
++ADTrans
+17.8
+19.2
+19.5
+16.5
+17.5
+17.6
+19.3
+20.3
+20.5
+One-Stage
+PSGTR (Yang et al. 2022)
+28.4
+34.4
+36.3
+16.6
+20.8
+22.1
+21.9
+26.3
+27.6
++IETrans (Zhang et al. 2022)
+25.3
+28.8
+29.2
+23.1
+27.2
+27.5
+24.9
+28.4
+28.7
++ADTrans
+26.0
+29.6
+30.0
+26.4
+29.7
+30.0
+27.1
+30.2
+30.5
+Table 1: The results (R@K, mR@K and PR@K) on SGDet task of our method and other baselines on PSG dataset. IETrans
+and ADTrans denote models equipped with different dataset-enhancement methods.
+For potentially positive samples, we further define an in-
+fluence factor, where the intuition is to transfer more data for
+the scarce relation triplets with low NA scores.
+Formally, the influence factor is:
+E(si,pi,oi) =
+q
+−log (NAscore) × c(si,oi) × cpi,
+(13)
+where −log(NAscore) is the NA score, c(si, oi) is the
+scarcity of triplets with subject si and oi, and cpi is the
+scarcity of triplets with predicate pi.
+In practice, we further normalize c(si,oi) with softmax.
+To judge whether a NA sample should be transferred, we
+rank all potential target triplet pairs according to their influ-
+ence factors, and conduct the transfer of top Kg% pairs.
+Resampling
+Without conflicts, we can directly integrate the transferred
+indistinguishable pairs and potentially positive pairs. Fur-
+thermore, a special re-sampling method is introduced on the
+integrated dataset to enhance it further. We propose a new
+repeat factor for the task. For every triplet (si, pi, oi) in each
+image, we calculate its repeat factor as:
+R = max
+ 1, t × c(si,oi) × c(pi)
+
+,
+(14)
+where t is a hyper-parameter controlling the possible repeat
+times. The maximum value of the repeat factor within each
+image is then selected.
+Experiment
+Dataset and Evaluation Metrics
+Dataset. We evaluate our method on Visual Genome (Kr-
+ishna et al. 2017) and PSG dataset (Yang et al. 2022).
+Evaluation Metric. Following previous works (Tang et al.
+2020; Zellers et al. 2018), we take recall@K (R@K) and
+mean recall@K (mR@K)(Tang et al. 2019; Chen et al. 2019)
+Method
+Predicate Classification
+mR@20 @50 @100 F@20 @50 @100
+MOTIFS
+11.7
+15.2
+16.2
+19.5
+24.5
+26.0
++ADTrans
+29.0
+36.2
+38.8
+36.1
+41.7
+43.5
+VCTree
+14.0
+16.3
+17.7
+22.7
+26.0
+28.0
++ADTrans
+30.0
+32.9
+35.5
+37.2
+40.5
+42.5
+GPSnet
+13.2
+15.0
+16.0
+21.7
+24.4
+25.8
++ADTrans
+27.3
+32.0
+34.7
+34.8
+40.2
+42.1
+Table 2: The results (mR@K and F@K) on PREDCLS task
+of our method and other baselines on VG dataset.
+as evaluation metrics. We also adopt a new evaluation met-
+rics named percentile recall (PR), which can be formulated
+as PR = 30%R +60%mR +10%PQ, where PQ measures
+the quality of a predicted panoptic segmentation relative to
+the ground truth (Kirillov et al. 2019). For conventional SGG
+tasks on the VG dataset, we also adopt an overall metric
+F@K (Zhang et al. 2022), which is the harmonic average
+of R@K and mR@K.
+Tasks and Implementation Details
+Tasks. We evaluate our method on three classic SGG tasks:
+Predicate Classification (PREDCLS), Scene Graph Classifi-
+cation (SGCLS) and Scene Graph Generation (SGDET).
+Implementation Details. For the pre-trained language
+model, we use pre-trained BERT-base (Devlin et al. 2019).
+The decision margin m is set to 10 degrees, the temperature
+hyper-parameter T is set to 0.05, and we use an AdamW
+(Loshchilov and Hutter 2017) optimizer with a learning rate
+2e-5. The hyper-parameter λ is set to 0.3, β is set to 5e5, and
+γ is set to 1.5. The D in multistage data filtration is set to 50.
+For NA sample transfer, the value of Kg is set to 0.05, and
+for the re-sampling process, the value of t is set to 3e7.
+road
+driving on
+person
+sky-other-merged
+walking on
+Plain PSGTR
+building-other-merged
+backpack
+over
+truck1
+truck2
+over
+traffic light
+over
+driving on
+tree-merged
+over
+over
+over
+over
+banner
+road
+driving on
+person
+sky-other-merged
+crossing
+ADTrans PSGTR
+building-other-merged
+backpack
+over
+truck1
+truck2
+over
+traffic light
+over
+parked on
+tree-merged
+over
+over
+over
+over
+banner
+hanging from
+over
+in front of
+carrying
+Figure 4: Visualization of plain PSGTR model and PSGTR equipped with our ADTrans. PSGTR with ADTrans can predict
+relationships between instances with greater accuracy and also select predicates that better match the visual scene.
+Method
+Scene Graph Classification
+mR@20 @50 @100 F@20 @50 @100
+MOTIFS
+6.0
+8.0
+8.5
+10.1
+13.1
+13.8
++ADTrans
+14.8
+17.0
+17.8
+20.2
+22.5
+23.7
+VCTree
+6.3
+7.5
+8.0
+10.7
+12.5
+13.3
++ADTrans
+16.0
+19.0
+19.8
+20.3
+23.7
+24.5
+GPSnet
+10.0
+11.8
+12.6
+15.7
+17.9
+18.9
++ADTrans
+15.5
+18.2
+18.8
+19.9
+22.5
+23.7
+Table 3: The results (mR@K and F@K) on SGCLS task of
+our method and other baselines on VG dataset.
+Qualitative Analysis
+As shown in Figure 4, we can compare results predicted by
+plain PSGTR and PSGTR equipped with our ADTrans. Ob-
+viously, PSGTR with ADTrans can predict more accurate re-
+lationships between instances and also predict predicate that
+better fits the scene. We believe our method helps construct
+a more comprehensive scene graph.
+Comparison with State-of-the-Art Methods
+In this section, we report the results for ADTrans on dif-
+ferent datasets, tasks, and baseline methods. All models use
+ResNet-50 (He et al. 2016) as their backbones.
+Effectiveness of ADTrans. From the results, we observe
+that our method can effectively improve the performance
+of baseline networks in nearly all metrics. Fig. 3 presents
+a comparison between our method and plain PSGTR of
+the detailed recall@100 of SGDet task on part of predi-
+cate classes. ADTrans performs better than plain PSGTR on
+almost all the above predicate classes. When compared to
+IETrans (Zhang et al. 2022), our method shows significant
+improvements in both recall and mean recall on all baseline
+models, indicating that our method can enhance the training
+dataset more effectively, avoiding noisy or redundant trans-
+fer processes. When it comes to PR, which takes into ac-
+count both recall and mean recall, our method outperforms
+all the original models by significant margins. This suggests
+that our method not only improves the recall of the models
+but also balances the performance across different predicate
+Method
+Scene Graph Generation
+mR@20 @50 @100 F@20 @50 @100
+MOTIFS
+4.8
+6.2
+7.1
+8.0
+10.3
+11.8
++ADTrans
+10.6
+15.5
+18.1
+13.4
+18.9
+22.0
+VCTree
+5.2
+6.7
+7.9
+8.7
+11.0
+13.0
++ADTrans
+9.7
+12.5
+16.9
+12.2
+16.3
+20.3
+GPSnet
+5.2
+5.9
+7.1
+8.6
+9.9
+11.8
++ADTrans
+12.3
+15.8
+19.2
+15.1
+18.6
+21.9
+Table 4: The results (mR@K and F@K) on SGDET task of
+our method and other baselines on VG dataset.
+Module
+Scene Graph Generation
+IT
+PT
+RE
+R/mR@20
+R/mR@50
+R/mR@100
+%
+%
+%
+28.4 / 16.6
+34.4 / 20.8
+36.3 / 22.1
+"
+%
+%
+26.2 / 24.9
+30.3 / 28.2
+30.7 / 29.2
+"
+"
+%
+25.5 / 25.6
+29.2 / 29.1
+29.7 / 29.6
+"
+"
+"
+26.0 / 26.4
+29.6 / 29.7
+30.0 / 30.0
+Table 5: Ablation study on model components. IT: Indistin-
+guishable Triplet Transfer; PT: Potential Positive Transfer;
+RE: re-sampling.
+labels, resulting in a more comprehensive evaluation of the
+models’ performance.
+Expansibility of ADTrans. Applied with our ADTrans,
+the performances of all baseline models trained on all the
+datasets on all the tasks are greatly improved. With the ob-
+servation that all the baseline models trained on the VG
+dataset have poorer performances compared to the same
+baseline models trained on the PSG dataset, VG dataset
+is more challenging for our ADTrans due to more biased
+annotations. Our method shows great expansibility on VG
+dataset, baseline models trained on the dataset achieve com-
+petitive performances on all the tasks.
+Ablation Studies
+Different components in ADTrans framework. We evalu-
+ate the importance of each component in our ADTrans. As
+playingfield
+person4
+on
+tennis racket
+sports ball
+over
+about to hit
+holding
+person1
+person2 person3
+wall-other-merged
+on
+in front of
+in front of
+on
+on
+in front of
+clock
+attach to
+beside
+playingfield
+person4
+standing on
+tennis racket
+sports ball
+flying over
+about to hit
+swinging
+person6 person3
+wall-other-merged
+standing on
+leaning on
+leaning on
+standing on
+standing on
+leaning on
+clock
+on
+beside
+person1
+Ground Truth Annotation
+Enhanced Annotation
+Figure 5: Visualization of the original dataset and a new dataset enhanced by our ADTRans. For the same image, we visualize
+its original biased annotations, and new annotations enhanced by our method. The enhanced dataset shows more informative
+annotations than the original one. These informative annotations promise the consistent training of models.
+Data Processing Method
+SGDet
+mR@20
+mR@50
+mR@100
+Original
+16.6
+20.8
+22.1
+Remove
+20.0
+24.6
+25.3
+Triplet Transfer
+24.9
+28.2
+29.2
+Table 6: Ablation study on data processing methods. Triplet
+Transfer: Indistinguishable triplet transfer. Remove: simply
+removing all indistinguishable triplet pairs. Original: base-
+line method on the original dataset.
+shown in Table. 5, we incrementally add one component to
+the plain baseline PSGTR (Yang et al. 2022) to validate their
+effectiveness. The indistinguishable triplet transfer compo-
+nent provides the most promotion on performance. The rea-
+son is that, we transfer these inconsistent annotations to in-
+formative and consistent ones, so that models can learn a
+consistent mapping from visual to predicates. The poten-
+tially positive transfer component additionally provides per-
+formance promotion. Our ADTrans transfers original NA
+samples, which are probably missed by annotators, to in-
+formative annotations. This step provides more reasonable
+training samples to construct a consistent training dataset.
+Different data processing methods during triplet trans-
+fer. To prove the effectiveness of our indistinguishable triplet
+transfer method and the harm of biased annotation, we de-
+sign another simple method to process indistinguishable
+triplet pairs. Instead of adaptively transferring them to tar-
+get pairs, we simply remove them from the original train-
+ing dataset. As shown in Table. 6, when comparing the sim-
+ply removing method and the original baseline, the simply
+removing method surprisingly greatly overtakes the base-
+line model, indicating the serious conflict resulting from bi-
+ased annotation within the original dataset. These biased an-
+notated samples can not help the model during the train-
+ing process, but will make it difficult for the model to dis-
+tinguish each predicate label, resulting in a sharp decline
+in model performance. When comparing the triplet trans-
+fer method and the simply removing method, there are also
+Contrastive Learning Method
+SGDet
+mR@20 mR@50 mR@100
+Original
+16.6
+20.8
+22.1
+InfoNCE
+21.0
+25.8
+26.3
+RCT
+26.4
+29.7
+30.0
+Table 7: Ablation study on contrastive learning methods. In-
+foNCE: the classic contrastive learning method. Original:
+the performance of original PSGTR. RCT: the proposed ro-
+bust contrastive training method.
+great margins between these two methods. With the fact that
+our triplet transfer method greatly outperforms the simply
+removing method, we observe a promising textual informa-
+tion alignment process and the effectiveness of our adaptive
+triplet transfer method is proved.
+Different contrastive learning methods. As shown in Ta-
+ble. 7, though we observe improvement with the help of the
+InfoNCE, we can promote the model to a higher level with
+our method. An simply InfoNCE method increase the intra-
+class cohesion and inter-class separability, but cannot learn
+unbiased predicate representations because of biased anno-
+tations. As a result, biased annotations are inconspicuous
+and hard to be identified in a biased predicate representa-
+tion embedding space. Our method utilizes invariant repre-
+sentation exploration and multistage data filtration to avoid
+the influence of biased annotations, and performs accurate
+biased-annotation identification.
+Conclusion
+We introduce a novel framework named ADTrans to allevi-
+ate the biased annotation problem in SGG. ADTrans trans-
+fers indistinguishable samples and potentially positive sam-
+ples to promise a reasonable training dataset with more in-
+formative and standard-unified labels. Experiments demon-
+strate that ADTrans greatly enhances the models’ perfor-
+mance on two datasets, achieving a new SOTA performance.
+Acknowledgements
+This research was supported in part by the National Key
+R&D Program of China (2022ZD0119103), in part by the
+National Natural Science Foundation of China (Grant No.
+62006123). This research was supported by the MSIT (Min-
+istry of Science, ICT), Korea, under the ITRC (Information
+Technology Research Center) support program (IITP-2023-
+2020-0-01789) supervised by the IITP (Institute for Infor-
+mation & Communications Technology Planning & Evalua-
+tion).
+References
+Antol, S.; Agrawal, A.; Lu, J.; Mitchell, M.; Batra, D.; Zit-
+nick, C. L.; and Parikh, D. 2015. VQA: Visual Question
+Answering. In ICCV.
+Arjovsky, M.; Bottou, L.; Gulrajani, I.; and Lopez-Paz, D.
+2020. Invariant Risk Minimization.
+Chang, X.; Ren, P.; Xu, P.; Li, Z.; Chen, X.; and Hauptmann,
+A. 2023. A Comprehensive Survey of Scene Graphs: Gen-
+eration and Application. TPAMI.
+Chen, S.; Jin, Q.; Wang, P.; and Wu, Q. 2020a. Say As You
+Wish: Fine-Grained Control of Image Caption Generation
+With Abstract Scene Graphs. In CVPR.
+Chen, T.; Kornblith, S.; Norouzi, M.; and Hinton, G. 2020b.
+A Simple Framework for Contrastive Learning of Visual
+Representations. In ICML.
+Chen, T.; Yu, W.; Chen, R.; and Lin, L. 2019. Knowledge-
+Embedded Routing Network for Scene Graph Generation.
+In CVPR.
+Devlin, J.; Chang, M.-W.; Lee, K.; and Toutanova, K. 2019.
+BERT: Pre-training of Deep Bidirectional Transformers for
+Language Understanding. In NAACL.
+Fang, X.; Liu, D.; Zhou, P.; and Hu, Y. 2022.
+Multi-
+modal cross-domain alignment network for video moment
+retrieval. TMM.
+Fang, X.; Liu, D.; Zhou, P.; and Nan, G. 2023. You Can
+Ground Earlier than See: An Effective and Efficient Pipeline
+for Temporal Sentence Grounding in Compressed Videos. In
+CVPR.
+He, K.; Zhang, X.; Ren, S.; and Sun, J. 2016. Deep Residual
+Learning for Image Recognition. In CVPR.
+Johnson, J.; Krishna, R.; Stark, M.; Li, L.-J.; Shamma, D.;
+Bernstein, M.; and Fei-Fei, L. 2015. Image Retrieval Using
+Scene Graphs. In CVPR.
+Kirillov, A.; He, K.; Girshick, R.; Rother, C.; and Dollar, P.
+2019. Panoptic Segmentation. In CVPR.
+Krishna, R.; Zhu, Y.; Groth, O.; Johnson, J.; Hata, K.;
+Kravitz, J.; Chen, S.; Kalantidis, Y.; Li, L.-J.; Shamma,
+D. A.; Bernstein, M. S.; and Fei-Fei, L. 2017.
+Visual
+Genome: Connecting Language and Vision Using Crowd-
+sourced Dense Image Annotations. IJCV.
+Li, L.; Wang, C.; Qin, Y.; Ji, W.; and Liang, R. 2023a.
+Biased-Predicate Annotation Identification via Unbiased Vi-
+sual Predicate Representation. In ACM Multimedia.
+Li, M.; Wang, H.; Zhang, W.; Miao, J.; Zhao, Z.; Zhang, S.;
+Ji, W.; and Wu, F. 2023b. Winner: Weakly-supervised hi-
+erarchical decomposition and alignment for spatio-temporal
+video grounding. In CVPR.
+Li, M.; Wang, T.; Zhang, H.; Zhang, S.; Zhao, Z.; Zhang,
+W.; Miao, J.; Pu, S.; and Wu, F. 2022a. Hero: Hierarchi-
+cal spatio-temporal reasoning with contrastive action corre-
+spondence for end-to-end video object grounding. In ACM
+Multimedia.
+Li, R.; Zhang, S.; Wan, B.; and He, X. 2021a.
+Bipartite
+Graph Network With Adaptive Message Passing for Unbi-
+ased Scene Graph Generation. In CVPR.
+Li, Y.; Wang, X.; Xiao, J.; Ji, W.; and Chua, T.-S. 2022b. In-
+variant Grounding for Video Question Answering. In CVPR.
+Li, Y.; Yang, X.; Shang, X.; and Chua, T.-S. 2021b. Inter-
+ventional Video Relation Detection. In ACM Multimedia.
+Lin, X.; Ding, C.; Zeng, J.; and Tao, D. 2020. GPS-Net:
+Graph Property Sensing Network for Scene Graph Genera-
+tion. In CVPR.
+Loshchilov, I.; and Hutter, F. 2017. Decoupled Weight De-
+cay Regularization.
+Lv, Z.; Wang, F.; Zhang, S.; Kuang, K.; Yang, H.; and
+Wu, F. 2022. Personalizing Intervened Network for Long-
+tailed Sequential User Behavior Modeling. arXiv preprint
+arXiv:2208.09130.
+Lv, Z.; Zhang, W.; Zhang, S.; Kuang, K.; Wang, F.; Wang,
+Y.; Chen, Z.; Shen, T.; Yang, H.; Ooi, B. C.; et al. 2023.
+DUET: A Tuning-Free Device-Cloud Collaborative Parame-
+ters Generation Framework for Efficient Device Model Gen-
+eralization. In WWW.
+Tang, K.; Niu, Y.; Huang, J.; Shi, J.; and Zhang, H. 2020.
+Unbiased Scene Graph Generation From Biased Training.
+In CVPR.
+Tang, K.; Zhang, H.; Wu, B.; Luo, W.; and Liu, W. 2019.
+Learning to Compose Dynamic Tree Structures for Visual
+Contexts. In CVPR.
+Teney, D.; Liu, L.; and van den Hengel, A. 2017. Graph-
+Structured Representations for Visual Question Answering.
+In CVPR.
+Wang, C.; Huang, Y.; Liu, X.; Pei, J.; Zhang, Y.; and Yang,
+J. 2022a. Global in local: A convolutional transformer for
+SAR ATR FSL. GRSL.
+Wang, C.; Pei, J.; Yang, J.; Liu, X.; Huang, Y.; and Mao, D.
+2022b. Recognition in Label and Discrimination in Feature:
+A Hierarchically Designed Lightweight Method for Limited
+Data in SAR ATR. TGRS.
+Wei, M.; Chen, L.; Ji, W.; Yue, X.; and Chua, T.-S. 2022. Re-
+thinking the Two-Stage Framework for Grounded Situation
+Recognition. AAAI.
+Xiao, J.; Yao, A.; Liu, Z.; Li, Y.; Ji, W.; and Chua, T.-S.
+2022.
+Video as Conditional Graph Hierarchy for Multi-
+Granular Question Answering. In AAAI.
+Xu, D.; Zhu, Y.; Choy, C. B.; and Fei-Fei, L. 2017. Scene
+Graph Generation by Iterative Message Passing. In CVPR.
+Yang, J.; Ang, Y. Z.; Guo, Z.; Zhou, K.; Zhang, W.; and Liu,
+Z. 2022. Panoptic Scene Graph Generation. In ECCV.
+Yao, Y.; Chen, Q.; Zhang, A.; Ji, W.; Liu, Z.; Chua, T.-S.;
+and Sun, M. 2022. PEVL: Position-enhanced Pre-training
+and Prompt Tuning for Vision-language Models. In EMNLP.
+Yao, Y.; Zhang, A.; Zhang, Z.; Liu, Z.; Chua, T.-S.; and
+Sun, M. 2021. CPT: Colorful Prompt Tuning for Pre-trained
+Vision-Language Models.
+Yu, J.; Chai, Y.; Hu, Y.; and Wu, Q. 2020. CogTree: Cog-
+nition Tree Loss for Unbiased Scene Graph Generation. In
+IJCAI.
+Zellers, R.; Yatskar, M.; Thomson, S.; and Choi, Y. 2018.
+Neural Motifs: Scene Graph Parsing With Global Context.
+In CVPR.
+Zhang, A.; Yao, Y.; Chen, Q.; Ji, W.; Liu, Z.; Sun, M.; and
+Chua, T.-S. 2022.
+Fine-Grained Scene Graph Generation
+with Data Transfer. In ECCV.
+Zhang, R.; and An, G. 2022. Causal Property based Anti-
+Conflict Modeling with Hybrid Data Augmentation for Un-
+biased Scene Graph Generation. In ACCV.
+Zhang, W.; Lv, Z.; Zhou, H.; Liu, J.-W.; Li, J.; Li, M.; Tang,
+S.; and Zhuang, Y. 2023. Revisiting the Domain Shift and
+Sample Uncertainty in Multi-source Active Domain Trans-
+fer. arXiv preprint arXiv:2311.12905.

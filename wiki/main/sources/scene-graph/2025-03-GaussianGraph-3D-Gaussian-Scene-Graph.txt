@@ -1,0 +1,1094 @@
+GaussianGraph: 3D Gaussian-based Scene Graph Generation for
+Open-world Scene Understanding
+Xihan Wang1,2, Dianyi Yang1,2, Yu Gao1,2, Yufeng Yue1,2, Yi Yang1,2, Mengyin Fu1,2
+Abstract— Recent
+advancements
+in
+3D
+Gaussian
+Splat-
+ting(3DGS) have significantly improved semantic scene under-
+standing, enabling natural language queries to localize objects
+within a scene. However, existing methods primarily focus on
+embedding compressed CLIP features to 3D Gaussians, suf-
+fering from low object segmentation accuracy and lack spatial
+reasoning capabilities. To address these limitations, we propose
+GaussianGraph, a novel framework that enhances 3DGS-
+based scene understanding by integrating adaptive semantic
+clustering and scene graph generation. We introduce a ‘Control-
+Follow’ clustering strategy, which dynamically adapts to scene
+scale and feature distribution, avoiding feature compression and
+significantly improving segmentation accuracy. Additionally, we
+enrich scene representation by integrating object attributes
+and spatial relations extracted from 2D foundation models. To
+address inaccuracies in spatial relationships, we propose 3D cor-
+rection modules that filter implausible relations through spatial
+consistency verification, ensuring reliable scene graph construc-
+tion. Extensive experiments on three datasets demonstrate that
+GaussianGraph outperforms state-of-the-art methods in both
+semantic segmentation and object grounding tasks, providing
+a robust solution for complex scene understanding and inter-
+action. We provide supplementary video and code at https:
+//wangxihan-bit.github.io/GaussianGraph.
+I. INTRODUCTION
+Open-world 3D scene understanding [1]–[3] is fundamen-
+tal to various robotic tasks [4], [5], as it facilitates the
+inference of both semantic and spatial properties of the
+environment. A critical factor enabling open-world scene
+understanding is the underlying scene representation strategy
+that should support high-quality scene modeling and seam-
+lessly integrate with semantic information. In this context,
+the recently proposed 3D Gaussian Splatting(3DGS) [6]
+demonstrates significant potential for photo-realistic scene
+reconstruction and explicit scene representation, driving ex-
+tensive efforts [7]–[10] to integrate semantic information into
+this representation framework.
+Existing approaches typically embed compressed CLIP
+features within each Gaussian primitive to construct language
+feature fields [7], [9], [11]. While this paradigm is effective
+for distinguishing objects with semantic information, it suf-
+fers from two critical limitations:
+(1) Such feature compression inevitably degrades the
+accuracy of semantic segmentation because the reduction in
+feature dimension leads to the loss of fine-grained details
+*This work was partly supported by National Natural Science Foundation
+of China (Grant No.NSFC 62233002) and National Key R&D Program of
+China (2022YFC2603600)
+1School of Automation, Beijing Institute of Technology, Beijing, China
+2National Key Lab of Autonomous Intelligent Unmanned Systems, Bei-
+jing Institute of Technology, Beijing, China
+*Corresponding author: Y. Yang Email: yang yi@bit.edu.cn
+Fig. 1: Comparison with other CLIP-based approaches.
+Confronted with textual queries involving spatial relation-
+ships, CLIP features cannot accurately identify objects solely
+based on similarity computation. Our method associates
+Gaussian clusters with descriptions and relations, enabling
+large language models(LLMs) to reason about the target
+object.
+and contextual information; Despite the fact that alterna-
+tive strategies [8] attempt to match uncompressed CLIP
+features to Gaussian clusters through K-Means algorithm,
+the requirement for manual specifying the number of nodes
+and random center initialization often lead to suboptimal
+2D-3D associations. This sensitivity to parameter selection
+frequently degrades segmentation quality and limits practical
+applicability.
+(2) Existing methods focus solely on CLIP feature learn-
+ing, neglecting object-level spatial relationships. Conse-
+quently, they often fail to handle complex queries involving
+spatial reasoning and ambiguous categories as illustrated in
+Fig. 1. A promising solution is to incorporate scene graphs
+into the scene representation through Vision-Language Mod-
+els (VLMs), as demonstrated by numerous points-cloud-
+based approaches [12]–[15]. However, they rely entirely on
+the performance of VLMs and struggle to generate accurate
+scene graphs due to the inherent limitations of VLMs, as
+mentioned in ConceptGraph [13].
+To address the above issues, we propose GaussianGraph,
+a novel approach that enhances 3DGS-based scene under-
+standing by integrating adaptive semantic clustering and
+scene graph generating, enabling robust semantic and spatial
+understanding in complex scenes. First, to eliminate the
+requirement for feature compression and manual specifi-
+cation of cluster numbers, we propose a “Control-Follow”
+clustering strategy that dynamically adjusts the number of
+clusters based on scene scale and feature distribution. Sec-
+ond, to enhance the model’s spatial reasoning capabilities,
+we augment the 3DGS-CLIP framework by extracting not
+only CLIP features but also object attributes and spatial
+relations through 2D foundation models [16]–[19]. Unlike
+arXiv:2503.04034v1  [cs.CV]  6 Mar 2025
+existing VLM-based scene graph methods, we introduce
+3D correction modules that filters out implausible relations
+through spatial consistency verification. In this way, Gaussian
+clusters are embedded with CLIP features, attributes and
+relations, which constitutes the nodes and edges of the scene
+graph.
+The contributions of this paper are as follows:
+• We introduce a novel framework that assign object-
+level attributes and relations to 3D Gaussians, which are
+represented as a graph structure. Our approach achieves
+state-of-the-art(SOTA) in semantic segmentation and 3D
+grounding.
+• To avoid feature compression and achieve accurate 2D-
+3D association for scene graph generation, we propose
+”Control-Follow” clustering strategy, which adaptively
+adjusts the number of clusters based on scene scale and
+feature distribution.
+• We design 3D correction modules to rectify inaccurate
+relations extracted from 2D images, thereby enhancing
+the accuracy of the 3D scene graph.
+II. RELATED WORK
+A. 3DGS-based Scene Understanding
+3D Gaussian Splatting(3DGS) [6] offers a continuous and
+photo-realistic rendering effect compared to point clouds.
+As a result, many methods apply 3DGS to accomplish
+scene understanding [7]–[11], [20]. Gaussian Grouping [10]
+utilizes segment anything model(SAM) and associates the
+masks across different views to achieve multi-view consistent
+segmentation. However, obtaining consistant masks through
+tracking anything model [21] is time-consuming, and a
+classifier is required with predefined number of objects.
+LangSplat [7] is compatible with view-independent masks
+and leverages SAM model’s multi-granularity outputs to
+improve segmentation accuracy. But the negative impact of
+low-quality masks is not considered. To tackle this challenge,
+LEGaussian [9] incorporates uncertainty and semantic fea-
+ture attributes to each Gaussian, generating a semantic map
+along with associated uncertainties. However, both LangSplat
+and LEGaussian require feature compression, leading to
+precision degradation inevitably. In addition, the 3D point-
+level localization of LangSplat [7] and LEGaussian [9] is
+inaccurate due to weak 2D-3D association. To address the
+two issues, OpenGaussian [8] avoids feature compression
+and directly matches CLIP features with Gaussian clusters,
+but the clustering strategy is naive and poor in generality.
+Above methods enable open-vocabulary 3D semantic seg-
+mentation, but they lack object-level attributes and spatial re-
+lations, which are significant to comprehend complex queries
+involving spatial reasoning and ambiguous categories. To ad-
+dress this issue, our method enriches Gaussian clusters with
+detailed descriptions and spatial relationships, constructing
+a 3D scene graph to support reasoning over intricate scene
+queries.
+B. 3D Scene Graph
+Various robotic planning tasks benefit from 3D scene
+graph because of its efficiency and compactness [22], [23].
+Traditional closed-vocabulary methods [24]–[26] focus on
+2D image graph and require training networks with limited
+relation types. Recently, conceptgraph [13] creatively pro-
+poses open-vocabulary algorithm to construct graph-based
+representation of the scene. HOV-SG [14] further builds a
+hierarchical structure to recognize room types and floors,
+making it more suitable for robot navigation tasks in multi-
+floor indoor environments. But the above two methods with
+a large number of parameters are time-consuming when
+generating visual descriptions of the scene. Beyond Bare
+Queries [27] reduces computational resources using a DINO-
+based map accumulation algorithm, enabling robot on-board
+computers.
+However, these methods primarily rely on VLMs and
+LLMs to extract 3D relationships. The inaccurate object rela-
+tionships caused by model limitations are directly assigned
+to the 3D scene without any adjustment. To mitigate this
+issue, we propose 3D correction modules, which can assess
+the validity of relation triples through spatial consistency
+verification to eliminate potential errors.
+III. METHOD
+As shown in Fig. 2, our method consists of three core
+components, 2D feature extraction, 3D Gaussian clustering
+and 3D correction modules, to construct 3D scene graph for
+downstream tasks. We introduce the details of 2D feature
+extraction via foundation models(Sec. III-A), and describe
+the “Control-Follow” clustering strategy to obtain Gaussian
+clusters(Sec. III-B). Ultimately, the 3D correction modules
+are used to refine 3D scene graph with four sub-modules(Sec.
+III-D).
+A. 2D Feature Extraction
+During the 2D feature extraction, we first obtain the full
+segmentation Ma and corresponding [n,h,w] CLIP features
+Fn
+a via Segment Anything Model(SAM) [18] and CLIP [16],
+where n is the number of masks, and h,w is the height as well
+as width of image. With the prompt “Describe visible object
+categories in front of you. Only provide the category names,
+no descriptions needed”, we generate N foreground object
+categories using the LLaVA [17] model which performs
+better than Recognize Anything Model(RAM) [28]. Then,
+bounding boxes Dci
+k ,i = 1,2,...,N,k −1,2,...,Mci for each
+category are obtained by Grounding DINO [19], where Mci
+is the number of objects belong to ci. With the box prompt
+Dci
+k , SAM generates foreground masks Mci
+k
+which can be
+corresponded to Ma through calculating IoU:
+Idxci
+k = argmax
+j
+Mci
+k ∩M j
+a
+Mci
+k ∪M j
+a
+for M j
+a in Ma
+(1)
+We then crop the internal objects within Dci
+k as foreground
+objects. To generate dense captions of foreground objects, we
+utilize LVM [17] with the prompt “Describe visible object
+Fig. 2: Method overview. The goal of GaussianGraph is constructing 3D scene graph in open-world scenes for downstream
+tasks. First, We extract 2D features including CLIP, segmentation, captions and relations. Foreground objects and object-
+pairs are input to LLaVA with prompts to generate captions and relations, which are combined with CLIP features and
+segmentation by mask index. Second, with posed multi-view images, we utilize 3DGS to reconstruct the scene and perform
+“Control-Follow” clustering strategy to generate Gaussian clusters. Third, after 3D Gaussian clustering, we build 3D scene
+graph through rendering each cluster to multi-view images and match them with CLIP features, captions and relations.
+Finally, 3D correction modules are used to refine the scene graph with four sub-modules.
+in front of you, including appearance, geometry, material.
+Don’t describe background”. Furthermore, we extract rela-
+tion triples including functional and spatial association. In
+order to identify potential correlations from the foreground
+objects, we only consider object-pairs closed in semantic
+features or spatial distance:
+Sim(F
+Idxci
+k
+a
+,F
+Idx
+c j
+k
+a
+) > θ or Area(Dci
+k ∩D
+c j
+k ) ̸= 0
+(2)
+(Dci
+ki,D
+c j
+k j) ∈< object −pairs >
+The object-pairs are marked by red and green bounding
+boxes and then input into the LLaVA model [17] with the
+prompt “There are two objects selected by the red and green
+rectangular boxes, write the relationship of the two selected
+objects. Don’t describe objects out of the boxes.” Thus,
+the relation triples are generated and associated with the
+full segmentation through Idxci
+k . Finally, the segmentation
+masks, foreground objects, dense captions and relation triples
+are attained for subsequent processing, with all elements
+connected with full segmentation through Idxci
+k .
+B. 3D Gaussian Clustering
+After extracting 2D information, 3DGS algorithm [6]
+generates a series of Gaussians to reconstruct the scene.
+In order to segment the Gaussians into distinct objects,
+each Gaussian is initialized with a class-agnostic instance
+feature In. Inspired by OpenGaussian [8], we also define
+the intra-mask smoothing and inter-mask contrastive loss,
+incorporating the confidence of the masks, denoted as Confi
+of the i th mask:
+Ls =
+m
+∑
+i=1
+H
+∑
+h=1
+W
+∑
+w=1
+Confi,h,w ·Bi,h,w ·
+M:,h,w −¯Mi
+2
+(3)
+Lc =
+1
+m(m+1)
+m
+∑
+i=1
+m
+∑
+j=1,j̸=i
+Confi +Conf j
+2
+ ¯Mi −¯Mj
+2
+(4)
+where m is the number of masks and Bi ∈{0,1}1×H×M
+represents the i th mask in the current view.
+While the class-agnostic instance features effectively dis-
+tinguish different objects, they do not provide specific object
+category information. To address this, we propose a novel
+“Control-Follow” clustering strategy, which clusters Gaus-
+sians with similar features and maps them to CLIP features.
+This method adaptively selects the number of clusters and
+initializes cluster centers based on the scene scale and feature
+distribution.
+In the control stage, supposed the total number of Gaus-
+sians is M, due to noise in the instance features and the
+computational cost of clustering all Gaussians, we select
+sparse points that are stable in semantic features. These
+points are chosen based on the following criterion:
+1
+(k2 −k1)
+k2
+∑
+iter=k1+1
+∇Iiter
+n
+ < ε
+(5)
+Then, m(m << M) control points are selected from sparse
+points through downsampling. Both the instance features In
+and the coordinates of the control points serve as clustering
+features. Based on these features, we apply the Balanced It-
+erative Reducing and Clustering Using Hierarchies (BIRCH)
+algorithm [29] to obtain the clustering results. The number
+of control points in each cluster is mc = {m1,m2,...,mkc} and
+cluster centers is Ec = {E1,E2,...,Ekc}, where kc is the total
+number of initial clusters.
+In the follow stage, all the Gaussians are assigned to
+the closest initial clusters or form new ones according to
+the feature G f = [In,XYZ], where f represents a Gaussian
+point. If the minimum distance between a Gaussian point
+and cluster centers is below a predefined threshold, it is
+assigned to the corresponding cluster. After each assignment,
+the cluster index and the average feature vector are updated.
+However, we observe that a single cluster may contain
+multiple nearby objects, we further refine the clustering
+process by dividing each cluster into more granular cat-
+egories, primarily based on the instance features. Finally,
+the clustering indices of all Gaussians are represented by
+L = {L1,L2,...,LM}.
+C. 3D Scene Graph
+In the Sec III-A, we generate multi-view segmentation,
+dense captions and relation triples between object-pairs. In
+the Sec III-B, Gaussian clusters representing 3D objects are
+obtained. By establishing the correspondence between multi-
+view information and Gaussian clusters, we can construct
+a 3D scene graph. The rendering images Rv
+i of the i th
+Gaussian cluster GSi can be attained through process as
+follows:
+Rv
+i = render(Gaussians[L == i],camera = v)
+(6)
+Then we evaluate the Intersection over Union (IoU) be-
+tween Rv
+i and full segmentation Mv
+a to find the best matching
+object Mv
+i from the view v. The semantic feature of GSi
+is the average CLIP feature of Mv
+i by traversing all views.
+Similarly, the attributes of GSi is obtained by aggregating the
+comprehensive captions of Mv
+i from all views, with removing
+redundant descriptions. In this way, semantic features and
+attributes form the node of 3D scene graph.
+Furthermore,
+we
+generate
+the
+edges
+of
+scene
+graph.
+In
+the
+Sec
+III-A,
+we
+extract
+relation
+triples
+< sub ject|predicate|object >.
+Supposed
+Mv
+i
+and
+Mv
+j
+constitute object-pairs in the image, the relationship is
+transferred to Gaussian clusters GSi and GSj. To ensure that
+the two objects involved in the relation triples are indeed the
+objects represented by the Gaussian clusters, we perform
+the following verification:
+(
+Sim(TE[s1],GSi) | Sim(TE[s2],GSi) > µ
+Sim(TE[s1],GSj) | Sim(TE[s2],GSj) > µ
+(7)
+where TE[·] is the text encoder of OpenCLIP model, and
+s1,s2 are the category of subject and object.
+D. 3D Correction Modules
+Since the relationships in the scene graph are directly in-
+ferred from 2D images via VLMs, object occlusion, missing
+depth information, and the limitations of the VLMs possibly
+lead to incorrect spatial relations. Therefore, we introduce 3D
+correction modules based on physical constraints to refine the
+scene graph.
+The correction modules are divided into four parts. The
+first part involves detecting the contact between related
+objects. When the predicted spatial relation must be based
+on direct contact, such as “in” or “on”, the points of two
+objects i, j are projected onto ground plane by ignoring the
+z-coordinate. The projected point sets are Pproj
+i
+and Pproj
+j
+.
+We compute the convex hulls of Pproj
+i
+and Pproj
+j
+and the
+relation is retained if Convex(Pproj
+i
+)∩Convex(Pproj
+j
+) ̸= /0.
+The second part measures the directional orientation of
+the related objects. When the spatial relationship involves
+directional attributes, such as “in front of” or “behind,” Let
+the center of object i be denoted as Oi = (xi,yi,zi), and the
+center of object j as O j = (x j,yj,z j). The direction vector is
+v = −−−−→
+Oi −O j. Then we calculate the dot product between v and
+corresponding axis. For example, if we define the positive
+direction of the x-axis as the “front,” then a positive dot
+product indicates the direction is “front,” and a negative dot
+product indicates the direction is “behind.”
+The third part is designed for object grounding. In this
+downstream task, objects of the same category in adjacent
+regions may interfere with each other, making it difficult
+for the model to infer the target one. We introduce the 3D
+distance to address the issue. For example, to find the chair
+closest to the blackboard, if there are three chairs in the
+vicinity, the Gaussian clusters corresponding to these three
+chairs can be computed, and the one closest to the blackboard
+is selected.
+The final part calculates the distance between object pairs
+with the adjacent relationship such as “next to”. Objects that
+appear to be adjacent in a 2D image may be far apart in actual
+3D space. To solve this problem, if the distance between the
+central points exceeds the threshold, like one-tenth of the
+scene’s scale, we discard the adjacent relationship between
+the objects.
+By applying these correction modules, we improve the
+accuracy and consistency of the generated 3D scene graph,
+ensuring that the relationships between objects reflect both
+physical reality and logical coherence.
+IV. EXPERIMENT
+The goals of our experiments are as follows: (i) we
+quantitatively compare GaussianGraph with recent open-
+vocabulary scene understanding methods in 3D semantic
+segmentation.(Sec. IV-B) (ii) we evaluate the accuracy of 3D
+grounding on Sr3D+ and Nr3D datasets.(Sec. IV-C) (iii) we
+justify the effect of “Control-Follow” clustering strategy and
+3D correction modules through ablation study.(Sec. IV-D)
+A. Settings
+Datasets We conduct comparisons on three datasets,
+LERF [30], Replica [31] and ScanNet [32], for semantic seg-
+mentation and scene graph generation. For LERF, we use the
+GT annotations provided by LangSplat [7]. For ScanNet, we
+choose 8 scene for evaluation, (0011 00, 0030 00, 0046 00,
+0086 00, 0222 00, 0378 00, 0389 00, 0435 00), and extract
+TABLE I: Open-vocabulary semantic segmentation on the LERF [30] datasets. We directly decode the Gaussians CLIP
+features of LangSplat and LEGaussian before rendering to better reflect 3D understanding capabilities.
+Method
+ramen
+teatime
+waldo kitchen
+figurines
+Acc@0.25↑Acc@0.5↑mIoU↑Acc@0.25↑Acc@0.5↑mIoU↑Acc@0.25↑Acc@0.5↑mIoU↑Acc@0.25↑Acc@0.5↑mIoU↑
+Langsplat [7]
+11.09
+7.25
+8.94
+21.73
+19.05
+14.42
+10.92
+10.08
+10.79
+9.00
+7.31
+14.84
+LEGaussian [9]
+31.54
+26.76
+15.79
+30.49
+27.12
+19.27
+25.76
+18.18
+11.78
+29.41
+23.21
+17.99
+OpenGaussian [8]
+40.85
+21.13
+25.41
+79.66
+71.19
+59.00
+40.15
+35.45
+25.15
+78.57
+71.43
+57.50
+Ours
+43.66
+28.63
+29.58
+79.96
+76.27
+62.70
+51.42
+36.36
+35.85
+81.24
+75.61
+62.00
+TABLE II: The semantic segmentation on the Replica [31]
+and ScanNet [32] datasets. We compare our GaussianGraph
+with pointcloud-based and 3DGS-based methods.
+Method
+Replica
+ScanNet
+mIoU↑
+mAcc↑
+mIoU↑
+mAcc↑
+PointCloud-based
+ConceptFusion [33]
+10.07
+16.15
+9.72
+15.41
+ConceptGraph [13]
+20.72
+31.54
+16.42
+27.60
+HOV-SG [14]
+23.16
+29.85
+22.43
+43.81
+3DGS-based
+Langsplat [7]
+4.72
+9.12
+3.28
+8.95
+LEGaussian [9]
+4.80
+11.59
+3.51
+10.04
+OpenGaussian [8]
+26.39
+44.28
+24.73
+41.54
+Ours
+31.18
+49.14
+31.09
+48.91
+Fig. 3: Visualization of GT segmentation and our instance
+feature map. It illustrates that the instance feature can
+effectively distinguish objects.
+every 20 frames from the original images. To examine the
+object grounding capability, we use Sr3D+ and Nr3D [34]
+which offer text queries and corresponding GT object ids of
+ScanNet [32].
+Metrics For semantic segmentation, we use accuracy(Acc)
+and mean Intersection over Union(mIoU) as evaluation met-
+rics. For object grounding, we use Acc@0.1, Acc@0.25
+as metrics, covering both easy and hard queries [34]. In
+addition, we measure the top-1, top-3, top-5 recall on the
+LERF [30] datasets in the ablation study, which is also used
+to evaluate the effect of 3D correction modules.
+Implementation details To extract the CLIP features,
+captions and relation triples of each image, we utilize the
+OpenCLIP ViT-B/16 and LLaVA-1.6 model. For SAM, we
+Fig. 4: Process of LLM-guided object grounding. The
+3D scene graph includes the information of Gaussian id,
+attributes and relations. With queries input to the model,
+we use LLM to infer the target Gaussian cluster id through
+prompts 1 and prompts 2.
+use the SAM2 L model to segment 2D masks. In the ground-
+ing task, LLama-3-8B or GPT-4o is suitable for reasoning
+target objects. There are a series of threshold required
+to 2D information extraction and scene graph generation.
+When building object-pairs, we use θ around 0.8. When
+constructing 3D scene graph, µ is set to 0.9. Our model
+is trained on an NVIDIA RTX-3090 GPU.
+We train instance feature and generate Gaussian clusters.
+The visualization of GT segmentation and rendered feature
+map are shown in Fig. 3. It shows that when the generated
+instance feature is rendered to 2D, it can produce accurate
+segmentation results, demonstrating the effectiveness of the
+instance feature. Through matching CLIP features with each
+Gaussian cluster, we obtain the 512-dimensional Gaussian
+semantic features. We calculate the cosine similarity between
+TABLE III: Grounding accuracy on the Sr3D+ and Nr3D dataset [34]. Easy queries provide clear and intuitive cues, while
+hard queries involve complex relations between multiple objects.
+Sr3D+
+Nr3D
+Method
+Easy
+Hard
+Overall
+Easy
+Hard
+Overall
+A@0.1↑
+A@0.25↑
+A@0.1↑
+A@0.25↑
+A@0.1↑
+A@0.25↑
+A@0.1↑
+A@0.25↑
+A@0.1↑
+A@0.25↑
+A@0.1↑
+A@0.2↑5
+LangSplat [7]
+4.7
+1.5
+2.1
+1.1
+4.5
+2.3
+8.5
+1.7
+3.4
+1.2
+7.4
+1.5
+OpenGaussian [8]
+7.3
+5.1
+3.6
+1.9
+7.0
+4.9
+10.1
+5.9
+7.4
+3.1
+9.5
+4.7
+ConceptGraph [13]
+13
+6.8
+16
+1.3
+13.3
+6.2
+18.7
+9.2
+9.1
+2.0
+16
+7.2
+OpenFusion [35]
+14
+2.4
+1.3
+1.3
+12.6
+2.4
+12.9
+1.4
+5.1
+1.5
+10.7
+1.4
+Ours
+19.1
+7.7
+16.3
+5.6
+18.2
+7.4
+20.7
+12.1
+10.9
+6.3
+17.2
+8.6
+Fig. 5: Qualitative results of our GaussianGraph and
+other 3DGS-based approaches in object grounding. Our
+GaussianGraph can reason the accurate object category with
+less artifacts and noise.
+texts and 512-dimensional Gaussian semantic features. Each
+Gaussian is assigned to the class label with the highest
+similarity.
+B. 3D Open-Vocabulary Semantic Segmentation
+We first evaluate our GaussianGraph compared with
+3DGS-based methods [7]–[9] on the LERF [30] dataset.
+In order to assess the segmentation capability in 3D scene
+instead of 2D rendering images, we directly decode the
+low-dimensional semantic feature of LangSplat [7] and
+LEGaussian [9] in 3D before rendering to images. Therefore,
+the evaluation indicators of them are much lower than its
+paper. As shown in TABLE I, ours GaussianGraph performs
+best among other baselines regarding mIoU, Acc@0.25 and
+Acc@0.5. The metrics of our method are significantly higher
+than LangSplat and LEGaussian, and the mIoU is 4-10%
+higher than the existing SOTA method, OpenGaussian.
+We
+also
+compare
+our
+GaussianGraph
+with
+both
+PointCloud-based
+and
+3D
+Gaussian-based
+methods
+on
+Replica and ScanNet datasets [31], [32]. To ensure the
+Gaussians coordinates are consistent with GT point clouds,
+Gaussians are initialized by the provided point clouds
+and trained without densification. According to the 3D
+point-level semantic GT labels, the mIoU and mAcc are
+calculated as shown in TABLE II.
+Fig. 6: Downstream tasks including visual question an-
+swering and object grounding. The model needs to ac-
+curately identify the object attributes(blue) and spatial rela-
+tionships(red) contained in the query and infer the correct
+objects. In the object grounding task, our model effectively
+mitigates the interference caused by similar objects in adja-
+cent areas.
+C. Scene Graph Generating
+To assess the performance of scene graph generation, we
+conduct 3D object grounding on LERF, Sr3D+ and Nr3D
+datasets [30], [34]. We use LLM to infer the target object
+according to queries. Specifically, the Gaussian cluster id,
+attributes, relations are input to the LLM with query, then
+it can find the best connected Gaussian cluster. In large-
+scale scenes, the constructed scene graph contains complex
+TABLE IV: Ablation study of “Control-Follow” clustering strategy on the LERF [30] dataset. We use two sampling
+methods to obtain control points. The result demonstrates the “Control-Follow” clustering with FPFH sampling perform
+best segmentation.
+Con Fol
+Sampling
+ramen
+teatime
+waldo kitchen
+figurines
+Mean
+FPFH
+FPS
+Acc@0.5
+mIoU
+Acc@0.5
+mIoU
+Acc@0.5
+mIoU
+Acc@0.5
+mIoU
+Acc@0.5
+mIoU
+21.13
+25.41
+71.19
+59.00
+35.45
+25.15
+71.43
+57.50
+49.80
+41.77
+✓
+✓
+28.63
+29.58
+76.27
+62.70
+36.38
+35.85
+75.61
+62.00
+54.22
+47.53
+✓
+✓
+23.94
+27.51
+75.23
+63.90
+35.92
+29.87
+76.71
+60.23
+52.95
+45.38
+information, and it would be difficult for the LLM to directly
+reason the target object. So we first use LLM to infer all the
+target categories involved in the query, then only retain the
+scene graph information corresponding to these categories,
+eliminating the interference from redundant objects, which
+is illustrated in Fig. 4.
+As shown in TABLE III, our GaussianGraph outperforms
+baselines for various types of queries. On Sr3D+, Gaus-
+sianGraph achieves 18.2 for A@0.1 and 7.4 for A@0.25
+in overall, which is 4.9 and 1.2 higher than ConceptGraph.
+On Nr3D, GaussianGraph achieves an average of 17.2 for
+A@0.1 and 8.6 for A@0.25, outperforming both OpenFusion
+and ConceptGraph. As shown in Fig. 5, we render the target
+object according to queries through LangSplat, OpenGauss
+and our GaussianGraph. The rendering results of LangSplat
+contain a significant amount of noise and irrelevant regions,
+primarily due to the limited representational capacity of com-
+pressed CLIP features in 3D decoding. While OpenGaussian
+produces clear object boundaries, the model lacks reason
+ability to infer the correct objects. As shown in Fig. 6,
+our model is capable of performing both visual question
+answering and object grounding, even in the presence of
+same-class distractors, demonstrating its robustness in dis-
+tinguishing target objects from visually similar alternatives.
+D. Ablation Study
+(1) “Control-Follow” clustering. As shown in TABLE
+IV, two sampling methods of control points, Farthest Point
+Sampling(FPS) and Fast Point Feature Histogram(FPFH)
+[36], [37], are compared to determine the impact of geo-
+metric properties on clustering results. “Con Fol” represents
+“Control-Follow” clustering strategy. FPFH sampling takes
+more into account the edges of objects, while FPS sampling
+is similar to uniform sampling. As shown in TABLE IV,
+“Control-Follow” clustering with control points promotes
+the segmentation quality generally. The Acc@0.5 and mIoU
+corresponding to FPFH sampling are slightly higher than
+FPS, because the correct clustering of edges contributes
+to the improvement of segmentation accuracy. Integrating
+the Control-Follow clustering strategy and FPFH sampling
+improves the overall performance metrics by approximately
+4-10% compared to directly using the clustering strategy in
+OpenGaussian [8].
+(2) 3D correction modules. As shown in TABLE V,
+we choose BLIP-2 and LLaVA as two examples of VLMs
+and calculate mR@1, mR@3, mR@5 on the LERF [30]
+TABLE V: Ablation study of 3D correction modules on
+the LERF [30] dataset. We divide the queries into function-
+related and location-related ones.
+Query func
+Query pos
+VLM
+3D corr mR@1 mR@3 mR@5 mR@1 mR@3 mR@5
+BLIP2 [38]
+35.37
+40.97
+42.45
+27.18
+28.85
+29.04
+BLIP2 [38]
+✓
+35.41
+41.39
+42.45
+35.49
+37.93
+40.05
+LLaVA [17]
+49.72
+52.81
+55.09
+40.73
+44.96
+49.83
+LLaVA [17]
+✓
+50.33
+53.75
+55.47
+56.84
+61.31
+63.20
+dataset. We define the queries considering both functional
+and positional connection. For example, “Chopsticks are
+used to eat the noodles” is functional connection, while
+“Glass is on the table next to apple” is positional connection.
+In each scene, we generate 10 positional and 5 functional
+connections. The overall performance of BLIP2 is lower than
+that of LLaVA. Both BLIP2 and LLaVA show improved
+recall of relation triples after adding 3D correction modules.
+After incorporating the 3D correction module into BLIP2 and
+LLaVA, the average recall of positional relations improves
+approximately by 8-17%. This indicates that the 3D correc-
+tion modules can effectively eliminate incorrect relationships
+especially location-related generated by the VLMs.
+V. CONCLUSIONS
+In this paper, we introduce GaussianGraph that involves
+the attributes and relations of Gaussian clusters through scene
+graph. According to the presented experiments, the following
+conclusion can be obtained:
+(1) To mitigate semantic accuracy degradation from
+feature compression and manual tuning, we propose the
+“Control-Follow” clustering strategy, which adaptively ad-
+justs cluster numbers and generates Gaussian clusters directly
+matched with high-dimensional CLIP features.
+(2) To addresses the issue that existing 3DGS-CLIP frame-
+work lacks the reasoning ability of spatial relationships, we
+construct scene graph to represent attributes and relations of
+Gaussian clusters. Furthermore, the 3D correction modules
+are introduced to refine the scene graph by spatial physical
+constraints.
+However, this study still has some limitations: the neglect
+of dynamic objects and view-dependent relations. Future
+work will focus on promptly update the scene graph and
+specific reasoning strategy for view-dependent relations.
+REFERENCES
+[1] S. Peng, K. Genova, C. Jiang, A. Tagliasacchi, M. Pollefeys,
+T. Funkhouser, et al., “Openscene: 3d scene understanding with
+open vocabularies,” in Proceedings of the IEEE/CVF conference on
+computer vision and pattern recognition, pp. 815–824, 2023.
+[2] R. Ding, J. Yang, C. Xue, W. Zhang, S. Bai, and X. Qi, “Pla:
+Language-driven open-vocabulary 3d scene understanding,” in Pro-
+ceedings of the IEEE/CVF conference on computer vision and pattern
+recognition, pp. 7010–7019, 2023.
+[3] J. Yang, R. Ding, W. Deng, Z. Wang, and X. Qi, “Regionplc: Regional
+point-language contrastive learning for open-world 3d scene under-
+standing,” in Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pp. 19823–19832, 2024.
+[4] L. Wijayathunga, A. Rassau, and D. Chai, “Challenges and solutions
+for autonomous ground robot scene understanding and navigation
+in unstructured outdoor environments: A review,” Applied Sciences,
+vol. 13, no. 17, p. 9877, 2023.
+[5] S. Liu, J. Zhang, R. X. Gao, X. V. Wang, and L. Wang, “Vision-
+language model-driven scene understanding and robotic object manip-
+ulation,” in 2024 IEEE 20th International Conference on Automation
+Science and Engineering (CASE), pp. 21–26, IEEE, 2024.
+[6] B. Kerbl, G. Kopanas, T. Leimk¨uhler, and G. Drettakis, “3d gaussian
+splatting for real-time radiance field rendering.,” ACM Trans. Graph.,
+vol. 42, no. 4, pp. 139–1, 2023.
+[7] M. Qin, W. Li, J. Zhou, H. Wang, and H. Pfister, “Langsplat:
+3d language gaussian splatting,” in Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition, pp. 20051–
+20060, 2024.
+[8] Y. Wu, J. Meng, H. Li, C. Wu, Y. Shi, X. Cheng, C. Zhao,
+H. Feng, E. Ding, J. Wang, et al., “Opengaussian: Towards point-level
+3d gaussian-based open vocabulary understanding,” arXiv preprint
+arXiv:2406.02058, 2024.
+[9] J.-C. Shi, M. Wang, H.-B. Duan, and S.-H. Guan, “Language em-
+bedded 3d gaussians for open-vocabulary scene understanding,” in
+Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, pp. 5333–5343, 2024.
+[10] M. Ye, M. Danelljan, F. Yu, and L. Ke, “Gaussian grouping: Segment
+and edit anything in 3d scenes,” in European Conference on Computer
+Vision, pp. 162–179, Springer, 2024.
+[11] S. Zhou, H. Chang, S. Jiang, Z. Fan, Z. Zhu, D. Xu, P. Chari, S. You,
+Z. Wang, and A. Kadambi, “Feature 3dgs: Supercharging 3d gaussian
+splatting to enable distilled feature fields,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+pp. 21676–21685, 2024.
+[12] Y. Chang, N. Hughes, A. Ray, and L. Carlone, “Hydra-multi: Collabo-
+rative online construction of 3d scene graphs with multi-robot teams,”
+in 2023 IEEE/RSJ International Conference on Intelligent Robots and
+Systems (IROS), pp. 10995–11002, IEEE, 2023.
+[13] Q. Gu, A. Kuwajerwala, S. Morin, K. M. Jatavallabhula, B. Sen,
+A. Agarwal, C. Rivera, W. Paul, K. Ellis, R. Chellappa, et al.,
+“Conceptgraphs: Open-vocabulary 3d scene graphs for perception and
+planning,” in 2024 IEEE International Conference on Robotics and
+Automation (ICRA), pp. 5021–5028, IEEE, 2024.
+[14] A. Werby, C. Huang, M. B¨uchner, A. Valada, and W. Burgard,
+“Hierarchical open-vocabulary 3d scene graphs for language-grounded
+robot navigation,” in First Workshop on Vision-Language Models for
+Navigation and Manipulation at ICRA 2024, 2024.
+[15] Y. Deng, J. Wang, J. Zhao, X. Tian, G. Chen, Y. Yang, and Y. Yue,
+“Opengraph: Open-vocabulary hierarchical 3d graph representation in
+large-scale outdoor environments,” IEEE Robotics and Automation
+Letters, 2024.
+[16] A. Radford, J. W. Kim, C. Hallacy, A. Ramesh, G. Goh, S. Agarwal,
+G. Sastry, A. Askell, P. Mishkin, J. Clark, et al., “Learning transferable
+visual models from natural language supervision,” in International
+conference on machine learning, pp. 8748–8763, PmLR, 2021.
+[17] H. Liu, C. Li, Y. Li, and Y. J. Lee, “Improved baselines with visual
+instruction tuning,” in Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, pp. 26296–26306, 2024.
+[18] A. Kirillov, E. Mintun, N. Ravi, H. Mao, C. Rolland, L. Gustafson,
+T. Xiao, S. Whitehead, A. C. Berg, W.-Y. Lo, et al., “Segment
+anything,” in Proceedings of the IEEE/CVF international conference
+on computer vision, pp. 4015–4026, 2023.
+[19] S. Liu, Z. Zeng, T. Ren, F. Li, H. Zhang, J. Yang, Q. Jiang, C. Li,
+J. Yang, H. Su, et al., “Grounding dino: Marrying dino with grounded
+pre-training for open-set object detection,” in European Conference on
+Computer Vision, pp. 38–55, Springer, 2024.
+[20] J. Cen, J. Fang, C. Yang, L. Xie, X. Zhang, W. Shen, and Q. Tian,
+“Segment any 3d gaussians,” arXiv preprint arXiv:2312.00860, 2023.
+[21] H. K. Cheng, S. W. Oh, B. Price, A. Schwing, and J.-Y. Lee, “Tracking
+anything with decoupled video segmentation,” in Proceedings of the
+IEEE/CVF International Conference on Computer Vision, pp. 1316–
+1326, 2023.
+[22] C. Agia, K. M. Jatavallabhula, M. Khodeir, O. Miksik, V. Vineet,
+M. Mukadam, L. Paull, and F. Shkurti, “Taskography: Evaluating robot
+task planning over large 3d scene graphs,” in Conference on Robot
+Learning, pp. 46–58, PMLR, 2022.
+[23] K. Rana, J. Haviland, S. Garg, J. Abou-Chakra, I. Reid, and
+N. Suenderhauf, “Sayplan: Grounding large language models using
+3d scene graphs for scalable robot task planning,” arXiv preprint
+arXiv:2307.06135, 2023.
+[24] J. Johnson, A. Gupta, and L. Fei-Fei, “Image generation from scene
+graphs,” in Proceedings of the IEEE conference on computer vision
+and pattern recognition, pp. 1219–1228, 2018.
+[25] X. Lin, C. Ding, Y. Zhan, Z. Li, and D. Tao, “Hl-net: Heterophily
+learning network for scene graph generation,” in proceedings of the
+IEEE/CVF conference on computer vision and pattern recognition,
+pp. 19476–19485, 2022.
+[26] J. Yang, J. Lu, S. Lee, D. Batra, and D. Parikh, “Graph r-cnn for
+scene graph generation,” in Proceedings of the European conference
+on computer vision (ECCV), pp. 670–685, 2018.
+[27] S.
+Linok,
+T.
+Zemskova,
+S.
+Ladanova,
+R.
+Titkov,
+D.
+Yudin,
+M. Monastyrny, and A. Valenkov, “Beyond bare queries: Open-
+vocabulary object grounding with 3d scene graph,” arXiv preprint
+arXiv:2406.07113, 2024.
+[28] Y. Zhang, X. Huang, J. Ma, Z. Li, Z. Luo, Y. Xie, Y. Qin, T. Luo,
+Y. Li, S. Liu, et al., “Recognize anything: A strong image tagging
+model,” in Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pp. 1724–1732, 2024.
+[29] T. Zhang, R. Ramakrishnan, and M. Livny, “Birch: an efficient data
+clustering method for very large databases,” ACM sigmod record,
+vol. 25, no. 2, pp. 103–114, 1996.
+[30] J. Kerr, C. M. Kim, K. Goldberg, A. Kanazawa, and M. Tancik,
+“Lerf: Language embedded radiance fields,” in Proceedings of the
+IEEE/CVF International Conference on Computer Vision, pp. 19729–
+19739, 2023.
+[31] J. Straub, T. Whelan, L. Ma, Y. Chen, E. Wijmans, S. Green, J. J.
+Engel, R. Mur-Artal, C. Ren, S. Verma, et al., “The replica dataset:
+A digital replica of indoor spaces,” arXiv preprint arXiv:1906.05797,
+2019.
+[32] A. Dai, A. X. Chang, M. Savva, M. Halber, T. Funkhouser, and
+M. Nießner, “Scannet: Richly-annotated 3d reconstructions of indoor
+scenes,” in Proceedings of the IEEE conference on computer vision
+and pattern recognition, pp. 5828–5839, 2017.
+[33] K. M. Jatavallabhula, A. Kuwajerwala, Q. Gu, M. Omama, T. Chen,
+A. Maalouf, S. Li, G. Iyer, S. Saryazdi, N. Keetha, et al.,
+“Conceptfusion: Open-set multimodal 3d mapping,” arXiv preprint
+arXiv:2302.07241, 2023.
+[34] P. Achlioptas, A. Abdelreheem, F. Xia, M. Elhoseiny, and L. Guibas,
+“Referit3d: Neural listeners for fine-grained 3d object identification in
+real-world scenes,” in Computer Vision–ECCV 2020: 16th European
+Conference, Glasgow, UK, August 23–28, 2020, Proceedings, Part I
+16, pp. 422–440, Springer, 2020.
+[35] K. Yamazaki, T. Hanyu, K. Vo, T. Pham, M. Tran, G. Doretto,
+A. Nguyen, and N. Le, “Open-fusion: Real-time open-vocabulary 3d
+mapping and queryable scene representation,” in 2024 IEEE Inter-
+national Conference on Robotics and Automation (ICRA), pp. 9411–
+9417, IEEE, 2024.
+[36] Y. Eldar, M. Lindenbaum, M. Porat, and Y. Y. Zeevi, “The farthest
+point strategy for progressive image sampling,” IEEE transactions on
+image processing, vol. 6, no. 9, pp. 1305–1315, 1997.
+[37] R. B. Rusu, N. Blodow, and M. Beetz, “Fast point feature histograms
+(fpfh) for 3d registration,” in 2009 IEEE international conference on
+robotics and automation, pp. 3212–3217, IEEE, 2009.
+[38] J. Li, D. Li, S. Savarese, and S. Hoi, “Blip-2: Bootstrapping language-
+image pre-training with frozen image encoders and large language
+models,” in International conference on machine learning, pp. 19730–
+19742, PMLR, 2023.

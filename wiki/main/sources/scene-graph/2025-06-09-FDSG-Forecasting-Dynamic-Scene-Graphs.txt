@@ -1,0 +1,3171 @@
+1
+FDSG: Forecasting Dynamic Scene Graphs
+Yi Yang, Yuren Cong, Hao Cheng, Bodo Rosenhahn, and Michael Ying Yang
+Abstract—Dynamic scene graph generation extends scene graph generation from images to videos by modeling entity relationships
+and their temporal evolution. However, existing methods either generate scene graphs from observed frames without explicitly modeling
+temporal dynamics or predict only relationships while assuming static entity labels and locations. These limitations hinder effective
+extrapolation of both entity and relationship dynamics, restricting video scene understanding. We propose Forecasting Dynamic Scene
+Graphs (FDSG), a novel framework that predicts future entity labels, bounding boxes, and relationships, for unobserved frames while
+also generating scene graphs for observed frames. Our scene graph forecast module leverages query decomposition and neural
+stochastic differential equations to model entity and relationship dynamics. A temporal aggregation module further refines predictions
+by integrating forecasted and observed information via cross-attention. To benchmark FDSG, we introduce Scene Graph Forecasting, a
+new task for full future scene graph prediction. Experiments on Action Genome show that FDSG outperforms state-of-the-art methods
+on dynamic scene graph generation, scene graph anticipation, and scene graph forecasting. Codes will be released upon publication.
+Index Terms—Scene Understanding, Scene Graph Generation, Dynamic Scene Graph, Scene Graph Forecasting
+✦
+1
+INTRODUCTION
+D
+ynamic Scene Graph Generation (DSGG) is a critical
+task in visual understanding that extends scene graph
+generation [1] from images to videos. Unlike static scene
+graph generation of triplets <subject-predicate-object> in a
+single image, DSGG requires modeling dynamic interactions
+over time, leveraging both spatial and temporal dependen-
+cies. This enables a more comprehensive representation of
+scenes, crucial for applications such as action recognition
+[2], video analysis [3], [4], and surveillance [5].
+Most existing methods [6], [7], [8], [9], [10], [11] employ
+an interpolation strategy, meaning that the target frame and
+reference frames need to be observed in order to generate a
+scene graph for the target frame, as illustrated in Fig. 1(a).
+Although these methods effectively generate scene graphs
+for individual frames, they lack a learning strategy to fore-
+cast the temporal dynamics and continuity across frames,
+preventing them from extrapolating temporal dependencies
+to enhance scene graph generation in videos.
+In contrast, extrapolation scene graph generation goes
+beyond the current frames by forecasting the evolving
+relationships between entities in future frames based on
+observed frames. This forecasting-driven approach has
+demonstrated clear advantages in text and video generation
+[12] and language modeling [13], where training models to
+predict future content encourages the development of richer,
+more generalizable representations. Despite this, only a cou-
+ple of methods have explored forecasting for DSGG. Notable
+examples include APT [14], which leverages pre-training
+to learn temporal correlations of visual relationships across
+frames, and SceneSayer [15], which introduces the task of
+•
+Yi Yang, Yuren Cong and Bodo Rosenhahn are with Institute of In-
+formation Processing, Leibniz University Hannover, Germany. E-mail:
+{yangyi,cong,rosenhahn}@tnt.uni-hannover.de.
+•
+Hao Cheng is with the Faculty of Geo-Information Science and Earth
+Observation, University of Twente, The Netherlands. Email: h.cheng-2@
+utwente.nl.
+•
+Michael Ying Yang is with Department of Computer Science and Research
+Centre for Spatial Intelligence (RCSI), University of Bath, UK. Email:
+myy35@bath.ac.uk.
+Fig. 1: Comparison between existing tasks and our FDSG
+framework. (a) DSGG generates scene graphs and entity
+bounding boxes from observed video. (b) SGA predicts
+scene graphs without bounding boxes for future unob-
+served video. In contrast, FDSG forecasts complete scene
+graphs, including both relationships (b) and entity labels
+and bounding boxes (c) in the future. FDSG also aggregates
+observed-frame information to enhance both generation and
+forecasting (d). Our FDSG employs a one-stage end-to-end
+design, without explicit object tracking, and incorporates
+forecasting error as an auxiliary loss, enabling joint learning
+of DSGG and SGA.
+Scene Graph Anticipation (SGA) of predicting future object
+interactions, as shown in Fig. 1(b). However, both methods
+adopt a narrow form of extrapolation, focusing almost ex-
+clusively on relationships while making the overly rigid as-
+sumption that entity labels and locations remain static. This
+oversimplification significantly limits their ability to handle
+realistic dynamic scenes, where entities often undergo sub-
+stantial changes in both appearance and position – such as a
+bottle being picked up and moved by a person, as illustrated
+arXiv:2506.01487v2  [cs.CV]  18 Jul 2025
+
+
+2
+in Fig. 1. Moreover, effectively fusing predicted information
+with observed frames remains an open challenge. This fu-
+sion is crucial for accurate temporal modeling but has been
+largely overlooked in existing extrapolation-based methods
+for dynamic scene graph generation, limiting their ability to
+understand complex scenes.
+To address these limitations, we introduce Forecasting
+Dynamic Scene Graphs, termed FDSG. It fully embraces
+extrapolation by forecasting future relationships, entity la-
+bels, and bounding boxes (Fig. 1(b),(c)). The predicted infor-
+mation is further incorporated with the observation at the
+current frame (Fig. 1(d)), fostering a more comprehensive
+understanding in videos. Specifically, a novel Forecast Mod-
+ule uses the query decomposition formulation in DINO [16],
+a state-of-the-art object detection model, to explicitly model
+entity label and location dynamics, and Neural Stochastic
+Differential Equations (NeuralSDE) [15], [17] to holistically
+model the time evolution of triplets from a continuous-
+time perspective. The temporal aggregation module then
+uses cross-attention mechanisms to incorporate the fore-
+casted scene graph representations with the high-confidence
+observed information selectively, enhancing the generated
+scene graph for the target frame.
+Overall, our key contributions are as follows:
+•
+We propose Scene Graph Forecasting (SGF), a new
+task that forecasts complete future scene graphs –
+including entities, bounding boxes, and interactions –
+from a video stream. This new task complements the
+existing DSGG and SGA tasks, providing a compre-
+hensive evaluation for the extrapolation-based scene
+graph generation.
+•
+We propose Forecasting Dynamic Scene Graphs
+(FDSG), a novel framework for simultaneous scene
+graph generation and forecasting, as illustrated in
+Fig. 2. FDSG includes a Forecast Module to han-
+dle forecasting challenges and an effective Temporal
+Aggregation Module to enhance DSGG using SGF
+results, and vice versa.
+•
+We rigorously validate our proposed model with the
+Action Genome dataset [18] on DSGG, SGA, and SGF
+tasks. Our method achieves superior performance on
+the SGF task and outperforms the existing methods
+on both DSGG and SGA tasks, demonstrating that
+learning to extrapolate can benefit the model’s over-
+all ability for dynamic scene understanding.
+2
+RELATED WORK
+2.1
+Dynamic Scene Graph Generation
+The Dynamic Scene Graph Generation (DSGG) task aims
+to generate a scene graph for each video frame, focusing
+on modeling the temporal dynamics of entities and their
+pairwise relationships. Early static [19], [20], [21], [22], [23]
+and dynamic scene graph generation [6], [7], [8], [9] models
+rely on off-the-shelf object detectors such as Faster-RCNN
+[24], which are also known as two-stage methods. Once
+entity representations from each frame are obtained, these
+two-stage methods typically utilize dedicated self-attention
+[6] or cross-attention layers [7], [8], [9] for temporal feature
+aggregation. With the recent success of the Transformer-
+based object detection model DETR [25], more attention has
+been paid to DETR-based one-stage scene graph genera-
+tion for images [26], [27], [28] and videos [10], [11]. These
+methods use a fixed set of queries for entity detection,
+facilitating the finding of the correspondence between the
+target and reference entities or triplets. These methods,
+although having achieved remarkable success in benchmark
+datasets, they utilize both the target frame and the reference
+frames to interpolate scene graphs from observed data. As a
+result, these models lack the capacity to predict future video
+frames accurately enough to support dynamic scene graph
+forecasting.
+2.2
+Anticipating Visual Relationships
+Modeling relationship dynamics across frames in scene
+graphs is crucial for DSGG. The first exploration of anticipat-
+ing future visual relationships comes from APT [14], which
+introduces anticipatory pertaining to predicting predicates
+(relationships) in the next frame using reference frames,
+then fine-tuned on all frames. While this improves the
+performance on DSGG, APT relies on conventional metrics
+and does not explicitly evaluate anticipation. More recently,
+Peddi et al. [15] formalized a Scene Graph Anticipation
+(SGA) task with a prediction model called SceneSayer, which
+combines two-stage DSGG models STTran [6] and DSG-
+DETR [29] and adopts a Neural Differential Equation-based
+dynamics model to predict future relationships. It focuses on
+the correctness of predicted visual relationships in the scene
+graph, assuming that the entity labels and locations remain
+unchanged in the future. The new evaluation metrics in SGA
+focus solely on predicting correct relationships, assuming
+fixed entity labels and locations. However, this overlooks
+entity dynamics, limiting anticipatory capability to predict-
+ing relationships under rigid location and label constraints.
+Unlike the above methods with partial forecasting, our
+proposed Scene Graph Forecasting (SGF) task extends the
+relationship prediction to include both entity locations and
+labels. This allows for a more comprehensive modeling of
+motion and relationship dynamics across frames. Moreover,
+we adopt a one-stage end-to-end method to achieve DSGG
+and SGF simultaneously with mutual benefits.
+2.3
+Anticipating Entity Labels and Locations
+Anticipating entity labels and locations has been explored in
+various domains. For example, Object Forecasting [30], [31]
+aims to predict future bounding boxes of tracked objects,
+which is closely related to object tracking [32]. [30], [31]
+use RNNs to model entity evolution, which rely heavily on
+tracked object trajectory and low-level features from optical
+flow estimation [33], but ignore information from high-level
+scene understanding, such as object interactions. Action An-
+ticipation, on the other hand, aims to predict what is going
+to happen in the scene given a portion of the activity video
+[34], [35], [36], [37]. It requires video understanding from an
+overview perspective. Recently, a novel task, known as Fu-
+ture Action Localization [38], aims to predict the bounding
+boxes for the central action-taking person(s) in videos from a
+third-person view. The proposed model, AdamsFormer [38],
+models the dynamics of the central person using a Neural
+Ordinary Differential Equation model [39] with features
+extracted from a CNN-based video encoder. However, this
+
+
+3
+Fig. 2: Our FDSG Framework carries out Dynamic Scene Graph Generation (DSGG) and Scene Graph Forecasting (SGF)
+simultaneously to fully exploit temporal dependencies. Video features are extracted using a CNN backbone and a DINO
+encoder. Then, (a) Scene Graph Generation Module generates scene graph representations for each observed frame.
+Subsequently, (b) Forecast Module forecasts a scene graph from a reference frame (gray representations) to the target
+frame (orange representations). Finally, (c) Temporal Aggregation Module aggregates information from DSGG and SGF to
+jointly enhance model performance. The output enhanced scene graph representations are shown in dark green.
+task overlooks modeling other objects interacting with the
+central person. In comparison, our proposed method for
+forecasting dynamic scene graphs takes a more comprehen-
+sive perspective, which includes anticipating relationships
+of interactions between various entities, entity labels, and
+locations. This forecasting process requires modeling both
+low-level features for entity prediction and localization, and
+high-level understanding of interaction dynamics between
+entities within the scene.
+3
+METHOD
+3.1
+Problem Formulation
+A scene graph is a structured representation of visual rela-
+tionships in a given scene, with nodes representing object
+instances and edges representing pairwise instance relation-
+ships. Formally, in frame 𝑡, each node 𝑜𝑡(𝑘𝑡) is defined
+by its category 𝑐𝑡(𝑘𝑡) ∈C, where C is the object category
+set and 𝑘𝑡∈[1, 𝐾𝑡] with 𝐾𝑡being the number of objects.
+𝑏𝑡(𝑘𝑡) ∈[0, 1]4 denotes the corresponding normalized box
+with center coordinates and width and height. Each edge
+represents a relationship 𝑝𝑡(𝑖, 𝑗) ∈P between two objects
+𝑜𝑡(𝑖) and 𝑜𝑡( 𝑗), where P is the set of predicates. If it is not
+otherwise specified, we use 𝑖to refer to a subject entity and
+𝑗to an object entity, in order to differentiate the direction of
+a 𝑝𝑟𝑒𝑑𝑖𝑐𝑎𝑡𝑒from the subject to the object. Together, a triplet
+is denoted as 𝑟𝑡(𝑖, 𝑗) = (𝑜𝑡(𝑖), 𝑝𝑡(𝑖, 𝑗), 𝑜𝑡( 𝑗)) and the scene
+graph for frame 𝑡is denoted as 𝐺𝑡= {𝑟𝑡(𝑖, 𝑗)}𝑖𝑗. Given an
+input video 𝑉𝐻
+𝑡=1 = {𝑉𝑡}, where 𝑡∈{1, ...,𝑇,𝑇+ 1, ..., 𝐻}, we
+introduce the following tasks:
+Dynamic Scene Graph Generation (DSGG): with all frames
+being observed, the model outputs a scene graph for every
+frame: { ˆ𝐺𝑡}𝐻
+𝑡=1;
+Scene Graph Anticipation (SGA): with frames up to a
+specific time stamp 𝑇being observed, the model predicts
+unlocalized future scene graphs: { ˜𝐺𝑡}𝐻
+𝑡=𝑇+1. Entities in the
+anticipatory time horizon (𝑡∈{𝑇+ 1, ..., 𝐻}) are assumed to
+be the same as last observed in frame 𝑇with no bounding
+boxes anticipation [15];
+Scene Graph Forecasting (SGF): with the same observa-
+tion time horizon as SGA, but the model predicts both the
+evolution of predicates and future entity labels and bound-
+ing boxes in the anticipatory time horizon. Concretely, the
+model uses DSGG results for the last observed frame ˆ𝐺𝑇as
+initial value, and forecasts scene graphs { ˆ𝐺𝑡}𝐻
+𝑡=𝑇+1. Notably,
+SGF predicts new entities for { ˆ𝐺𝑡}𝐻
+𝑡=𝑇+1, instead of re-using
+entities in ˆ𝐺𝑇. The task of SGF is illustrated in Fig. 3.
+Fig. 3: Illustration of the proposed SGF task.
+3.2
+Overview
+The overall workflow of our proposed method is illustrated
+in Fig. 2. Our Scene Graph Generation Module (Fig. 2(a))
+generates static scene graphs for each input frame. The Fore-
+cast Module (Fig. 2(b)) forecasts scene graphs in the future.
+The Temporal Aggregation Module (Fig. 2(c)) fuses temporal
+information from observed video and scene graph forecasts,
+and updates the final prediction for the target frame.
+
+
+4
+3.3
+Scene Graph Generation Module
+The Scene Graph Generation Module employs DINO [16]
+to detect all entities {𝑜𝑡(𝑘)}𝐾𝑡
+𝑘=1 in each input frame 𝑉𝑡.
+DINO consists of a backbone, a multi-layer Transformer
+encoder, and a multi-layer Transformer decoder. It uses
+a fixed set of 𝑁𝑞queries q = {𝑞0, 𝑞1, ..., 𝑞𝑁𝑞} for entity
+detection. Each query 𝑞= {𝑞𝑐, 𝑞𝑏} is composed of content
+𝑞𝑐and location 𝑞𝑏. Accordingly, DINO outputs decomposed
+representations for detected entities: ˆ𝑜= { ˆ𝑜𝑐, ˆ𝑜𝑏}. Note that
+for brevity here, we omit the denoising branch in DINO.
+To form triplet representations 𝑧(𝑖, 𝑗), we follow common
+practice [6], [15], [28] and concatenate the output content
+representation ˆ𝑜𝑐(𝑖) of the subject with the content represen-
+tation ˆ𝑜𝑐( 𝑗) of all other objects. The predicate is implicitly
+encoded within the triplet:
+𝑧(𝑖, 𝑗) = [ ˆ𝑜𝑐(𝑖); ˆ𝑜𝑐( 𝑗)],
+(1)
+where [·; ·] denotes the concatenation operation.
+Finally, the scene graph classification head includes a
+linear layer to classify entity labels using ˆ𝑜𝑐, a three-layer
+Multi-Layer Perceptron (MLP) for bounding box regression
+from ˆ𝑜𝑏and ˆ𝑜𝑐, and a two-layer MLP for predicate classifi-
+cation using 𝑧:
+ˆ𝑐( 𝑗) = Linear( ˆ𝑜𝑐( 𝑗)),
+(2)
+ˆ𝑏( 𝑗) = 𝜎( MLP( ˆ𝑜𝑐( 𝑗)) + 𝜎−1( ˆ𝑜𝑏( 𝑗)) ),
+(3)
+ˆ𝑝(𝑖, 𝑗) = MLP(𝑧(𝑖, 𝑗)),
+(4)
+where 𝜎denotes the sigmoid function and 𝜎−1 is its inverse.
+3.4
+Forecast Module
+Our Forecast Module consists of a Triplet Dynamics Model
+(TDM) and a Location Dynamics Model (LDM).
+The TDM takes a holistic view, modeling scene evolution
+at the triplet level:
+𝑧𝑇0+Δ𝑇= TDM(𝑧𝑇0, Δ𝑇).
+(5)
+Here, the triplet representation 𝑧is formed by concatenating
+the content representations of the subject and object entities,
+𝑜𝑐(𝑖) and 𝑜𝑐( 𝑗), as defined in Eq. (1). To recover individual
+entity forecasts from the triplet forecast, we reverse this
+concatenation:
+[ ˆ𝑜𝑐
+𝑇0+Δ𝑇(𝑖); ˆ𝑜𝑐
+𝑇0+Δ𝑇( 𝑗)] = 𝑧𝑇0+Δ𝑇(𝑖, 𝑗).
+(6)
+To forecast entity bounding boxes, we incorporate both
+the location ˆ𝑜𝑏
+𝑇0+Δ𝑇and content ˆ𝑜𝑐
+𝑇0+Δ𝑇of each forecasted
+entity (Eq. (9)). As the contribution from the entity content
+ˆ𝑜𝑐
+𝑇0+Δ𝑇is modeled by the TDM (Eqs. (5), (6)), the Location
+Dynamics Model (LDM) aims to predict the contribution
+from the entity location term:
+ˆ𝑜𝑏
+𝑇0+Δ𝑇( 𝑗) = LDM( ˆ𝑜𝑏
+𝑇0, Δ𝑇).
+(7)
+The classification head for forecasted scene graphs takes
+the same form as in the Scene Graph Generation module
+Eqs. (2 - 4).
+ˆ𝑐𝑇0+Δ𝑇( 𝑗) = Linear( ˆ𝑜𝑐
+𝑇0+Δ𝑇( 𝑗)),
+(8)
+ˆ𝑏𝑇0+Δ𝑇( 𝑗) = 𝜎( MLP( ˆ𝑜𝑐
+𝑇0+Δ𝑇( 𝑗)) + 𝜎−1( ˆ𝑜𝑏
+𝑇0+Δ𝑇( 𝑗)) ),
+(9)
+ˆ𝑝𝑇0+Δ𝑇(𝑖, 𝑗) = MLP(𝑧𝑇0+Δ𝑇(𝑖, 𝑗)),
+(10)
+3.4.1
+Triplet Dynamics Model (TDM) Realization
+We implement the TDM using a NeuralSDE [17], which
+forecasts both the triplet representation 𝑧and the associated
+entity content representations ˆ𝑜𝑐. A NeuralSDE models an
+initial value problem with neural network–parameterized
+drift and diffusion terms:
+NeuralSDE(𝑧𝑇0, Δ𝑇; 𝜃𝑐, 𝜙𝑐, 𝑊𝑐)
+= 𝑧𝑇0 +
+∫𝑇0+Δ𝑇
+𝑇0
+𝜇𝜃𝑐(𝑧𝑇0)d𝑡
++
+∫𝑇0+Δ𝑇
+𝑇0
+𝜈𝜙𝑐(𝑧𝑇0)d𝑊𝑐(𝑡).
+(11)
+where 𝜇𝜃𝑐(·), 𝜈𝜙𝑐(·), and 𝑊𝑐(·) denote drift terms parame-
+terized by 𝜃𝑐, diffusion terms parameterized by 𝜙𝑐, and a
+Wiener process, respectively [39].
+Based on the above analysis, our TDM forecasts simul-
+taneously the predicates (Eq. (10)), entity labels (Eqs. (6),(8))
+and residual term of entity bounding boxes (Eq. (9)):
+𝑧𝑇0+Δ𝑇(𝑖, 𝑗) = [ ˆ𝑜𝑐
+𝑇0+Δ𝑇(𝑖); ˆ𝑜𝑐
+𝑇0+Δ𝑇( 𝑗)]
+= NeuralSDE(𝑧𝑇0 (𝑖, 𝑗), Δ𝑇; 𝜃𝑐, 𝜙𝑐, 𝑊𝑐)
+(12)
+It is worth mentioning that, with our compact triplet rep-
+resentation, the TDM is capable of forecasting not only the
+predicates but also complete scene graphs, which therefore
+extends beyond the predicate anticipation module (LDPU)
+of SceneSayer [15].
+3.4.2
+Location Dynamics Model (LDM) Realization
+We explore several realizations for the LDM, including
+Identity Mapping, MLP, NeuralODE [39] and NeuralSDE,
+and report a comparative analysis in the ablation study
+Sec. 5.3.2. Among these, the Identity Mapping proved to
+be both simple and effective for representing future entity
+locations ˆ𝑜𝑏
+𝑇0+Δ𝑇, and is therefore adopted as our default
+LDM.
+With Identity Mapping, the predicted location remains
+unchanged: ˆ𝑜𝑏
+𝑇0+Δ𝑇= ˆ𝑜𝑏
+𝑇0, and Eq. (9) reduces to
+ˆ𝑏𝑇0+Δ𝑇= 𝜎( MLP( ˆ𝑜𝑐
+𝑇0+Δ𝑇) + 𝜎−1( ˆ𝑜𝑏
+𝑇0) ).
+(13)
+This formulation reveals that the predicted bounding box
+ˆ𝑏𝑇0+Δ𝑇consists of a reference box from the last observed
+frame ˆ𝑜𝑏
+𝑇0, combined with a residual predicted from the
+content representation via MLP( ˆ𝑜𝑐
+𝑇0+Δ𝑇). Consequently, the
+TDM (Eq. (5)) is responsible for learning this residual.
+3.5
+Temporal Aggregation Module
+For each frame 𝑉𝑡, the SGG Module generates a set of triplet
+representations 𝑍𝑡= {𝑧𝑡(𝑖, 𝑗) | 𝑖∈sbj, 𝑗∈obj}. To aggregate
+temporal information for the target frame 𝑉𝑇𝑔, following
+previous DETR-based models [11], [40], we sample reference
+frames {𝑉ref1, ...,𝑉ref𝑛} from the video. Then we use cascaded
+Transformer decoders to aggregate information, first from
+the reference triplet representations 𝑍ref = {𝑍ref1, ..., 𝑍ref𝑛},
+and then from forecasted representations 𝑍𝑇0+Δ𝑇.
+For reference frame aggregation, the triplet representa-
+tions of the target frame 𝑍𝑇𝑔are updated by first doing self-
+attention and then cross-attention with reference triplets:
+𝑍(𝑙)
+𝑇0 = CrossAttn( SelfAttn(𝑍(𝑙−1)
+𝑇0
+), 𝑍(𝑙)
+ref ),
+(14)
+𝑍(𝑙)
+ref = TopK(𝑍(𝑙−1)
+ref
+, 𝑘𝑙),
+(15)
+
+
+5
+TABLE 1: Comparison of evaluation settings for tasks DSGG, SGA and SGF. GT means the output uses ground truth from
+the input and is therefore not evaluated.
+Task
+Protocol
+Observation / Prediction Window
+Input
+Evaluated Output
+Input
+Reference
+Output
+Video
+Entity Label
+Entity BBox
+Entity Label
+Entity BBox
+Predicate
+DSGG
+PredCLS
+1→H
+1 →H
+1→H
+✓
+✓
+✓
+GT
+GT
+✓
+SGCLS
+✓
+-
+✓
+✓
+GT
+✓
+SGDET
+✓
+-
+-
+✓
+✓
+✓
+SGA
+GAGS
+1→T
+1→T
+T+1→H
+✓
+✓
+✓
+×
+×
+✓
+PGAGS
+✓
+-
+✓
+AGS
+✓
+-
+-
+SGF
+SGDET
+1→T
+1→T
+T+1→H
+✓
+-
+-
+✓
+✓
+✓
+where TopK selects 𝑘most confident reference triplets in
+terms of object and predicate classification scores. We use
+multiple decoders, with 𝑙denoting the 𝑙-th decoder layer,
+and the value of 𝑘is gradually reduced to obtain progres-
+sively refined features.
+To aggregate information from forecasts 𝑍𝑇0+Δ𝑇, we use
+𝑍𝑇𝑔= CrossAttn( SelfAttn(𝑍𝑇𝑔), 𝑍𝑇0+Δ𝑇).
+(16)
+where 𝑇𝑔corresponds to the target frame, 𝑇0 is selected from
+a reference frame ref𝑛. As shown in [15], [38], a larger an-
+ticipatory window benefits NeuralSDE performance; hence,
+we select 𝑇0 such that the time difference Δ𝑇is as large as
+possible, and the time steps should match that of the target
+frame: 𝑇0 + Δ𝑇= 𝑇𝑔.
+We first aggregate information from reference frames
+with lower uncertainty, followed by forecasts with higher
+uncertainty. Alternative aggregation strategies underper-
+form, and details are provided in the ablation study
+Sec. 5.3.3.
+3.6
+Training and Inference
+Training. Our model simultaneously outputs DSGG and SGF
+results, and the loss function has two components:
+L =
+𝐻
+∑︁
+𝑡=1
+(LDSGG
+𝑡
++ LSGF
+𝑡
+)
+(17)
+For each frame 𝑉𝑡, a fixed set of triplets {ˆ𝑟𝑡(𝑘)}𝑁𝑟
+𝑘=1 is
+predicted by the Scene Graph Generation Module, where
+𝑁𝑟denotes the total number of triplets derived from the
+fixed set of predicted entities ˆo𝑡= { ˆ𝑜𝑡(𝑖)}𝑁𝑞
+𝑖=1. We use the
+Hungarian algorithm as in DETR [25] to find the optimal
+one-to-one matching ˆ𝜌∈𝑃between the prediction set
+ˆ𝐺𝑡= {ˆ𝑟𝑡(𝑘)}𝑁𝑟
+𝑘=1 and the ground truth set 𝐺𝑡= {𝑟𝑡(𝑘)}𝑁𝑟
+𝑘=1,
+where 𝐺𝑡is padded with ∅to the same length as ˆ𝐺𝑡. The
+optimal matching ˆ𝜌is found by
+ˆ𝜌= arg min
+𝜌∈𝑃
+𝑁𝑟
+∑︁
+𝑘=1
+Lmatch(𝑟(𝑘), ˆ𝑟(𝜌(𝑘)))
+(18)
+where Lmatch(𝑟(𝑘), ˆ𝑟(𝜌(𝑘))) is the matching loss to assign
+predicted triplet ˆ𝑟with index 𝜌(𝑖) to ground truth triplet
+𝑟(𝑖). This matching loss is a sum of entity classification
+loss, predicate classification loss, and entity bounding box
+regression loss:
+Lmatch(𝑟(𝑘), ˆ𝑟(𝜌(𝑘))) =
+∑︁
+𝑙∈{𝑠,𝑜,𝑝}
+𝛼𝑙L𝑙
+cls +
+∑︁
+𝑙∈{𝑠,𝑜}
+𝛽𝑙L𝑙
+box
+(19)
+where {𝑠, 𝑜, 𝑝} denotes subject, object, and predicate, respec-
+tively, and 𝛼𝑙and 𝛽𝑙are weighting coefficients. We use focal
+loss [41] for classification Lcls, and a weighted sum of L1-
+loss and GIoU-loss for bounding box regression Lbox. When
+calculating the predicate classification loss, we follow OED
+[11] and ignore the loss between the prediction and any
+padded ground truth.
+For the SGF task, we adopt the same Hungarian Match-
+ing loss. During training, the model generates forecasted
+triplets only for the target frame. A reference frame is
+selected to guide the prediction of the scene graph for the
+target frame, as defined in Eq. (16). Consequently, both the
+Scene Graph Generation Module and the Forecast Module
+produce predictions for the same target frame. This is dif-
+ferent from the SceneSayer training scheme for SGA [15],
+which requires storing all observed samples and multiple
+anticipation targets.
+Inference. For DSGG, our model sees the entire video 𝑉𝐻
+and samples 𝑛reference frames {𝑉ref1, ...,𝑉ref𝑛}. Our model
+input is therefore {𝑉ref1, ...,𝑉ref𝑛} and the target frame 𝑉𝑇𝑔,
+and the output is the scene graph ˆ𝐺𝑇𝑔.
+For SGA and SGF, our model only sees part of the video
+{𝑉1, ...,𝑉𝑇} and samples 𝑛reference frames {𝑉ref1, ...,𝑉ref𝑛}
+from the observed part. The inputs of our model in this
+case are {𝑉ref1, ...,𝑉ref𝑛} and the last observed frame 𝑉𝑇. Our
+model generates a scene graph ˆ𝐺𝑇for the last observed
+frame, and from ˆ𝐺𝑇it forecasts scene graphs { ˆ𝐺𝑡}𝐻
+𝑡=𝑇+1 for a
+future time window of length 𝐻−𝑇.
+4
+EVALUATION FOR DIFFERENT TASKS
+We adopt the standard metrics Recall@K (R@K) and mean
+Recall@K (mR@K) to evaluate our model’s performance un-
+der both With Constraint and No Constraint strategies, where
+higher values indicate better coverage of true relationships.
+Following previous works, we set 𝐾∈{10, 20, 50}.
+We summarize the evaluation of different tasks in Table
+1, and present detailed elaboration as follows.
+4.1
+Dynamic Sene Graph Generation (DSGG)
+We primarily evaluate our model using the most chal-
+lenging protocol, Scene Graph Detection (SGDET), which
+requires predicting entity labels, bounding boxes, and pair-
+wise relationships for a target frame. A predicted entity
+bounding box is considered correct if its Intersection over
+Union (IoU) with the ground truth box exceeds 0.5. We also
+provide evaluation results for Predicate Classification (Pred-
+CLS) and Scene Graph Classification (SGCLS) for DSGG.
+
+
+6
+TABLE 2: Comparison with state-of-the-art Dynamic Scene Graph Generation (DSGG) methods on Action Genome for Scene
+Graph Detection (SGDET). Best values are highlighted in boldface.
+SGDET, 𝐼𝑜𝑈≥0.5
+Recall@K (R@K) ↑
+Mean Recall@K (mR@K) ↑
+With Constraint
+No Constraint
+With Constraint
+No Constraint
+Method
+10
+20
+50
+10
+20
+50
+10
+20
+50
+10
+20
+50
+RelDN [42]
+9.1
+9.1
+9.1
+13.6
+23.0
+36.6
+3.3
+3.3
+3.3
+7.5
+18.8
+33.7
+VCTree [43]
+24.4
+32.6
+34.7
+23.9
+35.3
+46.8
+-
+-
+-
+-
+-
+-
+TRACE [8]
+13.9
+14.5
+14.5
+26.5
+35.6
+45.3
+8.2
+8.2
+8.2
+22.8
+31.3
+41.8
+GPS-Net [21]
+24.7
+33.1
+35.1
+24.4
+35.7
+47.3
+-
+-
+-
+-
+-
+-
+STTran [6]
+25.2
+34.1
+37.0
+24.6
+36.2
+48.8
+16.6
+20.8
+22.2
+20.9
+29.7
+39.2
+APT [14]
+26.3
+36.1
+38.3
+25.7
+37.9
+50.1
+-
+-
+-
+-
+-
+-
+DSG-DETR [29]
+30.4
+34.9
+36.0
+32.3
+40.9
+48.2
+18.0
+21.3
+22.0
+23.6
+30.1
+36.5
+TEMPURA [44]
+28.1
+33.4
+34.9
+29.8
+38.1
+46.4
+18.5
+22.6
+23.7
+24.7
+33.9
+43.7
+OED [11]
+33.5
+40.9
+48.9
+35.3
+44.0
+51.8
+20.9
+26.9
+32.9
+26.3
+39.5
+49.5
+FDSG (ours)
+35.3
+42.9
+49.8
+37.2
+47.2
+56.5
+22.2
+27.8
+33.0
+27.8
+42.0
+54.1
+PredCLS aims to classify the predicate labels with ground-
+truth bounding boxes and labels of the entities being given,
+while SGCLS aims to classify entity and predicate labels
+with only ground-truth bounding boxes being given.
+4.2
+Scene Graph Anticipation (SGA)
+We use F , the fraction of observed frames within the total
+video frames, to split the observation and forecasting time
+horizons. A typical value is F = 0.5, meaning the first half of
+the video is observed, while the second half is used for eval-
+uation. For SGA, our model is evaluated on Action Genome
+Scenes (AGS), Partially Grounded Action Genome Scenes
+(PGAGS), and Grounded Action Genome Scenes (GAGS),
+following [15]. AGS resembles SGDET, where the model
+only sees video frames and predicts future scene graphs
+without bounding boxes. Similarly, GAGS aims to anticipate
+predicate labels, given ground-truth bounding boxes and
+labels of the entities. PGAGS aims to classify entity and
+predicate labels with ground-truth bounding boxes given.
+4.3
+Scene Graph Forecasting (SGF)
+As the task of SGF is to forecast complete scene graphs, we
+adopt the SGDET to evaluate the prediction of entity labels,
+bounding boxes, and predicates for an unobserved frame
+in the future. SGF is evaluated under different observed
+fractions F . A notable difference between SGDET for SGF
+and AGS for SGA is that SGDET evaluates bounding box
+predictions with an IoU threshold of 0.5, while bounding
+box is not evaluated in AGS, which is equivalent to using an
+IoU threshold of 0. In addition, we supplement SGF assess-
+ment by evaluating entity forecasting with object detection
+recall and average precision.
+5
+EXPERIMENTS
+5.1
+Experimental Settings
+5.1.1
+Dataset
+We evaluate the proposed model on the Action Genome
+dataset [18], which offers frame-level annotations for dy-
+namic scene graph generation tasks. It encompasses 234,253
+frames with 476,229 bounding boxes representing 35 object
+classes (excluding “person”) and 1,715,568 instances across
+25 relationship (predicate) classes. These relationships are
+categorized into three types: attentional (e.g., a person look-
+ing at an object), spatial (e.g., object positions relative to each
+other), and contacting (e.g., interactions such as holding or
+eating). Notably, this dataset supports multi-label annota-
+tions, with 135,484 subject-object pairs annotated with mul-
+tiple spatial or contact relationships, facilitating nuanced
+analysis of complex human-object interactions. This allows
+us to follow the two widely recognized strategies [45], [46]
+to build scene graphs and evaluate their performance: (1)
+With Constraint: enforcing a unique interaction for each pair.
+(2) No Constraint: allowing multiple relationships between
+the same pair.
+5.1.2
+Implementation Details
+Our model is initialized with a 4-scale DINO pretrained
+for 36 epochs on the COCO 2017 Object Detection Dataset
+[47], which consists of 6 Transformer layers for the encoder
+and decoder, respectively, and uses ResNet50 [48] as the
+backbone. The number of entity queries is set to 100. Each
+entity content representation has 256d and each triplet
+representation 𝑍has 512d, resulting in 𝑍𝑇𝑔∈R100×512 in
+Eq. (16). Following OED [11], we set TopK = {80𝑛, 50𝑛, 30𝑛},
+where 𝑛= 2, denoting the number of reference frames. For
+the NeuralSDE in our Triplet Dynamics Model, we employ
+a solver with a reversible Heun method, the same as in
+SceneSayer [15]. F is set to {0.3, 0.5, 0.7, 0.9}.
+5.1.3
+Model Training
+We first pre-trained the Scene Graph Generation baseline,
+as in OED [11], and then fine-tuned the Temporal Aggrega-
+tion Module together with the Forecast Module. The Scene
+Graph Generation baseline was trained for 5 epochs with a
+starting learning rate of 0.0001 and was reduced by a factor
+of 0.1 at the 4th epoch. We used AdamW [49] as optimizer
+with a batch size of 2. The temporal and forecast modules
+were fine-tuned for 3 epochs, with a starting learning rate of
+0.0001, batch size of 1, and reduced learning rate by a factor
+of 0.1 at the 3rd epoch. The weighting coefficients 𝛼𝑙and 𝛽𝑙
+in the matching loss (Eq. (19)) are 1.0 and 5.0, respectively.
+
+
+7
+TABLE 3: Comparison with state-of-the-art Dynamic Scene Graph Generation methods on Action Genome for Scene Graph
+Classification (SGCLS). Best and second-best values are highlighted in boldface and underlined, respectively.
+SGCLS
+Recall@K (R@K) ↑
+Mean Recall@K (mR@K) ↑
+With Constraint
+No Constraint
+With Constraint
+No Constraint
+Method
+10
+20
+50
+10
+20
+50
+10
+20
+50
+10
+20
+50
+RelDN [42]
+44.3
+45.4
+45.4
+52.9
+62.4
+65.1
+3.3
+3.3
+3.3
+7.5
+18.8
+33.7
+VCTree [43]
+44.1
+45.3
+45.3
+52.4
+62.0
+65.1
+-
+-
+-
+-
+-
+-
+TRACE [8]
+-
+45.7
+46.8
+-
+-
+-
+8.9
+8.9
+8.9
+31.9
+42.7
+46.3
+GPS-Net [21]
+45.3
+46.5
+46.5
+53.6
+63.3
+66.0
+-
+-
+-
+-
+-
+-
+STTran [6]
+46.4
+47.5
+47.5
+54.0
+63.7
+66.4
+16.6
+20.8
+22.2
+20.9
+29.7
+39.2
+APT [14]
+47.2
+48.9
+48.9
+55.1
+65.1
+68.7
+-
+-
+-
+-
+-
+-
+DSG-DETR [29]
+50.8
+52.0
+52.0
+59.2
+69.1
+72.4
+-
+-
+-
+-
+-
+-
+TEMPURA [44]
+47.2
+48.3
+48.3
+56.3
+64.7
+67.9
+30.4
+35.2
+35.2
+48.3
+61.1
+66.4
+FDSG (ours)
+54.8
+56.5
+56.5
+59.0
+67.2
+72.4
+34.9
+36.8
+36.8
+48.9
+63.8
+74.0
+TABLE 4: Comparison with state-of-the-art Dynamic Scene Graph Generation methods on Action Genome for Predicate
+Classification (PredCLS). Best and second-best values are highlighted in boldface and underlined, respectively.
+PredCLS
+Recall@K (R@K) ↑
+Mean Recall@K (mR@K) ↑
+With Constraint
+No Constraint
+With Constraint
+No Constraint
+Method
+10
+20
+50
+10
+20
+50
+10
+20
+50
+10
+20
+50
+RelDN [42]
+66.3
+69.5
+69.5
+75.7
+93.0
+99.0
+6.2
+6.2
+6.2
+31.2
+63.1
+75.5
+VCTree [43]
+66.0
+69.3
+69.3
+75.5
+92.9
+99.3
+-
+-
+-
+-
+-
+-
+TRACE [8]
+27.5
+27.5
+27.5
+72.6
+91.6
+96.4
+15.2
+15.2
+15.2
+50.9
+73.6
+82.7
+GPS-Net [21]
+66.8
+69.9
+69.9
+76.0
+93.6
+99.5
+-
+-
+-
+-
+-
+-
+STTran [6]
+68.6
+71.8
+71.8
+77.9
+94.2
+99.1
+37.8
+40.1
+40.2
+51.4
+67.7
+82.7
+APT [14]
+69.4
+73.8
+73.8
+78.5
+95.1
+99.2
+-
+-
+-
+-
+-
+-
+TEMPURA [44]
+68.8
+71.5
+71.5
+80.4
+94.2
+99.4
+42.9
+46.3
+46.3
+61.5
+85.1
+98.0
+OED [11]
+73.0
+76.1
+76.1
+83.3
+95.3
+99.2
+-
+-
+-
+-
+-
+-
+FDSG (ours)
+72.9
+75.9
+75.9
+83.2
+95.4
+99.4
+41.0
+44.7
+44.8
+56.7
+83.3
+97.7
+5.2
+Quantitative Results and Comparison
+5.2.1
+Dynamic Scene Graph Generation
+Our evaluation results on DSGG using the SGDET proto-
+col are summarized in Table 2. Our approach consistently
+outperforms state-of-the-art methods across all metrics in
+both With Constraint and No Constraint settings, in particular
+achieving a notable performance gain over OED [11] in both
+R@50 and mR@50.
+Further evaluation results for Scene Graph Classifica-
+tion (SGCLS) and Predicate Classification (PredCLS) for the
+DSGG task are presented in Table 3 and Table 4, respectively.
+It is worth mentioning that, unlike OED [11], we do not
+train separate models for the PredCLS and SGCLS tasks.
+We follow the recently verified match-and-assign strategy
+in one-stage scene graph generation methods [27], [28], the
+ground-truth labels can be easily assigned to the queries
+with matched triplet proposals for the evaluation of Pred-
+CLS and SGCLS. In contrast, OED follows the two-stage
+model strategy which the model is modified to incorporate
+additional input information (ground truth bounding boxes
+in SGCLS and additionally ground truth bounding boxes
+and entity labels in PredCLS) and then re-trained.
+For SGCLS, in general, our model outperforms other
+baselines, especially TEMPURA [44], which is specifically
+designed for unbiased scene graph generation on the Mean
+Recall metrics. Since the SGCLS results of OED are not
+reported in the paper [11] and the model checkpoint is un-
+available, we have to exclude OED in Table 3. For PredCLS,
+our model achieves comparable performance to the state-of-
+the-art model OED, even without training a separate model
+for PredCLS.
+The strong performances of our FDSG method on all
+three protocols are consistent, demonstrating the overall
+superiority of FDSG on the DSGG task.
+5.2.2
+Scene Graph Anticipation
+We provide further results for Scene Graph Anticipation
+(SGA) on the Action Genome Scenes (AGS) (Table 5), Par-
+tially Grounded Action Genome Scenes (PGAGS) (Table 6),
+and Grounded Action Genome Scenes (GAGS) (Table 7).
+To provide a more detailed analysis about the anticipation
+capacity, we evaluate our model under different observation
+fractions of the video, i.e., F = 0.3, 0.5, 0.7, 0.9.
+In all three tasks, our model consistently outperforms
+existing methods in different observation fractions. In AGS,
+our model significantly outperforms the baselines. In partic-
+ular, FDSG outperforms SceneSayer [15] across all metrics,
+achieving up to 50% improvement in mR@10 and mR@50,
+and averaging a 40% gain across Mean Recall metrics,
+highlighting our model’s effectiveness in reducing predic-
+tion bias. In PGAGS, while SceneSayer [15] marginally
+outperforms our model on the Recall metrics under the
+No Constraint setting, FDSG performs notably better than
+SceneSayer on the Mean Recall metrics, which gives the
+same indication as AGS results that our model has excellent
+capability of unbiased scene graph generation. Results in
+GAGS are consistent with AGS and PGAGS. These results
+demonstrate the superiority of FDSG in both short-term SGA
+(F = 0.9) and long-term SGA (F = 0.3).
+
+
+8
+TABLE 5: Comparison with state-of-the-art Scene Graph Anticipation methods on Action Genome Scenes (AGS). Best and
+second-best values are highlighted in boldface and underlined, respectively.
+F
+Method
+Recall@K (R@K) ↑
+Mean Recall@K (mR@K) ↑
+With Constraint
+No Constraint
+With Constraint
+No Constraint
+10
+20
+50
+10
+20
+50
+10
+20
+50
+10
+20
+50
+0.3
+STTran++ [6], [15]
+18.5
+27.9
+29.5
+15.4
+27.2
+48.6
+5.9
+10.4
+11.3
+6.2
+14.1
+31.2
+DSG-DETR++ [15], [29]
+19.5
+28.3
+29.4
+16.8
+29.0
+48.9
+6.0
+10.3
+11.0
+8.4
+16.7
+32.3
+SceneSayerODE [15]
+23.1
+29.2
+31.4
+23.3
+32.5
+45.1
+10.6
+13.8
+15.0
+13.3
+20.1
+33.0
+SceneSayerSDE [15]
+25.0
+31.7
+34.3
+25.9
+35.0
+47.4
+11.4
+15.3
+16.9
+15.6
+23.1
+37.1
+FDSG (ours)
+26.8
+34.2
+43.0
+27.8
+37.6
+48.7
+15.4
+20.2
+24.7
+18.3
+29.8
+41.7
+0.5
+STTran++ [6], [15]
+19.7
+30.2
+31.8
+16.6
+29.1
+51.5
+6.3
+11.3
+12.3
+6.6
+14.7
+33.4
+DSG-DETR++ [15], [29]
+20.7
+30.3
+31.6
+17.4
+30.5
+51.9
+6.4
+11.0
+11.7
+8.4
+17.0
+33.9
+SceneSayerODE [15]
+25.9
+32.6
+34.8
+26.4
+36.6
+49.8
+11.6
+15.2
+16.4
+14.3
+21.4
+36.0
+SceneSayerSDE [15]
+27.3
+34.8
+37.0
+28.4
+38.6
+51.4
+12.4
+16.6
+18.0
+16.3
+25.1
+39.9
+FDSG (ours)
+28.3
+36.5
+45.3
+30.1
+40.4
+52.2
+18.1
+23.5
+27.5
+23.2
+34.3
+45.8
+0.7
+STTran++ [6], [15]
+22.1
+33.6
+35.2
+19.0
+32.8
+56.8
+7.0
+12.6
+13.6
+7.7
+17.1
+36.8
+DSG-DETR++ [15], [29]
+22.9
+33.6
+34.9
+19.8
+34.1
+56.7
+7.1
+12.6
+13.3
+9.5
+19.2
+37.2
+SceneSayerODE [15]
+30.3
+36.6
+38.9
+32.1
+42.8
+55.6
+12.8
+16.4
+17.8
+16.5
+24.4
+39.6
+SceneSayerSDE [15]
+31.4
+38.0
+40.5
+33.3
+44.0
+56.4
+13.8
+17.7
+19.3
+18.1
+27.3
+44.4
+FDSG (ours)
+35.5
+43.9
+50.6
+37.1
+49.2
+60.2
+21.6
+27.9
+31.2
+25.0
+41.9
+54.7
+0.9
+STTran++ [6], [15]
+23.6
+35.5
+37.4
+20.2
+35.0
+60.2
+7.4
+13.4
+14.6
+8.9
+18.4
+38.8
+DSG-DETR++ [15], [29]
+24.4
+36.1
+37.6
+22.2
+37.1
+61.0
+7.4
+13.8
+14.8
+11.4
+21.0
+39.5
+SceneSayerODE [15]
+33.9
+40.4
+42.6
+36.6
+48.3
+61.3
+14.0
+18.1
+19.3
+17.8
+27.4
+43.4
+SceneSayerSDE [15]
+34.8
+41.9
+44.1
+37.3
+48.6
+61.6
+15.1
+19.4
+21.0
+20.8
+30.9
+46.8
+FDSG (ours)
+43.8
+52.8
+61.1
+47.5
+59.2
+70.9
+24.1
+30.1
+34.9
+30.9
+44.6
+59.5
+TABLE 6: Comparison with state-of-the-art Scene Graph Anticipation methods on Partially Grounded Action Genome
+Scenes (PGAGS). Best and second-best values are highlighted in boldface and underlined, respectively.
+F
+Method
+Recall@K (R@K) ↑
+Mean Recall@K (mR@K) ↑
+With Constraint
+No Constraint
+With Constraint
+No Constraint
+10
+20
+50
+10
+20
+50
+10
+20
+50
+10
+20
+50
+0.3
+STTran++ [6], [15]
+22.1
+22.8
+22.8
+28.1
+39.0
+45.2
+9.2
+9.8
+9.8
+17.7
+30.6
+42.0
+DSG-DETR++ [15], [29]
+18.2
+18.8
+18.8
+27.7
+39.2
+47.3
+8.9
+9.4
+9.4
+15.3
+26.6
+44.0
+SceneSayerODE [15]
+27.0
+27.9
+27.9
+33.0
+40.9
+46.5
+12.9
+13.4
+13.4
+19.4
+27.9
+46.9
+SceneSayerSDE [15]
+28.8
+29.9
+29.9
+34.6
+42.0
+46.2
+14.2
+14.7
+14.7
+21.5
+31.7
+48.2
+FDSG (ours)
+31.3
+32.4
+32.4
+35.2
+41.8
+47.1
+20.6
+21.8
+21.8
+28.9
+40.8
+51.4
+0.5
+STTran++ [6], [15]
+24.5
+25.2
+25.2
+30.6
+43.2
+50.2
+10.1
+10.7
+10.7
+18.4
+29.5
+43.1
+DSG-DETR++ [15], [29]
+20.7
+21.4
+21.4
+30.4
+44.0
+52.7
+10.2
+10.8
+10.8
+16.5
+30.8
+45.1
+SceneSayerODE [15]
+30.5
+31.5
+31.5
+36.8
+45.9
+51.8
+14.9
+15.4
+15.5
+21.6
+30.8
+48.0
+SceneSayerSDE [15]
+32.2
+33.3
+33.3
+38.4
+46.9
+51.8
+15.8
+16.6
+16.6
+23.5
+35.0
+49.6
+FDSG (ours)
+34.3
+35.2
+35.2
+38.1
+45.0
+50.5
+22.0
+23.4
+23.4
+31.0
+43.0
+53.7
+0.7
+STTran++ [6], [15]
+29.1
+29.7
+29.7
+36.8
+51.6
+58.7
+11.5
+12.1
+12.1
+21.2
+34.6
+49.0
+DSG-DETR++ [15], [29]
+24.6
+25.2
+25.2
+36.7
+51.8
+60.6
+12.0
+12.6
+12.6
+19.7
+36.4
+50.6
+SceneSayerODE [15]
+36.5
+37.3
+37.3
+44.6
+54.4
+60.3
+16.9
+17.3
+17.3
+25.2
+36.2
+53.1
+SceneSayerSDE [15]
+37.6
+38.5
+38.5
+45.6
+54.6
+59.3
+18.4
+19.1
+19.1
+28.3
+40.9
+54.9
+FDSG (ours)
+39.9
+40.7
+40.7
+44.3
+51.5
+57.3
+24.7
+25.9
+25.9
+33.8
+47.7
+58.1
+0.9
+STTran++ [6], [15]
+31.1
+31.6
+31.6
+43.5
+57.6
+63.9
+12.4
+12.8
+12.8
+25.3
+39.6
+54.0
+DSG-DETR++ [15], [29]
+27.6
+28.1
+28.1
+45.8
+61.5
+68.5
+13.2
+13.7
+13.7
+25.8
+42.9
+58.3
+SceneSayerODE [15]
+41.6
+42.2
+42.2
+52.7
+61.8
+66.5
+19.0
+19.4
+19.4
+29.4
+42.2
+59.2
+SceneSayerSDE [15]
+42.5
+43.1
+43.1
+53.8
+62.4
+66.2
+20.6
+21.1
+21.1
+32.9
+46.0
+59.8
+FDSG (ours)
+45.9
+46.6
+46.6
+53.0
+60.0
+64.7
+27.9
+28.8
+28.8
+41.8
+54.0
+66.6
+Moreover, in AGS, it is evident that the performance
+gain of our FDSG (e.g., mR@10 No Constraint increases
+from 41.7 to 59.5) is more profound than that of the runner-
+up model SceneSayerSDE [15] (e.g., mR@10 No Constraint
+increases from 37.1 to 46.8) with the observation fraction
+increasing from 0.3 to 0.9. A similar increasing trend can be
+observed in PGAGS and GAGS. This clearly demonstrates
+that our model is more capable of learning to extrapolate,
+which in turn largely benefits the performance of scene
+understanding in videos.
+In addition, in AGS, the performance gap between Sce-
+neSayerSDE and FDSG (e.g., 10.9 in R@20 With Constraint
+with F = 0.9) is clearly greater than that in PGAGS (3.5) and
+GAGS (3.1). Since ground truth bounding boxes are given
+in PGAGS and GAGS, this finding provides further support
+that learning to forecast entity bounding boxes benefits the
+performance of FDSG.
+5.2.3
+Scene Graph Forecasting
+We report our SGF results in Table 8. Baselines are adapted
+from SceneSayerODE/SDE [15], where we use the antici-
+pated relationship representations of SceneSayer LDPU to
+
+
+9
+TABLE 7: Comparison with state-of-the-art Scene Graph Anticipation methods on Grounded Action Genome Scenes
+(GAGS). Best and second-best values are highlighted in boldface and underlined, respectively.
+F
+Method
+Recall@K (R@K) ↑
+Mean Recall@K (mR@K) ↑
+With Constraint
+No Constraint
+With Constraint
+No Constraint
+10
+20
+50
+10
+20
+50
+10
+20
+50
+10
+20
+50
+0.3
+STTran++ [6], [15]
+30.7
+33.1
+33.1
+35.9
+51.7
+64.1
+11.8
+13.3
+13.3
+16.5
+29.3
+50.2
+DSG-DETR++ [15], [29]
+25.7
+28.2
+28.2
+36.1
+50.7
+64.0
+11.1
+12.8
+12.8
+19.7
+32.0
+51.1
+SceneSayerODE [15]
+34.9
+37.3
+37.3
+40.5
+54.1
+63.9
+15.1
+16.6
+16.6
+19.6
+31.6
+55.8
+SceneSayerSDE [15]
+39.7
+42.2
+42.3
+46.9
+59.1
+65.2
+18.4
+20.5
+20.5
+24.6
+37.8
+59.0
+FDSG (ours)
+46.2
+48.5
+48.5
+55.0
+67.3
+73.1
+24.6
+27.6
+27.7
+31.3
+51.6
+73.8
+0.5
+STTran++ [6], [15]
+35.6
+38.1
+38.1
+40.3
+58.4
+72.2
+13.4
+15.2
+15.2
+17.8
+32.5
+53.7
+DSG-DETR++ [15], [29]
+29.3
+31.9
+32.0
+40.3
+56.9
+72.0
+12.2
+13.8
+13.9
+20.6
+34.3
+54.0
+SceneSayerODE [15]
+40.7
+43.4
+43.4
+47.0
+62.2
+72.4
+17.4
+19.2
+19.3
+22.8
+35.2
+60.2
+SceneSayerSDE [15]
+45.0
+47.7
+47.7
+52.5
+66.4
+73.5
+20.7
+23.0
+23.1
+26.6
+40.8
+63.8
+FDSG (ours)
+51.1
+53.2
+53.2
+60.9
+73.8
+79.4
+26.2
+29.3
+29.3
+34.4
+56.0
+77.3
+0.7
+STTran++ [6], [15]
+41.3
+43.6
+43.6
+48.2
+68.8
+82.0
+16.3
+18.2
+18.2
+22.3
+39.5
+63.1
+DSG-DETR++ [15], [29]
+33.9
+36.3
+36.3
+48.0
+66.7
+81.9
+14.2
+15.9
+15.9
+24.5
+41.1
+63.4
+SceneSayerODE [15]
+49.1
+51.6
+51.6
+58.0
+74.0
+82.8
+21.0
+22.9
+22.9
+27.3
+43.2
+70.5
+SceneSayerSDE [15]
+52.0
+54.5
+54.5
+61.8
+76.7
+83.4
+24.1
+26.5
+26.5
+31.9
+48.0
+74.2
+FDSG (ours)
+57.3
+59.1
+59.1
+69.0
+81.8
+87.1
+29.2
+32.2
+32.2
+39.0
+62.9
+85.9
+0.9
+STTran++ [6], [15]
+46.0
+47.7
+47.7
+60.2
+81.5
+92.3
+19.6
+21.4
+21.4
+29.6
+49.1
+76.4
+DSG-DETR++ [15], [29]
+38.1
+39.8
+39.8
+58.8
+78.8
+92.2
+16.3
+17.7
+17.7
+30.7
+50.3
+77.2
+SceneSayerODE [15]
+58.1
+59.8
+59.8
+72.6
+86.7
+93.2
+25.0
+26.4
+26.4
+35.0
+51.7
+80.2
+SceneSayerSDE [15]
+60.3
+61.9
+61.9
+74.8
+88.0
+93.5
+28.5
+29.8
+29.8
+40.0
+57.7
+87.2
+FDSG (ours)
+63.8
+65.1
+65.1
+79.0
+90.4
+94.5
+33.3
+35.3
+35.3
+48.7
+72.0
+92.2
+TABLE 8: Comparison with baseline methods on Action Genome for the Scene Graph Forecasting (SGF) task. Best values
+are highlighted in boldface.
+F
+Method
+Recall@K (R@K) ↑
+Mean Recall@K (mR@K) ↑
+With Constraint
+No Constraint
+With Constraint
+No Constraint
+10
+20
+50
+10
+20
+50
+10
+20
+50
+10
+20
+50
+0.3
+SceneSayerODE+ [15]
+3.6
+4.3
+4.4
+3.8
+4.6
+5.3
+2.4
+2.9
+2.9
+2.8
+3.2
+3.9
+SceneSayerSDE+ [15]
+4.3
+4.7
+5.1
+4.5
+5.3
+6.2
+2.5
+3.5
+3.5
+2.9
+4.0
+4.7
+FDSG (ours)
+9.2
+11.4
+13.1
+10.2
+13.1
+16.2
+7.6
+9.7
+11.3
+9.2
+14.2
+18.5
+0.5
+SceneSayerODE+ [15]
+4.8
+5.4
+5.4
+5.1
+6.3
+6.9
+2.3
+3.0
+3.0
+2.6
+3.9
+4.4
+SceneSayerSDE+ [15]
+6.4
+7.7
+7.9
+6.6
+8.3
+9.0
+3.1
+3.9
+4.0
+3.9
+5.8
+8.4
+FDSG (ours)
+10.6
+13.3
+15.5
+12.0
+15.5
+18.8
+8.4
+11.2
+12.6
+11.4
+17.2
+22.5
+0.7
+SceneSayerODE+ [15]
+7.3
+7.8
+8.0
+7.9
+8.1
+8.4
+4.0
+4.4
+4.5
+4.1
+5.4
+6.5
+SceneSayerSDE+ [15]
+8.1
+8.9
+9.3
+8.3
+9.5
+10.6
+4.7
+5.2
+5.4
+5.0
+6.1
+7.4
+FDSG (ours)
+13.0
+15.6
+17.8
+14.3
+18.4
+21.5
+9.9
+12.8
+14.1
+12.4
+18.1
+23.1
+0.9
+SceneSayerODE+ [15]
+14.3
+17.6
+18.0
+15.7
+18.2
+19.4
+11.9
+13.7
+14.4
+12.5
+14.9
+16.8
+SceneSayerSDE+ [15]
+15.5
+18.3
+20.6
+17.8
+20.3
+22.8
+12.4
+14.0
+15.3
+15.1
+16.5
+18.7
+FDSG (ours)
+19.9
+23.8
+27.6
+22.4
+27.4
+32.5
+14.6
+18.4
+20.7
+18.1
+24.4
+32.9
+regress the dynamics of bounding boxes for the correspond-
+ing entities starting from the last observed frame. Specif-
+ically, we feed the anticipated predicate representations
+𝑧𝑇0+Δ𝑇(𝑖, 𝑗) to two 3-layer MLPs, one for subject bounding
+box regression and one for object, to update the locations:
+ˆ𝑏𝑇0+Δ𝑇(𝑖) = ˆ𝑏𝑇0 (𝑖) + MLPsub(𝑧𝑇0+Δ𝑇(𝑖, 𝑗)),
+(20)
+ˆ𝑏𝑇0+Δ𝑇( 𝑗) = ˆ𝑏𝑇0 ( 𝑗) + MLPobj(𝑧𝑇0+Δ𝑇(𝑖, 𝑗)),
+(21)
+where both MLPs have a hidden layer dimension of 1,024,
+with ReLU as the intermediate activation function and Soft-
+Plus as the last activation function. Notebly, in SceneSayer
+𝑧represents only the predicate, while in our FDSG, 𝑧repre-
+sents the complete triplet. We use the smoothed 𝐿1 loss for
+the bounding box anticipation error. Although the baseline
+models perform well for predicate anticipation, they show
+limited capacity for entity forecasting. In contrast, our model
+significantly outperforms them, demonstrating a stronger
+ability to learn temporal dynamics.
+We explicitly evaluate entity forecasting using Object
+Detection Recall. We evaluate under two settings: (1) SGA,
+where IoU ≥0, i.e., only evaluates label accuracy; and (2)
+SGF, where IoU ≥0.5, e.g., includes bounding box quality.
+We compare against a Baseline using the predicted scene
+graph from the last observation and an Oracle using the last
+ground truth. We also report Average Precision (AP) with
+IoU ≥0.5 in Table 9. Our model clearly outperforms the
+Baseline, in particular in the SGA setting, showing promising
+capability to discover novel nodes. Our model sometimes
+closely trails the Oracle due to minor prediction errors for the
+last observation, and in the SGF setting due to accumulated
+error in label and bounding box prediction. However, in
+the SGF setting, our model still evidently outperforms the
+Baseline that assumes bounding boxes predicted from the
+last observation remain static.
+FDSG’s superior performance in SGF, together with our
+improvements in DSGG and SGA (Tables 2 - 7), highlights the
+
+
+10
+TABLE 9: Object detection recall and average precision (AP) for SGA and SGF with different observation fraction F .
+Observed Fraction F
+Object Detection Recall R@20
+AP (IoU ≥0.5)
+SGA (IoU ≥0)
+SGF (IoU ≥0.5)
+Baseline
+Oracle
+Ours
+Baseline
+Oracle
+Ours
+Baseline
+Oracle
+Ours
+0.3
+77.00
+77.05
+81.57
+37.07
+39.23
+40.67
+9.1
+14.0
+10.8
+0.5
+80.11
+82.75
+83.36
+40.33
+44.01
+43.85
+10.5
+16.3
+12.1
+0.7
+84.44
+89.76
+87.38
+45.67
+51.27
+47.87
+13.3
+23.7
+16.7
+0.9
+86.99
+96.01
+91.89
+55.25
+64.95
+58.51
+18.7
+37.5
+22.2
+TABLE 10: Ablation study of model components with recall and mean recall metrics. For Dynamic Scene Graph Generation
+(DSGG) and Scene Graph Forecasting (SGF), the task is SGDET, while for Scene Graph Anticipation (SGA), the task is AGS.
+For SGA and SGF, the observed fraction F = 0.5. Notations for the model components: S - Static SGG Module; T - Temporal
+Aggregation Module; TDM - Triplet Dynamics Model; LDM - Location Dynamics Model. Best values are highlighted in
+boldface.
+Task
+#
+Method
+Recall@K (R@K)↑
+Mean Recall@K (mR@K)↑
+With Constraint
+No Constraint
+With Constraint
+No Constraint
+S
+T
+TDM
+LDM
+10
+20
+50
+10
+20
+50
+10
+20
+50
+10
+20
+50
+DSGG
+1
+✓
+33.4
+41.0
+48.1
+35.2
+45.0
+54.0
+19.7
+25.8
+30.9
+24.5
+38.2
+52.0
+2
+✓
+✓
+34.6
+42.2
+49.2
+36.5
+46.4
+55.5
+21.5
+27.3
+33.0
+26.2
+39.3
+50.8
+3
+✓
+✓
+✓
+34.9
+42.4
+49.3
+36.7
+46.6
+55.7
+21.0
+27.2
+32.0
+26.0
+39.5
+52.5
+4
+✓
+✓
+33.4
+41.0
+48.1
+35.3
+45.1
+54.2
+19.7
+25.8
+30.9
+24.8
+38.3
+52.2
+5
+✓
+✓
+✓
+33.3
+40.8
+47.9
+35.2
+45.0
+53.8
+19.7
+25.8
+30.9
+24.6
+38.2
+51.9
+6
+✓
+✓
+✓
+✓
+35.3
+42.9
+49.8
+37.2
+47.4
+56.4
+22.2
+27.8
+33.0
+27.8
+42.0
+54.1
+SGA
+3
+✓
+✓
+✓
+28.1
+36.5
+45.8
+29.7
+39.9
+52.9
+14.5
+21.5
+26.9
+17.7
+29.9
+43.1
+4
+✓
+✓
+28.4
+36.8
+46.3
+30.6
+40.7
+52.7
+16.6
+21.8
+27.2
+19.5
+31.7
+44.5
+5
+✓
+✓
+✓
+27.2
+35.1
+44.6
+29.0
+38.9
+50.0
+16.2
+21.9
+28.3
+20.8
+31.6
+44.4
+6
+✓
+✓
+✓
+✓
+28.2
+36.5
+45.5
+29.8
+40.1
+52.0
+18.1
+23.5
+27.5
+23.2
+34.3
+45.8
+SGF
+5
+✓
+✓
+✓
+9.5
+12.2
+14.4
+10.5
+13.9
+17.7
+6.6
+10.1
+11.0
+8.5
+13.6
+19.0
+6
+✓
+✓
+✓
+✓
+10.6
+13.3
+15.5
+12.0
+15.5
+18.8
+8.4
+11.2
+12.6
+11.4
+17.2
+22.5
+advantages of our forecasting-driven design.
+5.3
+Ablation Studies
+5.3.1
+Module Effectiveness
+We assess the contribution of each component in our model,
+with results shown in Table 10. The baseline model (#1)
+uses only spatial modeling (S), without explicit temporal
+modeling. Adding the Temporal Aggregation Module (T)
+in model (#2) yields a clear performance boost, surpassing
+OED. Incorporating the Triplet Dynamics Model (TDM) in
+the model (#3) enables SGA and further improves DSGG,
+demonstrating the benefits of learning to forecast. Enabling
+the Location Dynamics Model (LDM) in the model (#6) ex-
+tends capability to SGF, while also enhancing both SGA and
+DSGG. When the Temporal Aggregation Module is removed
+(models #4 and #5), DSGG performance drops to baseline
+levels, and both SGA and SGF are negatively impacted.
+This highlights the importance of temporal aggregation in
+learning rich representations for both prediction and fore-
+casting. Model (#4) achieves higher R@K’s on SGA than the
+full model (#6), but shows a significant drop in mR@K’s,
+indicating reduced robustness.
+5.3.2
+Realization of the LDM
+We evaluate different instantiations of the Location Dynam-
+ics Model (LDM) from Eq. (7) with results summarized in
+Table 11. When using residual updates for entity location
+representations (Eq. (9)), the Triplet Dynamics Model (TDM)
+also predicts these residuals. We hypothesize that this cou-
+pling helps TDM better model predicate dynamics when
+TABLE 11: Comparison of different realizations for a Lo-
+cation Dynamics Model (LDM). IM denotes the Identity
+Mapping.
+Task
+LDM
+SGDET / AGS, F = 0.5
+With Constraint ↑
+R@10
+R@20
+R@50
+DSGG
+IM
+35.3
+42.9
+49.8
+MLP
+35.4
+43.0
+50.0
+NeuralODE
+34.8
+42.4
+49.4
+NeuralSDE
+34.9
+42.6
+49.3
+SGA
+IM
+28.2
+36.5
+45.5
+MLP
+27.4
+34.7
+43.5
+NeuralODE
+16.5
+25.1
+36.8
+NeuralSDE
+26.3
+34.2
+43.0
+SGF
+IM
+10.6
+13.3
+15.5
+MLP
+10.0
+12.6
+14.8
+NeuralODE
+6.9
+8.5
+10.0
+NeuralSDE
+11.3
+13.6
+16.4
+they are linked to entity motion, which is supported by the
+observed performance trends. Among the variants, Identity
+Mapping offers the best overall performance: top in SGA,
+second-best in DSGG and SGF, with only marginal gaps from
+the top models in the latter two tasks. The 3-layer MLP
+achieves the best DSGG performance but underperforms in
+SGA. NeuralSDE excels in SGF, indicating stronger entity
+forecasting, but lags in DSGG and SGA, suggesting reduced
+effectiveness in predicate anticipation. Based on overall per-
+formance, simplicity, and compactness, Identity Mapping is
+adopted.
+
+
+11
+TABLE 12: Comparison between different temporal aggregation strategies. (a) aggregating forecasts before observations;
+(b) aggregating both information in a single cross-attention layer. Best values are highlighted in boldface.
+Task
+Method
+Recall (R)
+Mean Recall (mR)
+With Constraint
+No Constraint
+With Constraint
+No Constraint
+10
+20
+50
+10
+20
+50
+10
+20
+50
+10
+20
+50
+DSGG
+(a)
+35.0
+42.4
+49.3
+37.0
+46.9
+55.9
+21.0
+27.1
+31.9
+26.0
+39.8
+53.0
+(b)
+34.7
+42.0
+49.0
+36.7
+46.5
+55.5
+21.1
+27.3
+32.0
+26.3
+39.8
+51.8
+Ours
+35.3
+42.9
+49.8
+37.2
+47.2
+56.5
+22.2
+27.8
+33.0
+27.8
+42.0
+54.1
+SGA
+(a)
+25.9
+32.6
+39.8
+27.5
+36.7
+48.7
+11.3
+14.6
+17.7
+13.7
+22.3
+34.6
+(b)
+28.1
+35.7
+43.4
+28.8
+38.6
+50.7
+13.3
+17.3
+20.8
+16.8
+26.1
+38.7
+F = 0.5
+Ours
+28.3
+36.5
+45.3
+30.1
+40.4
+52.2
+18.1
+23.5
+27.5
+23.2
+34.3
+45.8
+SGF
+(a)
+7.0
+8.3
+9.7
+7.8
+10.1
+12.8
+4.8
+5.9
+6.9
+5.8
+9.6
+13.8
+(b)
+8.6
+10.5
+12.1
+9.4
+12.0
+14.8
+5.9
+7.5
+8.6
+7.6
+11.7
+15.9
+F = 0.5
+Ours
+10.6
+13.3
+15.5
+12.0
+15.5
+18.8
+8.4
+11.2
+12.6
+11.4
+17.2
+22.5
+Fig. 4: Visualization of bounding boxes and generated scene graphs from DSGG (left) and SGF (right), under observation
+fractions: top row - F = 0.5, bottom row - F = 0.7.
+
+
+12
+5.3.3
+Comparison of Aggregation Strategy
+In FDSG’s Temporal Aggregation Module, we first aggre-
+gate information from reference frames with lower uncer-
+tainty, followed by forecasts with higher uncertainty. In
+Table 12, we test two variants: (a) aggregating forecasts
+before observations, and (b) aggregating both information
+in a single cross-attention layer. Neither outperforms our
+current design in FDSG.
+5.4
+Qualitative Results
+5.4.1
+Forecast with Different Observation Fraction
+In Fig. 4, we present DSGG and SGF results from FDSG
+under different observation fractions F . In particular, the
+results shown in the top row use an observed video fraction
+F = 0.5, while the bottom row uses F = 0.7. When F = 0.5,
+FDSG fails to detect the bottle on the left due to partial
+occlusion in the last observed frame. In addition, the person
+is looking at the notebook and has not yet started the
+interaction with the bottle. Consequently, in SGF, our model
+does not predict any interaction between the person and the
+bottle. Instead, FDSG forecasts food/sandwich showing up
+in the center, demonstrating a comprehensive understand-
+ing of the scene and its capability to forecast unseen entities.
+In comparison, the bottom row uses F = 0.7, where in the
+last observed frame the bottle is clearly visible, and the
+person is also looking to the left, showing a clear intention
+to interact with the bottle. As a result, in SGF, our FDSG
+successfully predicts the movement of the bottle from the
+left to the center. In addition to the moving object (the
+bottle), FDSG also correctly predicts the location of static
+objects (the person, table, and notebook), demonstrating the
+effectiveness of our proposed Location Dynamics Model
+using Identity Mapping for the query locations.
+5.4.2
+Attention Maps
+In Fig. 5, we visualize the sampling points of the Deformable
+Attention module [50] within the entity decoder of our
+FDSG model. The visualizations are taken from the final
+cross-attention layer and correspond to the top five most
+confident queries, ranked by the overall classification scores
+of entities and predicates. Each query is associated with 128
+sampling points, each assigned an attention weight. Brighter
+colors (e.g., yellow) indicate higher attention weights, while
+darker colors (e.g., dark blue) represent lower ones.
+Notably, the deformable attention mechanism attends
+not only to the entities themselves but also to the regions
+representing interactions between subjects and objects. This
+is particularly evident in the first two columns, where the
+predicted predicates are looking at and not looking at. In
+these cases, attention focuses around the direction in which
+the central person is facing. Interestingly, this direction
+is obstructed by a table, which may explain the model’s
+misprediction: person – not looking at – bottle.
+5.4.3
+More DSGG and SGF Results
+Figs. 6–8 showcase additional DSGG and SGF results pro-
+duced by FDSG. For the SGF task, the observed video
+fraction is set to F = 0.5. In Fig. 6, the video depicts a man
+cleaning his room with a broom. In the DSGG results, FDSG
+successfully detects the presence of clothes, even though
+they are not included in the ground truth annotations.
+For the SGF task, the model predicts the dynamics of the
+broom’s bounding box. Fig. 7 shows a man leaving his
+laptop to get food. FDSG predicts an increase in the height
+of the man’s bounding box, correctly inferring that he is
+standing up. It also forecasts an interaction with a nearby
+box rather than the food located farther away, which is not
+labeled in the observed frames. In Fig. 8, the video shows a
+woman taking off her shoes. FDSG predicts an interaction
+with her clothes as shoes are not visible in the observed part,
+which is still closely aligned with the action of removing
+shoes.
+6
+CONCLUSION
+In this work, we introduce Forecasting Dynamic Scene
+Graph (FDSG), a novel framework extending Dynamic
+Scene Graph Generation (DSGG) by incorporating extrapola-
+tion to predict future relationships, entity labels, and bound-
+ing boxes. In contrast to the existing DSGG methods relying
+solely on interpolation, FDSG employs a Forecast Module
+with query decomposition and NeuralSDE, alongside a
+Temporal Aggregation Module that integrates forecasted
+scene graphs with observed frames to enhance scene graph
+generation. To evaluate FDSG, we propose Scene Graph
+Forecasting (SGF), a new task assessing the prediction of
+complete future scene graphs. Experiments on the Action
+Genome dataset demonstrate FDSG’s superior performance
+across DSGG, SGA, and SGF tasks. Significant improvements
+over baselines validate the effectiveness of our method and
+the benefits of learning to extrapolate. Our findings suggest
+that extrapolation enhances both forecasting and overall
+scene understanding, paving the way for future research on
+e.g., long-term scene prediction in video understanding and
+action recognition.
+REFERENCES
+[1]
+J. Johnson, R. Krishna, M. Stark, L.-J. Li, D. Shamma, M. Bernstein,
+and L. Fei-Fei, “Image retrieval using scene graphs,” in Proceedings
+of the IEEE conference on computer vision and pattern recognition, 2015,
+pp. 3668–3678. 1
+[2]
+Y. Kong and Y. Fu, “Human action recognition and prediction: A
+survey,” International Journal of Computer Vision, vol. 130, no. 5, pp.
+1366–1401, 2022. 1
+[3]
+A. Cherian, C. Hori, T. K. Marks, and J. Le Roux, “(2.5+ 1) d
+spatio-temporal scene graphs for video question answering,” in
+Proceedings of the AAAI Conference on Artificial Intelligence, vol. 36,
+no. 1, 2022, pp. 444–453. 1
+[4]
+T.-T. Nguyen, P. Nguyen, and K. Luu, “Hig: Hierarchical interlace-
+ment graph approach to scene graph generation in video under-
+standing,” in Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, 2024, pp. 18 384–18 394. 1
+[5]
+Y. Chen, J. Wang, Y. Bai, G. Casta˜n´on, and V. Saligrama, “Prob-
+abilistic semantic retrieval for surveillance videos with activity
+graphs,” IEEE Transactions on Multimedia, vol. 21, no. 3, pp. 704–
+716, 2018. 1
+[6]
+Y. Cong, W. Liao, H. Ackermann, B. Rosenhahn, and M. Y. Yang,
+“Spatial-temporal transformer for dynamic scene graph gener-
+ation,” in Proceedings of the IEEE/CVF international conference on
+computer vision, 2021, pp. 16 372–16 382. 1, 2, 4, 6, 7, 8, 9
+[7]
+J. Ji, R. Desai, and J. C. Niebles, “Detecting human-object rela-
+tionships in videos,” in Proceedings of the IEEE/CVF international
+conference on computer vision, 2021, pp. 8106–8116. 1, 2
+[8]
+Y. Teng, L. Wang, Z. Li, and G. Wu, “Target adaptive context
+aggregation for video scene graph generation,” in Proceedings of
+the IEEE/CVF International Conference on Computer Vision, 2021, pp.
+13 688–13 697. 1, 2, 6, 7
+
+
+13
+Fig. 5: Visualization of sampling points of the Deformable Attention in the last Cross-Attention layer of FDSG’s entity
+decoder for the DSGG task. A brighter color indicates a larger attention weight associated with the sampling point. We also
+label the detected triplets and the bounding boxes.
+Fig. 6: Visualization of Dynamic Scene Graph Generation (DSGG) and Scene Graph Forecasting (SGF) outputs from our
+FDSG. The first two rows show frames with ground truth entity bounding boxes and ground truth scene graphs, while the
+last two rows show generated scene graphs from DSGG (left) and SGF (right). In the scene graphs, incorrect predicates are
+highlighted with text in red, while entities/predicates with missing labels in the ground truth are highlighted in orange.
+
+
+14
+Fig. 7: Visualization of Dynamic Scene Graph Generation (DSGG) and Scene Graph Forecasting (SGF) outputs from our
+FDSG. The first two rows show frames with ground truth entity bounding boxes and ground truth scene graphs, while the
+last two rows show generated scene graphs from DSGG (left) and SGF (right). In the scene graphs, incorrect predicates are
+highlighted with text in red, while entities/predicates with missing labels in the ground truth are highlighted in orange.
+[9]
+J. Wang, J. Huang, C. Zhang, and Z. Deng, “Cross-modality time-
+variant relation learning for generating dynamic scene graphs,”
+in 2023 IEEE International Conference on Robotics and Automation
+(ICRA).
+IEEE, 2023, pp. 8231–8238. 1, 2
+[10] Y. Zhang, Y. Pan, T. Yao, R. Huang, T. Mei, and C.-W. Chen, “End-
+to-end video scene graph generation with temporal propagation
+transformer,” IEEE Transactions on Multimedia, vol. 26, pp. 1613–
+1625, 2023. 1, 2
+[11] G. Wang, Z. Li, Q. Chen, and Y. Liu, “Oed: Towards one-stage
+end-to-end dynamic scene graph generation,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2024, pp. 27 938–27 947. 1, 2, 4, 5, 6, 7
+[12] Y. Liu, K. Zhang, Y. Li, Z. Yan, C. Gao, R. Chen, Z. Yuan,
+Y. Huang, H. Sun, J. Gao et al., “Sora: A review on background,
+technology, limitations, and opportunities of large vision models,”
+arXiv preprint arXiv:2402.17177, 2024. 1
+[13] Y. Chang, X. Wang, J. Wang, Y. Wu, L. Yang, K. Zhu, H. Chen, X. Yi,
+C. Wang, Y. Wang et al., “A survey on evaluation of large language
+models,” ACM Transactions on Intelligent Systems and Technology,
+vol. 15, no. 3, pp. 1–45, 2024. 1
+[14] Y. Li, X. Yang, and C. Xu, “Dynamic scene graph generation via
+anticipatory pre-training,” in Proceedings of the IEEE/CVF conference
+on computer vision and pattern recognition, 2022, pp. 13 874–13 883.
+1, 2, 6, 7
+[15] R. Peddi, S. Singh, P. Singla, V. Gogate et al., “Towards scene graph
+anticipation,” in European Conference on Computer Vision. Springer,
+2024, pp. 159–175. 1, 2, 3, 4, 5, 6, 7, 8, 9
+[16] H. Zhang, F. Li, S. Liu, L. Zhang, H. Su, J. Zhu, L. M. Ni, and H.-
+Y. Shum, “Dino: Detr with improved denoising anchor boxes for
+end-to-end object detection,” arXiv preprint arXiv:2203.03605, 2022.
+2, 4
+[17] P. Kidger, J. Foster, X. C. Li, and T. Lyons, “Efficient and accurate
+gradients for neural sdes,” Advances in Neural Information Process-
+ing Systems, vol. 34, pp. 18 747–18 761, 2021. 2, 4
+[18] J. Ji, R. Krishna, L. Fei-Fei, and J. C. Niebles, “Action genome:
+Actions as compositions of spatio-temporal scene graphs,” in Pro-
+ceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, 2020, pp. 10 236–10 247. 2, 6
+[19] D. Xu, Y. Zhu, C. B. Choy, and L. Fei-Fei, “Scene graph generation
+by iterative message passing,” in Proceedings of the IEEE conference
+on computer vision and pattern recognition, 2017, pp. 5410–5419. 2
+[20] R. Zellers, M. Yatskar, S. Thomson, and Y. Choi, “Neural motifs:
+Scene graph parsing with global context,” in Proceedings of the IEEE
+conference on computer vision and pattern recognition, 2018, pp. 5831–
+5840. 2
+[21] X. Lin, C. Ding, J. Zeng, and D. Tao, “Gps-net: Graph property
+sensing network for scene graph generation,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2020, pp. 3746–3753. 2, 6, 7
+[22] K. Tang, Y. Niu, J. Huang, J. Shi, and H. Zhang, “Unbiased
+scene graph generation from biased training,” in Proceedings of the
+IEEE/CVF conference on computer vision and pattern recognition, 2020,
+
+
+15
+Fig. 8: Visualization of Dynamic Scene Graph Generation (DSGG) and Scene Graph Forecasting (SGF) outputs from our
+FDSG. The first two rows show frames with ground truth entity bounding boxes and ground truth scene graphs, while the
+last two rows show generated scene graphs from DSGG (left) and SGF (right). In the scene graphs, incorrect predicates are
+highlighted with text in red, while entities/predicates with missing labels in the ground truth are highlighted in orange.
+pp. 3716–3725. 2
+[23] X. Lin, C. Ding, J. Zhang, Y. Zhan, and D. Tao, “Ru-net: Regular-
+ized unrolling network for scene graph generation,” in Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern Recogni-
+tion, 2022, pp. 19 457–19 466. 2
+[24] S. Ren, K. He, R. Girshick, and J. Sun, “Faster r-cnn: Towards
+real-time object detection with region proposal networks,” IEEE
+transactions on pattern analysis and machine intelligence, vol. 39, no. 6,
+pp. 1137–1149, 2016. 2
+[25] N. Carion, F. Massa, G. Synnaeve, N. Usunier, A. Kirillov, and
+S. Zagoruyko, “End-to-end object detection with transformers,” in
+European conference on computer vision. Springer, 2020, pp. 213–229.
+2, 5
+[26] R. Li, S. Zhang, and X. He, “Sgtr: End-to-end scene graph genera-
+tion with transformer,” in proceedings of the IEEE/CVF conference on
+computer vision and pattern recognition, 2022, pp. 19 486–19 496. 2
+[27] Y. Cong, M. Y. Yang, and B. Rosenhahn, “Reltr: Relation trans-
+former for scene graph generation,” IEEE Transactions on Pattern
+Analysis and Machine Intelligence, vol. 45, no. 9, pp. 11 169–11 183,
+2023. 2, 7
+[28] J. Im, J. Nam, N. Park, H. Lee, and S. Park, “Egtr: Extracting graph
+from transformer for scene graph generation,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2024, pp. 24 229–24 238. 2, 4, 7
+[29] S. Feng, H. Mostafa, M. Nassar, S. Majumdar, and S. Tripathi,
+“Exploiting long-term dependencies for generating dynamic scene
+graphs,” in Proceedings of the IEEE/CVF Winter Conference on Appli-
+cations of Computer Vision, 2023, pp. 5130–5139. 2, 6, 7, 8, 9
+[30] O. Styles, V. Sanchez, and T. Guha, “Multiple object forecasting:
+Predicting future object locations in diverse environments,” in
+Proceedings of the IEEE/CVF Winter Conference on Applications of
+Computer Vision, 2020, pp. 690–699. 2
+[31] O. Kesa, O. Styles, and V. Sanchez, “Multiple object tracking and
+forecasting: Jointly predicting current and future object locations,”
+in Proceedings of the IEEE/CVF Winter Conference on Applications of
+Computer Vision, 2022, pp. 560–569. 2
+[32] J. Cao, H. Zhang, L. Jin, J. Lv, G. Hou, and C. Zhang, “A review
+of object tracking methods: From general field to autonomous
+vehicles,” Neurocomputing, 2024. 2
+[33] J. Xu, R. Ranftl, and V. Koltun, “Accurate optical flow via direct
+cost volume processing,” in Proceedings of the IEEE Conference on
+Computer Vision and Pattern Recognition, 2017, pp. 1289–1297. 2
+[34] H. Gammulle, S. Denman, S. Sridharan, and C. Fookes, “Predicting
+the future: A jointly learnt model for action anticipation,” in
+Proceedings of the IEEE/CVF International Conference on Computer
+Vision, 2019, pp. 5562–5571. 2
+[35] C. Rodriguez, B. Fernando, and H. Li, “Action anticipation by
+predicting future dynamic images,” in Proceedings of the European
+Conference on Computer Vision (ECCV) Workshops, 2018. 2
+[36] D. Gong, J. Lee, M. Kim, S. J. Ha, and M. Cho, “Future transformer
+for long-term action anticipation,” in Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition, 2022, pp.
+3052–3061. 2
+[37] M. Nawhal, A. A. Jyothi, and G. Mori, “Rethinking learning ap-
+proaches for long-term action anticipation,” in European Conference
+on Computer Vision.
+Springer, 2022, pp. 558–576. 2
+[38] H.-g. Chi, K. Lee, N. Agarwal, Y. Xu, K. Ramani, and C. Choi,
+“Adamsformer for spatial action localization in the future,” in
+Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, 2023, pp. 17 885–17 895. 2, 5
+[39] R. T. Chen, Y. Rubanova, J. Bettencourt, and D. K. Duvenaud,
+“Neural ordinary differential equations,” Advances in neural infor-
+mation processing systems, vol. 31, 2018. 2, 4
+[40] Q. Zhou, X. Li, L. He, Y. Yang, G. Cheng, Y. Tong, L. Ma, and
+D. Tao, “Transvod: End-to-end video object detection with spatial-
+temporal transformers,” IEEE Transactions on Pattern Analysis and
+Machine Intelligence, vol. 45, no. 6, pp. 7853–7869, 2022. 4
+[41] T.-Y. Ross and G. Doll´ar, “Focal loss for dense object detection,”
+in proceedings of the IEEE conference on computer vision and pattern
+recognition, 2017, pp. 2980–2988. 5
+[42] J. Zhang, K. J. Shih, A. Elgammal, A. Tao, and B. Catanzaro,
+“Graphical contrastive losses for scene graph parsing,” in Pro-
+
+
+16
+ceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, 2019, pp. 11 535–11 543. 6, 7
+[43] K. Tang, H. Zhang, B. Wu, W. Luo, and W. Liu, “Learning to com-
+pose dynamic tree structures for visual contexts,” in Proceedings of
+the IEEE/CVF conference on computer vision and pattern recognition,
+2019, pp. 6619–6628. 6, 7
+[44] S. Nag, K. Min, S. Tripathi, and A. K. Roy-Chowdhury, “Unbiased
+scene graph generation in videos,” in Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition, 2023, pp.
+22 803–22 813. 6, 7
+[45] X. Chang, P. Ren, P. Xu, Z. Li, X. Chen, and A. Hauptmann, “A
+comprehensive survey of scene graphs: Generation and applica-
+tion,” IEEE Transactions on Pattern Analysis and Machine Intelligence,
+vol. 45, no. 1, pp. 1–26, 2021. 6
+[46] H. Li, G. Zhu, L. Zhang, Y. Jiang, Y. Dang, H. Hou, P. Shen, X. Zhao,
+S. A. A. Shah, and M. Bennamoun, “Scene graph generation: A
+comprehensive survey,” Neurocomputing, vol. 566, p. 127052, 2024.
+6
+[47] T.-Y. Lin, M. Maire, S. Belongie, J. Hays, P. Perona, D. Ramanan,
+P. Doll´ar, and C. L. Zitnick, “Microsoft coco: Common objects in
+context,” in European Conference on Computer Vision, 2014, pp. 740–
+755. 6
+[48] K. He, X. Zhang, S. Ren, and J. Sun, “Deep residual learning for
+image recognition,” in Proceedings of the IEEE conference on computer
+vision and pattern recognition, 2016, pp. 770–778. 6
+[49] I. Loshchilov and F. Hutter, “Decoupled weight decay regulariza-
+tion,” arXiv preprint arXiv:1711.05101, 2017. 6
+[50] X. Zhu, W. Su, L. Lu, B. Li, X. Wang, and J. Dai, “Deformable
+detr: Deformable transformers for end-to-end object detection,” in
+International Conference on Learning Representations, 2021. 12
+
+

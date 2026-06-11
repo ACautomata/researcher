@@ -1,0 +1,1911 @@
+Devil’s on the Edges: Selective Quad Attention for Scene Graph Generation
+
+Deunsol Jung
+
+Sanghyun Kim
+
+Won Hwa Kim
+
+Minsu Cho
+
+Pohang University of Science and Technology (POSTECH), South Korea
+http://cvlab.postech.ac.kr/research/SQUAT
+
+Abstract
+
+horse
+
+man
+
+glasses
+
+Background
+
+man
+
+horse
+
+glasses
+
+Background
+
+Scene graph generation aims to construct a semantic
+graph structure from an image such that its nodes and edges
+respectively represent objects and their relationships. One
+of the major challenges for the task lies in the presence
+of distracting objects and relationships in images; contex-
+tual reasoning is strongly distracted by irrelevant objects or
+backgrounds and, more importantly, a vast number of irrel-
+evant candidate relations. To tackle the issue, we propose
+the Selective Quad Attention Network (SQUAT) that learns
+to select relevant object pairs and disambiguate them via di-
+verse contextual interactions. SQUAT consists of two main
+components: edge selection and quad attention. The edge
+selection module selects relevant object pairs, i.e., edges in
+the scene graph, which helps contextual reasoning, and the
+quad attention module then updates the edge features us-
+ing both edge-to-node and edge-to-edge cross-attentions to
+capture contextual information between objects and object
+pairs. Experiments demonstrate the strong performance
+and robustness of SQUAT, achieving the state of the art on
+the Visual Genome and Open Images v6 benchmarks.
+
+1. Introduction
+
+The task of scene graph generation (SGG) is to construct
+a visually-grounded graph from an image such that its nodes
+and edges respectively represent objects and their relation-
+ships in the image [27, 43, 46]. The scene graph provides a
+semantic structure of images beyond individual objects and
+thus is useful for a wide range of vision problems such as
+visual question answering [36, 37], image captioning [53],
+image retrieval [11], and conditional image generation [10],
+where a holistic understanding of the relationships among
+objects is required for high-level reasoning. With recent ad-
+vances in deep neural networks for visual recognition, SGG
+has been actively investigated in the computer vision com-
+munity. A vast majority of existing methods tackle SGG by
+ﬁrst detecting candidate objects and then performing con-
+textual reasoning between the objects via message pass-
+
+Background
+
+Background
+
+bucket
+
+bucket
+
+(a) Ground-truth scene graph
+
+(b) Fully-connected scene graph
+
+Key-Value
+
+Node
+
+N2N
+
+Edge
+
+N2E
+
+E2N
+
+E2E
+
+Node
+
+Edge
+
+(c) Overview of the quad attention module
+
+y
+r
+e
+u
+Q
+
+Node
+
+Edge
+
+Figure 1.
+(a) The ground-truth scene graph contains only 4
+ground-truth objects and 4 relations between the objects. (b) Only
+13% of edges in a fully-connected graph have the actual relation-
+ships according to the ground-truths. (c) The overview of the quad
+attention. The node features are updated by node-to-node (N2N)
+and node-to-edge (N2E) attentions, and the edge features are up-
+dated by edge-to-node (E2N) and edge-to-edge (E2E) attentions.
+
+ing [19, 21, 43] or sequential modeling [28, 36, 50]. Despite
+these efforts, the task of SGG remains extremely challeng-
+ing, and even the state-of-the-art methods do not produce
+reliable results for practical usage.
+
+While there exist a multitude of challenges for SGG, the
+intrinsic difﬁculty may lie in the presence of distracting ob-
+jects and relationships in images; there is a vast number of
+potential but irrelevant relations, i.e., edges, which quadrat-
+ically increase with the number of candidate objects, i.e.,
+nodes, in the scene graph. The contextual reasoning for
+SGG in the wild is thus largely distracted by irrelevant ob-
+jects and their relationship pairs. Let us take a simple ex-
+ample as in Fig. 1, where 4 objects and 4 relations in its
+ground-truth scene graph exist in the given image. If our
+
+ThisCVPRpaperistheOpenAccessversion,providedbytheComputerVisionFoundation.Exceptforthiswatermark,itisidenticaltotheacceptedversion;thefinalpublishedversionoftheproceedingsisavailableonIEEEXplore.18664object detector obtains 6 candidate boxes, 2 of which are
+from the background (red), then the contextual reasoning,
+e.g., message passing or self-attention, needs to consider 30
+potential relations, 87% of which are not directly related ac-
+cording to the ground-truth and most of them may thus act
+as distracting outliers. In practice, the situation is far worse;
+in the Visual Genome dataset, the standard benchmark for
+SGG, an image contains 38 objects and 22 relationships on
+average [43], which means that only around 1% of object
+pairs have direct and meaningful relations even when ob-
+ject detection is perfect. As will be discussed in our exper-
+iments, we ﬁnd that existing contextual reasoning schemes
+obtain only a marginal gain at best and often degrade the
+performance. The crux of the matter for SGG may lie in
+developing a robust model for contextual reasoning against
+irrelevant objects and relations.
+
+To tackle the issue, we propose the Selective Quad Atten-
+tion Network (SQUAT) that learns to select relevant object
+pairs and disambiguate them via diverse contextual interac-
+tions with objects and object pairs. The proposed method
+consists of two main components: edge selection and quad
+attention. The edge selection module removes irrelevant ob-
+ject pairs, which may distract contextual reasoning, by pre-
+dicting the relevance score for each pair. The quad attention
+module then updates the edge features using edge-to-node
+and edge-to-edge cross-attentions as well as the node fea-
+tures using node-to-node and node-to-edge cross-attentions;
+it thus captures contextual information between all objects
+and object pairs, as shown in Figure 1 (c). Compared to pre-
+vious methods [19, 21], which perform either node-to-node
+or node-to-edge interactions, our quad attention provides
+more effective contextual reasoning by capturing diverse
+interactions in the scene graph. For example, in the case
+of Fig. 1 (a), [‘man’, ‘feeding’, ‘horse’] relates to [‘man’,
+‘holding’, ‘bracket’] and [‘horse’, ‘eat from’, ‘bracket’],
+and vice versa; node-to-node or node-to-edge interactions
+are limited in capturing such relations between the edges.
+
+Our contributions can be summarized as follows:
+
+• We introduce the edge selection module for SGG that
+learns to select relevant edges for contextual reasoning.
+
+• We propose the quad attention module for SGG that
+performs effective contextual reasoning by updating
+node and edge features via diverse interactions.
+
+• The proposed SGG model, SQUAT, outperforms the
+state-of-the-art methods on both Visual Genome and
+Open Images v6 benchmarks. In particular, SQUAT
+achieves remarkable improvement on the SGDet set-
+tings, which is the most realistic and challenging.
+
+2. Related work
+
+Scene graph generation The vast majority of SGG meth-
+ods [19, 21, 50] predict scene graphs in two stages: object
+detection and contextual reasoning. While the ﬁrst stage
+is typically done by a pre-trained detection module [1, 31],
+contextual reasoning is performed by different types of mes-
+sage passing [2, 5, 12, 19–21, 23, 30, 41–43, 48, 49], which
+uses a graph neural network with node-to-edge and edge-
+to-node attentions, or sequential modeling [8, 28, 36, 50],
+which updates the node features with node-to-node atten-
+tion and constructs edge features with edge-to-node atten-
+tion. Unlike the previous methods, we propose quad atten-
+tion, which comprises node-to-node, node-to-edge, edge-
+to-node, and edge-to-edge interactions, to capture all types
+of context exchange between candidate objects and their
+pairs for relational reasoning. In contextual reasoning, most
+of the methods consider all the candidate object pairs, i.e.,
+a fully-connected graph whose nodes are candidate objects.
+While Graph R-CNN [46] proposes a relation proposal net-
+work that prunes the edges from a fully-connected graph, it
+focuses on reducing the cost of message passing and does
+not analyze the effect of edge selection on the performance
+of scene graph generation. In contrast, we introduce an ef-
+fective edge selection method and provide an in-depth anal-
+ysis of it. On the other hand, since dataset imbalance/bias
+has recently emerged as a critical bottleneck for learning
+SGG1, several methods [3, 16, 34, 40, 47] propose to adopt
+the techniques from long-tailed recognition, e.g., data re-
+sampling [6, 19] and loss reweighting [9, 15, 45].
+
+Transformers for vision tasks and graph structures
+Transformers [38] have been adapted to the various com-
+puter vision tasks, e.g., object classiﬁcation [7, 26], object
+detection [1, 26, 32, 54] and segmentation [26, 52], and also
+extended for graph structures [13, 22, 29, 33]. Despite their
+success, vision transformer networks typically suffer from
+high complexity and memory consumption. Several vari-
+ants of transformer networks [4, 14, 32, 39, 54] have been
+proposed to tackle the issue and showed that a proper spar-
+siﬁcation technique, e.g., Sparse DETR [32], can not only
+reduce the cost of computation and memory but also im-
+prove the task performance. Our transformer network is
+designed to perform contextual reasoning for scene graph
+generation by capturing the inherent relationships between
+objects and relevant object pairs, and unlike existing spar-
+siﬁcation methods, which focus on token pruning [32] or
+local attention [14, 54], our edge selection module prunes
+not only the query edges to update but also the key-value
+edges used for updating.
+
+1For example, in the Visual Genome dataset, the most frequent entity
+class is 35 times larger than the least frequent one, and the most frequent
+predicate class is 8,000 times larger than the least frequent one.
+
+18665N
+o
+d
+e
+
+d
+e
+t
+e
+c
+t
+i
+o
+n
+
+(   ,   )
+(   ,   )
+(   ,   )
+(   ,   )
+(   ,   )
+(   ,   )
+(   ,   )
+…
+
+(cid:2271)
+
+ESMQ
+
+ESME2E
+
+ESMN2E
+
+(cid:2280)
+
+(cid:563)Q
+
+(cid:563)E2E
+
+(cid:563)N2E
+
+Q
+u
+a
+d
+
+a
+t
+t
+e
+n
+t
+i
+o
+n
+
+C
+l
+a
+s
+s
+i
+f
+i
+e
+r
+
+man
+
+horse
+
+glasses
+
+bucket
+
+Figure 2. The overall architecture of Selective Quad Attention Networks (SQUAT). SQUAT consists of three components:
+the node
+detection module, the edge selection module, and the quad attention module. First, the node detection module extracts nodes N by
+detecting object candidate boxes and extracting their features. Also, all possible pairs of the nodes are constructed as initial edges E.
+Second, the edge selection module select valid edges (ΩQ, ΩE2E, ΩN2E) with high relatedness scores. Third, the quad attention module
+updates the node and edge features via four types of attention. Finally, the output features are passed into a classiﬁer to predict the scene
+graph. See Sec. 4 for the details.
+
+3. Problem Deﬁnition
+
+Given an image I, the goal of SGG is to generate a vi-
+sually grounded graph G = (O, R) that represents objects
+O and their semantic relationships R for object classes C
+and predicate classes P. An object oi ∈ O is described
+by a pair of a bounding box bi ∈ [0, 1]4 and its class label
+ci ∈ C: oi = (bi, ci). A relationship rk ∈ R is represented
+by a triplet of a subject oi ∈ O, an object oj ∈ O, and a
+predicate label pij ∈ P: rk = (oi, oj, pij), which repre-
+sents relationship pij between subject oi and object oj.
+
+and ESME2E
+
+For example, an edge between a person and a background,
+e.g., an ocean, is invalid but can help to predict the relation-
+ships between a person and other objects. Only the valid
+edges extracted by ESMN2E
+are used to up-
+date the features of the nodes and valid edges from ESMQ.
+Finally, the output features are then passed into a classiﬁer
+to predict relationship classes. The remainder of this section
+presents the details of each component and training proce-
+dure (Sec. 4.4). In this section, the calligraphic font, i.e., N
+and E, denotes a set of features while the italic, i.e., N and
+E, denotes a matrix of stacked features of the set.
+
+4. Selective Quad Attention Networks
+
+4.1. Node detection for object candidates
+
+To generate semantically meaningful scene graphs as de-
+scribed in Section 3, we propose the Selective Quad Atten-
+tion Network (SQUAT) that consists of three main com-
+the node detection module
+ponents as shown in Fig. 2:
+(Sec. 4.1), the edge selection module (Sec. 4.2), and the
+quad attention module (Sec. 4.3). First, the node detection
+module establishes nodes for a scene graph by detecting ob-
+ject candidate boxes and extracting their features. All pos-
+sible pairs of the nodes are constructed as potential edges.
+Second, among all the potential edges, the edge selection
+module selects valid edges with high relatedness scores.
+Third, the quad attention module updates the features of
+nodes and valid edges via four types of attention: node-to-
+node (N2N), node-to-edge (N2E), edge-to-node (E2N), and
+edge-to-edge (E2E). For the quad attention module, we use
+three edge selection modules: query edge selection mod-
+ule for entire quad attention (ESMQ) and key-value edge
+selection modules for N2E attention (ESMN2E
+) and E2E
+attention (ESME2E
+). The nodes and edges may require
+different sets of edges to update their features, and some
+pruned edges may help to update nodes or selected edges.
+
+Given an image I, we use a pre-trained object detector,
+i.e., Faster R-CNN [31] in our experiments, to extract ob-
+ject bounding boxes and their class labels. Let bi ∈ [0, 1]4
+be the i-th object box coordinate and vi ∈ Rdv its visual
+feature where dv is the dimension of the visual feature. We
+construct a node feature fi by transforming bi and vi via
+fi = Wo[Wvvi; Wgbi],
+where Wo, Wv, and Wg are linear transformation matrices
+and [·; ·] is a concatenation operation. The edge feature fij
+is formed by concatenating two node features fi and fj and
+performing a linear transformation as
+
+(1)
+
+(2)
+
+fij = Wp[fi; fj],
+where Wp is the linear transformation matrix. As in Fig. 2,
+the set of entire node features N = {fi|1 ≤ i ≤ n} and
+the set of all possible edge features E = {fij|1 ≤ i, j ≤
+n, i (cid:4)= j} are passed into the edge selection and quad at-
+tention modules, whose details are described below. We
+denote the stacks of the features in N and E as N and E for
+the sake of simplicity.
+
+18666 
+ 
+(cid:2271)(cid:3047)(cid:2879)(cid:2869)
+
+(   ,   )
+(   ,   )
+(   ,   )
+(   ,   )
+…
+
+(cid:563)\Q
+
+(cid:563)Q
+(   ,   )
+(   ,   )
+A
+(   ,   ) S
+
+…
+(cid:3018)
+(cid:2271)(cid:3047)(cid:2879)(cid:2869)
+
+(cid:2280)(cid:3047)(cid:2879)(cid:2869)
+
+A
+S
+
+(cid:2274)(cid:3047)
+(   ,   )
+(   ,   )
+(   ,   )
+(   ,   )
+…
+
+(cid:563)Q
+(   ,   )
+(   ,   )
+(   ,   )
+…
+(cid:3018)
+(cid:2274)(cid:3047)
+
+(cid:3018)
+(cid:2273)(cid:3047)
+
+(cid:563)\Q
+(cid:3006)(cid:2870)(cid:3006) (cid:2274)(cid:3047)
+
+(cid:3015)(cid:2870)(cid:3006)
+
+(cid:563)N2E
+
+(cid:2274)(cid:3047)
+(   ,   )
+(   ,   )
+(   ,   )
+…(cid:563)E2E
+
+(   ,   )
+(   ,   )
+(   ,   )
+…
+
+edge-to-edge
+
+edge-to-node
+
+node-to-edge
+
+node-to-node
+
+(cid:4593)
+(cid:2274)(cid:3047)
+(   ,   )
+(   ,   )
+(   ,   )
+(   ,   )
+…
+
+(cid:563)Q
+(   ,   )
+(   ,   )
+(   ,   )
+…
+(cid:3018)(cid:4593)
+(cid:2274)(cid:3047)
+
+(cid:3018)(cid:4593)
+(cid:2273)(cid:3047)
+
+P
+L
+M
+
+(cid:2271)(cid:3047)
+
+P
+L
+M
+
+(cid:2280)(cid:3047)
+
+ters for Q, K, and V , respectively, dk is the dimension of
+the query vector, and W O is a learnable transformation pa-
+rameter for the output. Each attention head HAi captures
+the information from different representation subspaces in
+parallel, and the multi-head attention aggregates them.
+
+Fig. 3 shows the architecture of our quad attention layer.
+Following the transformer decoder layer, the t-th quad at-
+tention layer takes output edge features Et−1 and node fea-
+tures Nt−1 from the (t − 1)-th layer as its input and update
+them with a self-attention ﬁrst. Instead of updating all pos-
+sible edge features Et−1, we only update the valid edge fea-
+tures EQ
+t−1, whose indices are in ΩQ extracted from ESMQ
+:
+
+Figure 3. Detailed architecture of the quad attention. The node
+features are updated by node-to-node and node-to-edge attentions,
+and the valid edge features, selected by ESMQ, are updated by
+edge-to-node and edge-to-edge attentions. The key-value of node-
+to-edge and edge-to-edge attentions are selected by ESMN2E and
+ESME2E. See Sec. 4.3 for the details. Best viewed in color.
+
+4.2. Edge selection for relevant object pairs
+
+While node features N and edge features E can be up-
+dated via attentive message passing, a large number of irrel-
+evant edges in E interferes with the attention process. We
+thus propose to prune invalid edges (i.e., non-existing/false
+relationships) before proceeding to the quad attention mod-
+ule, which will be described in the next subsection.
+
+In order to remove such distracting edges, we introduce
+an edge selection module (ESM) that takes an edge feature
+fij between nodes i and j and predicts its relatedness score
+sij using a simple multi-layer perceptron. We choose the
+pairs with top-ρ% highest relatedness scores as valid edges
+to use in the following quad attention module.
+
+, ESMN2E
+
+As mentioned earlier, we use three edge selection mod-
+ules: ESMQ
+, and ESME2E
+. Each edge selection
+module ESMa takes the initial edge features E as inputs and
+outputs the valid edge index set Ω for each module, result-
+ing in ΩQ, ΩE2E, and ΩN2E.
+
+4.3. Quad attention for relationship prediction
+
+To capture contextual interactions between the nodes and
+the edges, we propose a quad attention scheme inspired by
+the transformer decoder [38]. The main component of the
+quad attention is multi-head attention:
+
+MHA(Q, K, V ) = [HA1; · · · ; HAh]W O
+(cid:3)
+
+(cid:2)
+
+HAi = softmax
+
+(QW Q
+i
+
+)(KW K
+√
+i
+dk
+
+)T
+
+V W V
+i
+
+,
+
+(3)
+
+(4)
+
+Gt = LN(Nt−1 + MHA(Nt−1, Nt−1, Nt−1)),
+H Q
+t−1)),
+t
+
+t−1 + MHA(EQ
+
+t−1, EQ
+
+t−1, EQ
+
+= LN(EQ
+
+(5)
+
+(6)
+
+where LN is layer normalization, Gt and Ht are the output
+of the self-attention layer for node features and valid edge
+features, respectively. For key-value edge features of N2E
+and E2E attentions, we extract the key-value set from the
+updated entire edge set Ht = HQ
+is the
+set of updated valid edges for query and E \Q = E − E Q.
+Then, H Q
+t are reﬁned by E2N and E2E attentions and Gt
+are reﬁned by N2N and N2E attentions:
+
+∪ E \Q, where HQ
+
+t
+
+t
+
+G(cid:2)
+t
+
+= LN(Gt + MHA(Gt, Gt, Gt)
+(cid:7)
+
+(cid:4)
+
+(cid:5)(cid:6)
+node-to-node attention
++ MHA(Gt, H N2E
+
+(cid:4)
+
+(cid:5)(cid:6)
+t
+node-to-edge attention
+
+, H N2E
+t
+
+(7)
+
+,
+))
+(cid:7)
+
+H Q
+t
+
+(cid:2) = LN(H Q
+t
+
++ MHA(H Q
+(cid:5)(cid:6)
+t
+edge-to-node attention
+
+, Gt, Gt)
+(cid:7)
+
+(cid:4)
+
++ MHA(H Q
+t
+
+(cid:4)
+
+, H E2E
+(cid:5)(cid:6)
+t
+edge-to-edge attention
+
+, H E2E
+t
+
+(8)
+
+,
+))
+(cid:7)
+
+t
+
+t
+
+and H E2E
+
+where H N2E
+are selected by the indices ΩN2E
+and ΩE2E from the stack of Ht, i.e., Ht. Each attention ex-
+plicitly represents a particular type of relationship between
+edges and nodes and helps to construct contextual informa-
+tion for the scene graph generation. Lastly, G(cid:2)
+t are
+further updated by multi-layer perceptron (MLP) followed
+by the residual connection and a layer normalization:
+
+t and H (cid:2)
+
+Nt = LN(G(cid:2)
+t
+Et = LN(H (cid:2)
+t
+
++ MLP(G(cid:2)
+t
++ MLP(H (cid:2)
+t
+
+))
+
+)),
+
+(9)
+
+(10)
+
+where H (cid:2)
+t is the stack of H(cid:2)
+attention layer outputs Nt and Et.
+
+t
+
+= HQ(cid:2) ∪ E \Q, and the quad
+
+where Q, K, and V are query, key, and value matrices.
+W Q
+i are learnable transformation parame-
+i
+
+i , and W V
+
+, W K
+
+The inputs N0 and E0 of the ﬁrst quad attention layer are
+the entire node features N and all possible edge features E,
+
+18667    
+  
+    
+ 
+  
+ 
+ 
+ 
+which are deﬁned in Sec. 4.1. Every quad attention layer
+uses the same valid edge sets to update the node features
+and valid edge features by four types of attention. Given
+the output edge features ET of the last T -th quad attention
+layer, each edge feature eij ∈ ET is passed into a feedfor-
+ward MLP to produce a probability distribution yij over the
+predicate classes P.
+
+4.4. Training objective
+
+To train SQUAT, we use a combination of two loss func-
+tions: a cross-entropy loss for the predicate classiﬁcation
+and a binary cross-entropy loss for the edge selection mod-
+ule. The ﬁrst predicate classiﬁcation loss is deﬁned as:
+
+LPCE =
+
+1
+|E|
+
+|N |(cid:8)
+
+i,j=1,i(cid:3)=j
+
+LCE(yij, ˆyij),
+
+(11)
+
+where LCE is the cross-entropy loss and ˆyij is a one-hot
+vector of ground-truth relationship labels ˆpij between ob-
+ject i and object j. To train the edge selection module, we
+use auxiliary binary cross-entropy deﬁned as:
+
+La
+
+ESM =
+
+1
+|E|
+
+|N |(cid:8)
+
+i,j=1,i(cid:3)=j
+
+LBCE(sa
+ij
+
+, ˆsij),
+
+(12)
+
+where LBCE is the binary cross-entropy loss, ˆsij is the bi-
+nary indicator of whether object i and object j have a rela-
+tionship or not, and a ∈ A = {Q, E2E, N2E}. The entire
+loss is deﬁned as:
+
+L = LPCE + λ
+
+1
+|A|
+
+(cid:8)
+
+a∈A
+
+La
+
+ESM,
+
+(13)
+
+where λ > 0 is a hyper-parameter. In training, LCE does
+not affect the parameters of ESM directly due to the hard
+selection of ESM, and the gradient passes on to train the
+edge feature extraction; ESM is mainly trained by LESM.
+
+5. Experiments
+
+In this section, we perform a diverse set of experiments
+to evaluate the proposed model. We use two datasets: 1) Vi-
+sual Genome (VG) [18] and 2) OpenImages v6 [17] datasets
+to train and evaluate model performances. We intend to
+show that our model can be generalized over heterogeneous
+cases by demonstrating competitive results on the two inde-
+pendent datasets.
+
+5.1. Datasets and evaluation metrics
+
+5.1.1 Visual Genome [18]
+
+The Visual Genome dataset is composed of 108k images
+with an average of 38 objects and 22 relationships per im-
+age. However, most of the predicate classes have less
+
+than 10 samples. Therefore, we adopt the widely-used VG
+split [21, 50] to select the most frequent 150 object classes
+and 50 predicate classes. Following the [50], we ﬁrst split
+the dataset into a training set (70%) and a test set (30%).
+Then, we sample 5k validation images from the training
+set to tune the hyperparameters. We evaluate SQUAT on
+three subtasks: Predicate Classiﬁcation (PredCls), Scene
+Graph Classiﬁcation (SGCls), and Scene Graph Detection
+(SGDet). The PredCls predicts the relationships given the
+ground-truth bounding boxes and object labels, the SGCls
+aims to predict the object labels and the relationships given
+the ground-truth bounding boxes, and the SGDet targets
+predicting the object bounding boxes, object labels, and
+relationships without any ground-truth. As the evaluation
+metrics, we adopt the mean recall@K (mR@K), as pre-
+viously used in scene graph generation literature [2, 35].
+mR@K is the average of recall@K for each relation. Fol-
+lowing [43], we apply the graph-constraint, in which each
+object pair can have only one relationship, for evaluation.
+
+5.1.2 OpenImages v6 [17]
+
+The OpenImages v6 dataset has 126,368 images for the
+training, 1,813 images for the validation, and 5,322 im-
+ages for the test. Each image in the dataset has 4.1 ob-
+jects and 2.8 relationships on average. The dataset has 301
+object classes and 31 predicate classes. Compared with
+the Visual Genome dataset, the quality of annotation is far
+more robust and complete. For OpenImages v6, follow-
+ing [17, 51], we calculate Recall@50 (R@50), weighted
+mean AP of relationships (wmAPrel), and weighted mean
+AP of phrases (wmAPphr) as evaluation metrics. APrel eval-
+uates the two object bounding boxes, the subject box and
+the object box, and three labels, the triplets of the sub-
+ject, the object, and the predicate. APphr evaluates a union
+bounding box of subject and object and three labels as the
+same as APrel. To reduce the dataset bias in evaluation, we
+calculate wmAPrel and wmAPphr with weighted average of
+per-relationship APphr and APphr, respectively. The weight
+of each relationship is calculated by their relative ratios in
+the validation set. The ﬁnal score scorewtd is obtained as
+0.2 × R@50 + 0.4 × wmAPrel + 0.4 × wmAPphr.
+
+5.2. Implementation details
+
+As in the previous work [19, 36], we adopt ResNeXt-
+101-FPN as a backbone network and Faster R-CNN as an
+object detector. The model parameters of the pre-trained ob-
+ject detector are frozen during the training time. We use a
+bi-level sampling [19] to handle the long-tailed distribution
+of the datasets. The hyperparameters of bi-level sampling
+are set the same as in [19]. We set the hyper-parameter
+λ = 0.1 for the loss function. The keeping ratio ρ is set
+to 70% for the SGDet setting on both the Visual Genome
+dataset and the OpenImages v6 dataset in the training. In
+
+18668Methods
+
+IMP+‡ [43]
+Motifs‡ [50]
+RelDN [51]
+VCTree‡ [36]
+MSDN [21]
+GPS-Net [23]
+RU-Net [25]
+HL-Net [24]
+VCTree-TDE [35]
+Seq2Seq [28]
+GPS-Net†
+JMSGG [44]
+BGNN† [19]
+SQUAT † (Ours)
+
+SGCls
+mR@20 mR@50 mR@100 mR@20 mR@50 mR@100 mR@20 mR@50 mR@100
+
+PredCls
+
+SGDet
+
+8.9
+11.5
+-
+12.4
+-
+-
+-
+-
+18.4
+21.3
+21.5
+-
+-
+25.6
+
+11.0
+14.6
+15.8
+15.4
+15.9
+15.2
+-
+-
+25.4
+26.1
+27.1
+24.9
+30.4
+30.9
+
+11.8
+15.8
+17.2
+16.6
+17.5
+16.6
+24.2
+22.8
+28.7
+30.5
+29.1
+28.0
+32.9
+33.4
+
+5.2
+6.5
+-
+6.3
+-
+-
+-
+-
+8.9
+11.9
+6.4
+-
+-
+14.4
+
+6.2
+8.0
+9.3
+7.5
+9.3
+8.5
+-
+-
+12.2
+14.7
+10.1
+13.1
+14.3
+17.5
+
+6.5
+8.5
+9.6
+8.0
+9.7
+9.1
+14.6
+13.5
+14.0
+16.2
+12.3
+14.7
+16.5
+18.8
+
+2.8
+4.1
+-
+4.9
+6.1
+-
+-
+-
+6.9
+7.5
+6.6
+-
+-
+10.6
+
+4.2
+5.5
+6.0
+6.6
+7.2
+6.7
+-
+-
+9.3
+9.6
+9.4
+9.8
+10.7
+14.1
+
+5.3
+6.8
+7.3
+7.7
+
+8.6
+10.8
+9.2
+11.1
+12.1
+11.9
+11.8
+12.6
+16.5
+
+Table 1. The scene graph generation performance of three subtasks on Visual Genome (VG) dataset with graph constraints. † denotes that
+the bi-level sampling [19] is applied for the model. ‡ denotes that the results are reported from the [35].
+
+Methods
+
+R@50
+
+RelDN [51]
+VCTree [36]
+Motifs [50]
+VCTree+TDE [35]
+GPS-Net [23]
+GPS-Net† [23]
+BGNN† [19]
+HL-Net [24]
+RU-Net [25]
+SQUAT †
+
+73.1
+76.1
+71.6
+69.3
+74.8
+74.7
+75.0
+76.5
+76.9
+75.8
+
+wmAP
+
+rel
+
+32.2
+34.2
+29.9
+30.7
+32.9
+32.8
+33.5
+35.1
+35.4
+34.9
+
+phr
+
+33.4
+33.1
+31.6
+32.8
+34.0
+33.9
+34.2
+34.7
+34.9
+35.9
+
+scorewtd
+
+40.9
+42.1
+38.9
+39.3
+41.7
+41.6
+42.1
+43.2
+43.5
+43.5
+
+Table 2. The scene graph generation performance on OpenImages
+v6 dataset with graph constraints. † denotes that the bi-level sam-
+pling [19] is applied for the model.
+
+the early stages of training, the edge selection model is not
+reliable, causing instability during training. To tackle the
+issue, we pre-trained the edge selection module for a few
+thousand iterations using LESM while freezing all other pa-
+rameters and then trained the entire SQUAT except for the
+object detector. Complete implementation details are spec-
+iﬁed in the supplementary material.
+
+5.3. Comparison with state-of-the-art models
+
+As shown in Table 1, on the Visual Genome dataset,
+SQUAT outperforms the state-of-the-art models on every
+setting, PredCls, SGCls and SGDet. Especially, SQUAT
+outperforms the state-of-the-art models by a large margin
+of 3.9 in mR@100 on the SGDet setting, which is the most
+realistic and important setting in practice as there is no per-
+fect object detector. There are more invalid pairs in the
+
+SGDet setting than in other settings since the detected ob-
+ject bounding boxes from the pre-trained object detector in-
+cludes many background boxes. This means that previous
+work for contextual modeling was most likely distracted
+by the invalid pairs; thus, SQUAT shows signiﬁcant per-
+formance improvement on the SGDet setting. BGNN [19]
+also leverage a scoring function to scale the messages of the
+invalid edges, however, SQUAT shows better results with
+our edge selection module to discard invalid object pairs.
+This becomes doable with the quad attention mechanism
+with edge selection which helps to reduce noise and outliers
+from invalid pairs more effectively. Also, SQUAT shows
+the performance improvements by 2.3 and 0.5 on the SG-
+Cls and the PredCls settings with mR@100, respectively;
+the more complex and realistic the task, the more notice-
+able the performance improvement of SQUAT becomes. It
+shows that SQUAT, composed of edge selection and quad
+attention, is appropriate for contextual reasoning to generate
+scene graphs even in a complex scene.
+
+Also, as shown in Table 2, SQUAT achieve competitive
+results or even outperform compared with the state-of-the-
+art models on the OpenImages v6 dataset with scorewtd.
+Since there are fewer objects and relationships in the images
+of the OpenImages v6 dataset than of the Visual Genome,
+the edge selection module seems less effective for the Open-
+Images v6 dataset. As there is a trade-off in recall and mean
+recall when bi-level sampling is utilized [2,28], the result of
+SQUAT in Table 2 is a compromised metric for R@50. But
+still, the R@50 of SQUAT is still competitive with that from
+RU-Net [25] and outperforms other recent baselines, and we
+achieve the best performance in wmAPphr by a large mar-
+gin. It shows SQUAT is effective in improving the scene
+graph generation performance and also in simple scenes.
+
+18669Q
+
+(cid:2)
+
+(cid:2)
+
+Variants
+E2E
+
+N2E
+
+SGDet
+mR@20 mR@50 mR@100
+
+Method
+
+SGDet
+
+N2N N2E E2N E2E mR@20 mR@50 mR@100
+
+BGNN [19]
+
+(cid:2)
+
+(cid:2)
+
+(cid:2)
+
+(cid:2)
+
+7.49
+
+9.12
+9.92
+9.84
+
+10.57
+
+10.31
+
+12.45
+13.22
+13.04
+
+14.12
+
+12.46
+
+15.00
+15.66
+15.60
+
+16.47
+
+(cid:2)
+(cid:2)
+(cid:2)
+
+(cid:2)
+
+(cid:2)
+
+(cid:2)
+(cid:2)
+(cid:2)
+
+(cid:2)
+
+(cid:2)
+
+(cid:2)
+
+(cid:2)
+(cid:2)
+(cid:2)
+
+(cid:2)
+
+(cid:2)
+(cid:2)
+(cid:2)
+(cid:2)
+
+(cid:2)
+
+7.02
+9.76
+9.70
+9.90
+9.77
+9.99
+
+10.57
+
+9.74
+12.98
+12.27
+13.05
+12.93
+13.02
+
+14.12
+
+11.57
+15.30
+15.03
+15.28
+15.42
+15.54
+
+16.47
+
+Table 3. The ablation study on model variants on edge selection.
+We remove the edge selection module for query selection and key-
+value selection.
+
+Table 5. The ablation study on model variants on quad atten-
+tion. N2N, N2E, E2N, E2E denote the node-to-node, node-to-
+edge, edge-to-node, and edge-to-edge attentions, respectively.
+
+Variants
+E2E
+
+Q
+
+shared
+distinct
+
+shared
+shared
+
+N2E
+
+shared
+shared
+
+SGDet
+mR@20 mR@50 mR@100
+
+9.61
+9.63
+
+12.70
+12.54
+
+14.12
+
+14.85
+14.64
+
+16.47
+
+distinct
+
+distinct
+
+distinct
+
+10.57
+
+Table 4. The ablation study on model variants on edge selection.
+We share the edge selection module for query selection and key-
+value selection. ‘shared’ denotes the edge selection modules share
+the parameters.
+
+Qualitative visualizations of SQUAT and more exper-
+iments on SQUAT with 1) additional measurement, e.g.,
+recall and non-graph constraint measurement, on Visual
+Genome, 2) performance with plug-and-play long-tailed
+recognition techniques and 3) additional qualitative results
+are given in Supplementary.
+
+5.4. Ablation study
+
+5.4.1 Model variants on edge selection
+
+To verify the effectiveness of the edge selection module, we
+evaluate the model from which each component of edge se-
+lection is removed on the Visual Genome dataset. As shown
+in Table 3, we observe that the quad attention module with-
+out the edge selection module shows much lower perfor-
+mance at mR@100 (-8.9%) than the full model which has
+the edge selection module; thus, to select the valid edges
+is important for the scene graph generation. On the other
+hand, the quad attention module without the edge selection
+module shows 20.4% higher performance than the BGNN
+and achieves 15.00 on mR@100.
+It shows the effective-
+ness of the quad attention module itself without the edge
+selection module. We also observe that the query selection
+is more critical than the key-value selection for the scene
+graph generation; it shows that selecting what to update is
+important for the scene graph generation.
+
+To evaluate the effectiveness of three distinct edge se-
+lection modules, we evaluate the models, some of which
+
+edge selection modules are shared. In Table 4, ESMa, of
+which a ∈ {Q, E2E, N2E} are denoted ‘shared’ in the col-
+umn, share the same parameters. We observe that the three
+fully-distinct edge selection modules boost the scene graph
+generation performances. It shows there exist differences
+between the edges needed to update both features and the
+edges that need to be updated.
+
+5.4.2 Model variants on quad attention
+
+To verify the effectiveness of the quad attention module, we
+evaluate the model from which each attention is removed
+on the Visual Genome dataset. As shown in Table 5, the
+full model with quad attention outperforms the other model
+variants. We also observe that the SQUAT without updating
+edges, i.e., edge-to-node and edge-to-edge attentions, per-
+forms poorer than the SQUAT without updating nodes, i.e.,
+node-to-node and node-to-edge attentions. It shows that up-
+dating edge features with context information is important
+for context reasoning. Especially, SQUAT without edge-to-
+edge attention shows worse performance than without edge-
+to-node attention since edge-to-edge attention, which is ne-
+glected in the previous work, can capture high-level infor-
+mation.
+
+5.5. The effect of the edge selection module
+
+We applied the edge selection module to the scene graph
+generation model with message passing methods. Since it
+is not known which pairs of objects have a relationship,
+the message passing methods use the fully-connected graph
+in the inference time. However, we empirically observe
+that message passing on fully-connected graph is meaning-
+less or even harmful for the scene graph generation. We
+use three baselines, IMP [43], BGNN [19], and SQUAT,
+for ablation study on the Visual Genome dataset. Table 6
+shows that message passing through fully-connected graph
+is harmful for the scene graph generation. Even though
+BGNN uses a gating function to scale down the messages
+from invalid edges, it does not work well.
+
+18670man
+
+glasses
+
+airplane
+
+plane
+
+fedora
+
+cowboy
+hat
+
+wing
+
+nose
+
+wing
+
+(a) SGDet setting on OpenImages v6
+
+(b) SGCls setting on Visual Genome
+
+man
+
+sunhat
+
+wing
+
+wing
+
+Figure 4. Qualitative results for edge selection module ESMQ for query selection. The selected edges after edge selection are drawn in the
+right graph. The green arrows denote the valid pairs, and the gray arrows denote the invalid pairs. The keeping ratio for the two settings is
+the same ρ = 35%. All of the valid edges remain, and most of the invalid edges are removed.
+
+model
+
+Graph
+
+SGDet
+mR@20 mR@50 mR@100
+
+IMP [43]
+
+BGNN [19]
+
+SQUAT
+
+No
+Full
+
+No
+Full
+ES
+GT
+
+No
+Full
+ES
+GT
+
+4.09
+2.87
+
+8.99
+7.49
+9.00
+14.15
+
+8.68
+9.12
+10.57
+17.95
+
+5.56
+4.24
+
+11.84
+10.31
+11.86
+16.41
+
+11.52
+12.45
+14.12
+19.21
+
+6.53
+5.42
+
+13.56
+12.46
+14.20
+17.09
+
+13.99
+15.00
+16.47
+19.51
+
+Table 6. The ablation study on message passing for the scene
+graph generation. There are four settings depending on which
+graphs are used in the message passing: No, Full, ES, and GT.
+Every result is reproduced with the authors’ code.
+
+To further investigate the effect of edge selection, we ap-
+plied message passing through ground-truth scene graphs
+to each model.
+In table 6, ‘No’ represents that message
+passing is not used, ‘Full’ and ‘GT’ indicate that message
+passing is used with the complete graph and the ground-
+truth scene graph, respectively; ‘ES’ means that the pro-
+posed edge selection module is used with message passing.
+As shown in Table 6, every model with the message pass-
+ing through ground truth outperforms state-of-the-art mod-
+els by a substantial margin, showing that removing the in-
+valid edges is crucial for scene graph generation. The edge
+selection module clearly improves not only the performance
+of SQUAT but also that of BGNN, the previous state-of-
+the-art model. It indicates that the edge selection module
+effectively removes the invalid edges and can be used as
+a plug-and-play module for message-passing-based scene
+graph methods.
+
+5.6. Qualitative results
+
+Qualitative results for the edge selection module are
+shown in Fig. 4. As shown in Fig. 4 (a), the object detection
+module extracts 6 bounding boxes, then the fully-connected
+graph has 30 edges in total, where only 6 valid edges are
+in the ground-truth. After edge selection with keeping ra-
+tio ρ = 35%, only 10 edges remain where 6 valid edges all
+remain. It signiﬁcantly reduces noises from invalid edges.
+The other example in Fig. 4 (b) shows the same tendency.
+
+6. Conclusion
+
+We presented a novel scene graph generation model that
+predicts a scene graph within an image. The method is de-
+signed to selectively utilize valid edges using our proposed
+quad attention module, and update the model from the valid
+edges only. The edge selection module effectively ﬁlters
+out invalid edges to sparsify a noisy scene graph, and thus it
+removes uncertainties brought by invalid edges. The quad
+attention module, which is composed of four components
+— node-to-node, node-to-edge, edge-to-node, and edge-to-
+edge attentions — captures the high-level information for
+accurately predicting relationships among different objects.
+We have shown the effectiveness of the SQUAT, and each
+component under various settings was properly validated in
+the experiments to demonstrate stability.
+
+Acknowledgements. This work was supported by the
+IITP grants (2021-0-00537: Visual common sense through
+self-supervised learning for restoration of invisible parts in
+images (50%), 2022-0-00959: Few-shot learning of causal
+inference in vision and language (40%), and 2019-0-01906:
+AI graduate school program at POSTECH (10%)) funded
+by the Korea government (MSIT).
+
+18671References
+
+[1] Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas
+Usunier, Alexander Kirillov, and Sergey Zagoruyko. End-to-
+end object detection with transformers. In European confer-
+ence on computer vision, pages 213–229. Springer, 2020. 2
+[2] Tianshui Chen, Weihao Yu, Riquan Chen, and Liang Lin.
+Knowledge-embedded routing network for scene graph gen-
+eration.
+In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, pages 6163–
+6171, 2019. 2, 5, 6
+
+[3] Meng-Jiun Chiou, Henghui Ding, Hanshu Yan, Changhu
+Wang, Roger Zimmermann, and Jiashi Feng. Recovering the
+unbiased scene graphs from the biased ones. In Proceedings
+of the 29th ACM International Conference on Multimedia,
+pages 1581–1590, 2021. 2
+
+[4] Krzysztof Choromanski, Valerii Likhosherstov, David Do-
+han, Xingyou Song, Andreea Gane, Tamas Sarlos, Peter
+Hawkins, Jared Davis, Afroz Mohiuddin, Lukasz Kaiser,
+et al. Rethinking attention with performers.
+International
+Conference on Learning Representations, 2021. 2
+
+[5] Bo Dai, Yuqi Zhang, and Dahua Lin. Detecting visual rela-
+tionships with deep relational networks. In Proceedings of
+the IEEE conference on computer vision and Pattern recog-
+nition, pages 3076–3086, 2017. 2
+
+[6] Alakh Desai, Tz-Ying Wu, Subarna Tripathi, and Nuno Vas-
+concelos. Learning of visual relations: The devil is in the
+tails. In Proceedings of the IEEE/CVF International Confer-
+ence on Computer Vision (ICCV), pages 15404–15413, Oc-
+tober 2021. 2
+
+[7] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov,
+Dirk Weissenborn, Xiaohua Zhai, Thomas Unterthiner,
+Mostafa Dehghani, Matthias Minderer, Georg Heigold, Syl-
+vain Gelly, et al. An image is worth 16x16 words: Trans-
+arXiv preprint
+formers for image recognition at scale.
+arXiv:2010.11929, 2020. 2
+
+[8] Jiuxiang Gu, Handong Zhao, Zhe Lin, Sheng Li, Jianfei Cai,
+and Mingyang Ling. Scene graph generation with exter-
+nal knowledge and image reconstruction. In Proceedings of
+the IEEE/CVF conference on computer vision and pattern
+recognition, pages 1969–1978, 2019. 2
+
+[9] Yuyu Guo, Lianli Gao, Xuanhan Wang, Yuxuan Hu, Xing
+Xu, Xu Lu, Heng Tao Shen, and Jingkuan Song. From
+general to speciﬁc: Informative scene graph generation via
+balance adjustment.
+In Proceedings of the IEEE/CVF In-
+ternational Conference on Computer Vision (ICCV), pages
+16383–16392, October 2021. 2
+
+[10] Justin Johnson, Agrim Gupta, and Li Fei-Fei. Image gener-
+ation from scene graphs. In Proceedings of the IEEE con-
+ference on computer vision and pattern recognition, pages
+1219–1228, 2018. 1
+
+[11] Justin Johnson, Ranjay Krishna, Michael Stark, Li-Jia Li,
+David Shamma, Michael Bernstein, and Li Fei-Fei. Image
+retrieval using scene graphs. In Proceedings of the IEEE con-
+ference on computer vision and pattern recognition, pages
+3668–3678, 2015. 1
+
+[12] Siddhesh Khandelwal, Mohammed Suhail, and Leonid Si-
+In
+gal. Segmentation-grounded scene graph generation.
+
+Proceedings of the IEEE/CVF International Conference on
+Computer Vision, pages 15879–15889, 2021. 2
+
+[13] Jinwoo Kim, Saeyoon Oh, and Seunghoon Hong. Trans-
+formers generalize deepsets and can be extended to graphs
+& hypergraphs. Advances in Neural Information Processing
+Systems, 34:28016–28028, 2021. 2
+
+[14] Nikita Kitaev, Łukasz Kaiser, and Anselm Levskaya. Re-
+former: The efﬁcient transformer. International Conference
+on Learning Representations, 2020. 2
+
+[15] Boris Knyazev, Harm de Vries, C˘at˘alina Cangea, Graham W
+Taylor, Aaron Courville, and Eugene Belilovsky. Graph
+density-aware losses for novel compositions in scene graph
+generation. arXiv preprint arXiv:2005.08230, 2020. 2
+[16] Boris Knyazev, Harm de Vries, C˘at˘alina Cangea, Graham W.
+Taylor, Aaron Courville, and Eugene Belilovsky. Genera-
+tive compositional augmentations for scene graph prediction.
+In Proceedings of the IEEE/CVF International Conference
+on Computer Vision (ICCV), pages 15827–15837, October
+2021. 2
+
+[17] Ivan Krasin, Tom Duerig, Neil Alldrin, Vittorio Ferrari,
+Sami Abu-El-Haija, Alina Kuznetsova, Hassan Rom, Jasper
+Uijlings, Stefan Popov, Shahab Kamali, Matteo Malloci,
+Jordi Pont-Tuset, Andreas Veit, Serge Belongie, Victor
+Gomes, Abhinav Gupta, Chen Sun, Gal Chechik, David Cai,
+Zheyun Feng, Dhyanesh Narayanan, and Kevin Murphy.
+Openimages: A public dataset for large-scale multi-label
+and multi-class image classiﬁcation. Dataset available from
+https://storage.googleapis.com/openimages/web/index.html,
+2017. 5
+
+[18] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A Shamma, Michael Bernstein, and
+Li Fei-Fei. Visual genome: Connecting language and vision
+using crowdsourced dense image annotations. 2016. 5
+[19] Rongjie Li, Songyang Zhang, Bo Wan, and Xuming He.
+Bipartite graph network with adaptive message passing for
+unbiased scene graph generation.
+In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 11109–11119, 2021. 1, 2, 5, 6, 7, 8
+[20] Yikang Li, Wanli Ouyang, Bolei Zhou, Jianping Shi, Chao
+Zhang, and Xiaogang Wang. Factorizable net: an efﬁcient
+subgraph-based framework for scene graph generation.
+In
+Proceedings of the European Conference on Computer Vi-
+sion (ECCV), pages 335–351, 2018. 2
+
+[21] Yikang Li, Wanli Ouyang, Bolei Zhou, Kun Wang, and Xi-
+aogang Wang. Scene graph generation from objects, phrases
+and region captions.
+In Proceedings of the IEEE inter-
+national conference on computer vision, pages 1261–1270,
+2017. 1, 2, 5, 6
+
+[22] Kevin Lin, Lijuan Wang, and Zicheng Liu.
+
+Mesh
+graphormer. In Proceedings of the IEEE/CVF international
+conference on computer vision, pages 12939–12948, 2021. 2
+[23] Xin Lin, Changxing Ding, Jinquan Zeng, and Dacheng Tao.
+Gps-net: Graph property sensing network for scene graph
+generation.
+In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 3746–
+3753, 2020. 2, 6
+
+18672[24] Xin Lin, Changxing Ding, Yibing Zhan, Zijian Li, and
+Dacheng Tao. Hl-net: Heterophily learning network for
+scene graph generation.
+In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 19476–19485, 2022. 6
+
+[25] Xin Lin, Changxing Ding, Jing Zhang, Yibing Zhan, and
+Dacheng Tao. Ru-net: Regularized unrolling network for
+In Proceedings of the IEEE/CVF
+scene graph generation.
+Conference on Computer Vision and Pattern Recognition,
+pages 19457–19466, 2022. 6
+
+[26] Ze Liu, Yutong Lin, Yue Cao, Han Hu, Yixuan Wei, Zheng
+Zhang, Stephen Lin, and Baining Guo. Swin transformer:
+Hierarchical vision transformer using shifted windows.
+In
+Proceedings of the IEEE/CVF International Conference on
+Computer Vision, pages 10012–10022, 2021. 2
+
+[27] Cewu Lu, Ranjay Krishna, Michael Bernstein, and Li Fei-
+Fei. Visual relationship detection with language priors. In
+European Conference on Computer Vision, 2016. 1
+
+[28] Yichao Lu, Himanshu Rai, Jason Chang, Boris Knyazev,
+Guangwei Yu, Shashank Shekhar, Graham W Taylor, and
+Maksims Volkovs. Context-aware scene graph generation
+with seq2seq transformers. In Proceedings of the IEEE/CVF
+International Conference on Computer Vision, pages 15931–
+15941, 2021. 1, 2, 6
+
+[29] Erxue Min, Runfa Chen, Yatao Bian, Tingyang Xu, Kangfei
+Zhao, Wenbing Huang, Peilin Zhao, Junzhou Huang, Sophia
+Ananiadou, and Yu Rong. Transformer for graphs: An
+overview from architecture perspective.
+arXiv preprint
+arXiv:2202.08455, 2022. 2
+
+[30] Mengshi Qi, Weijian Li, Zhengyuan Yang, Yunhong Wang,
+and Jiebo Luo. Attentive relational networks for mapping
+images to scene graphs.
+In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 3957–3966, 2019. 2
+
+[31] Shaoqing Ren, Kaiming He, Ross Girshick, and Jian Sun.
+Faster r-cnn: Towards real-time object detection with region
+proposal networks. Advances in neural information process-
+ing systems, 28, 2015. 2, 3
+
+[32] Byungseok Roh, JaeWoong Shin, Wuhyun Shin, and Sae-
+hoon Kim. Sparse detr: Efﬁcient end-to-end object detection
+with learnable sparsity. arXiv preprint arXiv:2111.14330,
+2021. 2
+
+[33] Yu Rong, Yatao Bian, Tingyang Xu, Weiyang Xie, Ying Wei,
+Wenbing Huang, and Junzhou Huang. Self-supervised graph
+transformer on large-scale molecular data. Advances in Neu-
+ral Information Processing Systems, 33:12559–12571, 2020.
+2
+
+[34] Mohammed Suhail, Abhay Mittal, Behjat Siddiquie, Chris
+Broaddus, Jayan Eledath, Gerard Medioni, and Leonid Si-
+gal. Energy-based learning for scene graph generation. In
+Proceedings of the IEEE/CVF Conference on Computer Vi-
+sion and Pattern Recognition, pages 13936–13945, 2021. 2
+[35] Kaihua Tang, Yulei Niu, Jianqiang Huang, Jiaxin Shi, and
+Hanwang Zhang. Unbiased scene graph generation from bi-
+ased training. In Proceedings of the IEEE/CVF conference
+on computer vision and pattern recognition, pages 3716–
+3725, 2020. 5, 6
+
+[36] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan Luo,
+and Wei Liu. Learning to compose dynamic tree structures
+for visual contexts.
+In Proceedings of the IEEE/CVF con-
+ference on computer vision and pattern recognition, pages
+6619–6628, 2019. 1, 2, 5, 6
+
+[37] Damien Teney, Lingqiao Liu, and Anton van Den Hengel.
+Graph-structured representations for visual question answer-
+In Proceedings of the IEEE conference on computer
+ing.
+vision and pattern recognition, pages 1–9, 2017. 1
+
+[38] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszko-
+reit, Llion Jones, Aidan N Gomez, Łukasz Kaiser, and Illia
+Polosukhin. Attention is all you need. Advances in neural
+information processing systems, 30, 2017. 2, 4
+
+[39] Sinong Wang, Belinda Z Li, Madian Khabsa, Han Fang, and
+Hao Ma. Linformer: Self-attention with linear complexity.
+arXiv preprint arXiv:2006.04768, 2020. 2
+
+[40] Tzu-Jui Julius Wang, Selen Pehlivan, and Jorma Laaksonen.
+Tackling the unannotated: Scene graph generation with bias-
+reduced models. arXiv preprint arXiv:2008.07832, 2020. 2
+[41] Wenbin Wang, Ruiping Wang, Shiguang Shan, and Xilin
+Chen. Exploring context and visual pattern of relationship
+for scene graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 8188–8197, 2019. 2
+
+[42] Sanghyun Woo, Dahun Kim, Donghyeon Cho, and In So
+Kweon. Linknet: Relational embedding for scene graph. Ad-
+vances in Neural Information Processing Systems, 31, 2018.
+2
+
+[43] Danfei Xu, Yuke Zhu, Christopher B Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing. In Pro-
+ceedings of the IEEE conference on computer vision and pat-
+tern recognition, pages 5410–5419, 2017. 1, 2, 5, 6, 7, 8
+[44] Minghao Xu, Meng Qu, Bingbing Ni, and Jian Tang. Joint
+modeling of visual objects and relations for scene graph gen-
+eration. Advances in Neural Information Processing Sys-
+tems, 34, 2021. 6
+
+[45] Shaotian Yan, Chen Shen, Zhongming Jin, Jianqiang Huang,
+Rongxin Jiang, Yaowu Chen, and Xian-Sheng Hua. Pcpl:
+Predicate-correlation perception learning for unbiased scene
+graph generation. In Proceedings of the 28th ACM Interna-
+tional Conference on Multimedia, pages 265–273, 2020. 2
+
+[46] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi
+Parikh. Graph r-cnn for scene graph generation. In Proceed-
+ings of the European conference on computer vision (ECCV),
+pages 670–685, 2018. 1, 2
+
+[47] Yuan Yao, Ao Zhang, Xu Han, Mengdi Li, Cornelius Weber,
+Zhiyuan Liu, Stefan Wermter, and Maosong Sun. Visual dis-
+tant supervision for scene graph generation. In Proceedings
+of the IEEE/CVF International Conference on Computer Vi-
+sion (ICCV), pages 15816–15826, October 2021. 2
+
+[48] Guojun Yin, Lu Sheng, Bin Liu, Nenghai Yu, Xiaogang
+Wang, Jing Shao, and Chen Change Loy. Zoom-net: Mining
+deep feature interactions for visual relationship recognition.
+In Proceedings of the European Conference on Computer Vi-
+sion (ECCV), pages 322–338, 2018. 2
+
+[49] Alireza Zareian, Svebor Karaman, and Shih-Fu Chang.
+In
+Bridging knowledge graphs to generate scene graphs.
+
+18673European Conference on Computer Vision, pages 606–623.
+Springer, 2020. 2
+
+[50] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin
+Choi. Neural motifs: Scene graph parsing with global con-
+text.
+In Proceedings of the IEEE conference on computer
+vision and pattern recognition, pages 5831–5840, 2018. 1,
+2, 5, 6
+
+[51] Ji Zhang, Kevin J Shih, Ahmed Elgammal, Andrew Tao,
+and Bryan Catanzaro. Graphical contrastive losses for scene
+graph generation. 2019. 5, 6
+
+[52] Sixiao Zheng, Jiachen Lu, Hengshuang Zhao, Xiatian Zhu,
+Zekun Luo, Yabiao Wang, Yanwei Fu, Jianfeng Feng, Tao
+Xiang, Philip HS Torr, et al. Rethinking semantic segmen-
+tation from a sequence-to-sequence perspective with trans-
+formers.
+In Proceedings of the IEEE/CVF conference on
+computer vision and pattern recognition, pages 6881–6890,
+2021. 2
+
+[53] Yiwu Zhong, Liwei Wang, Jianshu Chen, Dong Yu, and Yin
+Li. Comprehensive image captioning via scene graph de-
+composition. In European Conference on Computer Vision,
+pages 211–229. Springer, 2020. 1
+
+[54] Xizhou Zhu, Weijie Su, Lewei Lu, Bin Li, Xiaogang Wang,
+and Jifeng Dai. Deformable detr: Deformable transformers
+for end-to-end object detection. International Conference on
+Learning Representations, 2021. 2
+
+18674

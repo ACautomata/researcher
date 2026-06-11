@@ -1,0 +1,1882 @@
+1
+Language-Driven Object-Oriented Two-Stage Method for Scene Graph
+Anticipation
+Xiaomeng Zhu
+, Changwei Wang
+, Haozhe Wang
+, Xinyu Liu
+, Fangzhen Lin
+Abstract—A scene graph is a structured representation of
+objects and their spatio-temporal relationships in dynamic scenes.
+Scene Graph Anticipation (SGA) involves predicting future scene
+graphs from video clips, enabling applications in intelligent
+surveillance and human–machine collaboration. While recent
+SGA approaches excel at leveraging visual evidence, long-horizon
+forecasting fundamentally depends on semantic priors and
+commonsense temporal regularities that are challenging to extract
+purely from visual features. To explicitly model these semantic
+dynamics, we propose Linguistic Scene Graph Anticipation
+(LSGA), a linguistic formulation of SGA that performs temporal
+relational reasoning over sequences of textualized scene graphs,
+with visual scene-graph detection handled by a modular front-
+end when operating on video. Building on this formulation,
+we introduce Object-Oriented Two-Stage Method (OOTSM), a
+language-based framework that anticipates object-set dynamics
+and forecasts object-centric relation trajectories with temporal-
+consistency regularization, and we evaluate it on a dedicated
+benchmark constructed from Action Genome annotations. Exten-
+sive experiments show that compact fine-tuned language models
+with up to 3B parameters consistently outperform strong zero-
+and one-shot API baselines, including GPT-4o, GPT-4o-mini, and
+DeepSeek-V3, under matched textual inputs and context windows.
+When coupled with off-the-shelf visual scene-graph generators, the
+resulting multimodal system achieves substantial improvements
+on video-based SGA, boosting long-horizon mR@50 by up to
+21.9% over strong visual SGA baselines.
+Index Terms—Scene graph anticipation, video understanding,
+large language models, long-horizon prediction.
+I. INTRODUCTION
+Understanding relationships in human–scene interactions
+requires more than recognizing static information in a single
+frame; it necessitates comprehending complex interaction
+patterns that evolve among objects over time [1], [2]. Recently,
+spatio-temporal scene graphs have emerged as a powerful
+structured representation of these dynamics by decomposing a
+scene into pairwise relations between humans and objects [3]–
+[6]. Because they already encode how interactions change
+over time, extending these graphs into the future is a valuable
+next step [7], [8]. This predictive capability underpins diverse
+applications—for instance, anticipating abnormal behaviours
+Manuscript received December x, 2025; revised x x, 2025.
+Xiaomeng Zhu, Haozhe Wang, and Fangzhen Lin are with the Department of
+Computer Science and Engineering, The Hong Kong University of Science and
+Technology, Hong Kong 999077, China (email: xiaomeng.zhu@connect.ust.hk,
+hwangha@connect.ust.hk, flin@cse.ust.hk).
+Changwei Wang is with the Key Laboratory of Computing Power Net-
+work and Information Security, Ministry of Education, Shandong Computer
+Science Center, Qilu University of Technology, China (email: changwei-
+wang@sdas.org).
+Xinyu Liu is with the Academy of Interdisciplinary Studies, The Hong Kong
+University of Science and Technology, Hong Kong 999077, China (email:
+xliugd@connect.ust.hk).
+Implementable code is available at: https://github.com/ZhuXMMM/OOTSM.
+in intelligent-surveillance footage [9], [10] or inferring user
+intent early in human–machine collaboration [11], [12].
+To study this predictive problem more concretely, we
+therefore turn to focus on the recently proposed SGA challenge.
+Given a sequence of observed video frames, SGA aims to
+predict future scene graphs that capture both spatial and
+temporal relationships among objects. Despite its promise,
+existing SGA methods draw almost exclusively on visual
+cues contained in spatio-temporal scene graphs, limiting their
+ability to incorporate rich semantic priors for interaction
+prediction [13]–[15], which can be vital for nuanced and
+long-horizon forecasting. This observation leads to a central
+question: how can we effectively capture and predict human-
+object interaction dynamics by combining visual evidence with
+commonsense priors?
+Current approaches to SGA mostly utilize transformer-based
+architectures that jointly model temporal dependencies and
+spatial relationships from visual inputs [5], [16]–[18]. This
+joint optimization often entangles pixel level recognition with
+long-horizon relational reasoning, making it difficult to inject
+(or even measure) the role of semantic priors and commonsense
+regularities [19]–[26]. Therefore, we argue that an effective
+strategy for SGA is to explicitly decouple visual perception
+from semantic reasoning, organizing them within a unified
+multimodal framework: a video scene graph generator serves
+as the perception front-end, while a language-based module
+performs temporal relational reasoning on top of the extracted
+graphs. This separation allows advances in either vision or
+language components to be integrated without retraining the
+entire pipeline, and aligns with the modular design commonly
+adopted in multimedia understanding systems [19], [27]–[29].
+Based on this decoupled multimodal strategy, we develop a
+modular SGA framework where existing scene-graph detectors
+extract visual representations while a language model reasons
+over temporal graph dynamics. We formalize LSGA to enable
+interpretable reasoning within this architecture. Specifically,
+a LSGA task involves predicting future scene graphs given
+a sequence of scene graphs corresponding to a video clip.
+By conducting its core anticipation reasoning primarily in the
+language domain, LSGA uniquely positions Large Language
+Models (LLMs) to apply their extensive linguistic knowledge
+and understanding of the learned world [30]–[34] to the SGA
+challenge. Our main contributions in this work are as follows:
+• We formalize LSGA as a linguistic formulation of SGA
+and construct a dedicated benchmark by converting Action
+Genome into temporally ordered scene-graph sequences with
+observed/predicted splits under the standard SGA protocol.
+• We propose OOTSM, an object-oriented two-stage frame-
+work that anticipates future object sets and refines object-
+arXiv:2509.05661v2  [cs.CV]  3 Dec 2025
+2
+centric relational trajectories through temporal-consistency
+regularization.
+• We develop a unified prompting and fine-tuning strategy
+that adapts compact open-source LLMs to LSGA without
+requiring visual features. A 3B-parameter Llama model
+trained with this strategy outperforms strong API baselines
+including GPT-4o by 9.6% in R@50 and 3.2% in mR@50
+under matched textual inputs and context windows.
+• When integrated with frozen scene-graph detectors, OOTSM
+improves video-based SGA performance, achieving up to
+21.9% mR@50 gain on long-horizon prediction while
+maintaining robustness under detection noise.
+The remainder of this paper is organized as follows. Sec-
+tion II reviews existing scene graph methods. Section III
+presents our two-stage framework for linguistic scene graph
+anticipation with object dynamics modeling. Section IV pro-
+vides comprehensive evaluation on text-based and video-based
+settings. Section V concludes the paper.
+II. RELATED WORK
+A. Scene Graph Generation.
+Scene Graph Generation (SGG) characterizes images through
+object-predicate graphs. Early approaches utilized frequency
+biases [35] or graph neural networks [3] on Visual Genome [36],
+with later work addressing long-tail relations via contextual
+attention and debiasing strategies [37].
+Recent advances in multimedia have tackled inherent chal-
+lenges in scene graph understanding through multiple comple-
+mentary approaches. Zero-shot predicate prediction methods
+leverage knowledge priors to handle unseen relations [38].
+Scene graph refinement networks enhance graph quality through
+structured reasoning for downstream tasks like visual question
+answering [39]. For temporal scenarios, end-to-end video scene
+graph generation frameworks unify object detection, tracking,
+and relation recognition through transformer-based architectures
+[40]. Attention-guided relation detection approaches further
+improve performance by modeling distinctions among different
+visual cues in dynamic scenes [41]. Additionally, debiasing
+methods that address visual and semantic imbalances have
+been shown to mitigate class skew in both static and video
+settings [14]. Our framework accepts SGG outputs as input,
+ensuring compatibility with any state-of-the-art detector and
+making improvements orthogonal to our method.
+B. Scene Graph Anticipation.
+SGA extends SGG to temporal prediction over video streams.
+Current methods employ diverse architectural strategies: spatio-
+temporal transformers capture both spatial context and temporal
+dependencies [5], [16], spatial-temporal attention mechanisms
+enhance feature representations across frames [42], and continu-
+ous latent trajectory models via ODEs/SDEs characterize object
+dynamics in latent space [8], [43]. Probabilistic frameworks
+generate multiple plausible futures to account for prediction am-
+biguity [44], while object-centric approaches decompose scenes
+into individual entities for prediction [45]. Additionally, spatio-
+temporal memory networks consolidate information across
+long temporal ranges for improved consistency [46]. Most
+approaches assume object persistence and rely primarily on
+visual cues for dynamics modeling [8]. Our work complements
+these efforts by leveraging language models’ commonsense
+reasoning capabilities, enabling explicit modeling of object set
+dynamics through semantic understanding without requiring
+dense visual information.
+C. Large Language Models for Scene-Graph Tasks.
+Recent work leverages LLMs and vision-language models
+to enhance scene graph understanding and generation. For
+static scene graphs, SDSGG [47] employs LLMs to generate
+scene-specific descriptions with role-playing mechanisms for
+open-vocabulary prediction, improving adaptation to visual
+context. VLPrompt [48] leverages natural-language prompts to
+improve predictions for rare relations by encoding linguistic
+priors. LLM4SGG [49] parses natural language descriptions
+into structured scene graph triples, enabling weakly supervised
+learning from textual annotations. Commonsense validation
+approaches utilize small-scale LLMs to filter out commonsense-
+violated predictions, complementing traditional detection mod-
+els [50]. For temporal understanding, vision-language models
+such as Video-LLaMA [31] and HyperGLM [51] demonstrate
+multimodal reasoning capabilities, though these primarily focus
+on description and question-answering rather than future pre-
+diction. Scene graph parsing from natural language descriptions
+has been explored through LLM-based methods that convert
+textual inputs into structured scene graphs [52]. Our approach
+uniquely employs LLMs as the exclusive reasoning engine for
+long-term SGA.
+III. METHOD
+In this section, we formalize the LSGA task in Section III-A.
+Then we introduce the motivation and design principles of
+our two-stage architecture in Section III-B. We detail the
+Global Object Anticipation (GOA) module and Object-Oriented
+Relationship Anticipation (OORA) module in Section III-C
+and Section III-D, respectively. Finally, we describe the
+multimodal integration pathway for end-to-end video-based
+SGA in Section III-E.
+A. Preliminary
+Generally, the classical SGA setting takes a raw video
+prefix F1:n as input and requires a model to return a set
+of predicted scene graphs ˆGn+1:T that describe the objects
+and their pairwise relationships in the remaining frames. In
+practice, state-of-the-art pipelines realise this mapping with a
+single multi-modal network that must simultaneously decode
+visual patterns and reason over semantic structures—a design
+that conflates pixel-level recognition with symbolic anticipation.
+We propose LSGA to effectively disentangle these two
+complementary aspects. Specifically, an external scene-graph
+detector first transforms the observed frames into a sequence
+of graphs G1:n. The anticipation module then predicts ˆGn+1:T
+solely from this graph sequence, operating with its core
+anticipation reasoning entirely within the language domain and
+3
+Scene Graph Generation (SGG) Module
+…
+Pre-processing
+…
+Fine-
+Tuned 
+LLM
+…
+…
+Fine-
+Tuned 
+LLM
+Global Object Anticipation
+Object-Oriented Relationship Anticipation
+…
+Observed Frames
+Unobserved Frames
+Unobserved Frames
+Anticipated Scene Graph (only nodes)
+Observed Scene Graph
+Anticipated Scene Graph
+Frame 663, t=26.52s
+Frame 720, t=28.80s
+Frame 970, t=38.80s
+Frame 15, t=0.60s
+Frame 24, t=0.96s
+Frame 635, t=25.40s
+clothes
+unsure
+on the side of
+not contacting
+towel
+on the side of
+person
+looking at
+not contacting
+clothes
+not looking at
+on the side of
+not contacting
+towel
+in front of
+on the side of
+person
+looking at
+not contacting
+clothes
+not looking at
+in front of
+not contacting
+phone/
+camera
+in front of
+person
+looking at
+holding
+clothes
+looking at
+in front of
+not contacting
+phone/
+camera
+in front of
+person
+looking at
+holding
+clothes
+phone/
+camera
+person
+person
+phone/
+camera
+clothes
+not looking at
+in front of
+not contacting
+phone/
+camera
+in front of
+person
+looking at
+holding
+in front of
+not looking at
+holding
+person
+phone/
+camera
+…
+Frame 720, t=28.80s
+Frame 970, t=38.80s
+Fig. 1. Overall OOTSM pipeline. The left branch converts observed video frames into compact textual scene graphs; GOA module performs dynamic object
+anticipation, whereas OORA module carries out object-oriented relationship anticipation. Additionally, scene graphs can bypass GOA for direct input into
+OORA (dotted arrow), provided the continuous-object constraint is maintained—only objects present in the final observed frame are projected forward. The
+dashed gray path is optional visual SGG tool integration.
+thereby leveraging the commonsense priors embedded in LLMs.
+Formally, while SGA learns a mapping F1:n 7→ˆGn+1:T , LSGA
+concentrates on the semantic sub-problem G1:n 7→ˆGn+1:T ;
+consequently, the visual front-end can be substituted without
+necessitating retraining of the reasoning component.
+Throughout the paper, we denote the unique set of objects
+(each coinciding with a single category) by O = {o1, . . . , oNO}
+and the set of relation types by R = {r1, . . . , rNR}. Following
+[4], [8], R is partitioned into three disjoint subsets: attention
+relations Rattn, spatial relations Rspat, and contact relations
+Rcont. Each graph is therefore represented as a collection
+of triples (human, o, r) with o ∈O, r ∈R, providing
+a structured textual input that can be processed by any
+language model while remaining compatible with existing video
+annotations used later in the paper.
+B. Overall Framework
+Existing SGA methods often assume continuous object sets
+between observed and future frames, yet this assumption
+substantially limits their performance. Analysis on Action
+Genome reveals that only 61% of videos maintain identical
+object sets, with 39% exhibiting object dynamics (14% new
+appearances, 25% disappearances). An oracle experiment
+demonstrates that strict adherence to last-frame objects limits
+Recall@10 to 67%, leaving a 33% performance gap. These
+findings motivate explicit future object anticipation.
+To enable explicit object anticipation while addressing
+context window constraints of small-sized LLMs, we propose
+OOTSM, a two-stage framework for text-based LSGA that
+leverages LLM for future scene graph prediction (fig. 1).
+This framework first generates a global forecast of object
+occurrences through GOA, capturing object set dynamics
+beyond the last observed frame, followed by targeted object-
+oriented prompts in OORA for relation refinement—each
+stage remaining within token limitations. To optimize context
+utilization, we employ temporal graph merging, combining
+consecutive frames with identical relationships as follows:
+G(Ft) ≡G(Ft+1)
+(1)
+where G(Ft) represents the scene graph of frame t. This
+aggregation focuses the model’s attention on meaningful scene
+transitions rather than redundant patterns.
+Expanding on this approach, we now detail the two-stage
+mechanism through which our anticipation framework oper-
+ates: (i) First, GOA module utilizes a fine-tuned LLM to
+generate holistic forecasts of object occurrences and their
+general relational patterns, though this global approach may
+not capture precise temporal transitions between individual
+relationships. (ii) Second, OORA module addresses context
+window constraints by generating targeted per-object prompts,
+enabling the model to refine each object’s relational trajectory
+through multi-label classification with temporal continuity
+regularization, thus yielding more accurate relation predictions
+across the prediction horizon.
+The final integration stage consolidates these object-level
+predictions into a coherent, temporally consistent scene graph,
+resolving potential conflicts and ensuring realistic interaction
+trajectories. For applications involving raw visual data, we
+provide an optional integration pathway leveraging existing
+SGG methodologies, such as STTran [16], to bridge visual
+detections with our semantic anticipation capabilities, thereby
+enhancing applicability and interpretability across multimodal
+domains.
+C. Global Object Anticipation
+In the GOA module, we leverage the generative capabilities
+of a fine-tuned LLM to anticipate future scene graphs with a
+global perspective, as illustrated in fig. 2. Given observed video
+segments consolidated into coherent textual blocks G1, . . . , Gn,
+we construct a comprehensive prompt structured as:
+P = H ⊕ObservedText ⊕Instruction ⊕FutureFrameInfo (2)
+where, ⊕denotes string concatenation. H provides task-
+oriented context, ObservedText encapsulates the temporal
+sequence of observed frames, Instruction delineates precise
+output formatting requirements, and FutureFrameInfo explicitly
+enumerates the future frames requiring predictions.
+4
+Observed Scene Graph
+Global Object Anticipation
+Merge the 
+same SGs
+person
+in front of
+looking at
+holding
+medicin
+e
+Frame 
+42
+…
+person
+in front of
+looking at
+holding
+phone
+/camera
+Frame 111
+person
+in front of
+looking at
+holding
+phone
+/camera
+Frame 450
+person
+in front of
+looking at
+holding
+phone
+/camera
+Frame 452
+……
+Frame 450-452:
+object: 
+phone/camera, 
+attention: looking_at, 
+spatial: in_front_of, 
+contact: holding.
+Scene Graph Description
+Build 
+prompts 
+Prompt
+person
+in front of
+looking at
+holding
+medicin
+e
+Frame 
+42
+…
+person
+in front of
+looking at
+holding
+phone
+/camera
+Frame 471
+person
+in front of
+looking at
+holding
+phone
+/camera
+Frame 491
+person
+in front of
+looking at
+holding
+phone
+/camera
+Frame 492
+Unobserved Scene Graph
+You are an object‐prediction assistant. 
+Observed:  <ObservedText>  
+Output each frame as:
+Frame N: <object1>,<object2>,…
+Predict objects for future frames: 
+<Frame1, Frame2, …>  
+Build
+targets
+Frame 468:
+phone/camera
+……
+Frame 492:
+phone/camera
+Targets
+…
+…
+…
+…
+Frame
+468
+Frame
+492
+1.0
+tokenizer
+LLM
+token logits
+token ids
+Llama (3B)
+DeepSeek 
+(1.5B)
+Qwen 
+(1.5B)
+Fig. 2. GOA training flow. Observed scene graphs with identical structures
+are first merged and converted to textual descriptions, then combined with
+instructions to construct prompts. A finetuned LLM subsequently predicts
+future object sets, supervised by unobserved scene graph targets via temporally
+weighted cross-entropy loss LGOA.
+Conventional uniform weighting treats all future frames
+equally, yet our experiments (table III) show this approach
+compromises near-term accuracy as uncertain long-horizon
+predictions introduce high-variance gradients. We implement a
+cosine attenuation schedule for distant frames, reflecting their
+diminished signal-to-noise ratio and enabling the optimizer
+to prioritize higher-fidelity supervision. The loss for GOA is
+formulated as:
+LGOA =
+PT
+t=n+1 w(t) PKt
+i=1 LCE
+ pt,i, yt,i
+
+PT
+t=n+1 w(t) Kt
+,
+(3)
+where t ranges over the future graphs n+1, . . . , T, w(t) is the
+temporal weight, and for each graph, Kt denotes the number
+of byte-pair-encoded tokens in the target string representation
+of graph Gt, with predicted probabilities pt,i and ground-truth
+labels yt,i for i = 1, . . . , Kt. The weighting function w(t) is
+defined as:
+w(t) = β
+h
+1 + cos
+
+π t −(n + 1)
+T −(n + 1)
+i
++ (1 −β) ,
+(4)
+where β ∈[0, 1] balances the base weight and cosine
+modulation.
+GOA’s predictions identify object occurrences and relational
+contexts temporally. Despite establishing global coherence,
+insufficient temporal granularity precludes precise scene graph
+construction, necessitating OORA module refinements.
+D. Object-Oriented Relationship Anticipation
+OORA of our framework addresses a fundamental limitation
+of GOA, as illustrated in fig. 3: while GOA provides com-
+prehensive scene-level forecasts, it lacks precision in tracking
+individual objects’ temporal evolution. To resolve this, we
+implement object-oriented refinement, generating detailed multi-
+frame relationship distributions for each target entity. Beginning
+with the globally predicted scene graph bG(0), we isolate the
+set of predicted future objects O. For each object o ∈O, we
+craft an object-specific prompt:
+Po = Ho⊕ObservedSegmentso⊕Instructiono⊕FutureFrameso
+(5)
+where Ho provides the object-centric prediction context,
+ObservedSegmentso succinctly summarizes the object’s his-
+torical presence and interactions, Instructiono explicitly spec-
+ifies the expected format of relationship predictions, and
+FutureFrameso enumerates the prediction horizon, enabling
+targeted temporal predictions.
+Relationship predictions in sequential frames often exhibit
+implausible transitions and temporal inconsistencies, severely
+compromising long-term forecasting reliability. To address
+this critical challenge, we introduce a temporal-transition
+regularizer Ltrans that penalizes improbable relationship state
+transitions across consecutive frames. Concretely, we first
+transform the frame-wise transition counts T r
+real and the soft
+predictions T r
+pred into normalized histograms Dr
+real and Dr
+pred.
+To ensure robustness against sparse relationships and minor
+fluctuations, we apply gating mechanisms: a count threshold
+δ filters relationships with insufficient observed transitions,
+while a probability-change threshold τ = 0.2 excludes trivial
+variations in consecutive predictions. The discrepancy between
+distributions is measured using symmetrized Kullback–Leibler
+divergence:
+Ltrans =
+1
+NR
+NR
+X
+r=1
+1
+2
+ KL
+ Dr
+pred ∥Dr
+real
+
++ KL
+ Dr
+real ∥Dr
+pred
+
+,
+(6)
+Here, T r
+real and T r
+pred represent frame-wise relationship transi-
+tion frequencies for ground-truth and predicted probabilities,
+respectively. This temporal-consistency prior discourages un-
+necessary high-frequency changes in relation trajectories and
+reduces error accumulation at long horizons.
+To compute transition histograms, we employ an auxiliary
+discriminative classification layer trained with Binary Cross-
+Entropy loss LBCE, which maps internal representations to
+relationship category probabilities.
+Combining these discriminative losses with the generative
+teacher-forcing cross-entropy loss LCE, we form the complete
+OORA training objective:
+LOORA = LCE + LBCE + λLtrans,
+(7)
+where LCE denotes the teacher-forcing cross-entropy on
+the next-token distribution, LBCE supervises an auxiliary
+classification head that is trained independently of the frozen
+LLM parameters, and Ltrans enforces temporal smoothness of
+relationship transitions. A single hyper-parameter λ controls the
+trade-off between temporal regularization and the two accuracy-
+oriented terms; we set λ = 0.03 in experiments.
+E. Integration Framework for Video SGA
+We propose an optional integration pathway with established
+SGG tools to extend our textual SGA framework to raw video
+inputs, bridging visual perception and semantic anticipation.
+The process begins with frame-level detection, where SGG tools
+extract bounding boxes, object labels ∈O, and relationships
+∈R, which are converted into our standardized textual format.
+5
+Object-Oriented Relationship Anticipation
+Observed Scene Graph
+person
+in front of
+looking at
+holding
+medicin
+e
+Frame 
+42
+person
+in front of
+looking at
+holding
+phone
+/camera
+Frame 111
+person
+in front of
+looking at
+holding
+phone
+/camera
+Frame 450
+person
+in front of
+looking at
+holding
+phone
+/camera
+Frame 452
+person
+in front of
+looking at
+holding
+medicin
+e
+Frame 
+42
+…
+person
+in front of
+looking at
+holding
+phone
+/camera
+Frame 471
+person
+in front of
+looking at
+holding
+phone
+/camera
+Frame 491
+person
+in front of
+looking at
+holding
+phone
+/camera
+Frame 492
+Unobserved Scene Graph
+person
+in front of
+looking at
+holding
+phone
+/camera
+Frame 111
+person
+in front of
+looking at
+holding
+phone
+/camera
+Frame 450
+person
+in front of
+looking at
+holding
+phone
+/camera
+Frame 452
+person
+in front of
+looking at
+holding
+medicine
+Frame 42
+person
+in front of
+looking at
+holding
+medicine
+Frame 411
+person
+in front of
+looking at
+holding
+medicine
+Frame 412
+…
+Build
+targets
+……
+Frame 492:
+object: phone/camera
+attention: looking at, 
+spatial: in front of, 
+contact: holding.
+Targets
+Merge the 
+same SGs
+……
+Frame 450-452:
+object: 
+phone/camera, 
+attention: looking at, 
+spatial: in front of, 
+contact: holding.
+Build 
+prompts 
+…
+You are a scene‐graph assistant. 
+Target object: <object_class>  
+Observed segments: <ObservedText> 
+Output each as 
+Frame N: attention: <…>; spatial: 
+<…>; contact: <…>.
+Predict relations for future frames
+<Frame1, Frame2, …>  
+Scene Graph Description
+tokenizer
+LLM
+Prompt
+classifier
+…
+…
+…
+…
+Frame
+468
+Frame
+492
+…
+…
+…
+Frame 468
+Frame 492
+…
+…
+…
+Frame 468
+Frame 492
+token logits
+token ids
+frame logits
+frame labels
+Normalize 
+Transitions
+KL div
+Group 
+by object
+Llama (3B)
+DeepSeek 
+(1.5B)
+Qwen 
+(1.5B)
+Fig. 3. OORA training flow. Observed scene graphs are first grouped by object, then frames with identical scene graph structures are merged. Scene graph
+descriptions are combined with object-specific information to build prompts. These object-specific prompts guide a finetuned LLM to predict future relationships
+(LCE). An auxiliary classifier generates per-frame relationship probabilities (LBCE), while a transition regularizer (Ltrans) ensures temporal coherence by
+penalizing improbable state transitions.
+We implement temporal merging to consolidate consecu-
+tive frames with identical elements, optimizing for textual
+compactness without semantic redundancy. This condensed
+“observed text” serves as input to GOA’s prompt for initial
+object anticipation, consistent with our primary pipeline. The
+anticipation then follows our two-stage methodology: the GOA
+module generates holistic future forecasts for the first stage
+while OORA provides object-centric refinements for the next
+stage.
+Finally, we establish bidirectional mapping between textual
+predictions and spatial representations by linking semantic
+relationships to their corresponding bounding box indices. This
+produces a comprehensive spatiotemporal scene graph with
+both semantic and spatial localization data, enabling end-to-
+end video-based SGA. To validate robustness, we evaluate
+SGG noise impact using ground-truth scene graphs (seen in
+table I) and detector outputs (seen in table II). Additionally, to
+encourage high-confidence relation scores and suppress noise,
+we augment SGG training with a margin-based multilabel-
+threshold loss. Specifically, for predicted probabilities p and
+ground-truth labels y, we define:
+Lthr(p, y) =
+1
+NR
+NR
+X
+r=1
+h
+yr max
+ 0, γpos −pr
+
++ (1 −yr) max
+ 0, pr −γneg
+i
+,
+(8)
+where γpos and γneg are margin parameters. The final objective
+combines Lrel = LBCE + η Lthr, creating an explicit decision
+margin that reduces ambiguous outputs. In our experiments,
+we set γpos = 0.9, γneg = 0.5, and η = 0.5.
+IV. EXPERIMENT
+We conduct comprehensive evaluations on the standard
+Action Genome dataset across text-based LSGA and video-
+based SGA settings. Our experiments include baseline com-
+parisons in Sections IV-C and IV-D, ablation studies on
+key components in Sections IV-E to IV-G, hyperparameter
+analysis in Sections IV-H and IV-I, and robustness evaluation
+in Section IV-J.
+A. Dataset and Evaluation Protocol
+We evaluate on Action Genome (AG) [4], the standard
+benchmark for scene graph anticipation with dense frame-
+level human-object interaction annotations. Following the
+established SGA protocol [8], we filter videos with fewer than
+three annotated frames, resulting in 11.4K videos, and adopt
+the official train-test split. The dataset comprises 35 object
+classes and 25 relation classes (attention, spatial, contact). AG
+remains the only real-world video dataset with comprehensive
+annotations for temporal scene graph reasoning, and all prior
+SGA methods evaluate exclusively on this dataset for fair
+comparison.
+Evaluation employs R@K and mR@K metrics with K ∈
+{10, 20, 50}. R@K measures anticipation of relevant relation-
+ships between observed objects, while mR@K addresses class
+imbalance by equally weighting predicate performance. We
+vary observation ratios F ∈{0.3, 0.5, 0.7, 0.9} to assess short-
+term and long-term capabilities. We adopt the standard “With
+Constraint” setting used in VidSGG and SGA, where each
+subject-object pair is assigned at most one predicted predicate
+(the highest-scoring one), and R@K/mR@K are computed
+over the top-K scoring triplets per frame. This aligns with
+LLMs’ discrete categorical output nature, unlike global ranking
+schemes that assume graded confidence distributions.
+6
+TABLE I
+RESULTS FOR TEXT-BASED LSGA (GT SCENE GRAPHS, WITHOUT SGG
+TOOL). EVALUATION IS BASED ON RECALL@K AND MEANRECALL@K
+WITH K = 10, 20, 50. WE COMPARE TWO SETTINGS: (1) W/O GOA:
+RELATION PREDICTION CONDITIONED ON OBSERVED GT OBJECTS; (2) W/
+GOA: FUTURE OBJECT PREDICTION FOLLOWED BY PER-OBJECT RELATION
+REASONING. BOLD INDICATES THE BEST RESULT, AND UNDERLINE
+INDICATES THE SECOND-BEST RESULT.
+Setting Method
+R / mR@10 R / mR@20 R / mR@50
+w/o
+GOA
+GPT4o-mini
+47.2 / 32.6
+49.2 / 38.2
+49.2 / 38.3
+GPT4o
+61.2 / 43.7
+64.6 / 52.9
+64.7 / 53.2
+DeepSeek-V3
+55.2 / 38.9
+57.9 / 46.4
+58.0 / 46.6
+OOTSM (DeepSeek-R1-1.5B)
+60.7 / 35.8
+64.4 / 43.5
+64.4 / 43.5
+OOTSM (Qwen2.5-1.5B Instruct)
+62.0 / 36.2
+65.1 / 43.7
+65.1 / 43.7
+OOTSM (Llama-3.2-3B Instruct)
+68.7 / 42.8
+72.4 / 51.8
+72.4 / 51.8
+w/
+GOA
+GPT4o-mini
+47.5 / 31.6
+49.5 / 37.3
+49.6 / 37.5
+GPT4o
+60.6 / 43.3
+63.9 / 52.5
+64.0 / 52.8
+DeepSeek-V3
+55.1 / 39.7
+57.9 / 46.8
+57.9 / 47.1
+OOTSM (DeepSeek-R1-1.5B)
+61.0 / 35.3
+65.6 / 44.2
+65.6 / 44.2
+OOTSM (Qwen2.5-1.5B Instruct)
+61.8 / 36.3
+65.3 / 43.8
+65.3 / 43.8
+OOTSM (Llama-3.2-3B Instruct)
+68.4 / 41.5
+73.6 / 56.0
+73.6 / 56.0
+B. Experimental Setup
+For pure textual LSGA, predictions use ground-truth annota-
+tions from observed frames. We compare OOTSM against two
+groups: (1) API-based baselines using direct inference without
+fine-tuning (GPT-4o, GPT-4o-mini, DeepSeek-V3), and (2)
+fine-tuned LLM variants with alternative backbones (Llama-
+3.2-3B, DeepSeek-R1-1.5B, Qwen 2.5-1.5B) integrated within
+our framework. This text-based setting directly validates our
+linguistic paradigm for temporal reasoning, decoupled from
+visual perception challenges.
+For video-based SGA, we evaluate in the GAGS setting
+where ground-truth objects and bounding boxes are pro-
+vided by Action Genome annotations. This isolates temporal
+reasoning from object detection challenges. We benchmark
+against state-of-the-art methods: STTran [16], DSGDet [18],
+SceneSayerODE, and SceneSayerSDE [8].
+All experiments are conducted on a single NVIDIA A100
+GPU with 40GB memory. We employ LoRA-based fine-tuning
+with rank=32 and α=32, training the GOA module for 5 epochs
+and OORA module for 10 epochs using SGD optimization
+with learning rate 1 × 10−5 and batch size 1. The context
+window is set to 2048 tokens to balance temporal coverage with
+computational efficiency. During inference, we apply nucleus
+sampling with temperature=0.7 and top-p=0.4 to maintain
+generation diversity. Output length constraints are adapted to
+observation ratios: for F ∈{0.3, 0.5, 0.7, 0.9}, GOA is limited
+to {1280, 1024, 768, 512} tokens respectively, while OORA
+is limited to {1792, 1536, 1280, 1024} tokens, reflecting the
+greater complexity of relation prediction.
+C. Text-based LSGA Results
+Table I reports Recall@K and meanRecall@K for text-based
+LSGA under two settings—w/o GOA (direct relation prediction,
+assuming all objects in the last observed frame persist) and
+w/ GOA (object forecasting before relation reasoning). In both
+cases, recall jumps markedly from R@10 to R@20, reflecting
+performance across short-, mid-, and long-term horizons.
+TABLE II
+RESULTS FOR SGA ON GROUNDED ACTION GENOME SCENES (GAGS)
+UNDER THE WITH-CONSTRAINT SETTING (USING SGG TOOL).
+EVALUATION IS CONDUCTED WITH DIFFERENT OBSERVED CONTEXT
+FRACTIONS (F). WE REPORT R / MR@10, R / MR@20, AND R / MR@50.
+F
+Method
+R / mR@10 R / mR@20 R / mR@50
+0.3
+STTran+
+30.8 / 7.1
+32.8 / 7.8
+32.8 / 7.8
+DSGDet+
+27.0 / 6.7
+28.9 / 7.4
+28.9 / 7.4
+STTran++
+30.7 / 11.8
+33.1 / 13.3
+33.1 / 13.3
+DSGDet++
+25.7 / 11.1
+28.2 / 12.8
+28.2 / 12.8
+SceneSayerODE
+34.9 / 15.1
+37.3 / 16.6
+37.3 / 16.6
+SceneSayerSDE
+39.7 / 18.4
+42.2 / 20.5
+42.3 / 20.5
+OOTSM w/o GOA (Ours)
+38.8 / 19.5
+48.3 / 31.5
+49.3 / 33.7
+OOTSM w/ GOA (Ours)
+39.0 / 19.7
+47.8 / 31.5
+48.4 / 32.3
+0.5
+STTran+
+35.0 / 8.0
+37.1 / 8.7
+37.1 / 8.8
+DSGDet+
+31.2 / 7.8
+33.3 / 8.6
+33.3 / 8.6
+STTran++
+35.6 / 15.2
+38.1 / 17.8
+38.1 / 15.2
+DSGDet++
+29.3 / 13.9
+31.9 / 20.6
+32.0 / 13.9
+SceneSayerODE
+40.7 / 17.4
+43.4 / 19.2
+43.4 / 19.3
+SceneSayerSDE
+45.0 / 20.7
+47.7 / 23.0
+47.7 / 23.1
+OOTSM w/o GOA (Ours)
+44.9 / 23.1
+50.1 / 29.9
+50.1 / 29.9
+OOTSM w/ GOA (Ours)
+43.4 / 21.6
+52.3 / 33.8
+52.8 / 35.9
+0.7
+STTran+
+40.0 / 9.1
+41.8 / 9.8
+41.8 / 9.8
+DSGDet+
+35.5 / 9.6
+37.3 / 9.6
+37.3 / 9.6
+STTran++
+41.3 / 18.2
+43.6 / 18.2
+43.6 / 18.2
+DSGDet++
+33.9 / 15.9
+36.3 / 15.9
+36.3 / 15.9
+SceneSayerODE
+49.1 / 21.0
+51.6 / 22.9
+51.6 / 22.9
+SceneSayerSDE
+52.0 / 24.1
+54.5 / 26.5
+54.5 / 26.5
+OOTSM w/o GOA (Ours)
+52.6 / 26.6
+56.9 / 32.9
+56.9 / 32.9
+OOTSM w/ GOA (Ours)
+53.6 / 26.8
+58.9 / 34.8
+58.9 / 34.9
+0.9
+STTran+
+44.7 / 10.3
+45.9 / 10.8
+45.9 / 10.8
+DSGDet+
+38.8 / 10.2
+40.0 / 10.7
+40.0 / 10.7
+STTran++
+46.0 / 19.6
+47.7 / 21.4
+47.7 / 21.4
+DSGDet++
+38.1 / 16.3
+39.8 / 17.7
+39.8 / 17.7
+SceneSayerODE
+58.1 / 25.0
+59.8 / 26.4
+59.8 / 26.4
+SceneSayerSDE
+60.3 / 28.5
+61.9 / 29.8
+61.9 / 29.8
+OOTSM w/o GOA (Ours)
+61.2 / 31.3
+69.8 / 43.2
+70.1 / 43.8
+OOTSM w/ GOA (Ours)
+60.6 / 31.9
+73.2 / 48.1
+74.2 / 51.7
+Our proposed OOTSM (Llama-3.2-3B Instruct) achieves
+the highest R@20/50: 72.4%/72.4% without GOA and
+73.6%/73.6% with GOA. GPT-4o is competitive, recording
+the highest mR@10 (43.7%) without GOA. Adding predicted
+objects with GOA increases OOTSM’s mR@20 by 4.2%
+over the single-stage setting, indicating that GOA refines
+the candidate object set and improves long tail prediction
+consistency.
+D. Video-based SGA Results
+Results for video-based SGA under constrained conditions
+(table II) demonstrate our OOTSM method’s consistent supe-
+riority across all observation fractions (F = 0.3, 0.5, 0.7, 0.9).
+When compared to strong baselines (e.g., SceneSayerSDE), our
+approach exhibits substantial performance advantages, particu-
+larly in medium-to-long-range predictions at R@20 and R@50.
+At F = 0.9, OOTSM achieves significant improvements of
+11.3% and 12.3% in R@20 and R@50, respectively, relative to
+SceneSayerSDE. The pronounced enhancements in mR metrics
+further demonstrate our method’s capacity for effective long-tail
+relation prediction through language prior integration.
+As illustrated in fig. 4, we present two representative cases:
+one video where new objects emerge in future frames, and
+another where existing objects gradually disappear. GOA
+7
+Frame 660
+Frame 635
+Frame 634
+Frame 269
+…
+…
+person
+shelf
+book
+person
+shelf
+person
+shelf
+person
+door
+book
+GOA
+ Results
+person
+dish
+doorway
+person
+dish
+person
+dish
+doorway
+person
+picture
+Vid. id: G6ZOB
+Vid. id: GYVK9
+Frame 223
+Frame 743
+Frame 765
+Frame 770
+…
+…
+Input
+ Keyframes
+OORA
+ Results
+shelf
+person
+not looking at
+in front of
+not contacting
+person
+shelf
+not looking at
+in front of
+not contacting
+not looking at
+person
+in front of
+not contacting
+shelf
+book
+holding
+in front of
+looking at
+dish
+person
+not looking at
+in front of
+holding
+not looking at
+person
+in front of
+holding
+dish
+doorway
+not contacting
+in front of
+not looking at
+person
+not looking at
+in front of
+holding
+dish
+doorway
+not contacting
+in front of
+not looking at
+looking at
+person
+in front of
+not contacting
+door
+book
+holding
+in front of
+not looking at
+picture
+person
+looking at
+in front of
+holding
+Observed Frames
+Unobserved Frames
+Observed Frames
+Unobserved Frames
+Fig. 4. Qualitative results of OOTSM. Two representative videos from Action Genome demonstrating newly appearing and disappearing objects in future
+predictions. Each example shows observed and unobserved frames with GOA-predicted future objects and OORA-anticipated relations. Green entries denote
+correct predictions; red entries denote incorrect predictions.
+TABLE III
+ABLATION ON WEIGHTING AND TRANSITION REGULARIZERS. WEIGHT
+REFERS TO THE COSINE-WEIGHTED CE LOSS APPLIED IN GOA, AND
+TRANSITION DENOTES THE TRANSITION LOSS INTRODUCED IN OORA.
+Index
+Weighting
+Transition
+R / mR@10
+R / mR@20
+R / mR@50
+(a)
+—
+—
+67.5 / 41.3
+72.6 / 53.9
+72.6 / 53.9
+(b)
+—
+✓
+68.1 / 41.4
+73.3 / 54.9
+73.3 / 54.9
+(c)
+✓
+—
+67.9 / 42.0
+73.3 / 55.6
+73.3 / 55.6
+(d)
+✓
+✓
+68.4 / 41.5
+73.6 / 56.0
+73.6 / 56.0
+predicts object set dynamics based on global context rather
+than mechanically replicating the last observed frame. This
+capability stems from LLMs’ ability to model temporal
+information in textual scene graph sequences, enabling them
+to learn semantically stable dynamic patterns and smooth local
+noise. Building on these predictions, OORA produces correct
+relationship predictions at most timesteps (marked in green),
+with errors (in red) primarily occurring at fine-grained bound-
+aries of attention/contact state transitions, demonstrating that
+the model effectively generates plausible temporal evolution
+following anticipated object trajectories.
+E. Impact of Cosine–Weighted and Transition Losses
+We evaluate two temporal regularizers on the validation split.
+Cosine-weighted CE loss is applied in GOA; each token loss is
+rescaled by the decay factor of eq. (4) with β = 0.5. Transition
+loss is the gated KL term introduced in OORA and weighted
+by λ = 0.03. The BCE used to train the classifier head in
+OORA does not update the LLM backbone and is therefore
+omitted from this ablation.
+The results are shown as table III. Adding the cosine
+weighting lifts overall recall from 72.6% to 73.3% and increases
+the long-tail metric mR@20 by 1.7% (c). The gains confirm that
+down-weighting distant-future tokens reduces noisy gradients
+and lets the model emphasize near-term, high-confidence
+patterns, markedly improving tail recall. Using the transition
+loss alone also reaches 73.3% R@20, but improves mR@20
+only to 54.9% (b), suggesting it mainly enforces smoothness
+TABLE IV
+ONE-SHOT AND ZERO-SHOT PERFORMANCE ON PURE TEXT-BASED
+LSGA (W/ GOA). EACH MODEL FIRST PREDICTS FUTURE OBJECTS
+BEFORE PERFORMING RELATION REASONING. R@K AND MR@K
+(K = 10, 20, 50) ARE REPORTED. BOLD INDICATES THE BEST RESULT,
+AND UNDERLINE INDICATES THE SECOND-BEST RESULT.
+Mode
+Method
+R / mR@10 R / mR@20 R / mR@50
+One-shot
+GPT4o-mini
+60.4 / 41.4
+63.5 / 49.4
+63.5 / 49.6
+GPT4o
+66.5 / 48.1
+70.3 / 48.7
+70.4 / 48.9
+DeepSeek-V3
+60.2 / 41.8
+63.3 / 50.2
+63.3 / 50.5
+Zero-shot
+GPT4o-mini
+47.5 / 31.6
+49.5 / 37.3
+49.6 / 37.5
+GPT4o
+60.6 / 43.3
+63.9 / 52.5
+64.0 / 52.8
+DeepSeek-V3
+55.1 / 39.7
+57.9 / 46.8
+57.9 / 47.1
+OOTSM (Llama-3.2-3B Instruct)
+68.4 / 41.5
+73.6 / 56.0
+73.6 / 56.0
+on frequent relations. Combining both regularizers (d) further
+raises overall recall to 73.6% and yields the best balanced
+score of 56.0% mR@20, showing that the two losses are
+complementary: cosine weighting broadens tail coverage, while
+the transition loss stabilises common relational patterns. The
+slight drop in mR@10 compared with row c indicates that
+excessive smoothing can still dampen legitimate abrupt changes
+in very short windows, motivating future adaptive gating
+strategies.
+F. Effectiveness of Temporal Reasoning
+To verify that OOTSM learns genuine temporal dynamics
+rather than relying on final-frame replication, we evaluate
+across observation ratios F ∈{0.3, 0.5, 0.7, 0.9} (Table V).
+OOTSM demonstrates substantially larger improvements in
+mR metrics than R metrics, indicating better performance on
+long-tail categories and newly appearing objects. At F = 0.9,
+mR improvements (18.3% and 21.9% for mR@20 and mR@50)
+exceed R improvements (11.3% and 12.3%), with average gains
+of +4.1% (mR@10), +13.0% (mR@20), and +14.6% (mR@50)
+over the naive baseline. This suggests our approach leverages
+linguistic priors to predict infrequent relationships that visual
+methods typically miss.
+Performance gains increase substantially at larger K values,
+with R@20 and R@50 improvements (+7.0% and +7.4%)
+8
+TABLE V
+VALIDATION OF TEMPORAL REASONING EFFECTIVENESS ACROSS
+OBSERVATION RATIOS. † DENOTES THE NAIVE STRATEGY (PREDICTING
+ALL FUTURE FRAMES USING THE LAST OBSERVED FRAME’S SCENE GRAPH).
+WE REPORT R / MR@10, R / MR@20, AND R / MR@50.
+F
+Method
+R / mR@10
+R / mR@20
+R / mR@50
+0.3
+SceneSayerSDE†
+38.7 / 16.6
+42.0 / 19.9
+42.1 / 19.9
+SceneSayerSDE
+39.7 / 18.4
+42.2 / 20.5
+42.3 / 20.5
+OOTSM
+39.0 / 19.7
+47.8 / 31.5
+48.4 / 32.3
+0.5
+SceneSayerSDE†
+43.4 / 18.5
+47.1 / 21.9
+47.1 / 22.1
+SceneSayerSDE
+45.0 / 20.7
+47.7 / 23.0
+47.7 / 23.1
+OOTSM
+43.4 / 21.6
+52.3 / 33.8
+52.8 / 35.9
+0.7
+SceneSayerSDE†
+50.7 / 21.9
+53.9 / 25.2
+53.9 / 25.2
+SceneSayerSDE
+52.0 / 24.1
+54.5 / 26.5
+54.5 / 26.5
+OOTSM
+53.6 / 26.8
+58.9 / 34.8
+58.9 / 34.9
+0.9
+SceneSayerSDE†
+59.3 / 26.5
+61.5 / 29.2
+61.5 / 29.2
+SceneSayerSDE
+60.3 / 28.5
+61.9 / 29.8
+61.9 / 29.8
+OOTSM
+60.6 / 31.9
+73.2 / 48.1
+74.2 / 51.7
+Avg ∆
+vs SceneSayerSDE†
+SceneSayerSDE
++1.3 / +2.0
++0.5 / +0.9
++0.4 / +0.9
+OOTSM
++1.2 / +4.1
++7.0 / +13.0
++7.4 / +14.6
+exceeding short-term gains (+1.2% at R@10). This pattern
+indicates that linguistic reasoning is more effective for longer
+horizons, where structured scene graphs provide cleaner signals
+than raw visual features, enabling LLMs to better capture
+temporal object dynamics.
+G. One-Shot Prompting Strategy
+We evaluate API-based LLMs on pure text-based LSGA
+under zero-shot and one-shot prompting conditions (table IV).
+Incorporating a single demonstration example generally en-
+hances API model performance: GPT4o-mini improves from
+47.5% to 60.4% (R@10) and from 31.6% to 41.4% (mR@10),
+while DeepSeek-V3 shows consistent gains across metrics.
+GPT4o achieves the best one-shot R@10 performance (66.5%),
+though its class-balanced metrics (mR@20, mR@50) slightly
+degrade compared to zero-shot, suggesting potential trade-offs
+between overall and tail-class accuracy.
+In contrast, our fine-tuned OOTSM model achieves supe-
+rior zero-shot performance, surpassing one-shot results of
+competing models across most metrics. Notably, OOTSM
+reaches 73.6% R@20 and 56.0% mR@20 in zero-shot settings,
+demonstrating the effectiveness of task-specific fine-tuning for
+LSGA without requiring in-context examples.
+H. Effect of the Observation Window
+Figure 5a plots short-term (R@10) and long-term (R@50)
+prediction accuracy as the number of input observation frames
+increases from 1 to 30. When only a few frames are observed,
+the model achieves its highest R@10 but exhibits relatively poor
+R@50. As more frames are added, R@50 recovers significantly
+and then plateaus, while R@10, after a small initial dip,
+gradually returns to its original level. In summary, adding
+history frames yields clear gains in long-range prediction but
+diminishing returns for short-range accuracy. Nevertheless, to
+maximize available temporal context, we feed as many frames
+as possible—subject to a 2k token limit—to strike a balance
+between predictive performance and inference latency.
+0
+5
+10
+15
+20
+25
+30
+Number of Input Frames
+67.25
+67.50
+67.75
+68.00
+R@10 Score (%)
+R@10
+R@50
+72.0
+72.5
+R@50 Score (%)
+(a) Observation window.
+0.2
+0.4
+0.6
+0.8
+68.2
+68.4
+68.6
+R@10 Score (%)
+R@10
+R@50
+73.5
+73.6
+R@50 Score (%)
+(b) Cosine weighting (β).
+Fig. 5. Observation window length and weighting hyper-parameter. Left:
+effect of varying the number of observed frames on recall performance. Right:
+study of the cosine-weighting coefficient β. Shaded region denotes one standard
+deviation over three independent runs per value.
+TABLE VI
+ROBUSTNESS TO INJECTED SGG NOISE. EACH CELL REPORTS
+SHORT-TERM / LONG-TERM PERFORMANCE (R@10 / R@50) UNDER
+DIFFERENT NOISE TYPES, FRAME RANGES, AND NOISE RATIOS. 5%–30%
+INDICATES THE PROPORTION OF FRAMES REPLACED BY NOISE.
+Noisy
+Type
+Frame
+Range
+5%
+10%
+15%
+30%
+R@10 / R@50
+R@10 / R@50
+R@10 / R@50
+R@10 / R@50
+drop
+0–30%
+68.2 / 73.4
+68.3 / 73.4
+68.2 / 73.5
+68.5 / 73.6
+drop
+30–60%
+68.4 / 73.4
+68.4 / 73.5
+68.4 / 73.4
+68.3 / 73.5
+drop
+60–90%
+68.6 / 73.6
+68.5 / 73.7
+68.7 / 73.8
+68.8 / 73.9
+modify
+0–30%
+67.2 / 73.1
+67.1 / 73.2
+66.6 / 73.0
+66.4 / 73.3
+modify
+30–60%
+66.8 / 73.3
+65.5 / 73.2
+64.8 / 72.6
+63.4 / 72.7
+modify
+60–90%
+66.2 / 73.4
+64.7 / 73.0
+63.5 / 72.9
+62.0 / 71.6
+Avg ∆
+-1.22 / -0.32
+-1.92 / -0.36
+-2.49 / -0.54
+-3.16 / -0.68
+I. Effect of the Weighting Hyper-Parameter
+As shown in fig. 5b, we examine GOA’s training sensitivity
+to the cosine-weighting coefficient β, which modulates future
+token loss down-weighting. The performance curve exhibits
+a shallow U-shape across prediction horizons. Very small β
+values concentrate loss on near-term frames, causing overfitting
+to short-range patterns and degrading overall performance.
+Moderate β values balance high-confidence short-range su-
+pervision with sufficient long-range exposure to regularize
+temporal dynamics, yielding monotonically improving recall.
+Beyond optimal levels, near-uniform weighting reintroduces
+noisy gradients from uncertain far-future tokens, reverting
+metrics toward their low-β baseline. Our findings indicate that
+moderate decay (0.3 < β < 0.7) optimally balances near-future
+reliability with comprehensive horizon coverage.
+9
+TABLE VII
+PERFORMANCE IMPROVEMENTS WITH DIFFERENT SGG BACKBONES.
+OOTSM CONSISTENTLY ENHANCES BOTH WEAKER AND STRONGER
+DETECTORS ACROSS ALL METRICS, WITH PARTICULARLY NOTABLE GAINS
+IN CLASS-BALANCED RECALL (MR).
+Method
+R / mR@10 R / mR@20 R / mR@50 ∆mR@50
+DSGDet+
+38.8 / 10.2
+40.0 / 10.7
+40.0 / 10.7
+–
++ OOTSM
+60.5 / 25.7
+64.6 / 29.6
+64.6 / 29.6
++18.9
+DSGDet++
+38.1 / 16.3
+39.8 / 17.7
+39.8 / 17.7
+–
++ OOTSM
+59.5 / 29.2
+65.7 / 34.7
+65.7 / 34.8
++17.1
+STTran+
+44.7 / 10.3
+45.9 / 10.8
+45.9 / 10.8
+–
++ OOTSM
+60.0 / 23.7
+63.9 / 27.6
+64.0 / 27.7
++16.9
+STTran++
+46.0 / 19.6
+47.7 / 21.4
+47.7 / 21.4
+–
++ OOTSM
+60.6 / 31.9
+73.2 / 48.1
+74.2 / 51.7
++30.3
+J. Robustness Analysis
+We evaluate robustness to SGG noise and detector quality
+variations. Table VI shows that OOTSM demonstrates high
+tolerance to missing detections (drop noise), maintaining stable
+performance across all noise rates with R@50 degradation
+below 0.7% even at 30% noise. For incorrect detections (modify
+noise), short-term performance (R@10) degrades proportionally
+with noise rate, while long-term predictions (R@50) remain
+remarkably robust, degrading by only 0.68% on average at
+25% frame error rates. Temporal analysis reveals that noise
+in later frames has greater impact on immediate predictions,
+quantifying the model’s reliance on recent observations.
+We further evaluate compatibility with different SGG tools
+(seen in table VII). OOTSM consistently improves performance
+across detectors of varying quality. Notably, adding OOTSM to
+the stronger STTran++ backbone achieves the most substantial
+gain of +30.3% mR@50, while even weaker detectors like
+DSGDet+ show +18.9% mR@50 improvement. These results
+demonstrate that OOTSM maintains effectiveness across di-
+verse SGG quality levels, validating its practical applicability
+in real-world scenarios.
+V. CONCLUSION
+This work introduces OOTSM, a novel two-stage, language-
+driven framework that fundamentally reframes scene-graph an-
+ticipation as textual inference. Our fine-tuned LLM with cosine-
+weighted and transition loss demonstrates state-of-the-art
+performance by consistently outperforming visual baselines on
+both our pioneering text-only LSGA benchmark and standard
+SGA evaluation, particularly at extended prediction horizons.
+These advantages stem from the principled separation of object
+and relation reasoning within a linguistic interface that naturally
+produces unordered multi-label triples, accommodates object
+dynamics, and effectively leverages linguistic associations when
+visual evidence is ambiguous or incomplete. Future directions
+include developing end-to-end video integration that eliminates
+modality transitions, implementing open-vocabulary object
+representation to address long-tail recognition failures and
+enhance generalization across varied scenarios, and exploring
+adaptive temporal constraints to balance between stability and
+legitimate state changes.
+ACKNOWLEDGEMENT
+The authors would like to thank Yuyang Li, Fengming Zhu,
+and Yangfan Wu for their valuable discussions and constructive
+feedback that helped improve this work.
+REFERENCES
+[1] A. Mohamed, K. Qian, M. Elhoseiny, and C. Claudel, “Social-stgcnn:
+A social spatio-temporal graph convolutional neural network for human
+trajectory prediction,” in CVPR, 2020.
+[2] N. Wang, G. Zhu, L. Zhang, P. Shen, H. Li, and C. Hua, “Spatio-
+temporal interaction graph parsing networks for human-object interaction
+recognition,” in ACM MM, 2021.
+[3] D. Xu, Y. Zhu, C. B. Choy, and L. Fei-Fei, “Scene graph generation by
+iterative message passing,” in CVPR, 2017.
+[4] J. Ji, R. Krishna, L. Fei-Fei, and J. C. Niebles, “Action genome: Actions
+as compositions of spatio-temporal scene graphs,” in CVPR, 2020.
+[5] Y. Li, X. Yang, and C. Xu, “Dynamic scene graph generation via
+anticipatory pre-training,” in CVPR, 2022.
+[6] Y. Qiu, Y. Nagasaki, K. Hara, H. Kataoka, R. Suzuki, K. Iwata, and
+Y. Satoh, “Virtualhome action genome: A simulated spatio-temporal
+scene graph dataset with consistent relationship labels,” in WACV, 2023.
+[7] M. Liu, S. Tang, Y. Li, and J. M. Rehg, “Forecasting human-object
+interaction: joint prediction of motor attention and actions in first person
+video,” in ECCV, 2020.
+[8] R. Peddi, S. Singh, Saurabh, P. Singla, and V. Gogate, “Towards scene
+graph anticipation,” in ECCV, 2024.
+[9] M. I. Sarker, C. Losada-Gutiérrez, M. Marron-Romera, D. Fuentes-
+Jiménez, and S. Luengo-Sánchez, “Semi-supervised anomaly detection in
+video-surveillance scenes in the wild,” Sensors, vol. 21, no. 12, p. 3993,
+2021.
+[10] V. R. Chiranjeevi and D. Malathi, “Anomaly graph: leveraging dynamic
+graph convolutional networks for enhanced video anomaly detection
+in surveillance and security applications,” Neural Computing and
+Applications, vol. 36, no. 20, pp. 12011–12028, 2024.
+[11] Y. Zhang, X. Li, H. Xie, W. Zhuang, S. Guo, and Z. Li, “Multi-label
+action anticipation for real-world videos with scene understanding,” IEEE
+TIP, 2024.
+[12] S. Özdel, Y. Rong, B. M. Albaba, Y.-L. Kuo, X. Wang, and E. Kasneci,
+“Gaze-guided graph neural network for action anticipation conditioned
+on intention,” in Proceedings of the 2024 Symposium on Eye Tracking
+Research and Applications, 2024.
+[13] Q. Yu, J. Li, Y. Wu, S. Tang, W. Ji, and Y. Zhuang, “Visually-prompted
+language model for fine-grained scene graph generation in an open world,”
+in ICCV, 2023.
+[14] Y. Li, Z. Li, H. Chen, and L. Xu, “Unbiased video scene graph generation
+via visual and semantic dual debiasing,” arXiv preprint arXiv:2503.00548,
+2025.
+[15] S.-K. Hsieh and H.-I. Liu, “Generation of scene graph and semantic
+image: A review and challenge ahead,” in 2025 International Conference
+on Artificial Intelligence in Information and Communication (ICAIIC),
+2025.
+[16] Y. Cong, W. Liao, H. Ackermann, B. Rosenhahn, and M. Y. Yang,
+“Spatial-temporal transformer for dynamic scene graph generation,” in
+ICCV, pp. 16372–16382, 2021.
+[17] V. Mazzia, S. Angarano, F. Salvetti, F. Angelini, and M. Chiaberge,
+“Action transformer: A self-attention model for short-time pose-based
+human action recognition,” PR, vol. 124, p. 108487, 2022.
+[18] S. Feng, H. Mostafa, M. Nassar, S. Majumdar, and S. Tripathi, “Exploiting
+long-term dependencies for generating dynamic scene graphs,” in WACV,
+2023.
+[19] X. Chen, A. Shrivastava, and A. Gupta, “Enriching visual knowledge
+bases via object discovery and segmentation,” in CVPR, 2014.
+[20] R. Vedantam, X. Lin, T. Batra, C. L. Zitnick, and D. Parikh, “Learning
+common sense through visual abstraction,” in ICCV, 2015.
+[21] T. Wang, J. Huang, H. Zhang, and Q. Sun, “Visual commonsense r-cnn,”
+in CVPR, 2020.
+[22] Y. Heo and S. Kang, “A simple framework for scene graph reasoning with
+semantic understanding of complex sentence structure,” Mathematics,
+vol. 11, no. 17, p. 3751, 2023.
+[23] Y. Wu, Y. Wei, H. Wang, Y. Liu, S. Yang, and X. He, “Grounded image
+text matching with mismatched relation reasoning,” in ICCV, 2023.
+[24] H. Wang, C. Qu, Z. Huang, W. Chu, F. Lin, and W. Chen, “Vl-rethinker:
+Incentivizing self-reflection of vision-language models with reinforcement
+learning,” arXiv preprint arXiv:2504.08837, 2025.
+10
+[25] H. Wang, Q. Xu, C. Liu, J. Wu, F. Lin, and W. Chen, “Emergent
+hierarchical reasoning in llms through reinforcement learning,” arXiv
+preprint arXiv:2509.03646, 2025.
+[26] Z. Zhao, Z. Zhao, K. Xu, Y. Fu, J. Chai, Y. Zhu, and D. Zhao, “Learning
+and planning multi-agent tasks via a moe-based world model,” in NeurIPS,
+2025.
+[27] O. Vinyals, A. Toshev, S. Bengio, and D. Erhan, “Show and tell: A
+neural image caption generator,” in CVPR, 2015.
+[28] S. Antol, A. Agrawal, J. Lu, M. Mitchell, D. Batra, C. L. Zitnick, and
+D. Parikh, “Vqa: Visual question answering,” in ICCV, 2015.
+[29] L. Gao, Z. Guo, H. Zhang, X. Xu, and H. T. Shen, “Video captioning
+with attention-based lstm and semantic consistency,” IEEE TMM, vol. 19,
+no. 9, pp. 2045–2055, 2017.
+[30] M. Yuan, G. Jia, and B.-K. Bao, “Gpt-based knowledge guiding network
+for commonsense video captioning,” IEEE TMM, vol. 26, pp. 5147–5158,
+2023.
+[31] H. Zhang, X. Li, and L. Bing, “Video-llama: An instruction-tuned
+audio-visual language model for video understanding,” arXiv preprint
+arXiv:2306.02858, 2023.
+[32] Y. Shi, X. Wu, H. Lin, and J. Luo, “Commonsense knowledge prompting
+for few-shot action recognition in videos,” IEEE TMM, vol. 26, pp. 8395–
+8405, 2024.
+[33] R. Qian, X. Dong, P. Zhang, Y. Zang, S. Ding, D. Lin, and J. Wang,
+“Streaming long video understanding with large language models,”
+NeurIPS, 2024.
+[34] Z. Wen, M. Tan, Y. Wang, Q. Wu, and Q. Wu, “Enhanced reasoning via
+multimodal llms and collaborative inference,” IEEE TMM, 2025.
+[35] R. Zellers, M. Yatskar, S. Thomson, and Y. Choi, “Neural motifs: Scene
+graph parsing with global context,” in CVPR, 2018.
+[36] R. Krishna, Y. Zhu, O. Groth, J. Johnson, K. Hata, J. Kravitz, S. Chen,
+Y. Kalantidis, L.-J. Li, D. A. Shamma, et al., “Visual genome: Connecting
+language and vision using crowdsourced dense image annotations,” IJCV,
+2017.
+[37] K. Tang, Y. Niu, J. Huang, J. Shi, and H. Zhang, “Unbiased scene graph
+generation from biased training,” in CVPR, 2020.
+[38] Y. Li, X. Yang, X. Huang, Z. Ma, and C. Xu, “Zero-shot predicate
+prediction for scene graph parsing,” IEEE TMM, vol. 25, pp. 3140–3153,
+2022.
+[39] T. Qian, J. Chen, S. Chen, B. Wu, and Y.-G. Jiang, “Scene graph
+refinement network for visual question answering,” IEEE TMM, vol. 25,
+pp. 3950–3961, 2022.
+[40] Y. Zhang, Y. Pan, T. Yao, R. Huang, T. Mei, and C.-W. Chen, “End-to-
+end video scene graph generation with temporal propagation transformer,”
+IEEE TMM, vol. 26, pp. 1613–1625, 2023.
+[41] Q. Cao and H. Huang, “Attention guided relation detection approach for
+video visual relation detection,” IEEE TMM, vol. 24, pp. 3896–3907,
+2021.
+[42] C. Yan, Y. Tu, X. Wang, Y. Zhang, X. Hao, Y. Zhang, and Q. Dai, “Stat:
+Spatial-temporal attention mechanism for video captioning,” IEEE TMM,
+vol. 22, no. 1, pp. 229–241, 2019.
+[43] R. Peddi, S. Saurabh, A. A. Shrivastava, P. Singla, and V. Gogate,
+“Towards unbiased and robust spatio-temporal scene graph generation
+and anticipation,” in CVPR, 2025.
+[44] A. Hu, F. Cotter, N. Mohan, C. Gurau, and A. Kendall, “Probabilistic
+future prediction for video scene understanding,” in ECCV, 2020.
+[45] X. Chen and W. Wang, “Uni-and-bi-directional video prediction via
+learning object-centric transformation,” IEEE TMM, vol. 22, no. 6,
+pp. 1591–1604, 2019.
+[46] W. Lu, Y. Zhai, J. Han, P. Jing, Y. Liu, and Y. Su, “Vmemnet: A deep
+collaborative spatial-temporal network with attention representation for
+video memorability prediction,” IEEE TMM, vol. 26, pp. 4926–4937,
+2023.
+[47] G. Chen, J. Li, and W. Wang, “Scene graph generation with role-playing
+large language models,” arXiv preprint arXiv:2410.15364, 2024.
+[48] Z. Zhou, M. Shi, and H. Caesar, “Vlprompt: Vision-language prompting
+for panoptic scene graph generation,” arXiv preprint arXiv:2311.16492,
+2023.
+[49] K. Kim, K. Yoon, J. Jeon, Y. In, J. Moon, D. Kim, and C. Park, “Llm4sgg:
+large language models for weakly supervised scene graph generation,”
+in CVPR, 2024.
+[50] B. Jiang, Z. Zhuang, S. S. Shivakumar, and C. J. Taylor, “Enhancing
+scene graph generation with hierarchical relationships and commonsense
+knowledge,” in WACV, 2025.
+[51] T.-T. Nguyen, P. Nguyen, J. Cothren, A. Yilmaz, and K. Luu, “Hyperglm:
+Hypergraph for video scene graph generation and anticipation,” arXiv
+preprint arXiv:2411.18042, 2024.
+[52] D. Yang, M. Kim, S. Mac Kim, B.-w. Kwak, M. Park, J. Hong, W. Woo,
+and J. Yeo, “Llm meets scene graph: Can large language models
+understand and generate scene graphs? a benchmark and empirical study,”
+in Annual Meeting of the Association for Computational Linguistics
+(ACL), 2025.
+Xiaomeng Zhu is a second-year Ph.D. student in the
+Department of Computer Science and Engineering at
+the Hong Kong University of Science and Technology.
+She received her B.Eng. degree in automation from
+the University of Electronic Science and Technol-
+ogy of China and her Master’s degree in pattern
+recognition and intelligent systems from the Institute
+of Automation, Chinese Academy of Sciences. Her
+research focuses on advancing robotic understanding
+of human intent and environmental context to enable
+more effective human-robot collaboration.
+Changwei Wang received the B.S. degree in software
+engineering from Tiangong University, China, in
+July 2019. He received the Ph.D degree in the State
+Key Laboratory of Multimodal Artificial Intelligence
+Systems, Institute of Automation, Chinese Academy
+of Sciences and School of Artificial Intelligence,
+University of Chinese Academy of Sciences, China,
+in July 2024. From 2024, he works at Shandong
+Computer Science Center (National Supercomputer
+Center in Jinan). His research interests include multi-
+modal learning, robotic vision, embodied intelligence
+and edge intelligence.
+Haozhe Wang is a second-year PhD student with the
+Hong Kong University of Science and Technology
+(HKUST), where he is a recipient of the prestigious
+Hong Kong PhD Fellowship Scheme (HKPFS). His
+research interests focus on reasoning and Reinforce-
+ment Learning (RL) for Large Language Models
+(LLMs) and Vision-Language Models (VLMs). He
+has published over ten papers in top-tier conferences,
+including NeurIPS, AAAI, ACL, etc. He also serves
+as a Program Committee member for premier venues
+such as NeurIPS, ICLR, CVPR, and TMLR.
+Xinyu Liu is a second-year Ph.D. student in the
+Academy of Interdisciplinary Studies at the Hong
+Kong University of Science and Technology. She
+received a Bachelor’s degree in Communication
+Engineering from Xidian University and a Master’s
+degree in Computer Science and Technology from the
+School of Artificial Intelligence at Xidian University.
+Her research focuses on the understanding and
+generation of dynamic world context.
+Fangzhen Lin is currently a Professor in the Depart-
+ment of Computer Science and Engineering of the
+Hong Kong University of Science and Technology.
+He received his BS degree at Fuzhou University, MS
+degree at Beijing University and PhD at Stanford
+University. His research interests is in artificial in-
+telligence, and in particular, principles of knowledge
+representation, reasoning, and learning and their
+applications in programming languages, robotics,
+multi–agent systems, game theory and social choice
+theory, language understanding etc. He is an AAAI
+Fellow and received a Croucher Senior Research Fellowship.

@@ -1,0 +1,1812 @@
+Salience-SGG: Enhancing Unbiased Scene Graph Generation with Iterative
+Salience Estimation
+Runfeng Qu1,5
+Ole Hall1,5
+Pia K Bideau3
+Julie Ouerfelli-Ethier2,5
+Martin Rolfs2,5
+Klaus Obermayer1,4,5
+Olaf Hellwich1,5
+1Technische Universit¨at Berlin, Germany 2Humboldt Universit¨at zu Berlin, Germany
+3Univ. Grenoble Alpes, Inria, CNRS, Grenoble INP, LJK, France
+4Bernstein Center for Computational Neuroscience, Germany
+5Science of Intelligence Research Cluster of Excellence, Germany
+runfeng.qu@campus.tu-berlin.de
+Abstract
+Scene Graph Generation (SGG) suffers from a long-
+tailed distribution, where a few predicate classes dom-
+inate while many others are underrepresented, leading
+to biased models that underperform on rare relations.
+Unbiased-SGG methods address this by implementing de-
+biasing strategies, but often at the cost of spatial under-
+standing—resulting in over-reliance on semantic priors. We
+introduce Salience-SGG, a novel framework featuring an
+Iterative Salience Decoder (ISD) that emphasizes triplets
+with salient spatial structures.
+To support this, we pro-
+pose semantic-agnostic salience labels guiding ISD. Eval-
+uations on Visual Genome, Open Images V6, and GQA-
+200 show that Salience-SGG achieves state-of-the-art per-
+formance and improves existing Unbiased-SGG methods in
+their spatial understanding as demonstrated by the Pair-
+wise Localization Average Precision. Code is available at:
+https://github.com/runfeng-q/Salience-SGG.
+1. Introduction
+For any given image, scene graph generation (SGG)
+models aim to detect a set of triplets in the form of
+{subject, predicate, object}. These triplets can be trans-
+formed into graph structures called scene graphs, where
+nodes indicate subjects and objects, while edges represent
+predicates. The primary challenge in SGG tasks is the long-
+tailed distribution problem. Unbalanced predicate samples
+result in predictions of SGG models dominated by a few fre-
+quent predicates (e.g. wearing, has), while undermining the
+rare predicates (e.g. lying on, flying in). Recent SGG stud-
+ies focus on Unbiased Scene Graph Generation (Unbiased-
+SGG), which aims to create fine-grained scene graphs with
+more informative predicates by incorporating various de-
+(a) Unbiased-SGG
+coat
+man
+fence
+pant
+building
+wearing
+hanging from
+wearing
+has
+roof
+(b) Unbiased-SGG+Iterative Salience Decoder
+leg
+of
+hanging from
+hanging from
+under
+light
+on
+building
+roof
+fence
+coat
+man
+pant
+wearing
+wearing
+roof
+leg
+under
+building
+roof
+and
+on
+on
+building
+with
+vehicle
+holding
+and
+light
+man
+coat
+leg
+pant
+man
+coat
+leg
+pant
+vehicle
+of
+has
+Text
+Figure 1.
+Salience-SGG. (a): IETrans [51] with standard de-
+biasing, showing over-reliance on the semantic information, i.e.
+coat and hanging from (dashed lines). (b): Our salience-enhanced
+model favors spatially coherent triplets (bold).
+biasing methods such as re-weighting [2, 28], re-sampling
+[8, 26], and pseudo-labeling [9, 21, 51].
+Despite the progress made in Unbiased-SGG studies,
+prevalent models do not demonstrate strong robustness to
+debiasing strategies. Improving performance on rare predi-
+cates often substantially reduces performance on frequent
+ones [26].
+This phenomenon can be attributed to the
+model’s preference for rare predicates, encouraged by debi-
+asing strategies. For triplets such as {person, on, beach},
+Unbiased-SGG models may incorrectly favor rare predi-
+cates (e.g., standing on). This example illustrates the trade-
+off that undermines performance on common predicates.
+However, we identify that debiasing strategies disrupt spa-
+tial understanding of entity pairs.
+Specifically, spatially
+1
+arXiv:2601.08728v1  [cs.CV]  13 Jan 2026
+loosely associated entity pairs with rare predicates are de-
+tected with high confidences, as illustrated in Figure 1 (a).
+These spatially incoherent pairs, in turn, suppress other en-
+tity pairs with more salient spatial structures to be recalled,
+thereby further decreasing overall performance. The rea-
+son for this issue is that the prevailing debiasing methods
+rely solely on the frequency statistics of predicate and en-
+tity semantics. Applying these methods to detection tasks
+may result in a model that relies significantly on high-level
+semantic information of entity pairs alone, while disregard-
+ing low-level spatial information for global detection. As
+a consequence, Unbiased-SGG models may not capture the
+triplets in salient spatial structures. We refer to this issue
+as salience insensitivity, given the lesser sensitivity to the
+spatial information. To analyze salience insensitivity sys-
+tematically, we introduce a measurement that evaluates the
+ability of SGG models to capture salient triplet structures
+(see Section 4.4).
+To address the problem of salience insensitivity, we pro-
+pose a novel framework that integrates a triplet salience
+estimation process into the Unbiased-SGG process. The
+salience estimation is achieved with the introduction of
+triplet salience labels and an Iterative Salience Decoder
+(ISD). The triplet salience labels are expressed by a mask
+in the form of {0, 1}, which indicates whether any two de-
+tected entities form a salient triplet that spatially matches
+the ground-truth triplets. Our triplet salience labels and ISD
+stand in contrast to existing approaches [17, 18, 44], which
+directly address the corresponding annotated triplets involv-
+ing semantic content to create top-down binary labels. We
+generate bottom-up labels that consider only the low-level
+spatial information of the ground-truth triplets. The rich
+spatial features contained within these salience labels pro-
+vide ISD with significant guidance for emphasizing the spa-
+tial configuration and globally exploring the triplet candi-
+dates in most important spatial structures within scenes, as
+shown in Figure 1 (b). Furthermore, such semantic-agnostic
+labels prevent the salience estimation from becoming a pre-
+diction of whether each triplet is positive. ISD formulates
+the triplet salience estimation as a salience message-passing
+process. To effectively capture the important spatial struc-
+tures in scenes, we propose two types of enhanced attention
+layers to guide the message-passing. In summary, our con-
+tributions are as follows:
+• We propose a novel framework for Unbiased-SGG that
+incorporates salience estimation to directly address the
+salience insensitivity caused by debiasing strategies.
+• We introduce bottom-up salience labels, and enhanced
+attention layers to facilitate the exploration of the salient
+spatial structures of the visual scene by an iterative
+salience decoder.
+• We provide extensive experimental results on three chal-
+lenging dataset demonstrating that our proposed frame-
+work improves the performance on the Unbiased-SGG
+task by enhancing salience sensitivity.
+2. Related Work
+Scene Graph Generation. Early work on SGG follows
+the two-stage framework which contains an object detec-
+tor such as Faster R-CNN [36] to propose entities. A pred-
+icate predictor is performed on the entity pairs to predict
+the predicates between them [33, 52]. Subsequently, hierar-
+chical structures are proposed [5, 46, 47] to jointly update
+entity pairs and predicates. [45, 50] employ Long Short-
+Term Memory (LSTM) [13] and Attention Mechanism [41]
+to aggregate global context for entity updating and predicate
+prediction. Inspired by the Detection Transformer (DETR)
+[1], several one-stage SGG models [7, 19, 40] are developed
+achieving SGG by maintaining a set of learnable queries.
+Recall (R@K) is the standard metric for evaluating SGG
+models, but it fails to reflect performance on rare predicates
+due to the long-tailed distribution. To address this, mean
+recall (mR@K)
+[38] equally weigh all predicate classes
+to better assess generalization. To achieve high mR@K,
+[39] propose an Unbiased-SGG model with causal effects.
+BGNN [26] re-balances the dataset using a bi-level re-
+sampling strategy. Various studies [2, 19, 37] utilize the re-
+weighting losses to adjust the decision boundary for each in-
+dividual predicate. Finally, inspired by knowledge distilla-
+tion, many recent studies [48, 49] focus on creating pseudo-
+labels based on predictions of a pre-trained SGG model to
+enrich annotations.
+Current Unbiased-SGG models focus on optimizing
+mR@K, often overlooking the negative impact of debias-
+ing strategies on R@K. To balance both, IETrans [51] pro-
+pose F@K as an overall performance, which is the harmonic
+mean of R@K and mR@K. Mg-RMPN [44] discover that
+using a binary classification module to select likely triplets
+may greatly benefit overall performance. However, the bi-
+nary classification module is trained using binary labels that
+are consistent with the annotated triplets. The high corre-
+lation between these labels and triplet semantic informa-
+tion may not sufficiently support the model exploring salient
+spatial structure. Our salience estimation module is trained
+using labels derived solely from the spatial information of
+ground-truth graphs. These semantic-agnostic labels guide
+the module to focus purely on spatial patterns.
+Salience-Guided Object Detector.
+Salience esti-
+mation is commonly used to improve object detection
+tasks.
+Salience-DETR[14] and Focus-DETR [54] inte-
+grate feature-level salience modules into DETR to reduce
+the computational burden. Yolo-sg [10] creates pixel-level
+salience labels to help the detector focus on important re-
+gions of images.
+Inspired by these studies, we propose
+Salience-SGG, which encourages exploration of important
+spatial structures by leveraging triplet-level salience labels.
+2
+3. Method
+SGG tasks aim to detect a scene graph represented as G =
+{ˆV, ˆE}, where ˆV denotes the set of entities and ˆE is the set of
+triplets. Each entity ˆvx ∈ˆV contains information about its
+category and location, i.e. ˆvx = {ˆbx, ˆcx}. In general, each
+triplet ˆek ∈ˆE is represented in the form of {ˆsk, ˆpk, ˆok},
+where ˆsk, ˆok refer to the entity indices in ˆV of the corre-
+sponding subject and object, while ˆpk indicates the predi-
+cate category connecting the entity pair. To address salience
+insensitivity, we reformulate the triplet as {ˆsk, ˆpk, ˆok, ˆmk},
+where ˆmk is a binary label indicating triplet salience.
+The overall framework of our approach consists of an
+Unbiased-SGG module and a salience decoder module, i.e.
+Iterative Salience Decoder (ISD), as depicted in Figure 2
+(a). To investigate the impact of ISD on various debias-
+ing strategies, we provide both one-stage and two-stage
+methods.
+The implementation of the two-stage method
+is achieved through the integration of ISD into the extant
+two-stage Unbiased-SGG models (see Section 4.3). Unless
+specified otherwise, the following sections refer to our one-
+stage method Salience-SGG. In the Unbiased-SGG part, a
+deformable DETR [55] is employed as an object detector to
+propose a set of entities V = {vi}Ne
+i=1, where Ne is the num-
+ber of detected entities. Each detected entity vi contains its
+bounding box location and category distribution, denoted
+as B = {bi}Ne
+i=1 ∈RNe×4, C = {ci}Ne
+i=1 ∈RNe×Nc,
+respectively, where Nc is the total number of entity cate-
+gories. In addition, we extract the queries from the last
+decoder layer of the deformable DETR as entity features
+Q = {qi}Ne
+i=1 ∈RNe×d, where d is the dimension of
+these features. The object detector is followed by a pred-
+icate decoder to predict the predicate connecting each de-
+tected entity pair, denoted as G ∈RNe×Ne×Np (see Sec-
+tion 3.1). Following previous work [17, 44], the entity la-
+bels and predicates labels for the detected entities are ob-
+tained by applying Hungarian Matching [23]. Entity labels
+are denoted as V
+′ = {v
+′
+i}Ne
+i=1, where v
+′
+i = {b
+′
+i, c
+′
+i}, while
+the predicate labels are indicated as G
+′ ∈RNe×Ne×Np,
+where Np is the category number of predicates. Leveraging
+the ground-truth graph G, we construct the triplet salience
+labels M
+′ ∈RNe×Ne as described in Section 3.2. Ulti-
+mately, G, C, B, Q are sent to the ISD to estimate the triplet
+salience intensity M ∈RNe×Ne and approximate M
+′ (for
+details see Section 3.3).
+3.1. Predicate Decoder
+Our Salience-SGG uses a lightweight predicate decoder to
+reason about predicates directly. Given the entity informa-
+tion, the predicate features R = {rij} ∈RNe×Ne×D are
+created as written in Equation (1). Subsequently, R is trans-
+mitted to a MLP classifier to obtain G without any further
+refinement process.
+rij = [bi, GloVei, qi, bj, GloVej, qj]
+(1)
+where [·, ·] denotes the operation of concatenation, and
+Glove indicates the glove embedding [35] of the predicted
+entity category from the object detector.
+3.2. Triplet Salience Label
+The triplet salience label is created to guide our ISD to ex-
+plore the significant spatial structures related to the anno-
+tated graphs, thereby maintaining salience sensitivity dur-
+ing the Unbiased-SGG process. In order to preserve the
+geometric relationships between subjects and objects, we
+use the entity-level locations of the annotated triplets as a
+criterion to assign salience labels. A given triplet candi-
+date is considered salient when both the subject and object
+boxes sufficiently overlap with the subject and object of any
+one of the ground-truth triplets at the same time. Particu-
+larly, the locations of subjects and objects in the ground-
+truth triplets set are denoted by {b
+′
+sk, b
+′
+ok}K
+k=1, where K
+is the number of annotated triplets. {bi}Ne
+i=1 refers to the
+bounding boxes of the detected entities. A subject salience
+matrix ˆ
+M sub ∈RNe×K is constructed by computing the
+pairwise Intersection over Unions (IoUs) between {bi} and
+{b
+′
+sk}. Similarly, an object salience matrix ˆ
+M obj ∈RNe×K
+reflects the pairwise IoUs between {bi} and {b
+′
+ok}. The
+salience labels of detected entity pairs are determined as
+follows:
+M
+′
+ij =
+
+1,
+∃a, ˆ
+M sub
+ia
+>= T
+&
+ˆ
+M obj
+ja >= T
+0,
+otherwise
+(2)
+Due to the omission of semantic information regarding en-
+tity pairs during salience label assignment, a significant
+number of triplet candidates with low semantic information
+or incoherent semantics are considered salient. This kind of
+label forces ISD to rely heavily on spatial information when
+making estimations.
+3.3. Iterative Salience Decoder
+The structure of ISD is illustrated in Figure 2 (b). Using
+the detected entities Q, B, and C as well as the predicate
+matrix G, ISD estimates the salience of each entity pair
+M ∈RNe×Ne. Because each image contains Ne × Ne en-
+tity pairs, globally estimating the salience by maintaining
+N 2
+e triplet salience features brings significant computational
+cost. In this study, we introduce subject salience queries
+Qsub ∈RNe×d and object salience queries Qobj ∈RNe×d
+to preserve subject and object salience information. Qsub
+and Qobj are updated through a message-passing process
+which is achieved by multiple salience decoder layers. Each
+layer of our iterative salience decoder contains two branches
+for updating Qsub and Qobj respectively (see Figure 2
+3
+M0
+M1
+ISD
+FFN
+FFN
+Linear
+Projector
+Salience Decoder Layer l2
+M2
+M3
+M4
+predicate matrix (G)
+entity features (Q)
+entity boxes (B)
+entity categories (C)
+predicate matrix (G)
+predicate matrix (GT)
+entity boxes (B)
+entity boxes (B)
+P-ECA
+predicate matrix (G)
+entity boxes (B)
+Salience Decoder Layer l3
+Salience Decoder Layer l1
+entity features (Q)
+entity categories (C)
+Salience Decoder Layer l4
+Linear
+Projector
+P-ECA
+G-ESA
+G-ESA
+M
+c) Salience Decoder Layer 
+b) Iterative Salience Decoder (ISD)
+Predicate Decoder
+Object Detector
+a) Salience-SGG
+Unbiased-SGG
+Figure 2. (a) Overview of our full network architecture. Our framework consists of an Unbiased-SGG module and a model-agnostic
+iterative salience decoder (ISD) module. (b) Subject salience features and object salience features are updated through multiple salience
+decoder layers in ISD. (c) Details of the message-passing process of the salience decoder layer. G-ESA and P-ECA correspond to Geometry
+Enhanced Self-Attention and Predicate Enhanced Cross-Attention, respectively.
+(c)). Each branch consists of a Geometry Enhanced Self-
+Attention (G-ESA), a Predicate Enhanced Cross-Attention
+(P-ECA) and a Feed Forward Network (FFN). The final
+triplet salience M is estimated by fusing Qsub and Qobj.
+Subject and Object Salience Queries Initialization.
+We denote the updated subject and object salience queries
+after l-th salience decoder layer as Qsub
+l
+and Qobj
+l
+re-
+spectively. Since ISD is a module to model the salience
+message-passing process, the initial salience queries Qsub
+0
+and Qobj
+0
+reflect the salience information of individual en-
+tities as determined by the object detector. Instead of cre-
+ating additional learnable vectors, we design a set of entity
+salience features Qent ∈RNe×d with the entity category
+distributions C and features Q obtained from object detec-
+tion as follows:
+Qent = Q + proj(C)
+(3)
+where proj indicates a linear projector to map the category
+distribution to the same dimension as the entity features.
+Subsequently, two linear projectors are applied to Qent to
+return Qsub
+0
+and Qobj
+0 .
+Geometry Enhanced Self-Attention.
+G-ESAs are
+adopted to conduct intra-subject and intra-object salience
+message-passing. Before introducing our G-ESA, let us re-
+visit the process of the regular self-attention process. Given
+the subject salience queries Qsub
+l
+, the regular self-attention
+first computes an attention matrix Aself ∈RNe×Ne×H,
+where H is the head number of self-attention:
+Aself = Que(Qsub
+l
+) · Key(Qsub
+l
+)T
+√
+d
+(4)
+The queries are updated according to Aself as follows:
+Qsub
+l′
+= Qsub
+l
++ SoftMax(Aself) · Val(Qsub
+l
+)
+(5)
+The regular self-attention layers control the information
+flow solely based on the subspace similarity among queries
+as shown in Equation (4). According to the definition of
+our triplet salience described in Section 3.2, subjects or ob-
+jects exhibiting high overlap areas should be characterized
+by similar salience. Inspired by [11, 15], we introduce G-
+ESA to reinforce the information interaction between the
+queries determined by their spatial overlapping.
+Specif-
+ically, we calculate the IoUs between every entity pairs
+forming U ∈RNe×Ne. Subsequently, U is projected to
+equal the channel to the head number H of the self-attention
+layer. Ultimately, the projected U is incorporated into the
+attention matrix AMself in order to manipulate the infor-
+mation flow as below:
+Aself = Relu(MLP(U)) + Que(Qsub
+l
+) · Key(Qsub
+l
+)T
+√
+d
+(6)
+The same operation is used for intra-object salience
+message-passing to obtain Qobj
+l′ . Note that, to ensure train-
+ing stability, a ReLU activation function is applied after the
+MLP output layer to suppress negative values.
+Predicate Enhanced Cross-Attention.
+we introduce
+P-ECA to conduct inter-subject-object salience message-
+passing. Similarly to G-ESA, the interactions between sub-
+jects and objects are enhanced in accordance with the pre-
+dicted predicates G. For instance, in the subject branch,
+subject salience queries are updated as follows:
+Across = Relu(MLP(G))+
+Que(Qsub
+l′ ) · Key(Qobj
+l′ )T
+√
+d
+(7)
+4
+Qsub
+l′′
+= Qsub
+l′
++ SoftMax(Across) · Val(Qobj
+l′ )
+(8)
+The operation is identical for updating object salience
+queries, with the exception that G is first transposed to GT .
+After P-ECAs, FFNs performed on Qsub
+l′′
+and Qobj
+l′′ lead to
+the two following outputs: Qsub
+l+1 and Qobj
+l+1.
+Iterative Triplet Salience Refinement.
+As demon-
+strated by our empirical results, an iterative refinement pro-
+cess yields superior results in comparison to directly consid-
+ering the predictions after each salience decoder layer as the
+triplet salience. To reduce computational costs and in line
+with the salience message-passing process in the salience
+decoder layer, linear attention is utilized to fuse the subject
+and object salience queries. These fused queries are added
+to the triplet salience predicted from the previous layer to
+form the refined triplet salience as follows:
+Ml+1 = sigmoid(inverse sigmoid(Ml)+ Qsub
+l+1 · (Qobj
+l+1)T
+√
+d
+)
+(9)
+where sigmoid refers to the sigmoid activation function. For
+l = 0, the initial salience matrix M0 is a zero matrix.
+3.4. Training and Inference
+For the entire training process of our Salience-SGG, the
+overall loss function L is expressed as follows:
+L = Lent + Lsalience + Lpre
+Lent = Lcls
+ent + Lbox
+ent + LGIoU
+ent
+(10)
+where Lent is the entity loss, which is identical to the loss
+function of the deformable DETR [55]. We compute focal
+loss [29] between M and M
+′ as the salience loss Lsalience.
+Following [44], we employ re-weighting loss called seesaw
+loss [42] as the predicate loss Lpre in our Salience-SGG to
+solve the long-tailed distribution problem.
+For inference, we follow [17], except that triplet candi-
+dates are sorted by involving our salience scores M.
+4. Experiments
+4.1. Experimental Setup
+This section provides descriptions of datasets, evaluation
+metrics, and implementation details.
+Datasets. We conduct experiments on three datasets:
+Visual Genome (VG) [22] contains 57,723 training, 5,000
+validation, and 26,446 test images. It comprises of 150 en-
+tity and 50 predicate categories.
+Open Image V6 (OIv6) [24] contains 126,368 training,
+1,813 validation, and 5,322 test images, totaling 133,503
+images across 601 entity and 30 predicate categories.
+GQA-200 [16] consists of 57,623 training, 5,000 validation,
+and 8,208 test images. After processing, GQA-200 is com-
+posed of 200 entity and 100 predicate categories.
+For all three datasets, we follow the pre-processing in [44].
+Evaluation Metrics. For each dataset, we present the
+performance on the scene graph detection (SGDet) task.
+In the case of the VG and GQA-200 datasets, we follow
+previous work [51] reporting Recall@K (R@K), mean Re-
+call@K (mR@K), and F@K to measure the overall perfor-
+mance. For the OIv6 dataset, we include micro-Recall@50
+(micro-R@50), weighted mean AP of triplets (wmAPrel),
+weighted mean AP of phrase (wmAPphr), and the final
+score. The final score is calculated by score = 0.2 × Re-
+call@50 + 0.4 × wmAPrel + 0.4 × wmAPphr. Furthermore,
+mR@K is reported to exhibit the capability of methods to
+solve the biased problem of methods.
+Implementation Details. For all three datasets, we fol-
+low the same setup. A deformable DETR with backbone
+ResNet-50 [12] is pre-trained for 25 epochs. The number
+of entity queries, Ne, is set to 200. Subsequently, the pre-
+trained object detector is frozen during the joint training of
+the predicate decoder and ISD. In the Salience-SGG, the
+loss ratio between salience loss Lsalience and predicate loss
+Lpre is 1 : 1. The re-weighting loss proposed in [42] is
+employed as a debiasing strategy. By default, the hyperpa-
+rameters α and β in the loss function are set to 1.0 and 0.2,
+respectively. The hyper-parameters T and L introduced by
+ISD are 0.6 and 4. The training epochs of predicate decoder
+and ISD are 13, 8, 12 for VG, OIv6, GQA-200, respectively.
+We use AdamW [32] as optimizer, with an initial learning
+rate of 10−4 and a weight decay of 10−4. All training is
+performed on two NVIDIA RTX A6000 GPUs with a batch
+size of 16, using a fixed random seed of 42. Additional
+training details are provided in the suppl. material.
+4.2. Comparison to SOTA Methods
+We compare our approach with both two-stage methods
+(e.g. Motifs [50], BGNN [26], DRM [25], SHA [8]) and
+one-stage methods (e.g. Mg-RMPN [44], SSR-CNN [40],
+SpeaQ [20], Hydra-SGG [3]). Since our works are based
+on Unbiased-SGG methods. we focus on comparing to re-
+sults in which at least one debiasing strategy is applied.
+VG. In Table 1, we report the comparison results on
+the VG test dataset.
+The Salience-SGG model demon-
+strates superior holistic performance F@K compared to all
+existing SGG models which incorporate debiasing strate-
+gies.
+In the context of one-stage models, the Salience-
+SGG model achieves second best mR@20 with 12.8 and
+the SOTA mR@50, and mR@100 of 18.0 and 21.6, respec-
+tively. This is notable given that our model utilizes a signif-
+icantly reduced number of parameters (77.7M) compared to
+the SSR-CNN model [40] (274.3M). In contrast to the Mg-
+RMPN approach [44], which also employs seesaw loss as
+the debiasing strategy, our approach significantly improves
+mR@K. This demonstrates that our salience estimation pro-
+cess enhances addressing the long-tailed distribution prob-
+lem. Among two-stage models, DRM [25] exhibits notable
+5
+Method
+Backbone
+# params (M)
+R@20
+R@50
+R@100
+mR@20
+mR@50
+mR@100
+F@20
+F@50
+F@100
+two-stage models
+Motifs∗[50] [CVPR2018]
+ResNeXt101-FPN
+369.9
+25.5
+32.8
+37.2
+5.0
+6.8
+7.9
+8.4
+11.3
+13.0
+TDE† [39] [CVPR2020]
+ResNeXt101-FPN
+369.9
+11.9
+16.6
+20.2
+6.6
+8.9
+11.0
+8.5
+11.7
+14.3
+BGNN [26] [CVPR2021]
+ResNeXt101-FPN
+341.9
+23.3
+31.0
+35.8
+7.5
+10.7
+12.6
+11.3
+15.9
+18.6
+SHA [8] [CVPR2022]
+ResNeXt101-FPN
+–
+–
+14.9
+18.2
+14.2
+17.9
+20.9
+–
+16.3
+19.5
+IETrans† [51] [ECCV2022]
+ResNeXt101-FPN
+369.9
+17.5
+23.5
+27.3
+11.0
+15.7
+18.2
+13.5
+18.8
+21.8
+ST-SGG† [21] [ICLR2024]
+ResNeXt101-FPN
+–
+–
+26.7
+30.7
+–
+11.6
+14.2
+–
+16.2
+19.4
+DRM [25] [CVPR2024]
+ResNeXt101-FPN
+–
+–
+19.0
+22.9
+–
+20.4
+24.1
+–
+20.8
+23.5
+SRD† [34] [WACV2025]
+ResNeXt101-FPN
+–
+–
+–
+–
+13.5
+17.9
+20.6
+–
+–
+–
+one-stage models
+SSR-CNN [40] [CVPR2022]
+ResNeXt101-FPN
+274.3
+18.4
+23.3
+26.5
+13.5
+17.9
+21.4
+15.6
+20.2
+23.7
+EGTR [17] [CVPR2024]
+ResNet50
+42.5
+22.4
+28.2
+31.7
+8.8
+14.0
+18.3
+12.6
+18.7
+23.2
+Mg-RMPN [44] [ECCV2024]
+ResNet50
+–
+22.5
+29.1
+33.5
+10.3
+14.4
+17.3
+14.1
+19.3
+22.8
+SpeaQ [20] [CVPR2024]
+ResNet101
+93.4
+25.1
+32.1
+35.5
+10.1
+15.1
+17.6
+14.4
+20.5
+23.5
+Hydra-SGG [3] [ICLR2025]
+ResNet50
+67.6
+21.9
+28.6
+33.4
+10.3
+15.9
+19.4
+14.0
+20.5
+24.7
+Salience-SGG (Ours)
+ResNet50
+77.7
+21.9
+28.8
+33.4
+12.8
+18.0
+21.6
+16.2
+22.1
+26.2
+Table 1. Comparison with state-of-the-art methods evaluated on the VG test dataset. The methods are divided into two groups. The best
+and second-best results in each group are indicated with bold and underlined text, respectively. ‘*’ denotes the performance without any
+debiasing strategy. ‘†‘ indicates the methods are combined with MOTIFS [50].
+Method
+mR@50
+micro-R@50
+wmAPrel
+wmAPphr
+score
+two-stage models
+GPS-Net [30] [CVPR2020]
+35.2
+74.8
+32.9
+34.0
+41.7
+BGNN [26] [CVPR2021]
+40.5
+75.0
+33.5
+34.2
+42.1
+RU-Net [31] [CVPR2022]
+–
+76.9
+35.4
+34.9
+43.5
+PE-Net [53] [CVPR2023]
+–
+76.5
+36.6
+37.4
+44.9
+DRM [25] [CVPR2024]
+–
+75.9
+40.5
+41.4
+47.9
+one-stage models
+SGTR [27] [CVPR2022]
+42.6
+59.9
+37.0
+38.7
+42.3
+SSR-CNN [40] [CVPR2022]
+42.8
+76.7
+41.5
+43.6
+49.4
+RelTR [4] [TPAMI2023]
+–
+71.7
+37.2
+37.5
+43.0
+EGTR [17] [CVPR2024]
+–
+75.0
+42.0
+41.9
+48.6
+Mg-RMPN [44] [ECCV2024]
+45.5
+74.2
+35.5
+36.4
+43.6
+Hydra-SGG [3] [ICLR2025]
+–
+76.1
+42.8
+44.3
+50.1
+Salience-SGG (Ours)
+48.0
+78.1
+45.6
+44.9
+51.8
+Table 2. Comparison with SOTA methods evaluated on OIv6.
+Method
+R@50
+R@100
+mR@50
+mR@100
+F@50
+F@100
+two-stage models
+Motifs† [50] [CVPR2018]
+18.5
+21.8
+16.8
+18.8
+17.6
+20.2
+VCTREE† [38] [CVPR2019]
+17.6
+20.7
+15.6
+17.8
+16.5
+19.1
+SHA† [8] [CVPR2022]
+14.8
+17.9
+17.8
+20.1
+16.2
+18.9
+VETO [37] [ICCV2023]
+26.1
+29.0
+7.0
+8.1
+11.0
+12.7
+DRM [25] [CVPR2024]
+18.6
+21.7
+18.9
+21.0
+18.7
+21.3
+RA-SGG [48] [AAAI2025]
+16.3
+19.0
+12.9
+15.0
+14.4
+16.8
+one-stage models
+Pair-Net [43] [PAMI2024]
+20.2
+23.4
+10.6
+12.6
+13.9
+16.4
+Mg-RMPN [44] [ECCV2024]
+23.2
+25.7
+12.8
+14.5
+16.5
+18.5
+Hydra-SGG [3] [ICLR2025]
+22.8
+26.5
+12.7
+15.9
+16.3
+19.9
+Salience-SGG (Ours)
+23.6
+26.6
+16.2
+18.4
+19.2
+21.7
+Table 3. Comparison with SOTA methods evaluated on GQA-200.
+‘†‘ denotes models combined with GCL as proposed in [8].
+mR@50 and mR@100 scores of 20.4 and 24.1, respectively.
+However, weak robustness to the debiasing strategy intro-
+duces substantial negative impacts on R@K by preventing
+it from achieving a superior overall performance F@K. We
+provide specific comparisons to evaluate the robustness (see
+Section 4.3). In addition, a more extensive comparison with
+additional methods is provided in suppl. material.
+OIv6. For the OIv6 dateset, a different set of evaluation
+metrics is applied. Since micro-R@50, wmAPrel, wmAP-
+phr are more sensitive to the performance on frequent pred-
+icates, most existing works, except Mg-RMPN [44], omits
+debiasing strategies to evaluate their models, resulting in
+better results. In Salience-SGG, the debiasing strategy is
+maintained to illustrate the robustness of our framework to
+the debiasing strategies. In addition, we follow [27] and re-
+port mR@K to reflect the performance on rare predicates.
+As demonstrated in Table 2, our approach sets new SOTA
+standards on all evaluation metrics. It is imperative to em-
+phasize the result on wmAPrel, which is employed to as-
+sess the AP of the predicted triplets, wherein both the sub-
+ject and object boxes exhibit an IoU of at least 0.5 with the
+ground-truth. Our approach outperforms the second best re-
+sult from Hydra-SGG [3] by a margin of 2.8 on wmAPrel.
+This may stem from the relative geometric relationships en-
+coded in the triplet salience labels.
+GQA-200. Table 3 illustrates the comparison results on
+the GQA-200 test dataset.
+As with the VG dataset, the
+Salience-SGG sets new SOTA F@k scores of 19.2 and 21.7,
+respectively. This outcome surpasses the second best results
+from SHA [8] and DRM [25]. Furthermore, Salience-SGG
+outperforms one-stage models Mg-RMPN [44] and Hydra-
+SGG [3] on all evaluation metrics.
+4.3. Complementary Comparisons
+This section presents additional evaluations on the VG test
+set to assess (1) whether Salience-SGG exhibits superior
+robustness to debiasing compared to Unbiased-SGG mod-
+els, (2) the compatibility of our salience estimation frame-
+work with alternative debiasing strategies, and (3) the per-
+formances of our ISD on predicates at varying frequencies.
+Robustness Evaluation. Debiasing strategies can shift
+6
+man wearing jacket
+man with hair
+man wearing shirt
+man wearing pant
+head of man
+man wearing jacket
+man with hair
+man wearing shirt
+man wearing pant
+man sitting on the chair
+man
+hair
+shirt
+jacket
+chair
+pant
+head
+IETrans
+IETrans+ISD
+man wearing shirt
+man with hair
+hand of man
+man behind table
+man wearing shirt
+chair behind man
+man wearing pant
+man has hand
+man
+shirt
+table
+chair
+pant
+hand
+hair
+TDE
+TDE+ISD
+man has hand
+man wearing pant
+Figure 3. Comparison of the top-5 detected triplets. For each im-
+age, the colors indicate triplet identifications; identical colors be-
+fore and after re-ranking refer to the same triplets.
+the trade-off between mR@K and R@K. When two ap-
+proaches differ greatly in mR@K, F@K alone may not
+reflect their robustness.
+To assess robustness, we train
+Salience-SGG on VG with varying seesaw loss hyperpa-
+rameters, yielding results across different mR@K values.
+Since mR@K is more sensitive to β, we vary β while keep-
+ing α fixed. For a fair comparison, we select the Salience-
+SGG result with the closest mR@K, so differences in F@K
+more clearly reflect robustness to debiasing. Table 4 reports
+Salience-SGG with different β values and three strong base-
+lines. Comparing Salience-SGG β = 0.35, 0.25, and 0.125
+with DRM [25], SHA [8], and SpeaQ [20], respectively,
+highlights Salience-SGG’s robustness to debiasing. Ben-
+efiting from our salience estimation process, our Salience-
+SGG set new SOTA mR@50 and mR@100 scores with 21.4
+and 25.3 in the case where β = 0.5.
+ISD Compatibility with Other Debiasing Strategies.
+To examine the compatibility of triplet salience estimation
+with diverse debiasing strategies, the ISD is integrated into
+the pre-trained TDE [39] and IETrans [51].
+The origi-
+nal detection set is re-ranked by involving ISD salience
+scores.
+Table 5 shows that our salience estimation im-
+proves both TDE and IETrans, demonstrating the ISD mod-
+ule’s broad compatibility with debiasing strategies.
+We
+also provide the qualitative comparisons for TDE versus
+TDE+ISD, and IETrans versus IETrans+ISD. In order to
+provide a comprehensive understanding, we visualize the
+top-5 detections from each models as illustrated in Figure 3.
+For both models, the spatial incoherent triplets such as
+{man, sitting on, chair}, {man, behind, table} are re-
+moved after re-ranking. The triplet {man, with, hair} de-
+tected by IETrans and IETrans+ISD shows that re-ranking is
+not simply the result of lowering confidences for rare pred-
+icates. For more qualitative comparisons please see suppl.
+material.
+Group-wise Performance Comparison. Following [6],
+predicates are grouped into head, body, and tail based on
+training frequency, and the performance of each group is
+measured by the average mR@100. Table 6 shows that in-
+tegrating ISD significantly improves TDE and IETrans on
+the head and body groups. Although IETrans+ISD scores
+are lower on the tail group, overall performance is still im-
+proved. One-stage Salience-SGG achieves SOTA on head
+Method
+R@50
+R@100
+mR@50
+mR@100
+F@50
+F@100
+DRM [25]
+19.0
+22.9
+20.4
+24.1
+20.8
+23.5
+SHA [8]
+14.9
+18.2
+17.9
+20.9
+16.3
+19.5
+SpeaQ [20]
+32.1
+35.5
+15.1
+17.6
+20.5
+23.5
+Salience-SGG (β = 0.5)
+20.3
+24.3
+21.4
+25.3
+20.8
+24.8
+Salience-SGG (β = 0.35)
+24.0
+28.4
+20.4
+24.4
+22.0
+26.2
+Salience-SGG (β = 0.25)
+26.8
+31.4
+19.2
+22.9
+22.4
+26.5
+Salience-SGG (β = 0.125)
+32.2
+36.2
+15.7
+19.0
+21.1
+24.9
+Table 4. Robustness to debiasing strategies evaluation.
+Method
+R@50
+R@100
+mR@50
+mR@100
+F@50
+F@100
+TDE [39]
+16.6
+20.2
+8.9
+11.0
+11.7
+14.3
+TDE+ISD
+19.9
+24.4
+10.5
+12.4
+13.6
+16.4
+IETrans [51]
+23.5
+27.3
+15.7
+18.2
+18.8
+21.8
+IETrans+ISD
+27.6
+32.5
+15.9
+18.6
+20.2
+23.7
+Table 5.
+Results of combing ISD with existing two-stage
+Unbiased-SGG models.
+Model
+Head (16)
+Body (17)
+Tail (17)
+mR@100
+DT2-ACBS [6]
+22.3
+26.7
+24.0
+24.4
+EGTR [17]
+24.3
+19.4
+13.3
+18.9
+TDE [39]
+19.8
+13.1
+0.1
+11.0
+IETrans [51]
+23.8
+18.0
+13.2
+18.2
+ST-SGG [21]
+21.5
+15.0
+0.1
+14.2
+BGNN [26]
+22.3
+11.9
+0.1
+12.5
+TDE+ISD
+21.6
+14.3
+0.1
+12.4
+IETrans+ISD
+26.1
+19.2
+11.0
+18.6
+Salience-SGG (β = 0.5)
+25.9
+28.0
+22.1
+25.3
+Salience-SGG(β = 0.2)
+27.4
+22.8
+15.0
+21.6
+Table 6. Group-wise performance comparison
+10
+15
+20
+25
+30
+10
+20
+30
+TDE [39]
+BGNN [26]
+ST-SGG [21]
+IETrans [51]
+IETrans+ISD
+Motifs [50]
+Salience-SGG
+EGTR [17]
+EGTR [17]
+F@100
+pl-AP
+SGG Models
+Unbiased-SGG Models
+Figure 4. Pairwise localization avg. precision (pl-AP) versus SGG
+performance (F@100). Color indicates the model family. The
+green text marks our contributions
+and body groups with superior overall performance.
+4.4. Salience Sensitivity Analysis
+Pairwise Localization Average Precision (pl-AP) measures
+the model’s ability to localize salient subject–object pairs in
+predicted triplets. For the top-100 detected triplets, we com-
+pute category-agnostic precision and recall, where precision
+reflects accuracy in capturing salient spatial structure and
+7
+ISD
+G-ESA
+P-ECA
+R@50
+R@100
+mR@50
+mR@100
+F@50
+F@100
+×
+×
+×
+26.4
+29.7
+13.5
+16.4
+17.8
+21.1
+✓
+✓
+×
+27.0
+31.2
+17.8
+20.6
+21.5
+24.9
+✓
+×
+✓
+27.8
+32.3
+17.1
+20.5
+21.2
+25.1
+✓
+✓
+✓
+28.8
+33.4
+18.0
+21.6
+22.1
+26.2
+Table 7. Ablation study on the individual model components.
+recall reflects its coverage. Similar to the saliency triplet
+label assignment, a true positive is assigned if the IoU be-
+tween subject and object pairs is at least 0.5. The pl-AP is
+then calculated as the area under the precision-recall curve.
+We report pl-AP with the SGG performance (F@100) of
+multiple SGG and Unbiased-SGG models, as illustrated
+in Figure 4. From this figure, the following observations
+can be made: 1) The comparisons of pl-AP and F@100
+among the Unbiased-SGG models clearly demonstrate that
+a higher pl-AP leads to a better F@100. 2) The debias-
+ing strategies tend to impede the capture of salient spatial
+structures. In particular, Motifs [50] achieves a higher pl-
+AP than TDE [39] and ST-SGG [21]. Of note, IETrans [51]
+achieves a similar pl-AP to Motifs despite IETrans introduc-
+ing spatial incoherent triplets (i.e., lower precision). This is
+likely the result of increased diversity of captured salient
+structures (i.e., higher recall). 3) Comparing IETrans and
+IETrans+ISD highlights that ISD not only improves F@100
+but also leads to an increased pl-AP.
+4.5. Ablation Studies
+Finally, in this section, we present ablation studies to pro-
+vide detailed analyses of our approach. All experiments are
+conducted on the VG dataset. The analysis of hyperparam-
+eters (i.e. T and L) is provided in suppl. material.
+Impact of Individual Components. We propose an ISD
+module containing G-ESA and P-ECA. Table 7 illustrates
+the performance when each component is removed. When
+G-ESA and P-ECA are partially removed, we use the regu-
+lar self-attention and cross-attention layers instead to main-
+tain the module at the same parameter level. If the ISD is
+completely removed, performance drops significantly. This
+demonstrates that our ISD can greatly improve the perfor-
+mance of Unbiased-SGG. Partial removal of the G-ESA and
+P-ECA modules causes a decline in both R@K and mR@K.
+These results highlight the importance of our G-ESA and P-
+ECA modules. The G-ESA may facilitate spatial structure
+learning, while the P-ECA enhances predicate understand-
+ing (i.e. the salience loss serves as a regularization for the
+predicate prediction through the P-ECA). A detailed analy-
+sis of predicate understanding and spatial structure learning
+is provided in the suppl. material.
+Iterative Refinement Analysis. Table 8 demonstrates
+that an iterative refinement process in ISD leads to a better
+performance than the non-iterative process.
+Triplet Salience Label Analysis. To investigate the ef-
+Iterative Refinement
+R@50
+R@100
+mR@50
+mR@100
+F@50
+F@100
+×
+28.6
+33.0
+17.1
+20.7
+21.5
+25.4
+✓
+28.8
+33.4
+18.0
+21.6
+22.1
+26.2
+Table 8. Ablation study on the iterative refinement process in ISD.
+Type
+R@50
+R@100
+mR@50
+mR@100
+F@50
+F@100
+top downgt
+27.5
+32.0
+15.1
+18.4
+19.5
+23.3
+top downentity
+28.5
+33.0
+16.3
+19.6
+20.7
+24.6
+top downtriplet
+27.9
+32.5
+15.7
+19.1
+20.1
+24.1
+Ours
+28.8
+33.4
+18.0
+21.6
+22.1
+26.2
+Table 9. Ablation study on the type of salience labels.
+fect of our bottom-up triplet salience labels, we create three
+types of top-down labels which consider the semantic infor-
+mation concurrently, namely top downgt, top downentity
+and top downtriplet. top downgt is created by mapping
+the predicate label G to a binary mask as in previous work
+[17, 18, 44]. Following [3], top downentity is created by
+performing an additional one-to-many matching on the ob-
+ject detector results. top downtriplet is constructed by per-
+forming one-to-many matching at the triplet level as in [20].
+For all triplet salience labels, the predicate label G
+′ is con-
+sistently obtained by the one-to-one matching results from
+the object detector. The details of the construction process
+of each type of triplet salience label are specified in the
+suppl. material. Table 9 shows that Salience-SGG, which
+is supervised by bottom-up triplet salience labels offering
+maximal spatial supervision, achieves the best results.
+5. Conclusion
+The present study provides a detailed examination of the
+underlying causes of the substantial performance deteri-
+oration of Unbiased-SGG models on frequent predicates.
+Based on our observations, we propose a framework
+incorporating an iterative triplet salience estimation process
+to enhance the Unbiased-SGG process. The salience esti-
+mation process, supervised by semantic-agnostic salience
+labels, enables Unbiased-SGG models to globally highlight
+the triplets characterized by salient spatial structures. This
+improvement is demonstrated quantitatively by a specific
+evaluation metric that measures a model’s ability to capture
+salient triplet structures. To model the process of salience
+estimation, two enhanced attention layers are devised to
+direct the salience message-passing. Extensive experimen-
+tation and ablation studies are conducted, demonstrating
+that the introduced framework achieves SOTA performance
+and exhibits robustness to diverse debiasing strategies.
+8
+Acknowledgement
+Funded by the Deutsche Forschungsgemeinschaft (DFG,
+German Research Foundation) under Germany’s Excel-
+lence Strategy – EXC 2002/1 “Science of Intelligence” –
+project number 390523135.
+In addition, this work was
+partially supported by MIAI@Grenoble Alpes, (ANR-19-
+P3IA-0003).
+References
+[1] Nicolas Carion, Francisco Massa, Gabriel Synnaeve,
+Nicolas Usunier, Alexander Kirillov, and Sergey
+Zagoruyko. End-to-end object detection with trans-
+formers. In European conference on computer vision,
+pages 213–229. Springer, 2020. 2
+[2] Chao Chen, Yibing Zhan, Baosheng Yu, Liu Liu, Yong
+Luo, and Bo Du. Resistance training using prior bias:
+toward unbiased scene graph generation. In Proceed-
+ings of the AAAI Conference on Artificial Intelligence,
+pages 212–220, 2022. 1, 2
+[3] Minghan Chen, Guikun Chen, Wenguan Wang, and
+Yi Yang.
+Hydra-sgg: Hybrid relation assignment
+for one-stage scene graph generation. arXiv preprint
+arXiv:2409.10262, 2024. 5, 6, 8
+[4] Yuren Cong, Michael Ying Yang, and Bodo Rosen-
+hahn. Reltr: Relation transformer for scene graph gen-
+eration. IEEE Transactions on Pattern Analysis and
+Machine Intelligence, 45(9):11169–11183, 2023. 6
+[5] Bo Dai, Yuqi Zhang, and Dahua Lin. Detecting visual
+relationships with deep relational networks. In Pro-
+ceedings of the IEEE conference on computer vision
+and Pattern recognition, pages 3076–3086, 2017. 2
+[6] Alakh Desai, Tz-Ying Wu, Subarna Tripathi, and
+Nuno Vasconcelos. Learning of visual relations: The
+devil is in the tails. In Proceedings of the IEEE/CVF
+International Conference on Computer Vision, pages
+15404–15413, 2021. 7
+[7] Qi Dong, Zhuowen Tu, Haofu Liao, Yuting Zhang, Vi-
+jay Mahadevan, and Stefano Soatto. Visual relation-
+ship detection using part-and-sum transformers with
+composite queries. In Proceedings of the IEEE/CVF
+International Conference on Computer Vision (ICCV),
+pages 3550–3559, 2021. 2
+[8] Xingning Dong, Tian Gan, Xuemeng Song, Jianlong
+Wu, Yuan Cheng, and Liqiang Nie. Stacked hybrid-
+attention and group collaborative learning for unbi-
+ased scene graph generation. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, pages 19427–19436, 2022. 1, 5, 6,
+7
+[9] Arushi Goel, Basura Fernando, Frank Keller, and
+Hakan Bilen. Not all relations are equal: Mining in-
+formative labels for scene graph generation. In Pro-
+ceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pages 15596–15606,
+2022. 1
+[10] Rong Han, Xiaohong Liu, and Ting Chen. Yolo-sg:
+Salience-guided detection of small objects in medical
+images. In 2022 IEEE International conference on im-
+age processing (ICIP), pages 4218–4222. IEEE, 2022.
+2
+[11] Xixuan Hao, Danqing Huang, Jieru Lin, and Chin-
+Yew Lin. Relation-enhanced detr for component de-
+tection in graphic design reverse engineering.
+In
+Proceedings of the Thirty-Second International Joint
+Conference on Artificial Intelligence, pages 4785–
+4793, 2023. 4
+[12] Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian
+Sun.
+Deep residual learning for image recognition.
+In Proceedings of the IEEE conference on computer
+vision and pattern recognition, pages 770–778, 2016.
+5
+[13] Sepp Hochreiter and J¨urgen Schmidhuber. Long short-
+term memory. Neural computation, 9(8):1735–1780,
+1997. 2
+[14] Xiuquan Hou, Meiqin Liu, Senlin Zhang, Ping Wei,
+and Badong Chen. Salience detr: Enhancing detection
+transformer with hierarchical salience filtering refine-
+ment.
+In Proceedings of the IEEE/CVF conference
+on computer vision and pattern recognition, pages
+17574–17583, 2024. 2
+[15] Xiuquan Hou, Meiqin Liu, Senlin Zhang, Ping Wei,
+Badong Chen, and Xuguang Lan. Relation detr: Ex-
+ploring explicit position relation prior for object de-
+tection. In European Conference on Computer Vision,
+pages 89–105. Springer, 2024. 4
+[16] Drew A Hudson and Christopher D Manning. Gqa: A
+new dataset for real-world visual reasoning and com-
+positional question answering. In Proceedings of the
+IEEE/CVF conference on computer vision and pattern
+recognition, pages 6700–6709, 2019. 5
+[17] Jinbae Im, JeongYeon Nam, Nokyung Park, Hyung-
+min Lee, and Seunghyun Park. Egtr: Extracting graph
+from transformer for scene graph generation. In Pro-
+ceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pages 24229–24238,
+2024. 2, 3, 5, 6, 7, 8
+[18] Deunsol Jung, Sanghyun Kim, Won Hwa Kim, and
+Minsu Cho. Devil’s on the edges: Selective quad at-
+tention for scene graph generation.
+In Proceedings
+of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, pages 18664–18674, 2023. 2, 8
+[19] Siddhesh Khandelwal and Leonid Sigal.
+Iterative
+scene graph generation. Advances in Neural Informa-
+tion Processing Systems, 35:24295–24308, 2022. 2
+9
+[20] Jongha Kim, Jihwan Park, Jinyoung Park, Jinyoung
+Kim, Sehyung Kim, and Hyunwoo J Kim.
+Group-
+wise query specialization and quality-aware multi-
+assignment for transformer-based visual relationship
+detection. In Proceedings of the IEEE/CVF Confer-
+ence on Computer Vision and Pattern Recognition,
+pages 28160–28169, 2024. 5, 6, 7, 8
+[21] Kibum Kim, Kanghoon Yoon, Yeonjun In, Jinyoung
+Moon, Donghyun Kim, and Chanyoung Park. Adap-
+tive self-training framework for fine-grained scene
+graph generation. In ICLR, 2024. 1, 6, 7, 8
+[22] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin John-
+son, Kenji Hata, Joshua Kravitz, Stephanie Chen, Yan-
+nis Kalantidis, Li-Jia Li, David A Shamma, et al. Vi-
+sual genome: Connecting language and vision using
+crowdsourced dense image annotations. International
+journal of computer vision, 123:32–73, 2017. 5
+[23] Harold W Kuhn. The hungarian method for the as-
+signment problem. Naval research logistics quarterly,
+2(1-2):83–97, 1955. 3
+[24] Alina Kuznetsova, Hassan Rom, Neil Alldrin, Jasper
+Uijlings,
+Ivan Krasin,
+Jordi Pont-Tuset,
+Shahab
+Kamali, Stefan Popov, Matteo Malloci, Alexander
+Kolesnikov, et al. The open images dataset v4: Uni-
+fied image classification, object detection, and visual
+relationship detection at scale. International journal
+of computer vision, 128(7):1956–1981, 2020. 5
+[25] Jiankai Li, Yunhong Wang, Xiefan Guo, Ruijie Yang,
+and Weixin Li. Leveraging predicate and triplet learn-
+ing for scene graph generation. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, pages 28369–28379, 2024. 5, 6, 7
+[26] Rongjie Li, Songyang Zhang, Bo Wan, and Xuming
+He. Bipartite graph network with adaptive message
+passing for unbiased scene graph generation. In Pro-
+ceedings of the IEEE/CVF conference on computer
+vision and pattern recognition, pages 11109–11119,
+2021. 1, 2, 5, 6, 7
+[27] Rongjie Li, Songyang Zhang, and Xuming He. Sgtr:
+End-to-end scene graph generation with transformer.
+In Proceedings of the IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition (CVPR), pages
+19486–19496, 2022. 6
+[28] Wei Li, Haiwei Zhang, Qijie Bai, Guoqing Zhao, Ning
+Jiang, and Xiaojie Yuan. Ppdl: Predicate probability
+distribution based loss for unbiased scene graph gen-
+eration. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages
+19447–19456, 2022. 1
+[29] Tsung-Yi Lin, Priya Goyal, Ross Girshick, Kaiming
+He, and Piotr Doll´ar. Focal loss for dense object de-
+tection. In Proceedings of the IEEE international con-
+ference on computer vision, pages 2980–2988, 2017.
+5
+[30] Xin Lin,
+Changxing Ding,
+Jinquan Zeng,
+and
+Dacheng Tao. Gps-net: Graph property sensing net-
+work for scene graph generation. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, pages 3746–3753, 2020. 6
+[31] Xin Lin, Changxing Ding, Jing Zhang, Yibing Zhan,
+and Dacheng Tao. Ru-net: Regularized unrolling net-
+work for scene graph generation. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, pages 19457–19466, 2022. 6
+[32] Ilya
+Loshchilov
+and
+Frank
+Hutter.
+Decou-
+pled weight decay regularization.
+arXiv preprint
+arXiv:1711.05101, 2017. 5
+[33] Cewu Lu, Ranjay Krishna, Michael Bernstein, and Li
+Fei-Fei. Visual relationship detection with language
+priors. In Computer Vision–ECCV 2016: 14th Euro-
+pean Conference, Amsterdam, The Netherlands, Octo-
+ber 11–14, 2016, Proceedings, Part I 14, pages 852–
+869. Springer, 2016. 2
+[34] Thanh-Son Nguyen, Hong Yang, and Basura Fer-
+nando. Effective scene graph generation by statistical
+relation distillation. In 2025 IEEE/CVF Winter Con-
+ference on Applications of Computer Vision (WACV),
+pages 8420–8430. IEEE, 2025. 6
+[35] Jeffrey Pennington, Richard Socher, and Christo-
+pher D Manning. Glove: Global vectors for word rep-
+resentation.
+In Proceedings of the 2014 conference
+on empirical methods in natural language processing
+(EMNLP), pages 1532–1543, 2014. 3
+[36] Shaoqing Ren, Kaiming He, Ross Girshick, and Jian
+Sun.
+Faster r-cnn: Towards real-time object detec-
+tion with region proposal networks.
+IEEE transac-
+tions on pattern analysis and machine intelligence, 39
+(6):1137–1149, 2016. 2
+[37] Gopika Sudhakaran, Devendra Singh Dhami, Kristian
+Kersting, and Stefan Roth. Vision relation transformer
+for unbiased scene graph generation. In Proceedings
+of the IEEE/CVF International Conference on Com-
+puter Vision, pages 21882–21893, 2023. 2, 6
+[38] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan
+Luo, and Wei Liu. Learning to compose dynamic tree
+structures for visual contexts. In Proceedings of the
+IEEE/CVF conference on computer vision and pattern
+recognition, pages 6619–6628, 2019. 2, 6
+[39] Kaihua Tang, Yulei Niu, Jianqiang Huang, Jiaxin Shi,
+and Hanwang Zhang. Unbiased scene graph gener-
+ation from biased training.
+In Proceedings of the
+IEEE/CVF conference on computer vision and pattern
+recognition, pages 3716–3725, 2020. 2, 6, 7, 8
+[40] Yao Teng and Limin Wang. Structured sparse r-cnn for
+direct scene graph generation. In Proceedings of the
+10
+IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, pages 19437–19446, 2022. 2, 5, 6
+[41] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob
+Uszkoreit, Llion Jones, Aidan N Gomez, Łukasz
+Kaiser, and Illia Polosukhin. Attention is all you need.
+Advances in neural information processing systems,
+30, 2017. 2
+[42] Jiaqi Wang, Wenwei Zhang, Yuhang Zang, Yuhang
+Cao, Jiangmiao Pang, Tao Gong, Kai Chen, Ziwei Liu,
+Chen Change Loy, and Dahua Lin. Seesaw loss for
+long-tailed instance segmentation. In Proceedings of
+the IEEE/CVF conference on computer vision and pat-
+tern recognition, pages 9695–9704, 2021. 5
+[43] Jinghao Wang, Zhengyu Wen, Xiangtai Li, Zujin Guo,
+Jingkang Yang, and Ziwei Liu.
+Pair then relation:
+Pair-net for panoptic scene graph generation. IEEE
+Transactions on Pattern Analysis and Machine Intelli-
+gence, 2024. 6
+[44] Lei Wang, Zejian Yuan, and Badong Chen.
+Multi-
+granularity sparse relationship matrix prediction net-
+work for end-to-end scene graph generation. In Euro-
+pean Conference on Computer Vision, pages 105–121.
+Springer, 2024. 2, 3, 5, 6, 8
+[45] Sanghyun Woo, Dahun Kim, Donghyeon Cho, and
+In So Kweon.
+Linknet: Relational embedding for
+scene graph. Advances in neural information process-
+ing systems, 31, 2018. 2
+[46] Danfei Xu, Yuke Zhu, Christopher B Choy, and Li
+Fei-Fei. Scene graph generation by iterative message
+passing. In Proceedings of the IEEE conference on
+computer vision and pattern recognition, pages 5410–
+5419, 2017. 2
+[47] Guojun Yin, Lu Sheng, Bin Liu, Nenghai Yu, Xiao-
+gang Wang, Jing Shao, and Chen Change Loy. Zoom-
+net: Mining deep feature interactions for visual rela-
+tionship recognition. In Proceedings of the European
+conference on computer vision (ECCV), pages 322–
+338, 2018. 2
+[48] Kanghoon Yoon, Kibum Kim, Jaehyeong Jeon, Yeon-
+jun In, Donghyun Kim, and Chanyoung Park. Ra-sgg:
+Retrieval-augmented scene graph generation frame-
+work via multi-prototype learning. In Proceedings of
+the AAAI Conference on Artificial Intelligence, pages
+9562–9570, 2025. 2, 6
+[49] Yujie Zang, Yaochen Li, Yuan Gao, Yimou Guo, Wen-
+neng Tang, Yanxue Li, and Meklit Atlaw. Refine and
+redistribute: Multi-domain fusion and dynamic label
+assignment for unbiased scene graph generation. In
+Proceedings of the IEEE/CVF Winter Conference on
+Applications of Computer Vision, pages 1318–1327,
+2024. 2
+[50] Rowan Zellers, Mark Yatskar, Sam Thomson, and
+Yejin Choi. Neural motifs: Scene graph parsing with
+global context. In Proceedings of the IEEE conference
+on computer vision and pattern recognition, pages
+5831–5840, 2018. 2, 5, 6, 7, 8
+[51] Ao Zhang, Yuan Yao, Qianyu Chen, Wei Ji, Zhiyuan
+Liu, Maosong Sun, and Tat-Seng Chua. Fine-grained
+scene graph generation with data transfer. In Euro-
+pean conference on computer vision, pages 409–424.
+Springer, 2022. 1, 2, 5, 6, 7, 8
+[52] Hanwang Zhang, Zawlin Kyaw, Shih-Fu Chang, and
+Tat-Seng Chua.
+Visual translation embedding net-
+work for visual relation detection. In Proceedings of
+the IEEE conference on computer vision and pattern
+recognition, pages 5532–5540, 2017. 2
+[53] Chaofan Zheng, Xinyu Lyu, Lianli Gao, Bo Dai, and
+Jingkuan Song. Prototype-based embedding network
+for scene graph generation.
+In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, pages 22783–22792, 2023. 6
+[54] Dehua Zheng, Wenhui Dong, Hailin Hu, Xinghao
+Chen, and Yunhe Wang. Less is more: Focus atten-
+tion for efficient detr. In Proceedings of the IEEE/CVF
+international conference on computer vision, pages
+6674–6683, 2023. 2
+[55] Xizhou Zhu, Weijie Su, Lewei Lu, Bin Li, Xiaogang
+Wang, and Jifeng Dai. Deformable detr: Deformable
+transformers for end-to-end object detection.
+arXiv
+preprint arXiv:2010.04159, 2020. 3, 5
+11

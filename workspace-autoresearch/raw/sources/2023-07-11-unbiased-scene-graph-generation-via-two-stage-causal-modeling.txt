@@ -1,0 +1,3688 @@
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+1
+Unbiased Scene Graph Generation via
+Two-stage Causal Modeling
+Shuzhou Sun, Shuaifeng Zhi, Qing Liao, Janne Heikkil¨a, Li Liu
+Abstract—Despite the impressive performance of recent unbiased Scene Graph Generation (SGG) methods, the current debiasing literature
+mainly focuses on the long-tailed distribution problem, whereas it overlooks another source of bias, i.e., semantic confusion, which makes the
+SGG model prone to yield false predictions for similar relationships. In this paper, we explore a debiasing procedure for the SGG task leveraging
+causal inference. Our central insight is that the Sparse Mechanism Shift (SMS) in causality allows independent intervention on multiple biases,
+thereby potentially preserving head category performance while pursuing the prediction of high-informative tail relationships. However, the noisy
+datasets lead to unobserved confounders for the SGG task, and thus the constructed causal models are always causal-insufficient to benefit from
+SMS. To remedy this, we propose Two-stage Causal Modeling (TsCM) for the SGG task, which takes the long-tailed distribution and semantic
+confusion as confounders to the Structural Causal Model (SCM) and then decouples the causal intervention into two stages. The first stage is
+causal representation learning, where we use a novel Population Loss (P-Loss) to intervene in the semantic confusion confounder. The second
+stage introduces the Adaptive Logit Adjustment (AL-Adjustment) to eliminate the long-tailed distribution confounder to complete causal
+calibration learning. These two stages are model agnostic and thus can be used in any SGG model that seeks unbiased predictions.
+Comprehensive experiments conducted on the popular SGG backbones and benchmarks show that our TsCM can achieve state-of-the-art
+performance in terms of mean recall rate. Furthermore, TsCM can maintain a higher recall rate than other debiasing methods, which indicates
+that our method can achieve a better tradeoff between head and tail relationships.
+Index Terms—Scene graph generation, causal inference, counterfactuals, representation learning, long-tailed distribution
+✦
+1
+INTRODUCTION
+Scene Graph Generation (SGG), first proposed by Scherrer
+et al. [1], is an emerging, critical, and challenging intermediate
+scene-understanding task and has received increasing attention,
+especially during the past few years [2], [3], due to its potential
+to be a bridge between computer vision and natural language
+processing. SGG aims to generate a structured representation of
+a scene that jointly describes objects and their attributes, as well
+as their pairwise relationships, and is typically formulated as a
+set of <subject, relationship, object> triplets. Such representations
+can provide a deep understanding of a scene, and thus SGG
+has been employed for many downstream tasks, such as image-
+text retrieval [1], [4], visual question answering [5], [6], visual
+captioning [7], [8], etc.
+While early SGG work has made significant progress [1], [9],
+[10], which, however, as discussed in [11], [12], tends to generate
+biased predictions, i.e., informative fine-grained relationships
+(e.g., standing on) are predicted as less informative coarse-
+grained relationships (e.g., on) due to the long-tailed distribution
+problem. As an example, we consider the distribution of the
+relationships in VG150 [13], a popular benchmark in the SGG
+task, which, as shown in Fig. 1 (a), clearly suffers from severe
+long-tailed distribution problems. The SGG model, naturally,
+•
+This work was partially supported by the National Key Research and
+Development Program of China No. 2021YFB3100800, the Academy of Finland
+under grant 331883, Infotech Project FRAGES, and the National Natural
+Science Foundation of China under Grant 61872379, 62022091, 62201603 and
+62201588.
+•
+Li Liu (dreamliu2010@gmail.com) and shuaifeng Zhi are with the College
+of Electronic Science, National University of Defense Technology (NUDT),
+Changsha, Hunan, China. Li Liu is also with the CMVS at the University
+of Oulu, Finland.
+Li Liu is the corresponding author.
+•
+Qing Liao is with the Department of Computer Science and Technology, Harbin
+Institute of Technology, Shenzhen, China, and also with the Peng Cheng
+Laboratory, Shenzhen, China, 518055. Shuzhou Sun and Janne Heikkil¨a are
+with the Center for Machine Vision and Signal Analysis, University of Oulu,
+Finland.
+cannot learn to represent the features of the head and tail
+relationships simultaneously from the skewed distribution and,
+hence, easily yields False Predictions (FP) on head relationships
+(see Fig. 1 (c)).
+For the above biased predictions, many debiasing methods
+[14], [15], [16], [17], [18] have been proposed to overcome this
+problem. Unlike earlier work, the primary goal of debiasing
+methods, however, is to pursue the unbiased scene graphs.
+Existing debiasing methods can be roughly categorized into
+four groups: 1) Resampling methods [19], [20] upsample the tail
+relationships and/or downsample the head relationships to
+rebalance the training data distribution. 2) Reweighting methods
+[15], [17], [21], [22], [23] revise the contribution of different
+relationships
+during
+training,
+for
+instance,
+weighting
+the
+prediction loss to strengthen the model’s representation ability
+to the tail categories. 3) Adjustment methods [14], [24], [25], [26]
+modify the learned biased model to obtain unbiased predictions,
+for example, by adjusting the output logits to increase the
+likelihood of more informative fine-grained relationships. 4)
+Hybrid methods [27], [28], [29] combine some/all of the above
+methods. Although debiasing research is rather active in
+the SGG community, the above methods often fall short in
+preserving head category performance while pursuing the
+prediction of informative tail relationships [2], [14]. More
+importantly, the current debiasing methods mainly focus on a
+single bias, i.e., the long-tailed distribution problem, whereas it
+overlooks other biases.
+Unlike existing work that focuses on a single bias, we reveal
+the fact that there are multiple biases for the SGG task in
+this paper. This stems from our observation that some of the
+False Predictions (FP) are clearly not caused by the long-tailed
+distribution bias, e.g., FP on tail relationships (see Fig. 1 (c)).
+We therefore argue that there are other biases that have not yet
+been observed and explored with current debiasing methods.
+Cognitive psychology [34] and studies on the human visual
+arXiv:2307.05276v1  [cs.CV]  11 Jul 2023
+
+---PAGE BREAK---
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+2
+Head relationships, e.g., 
+‘on’=34.8%, ‘has’=13.6%, etc.
+Tail relationships, e.g., 
+‘standing on’=0.7%, 
+‘carrying’=0.3%, etc.
+Head objects, e.g., 
+‘man’=4.7%, ‘tree’=4.2%, etc.
+Tail objects, e.g., 
+‘bird’=0.4%, ‘tie’=0.2%, etc.
+Standing on
+Walking on
+Carrying
+Holding
+(b)
+(a)
+(c)
+Fig. 1. The motivations of TsCM. (a) illustrates the long-tailed distribution bias. (b) shows the semantic confusion bias. (c) reports the True Predictions (TP),
+False Predictions (FP) on head relationships, and FP on tail relationships (further divided into two cases depending on whether the predictions are tail-similar
+relationships or not) of the MotifsNet [9] framework. Formally, in this paper, head relationships refer to on, has, in, of, and wearing, since they account for
+more than 50%, and the rest are tail relationships, but note often different grouping criteria were also adopted in the literature [30], [31], [32], [33]. For a given
+category, similar and dissimilar relationships are those found within and outside its population, respectively. A formal introduction to the concept of population
+is provided in Section 3.3.2.
+system [35] suggest that humans struggle to distinguish similar
+objects. Inspired by this fact, we hypothesize that the source of
+the bias of FP on tail relationships is semantic confusion, which
+refers to two relationships sharing similar semantic information.
+For instance, as shown in Fig. 1 (b), both carrying and holding
+are semantic concepts composed of a people and objects in
+his/her hands. To demonstrate our premise, as shown in Fig. 1
+(c), we additionally split FP on tail relationships into FP on tail-
+similar relationships and FP on tail-dissimilar relationships. As
+expected, most of the FP on tail relationships occur in tail-similar
+relationships. This suggests that SGG models, like humans, have
+difficulties in distinguishing similar relationships. As a result, we
+take semantic confusion as the second bias.
+For the multiple biases in the SGG task, we seek causal
+inference [36], [37], an inference procedure that achieves
+impressive
+performance
+in
+statistics,
+econometrics,
+and
+epidemiology, which has also attracted significant attention in
+the deep learning community in recent years. Our central insight
+is that the Sparse Mechanism Shift (SMS) [38], [39] in causal
+inference allows independent intervention on multiple biases,
+thereby potentially preserving head category performance while
+pursuing higher performance in fine-grained tail relationships.
+Inspired by Pearl Causal Hierarchy (PCH) [40], in particular
+its highest layer, counterfactual, we pose two questions: 1)
+What happens if there is no semantic confusion between any
+two relationships in the observed data? 2) What happens if the
+distribution of relationships in the observed data is balanced?
+To answer these two counterfactual questions, we first build
+Structural Causal Models (SCM) [41], [42], a causal modeling
+method that can support counterfactual inference, based on
+two observed biases as confounders. In practice, unfortunately,
+not all confounders for the SGG task can be observed, which
+means that the built SCM is causal-insufficient (see Section 3.2
+for a detailed analysis). Causal-insufficient assumption will
+invalidate the SMS hypothesis because the variables of the
+SCM are entangled in this case. Put another way, when we use
+existing causal intervention methods to overcome the observed
+biases, unobserved biases could be disturbed and bring about
+unwanted consequences. To allow SCM with causal-insufficient
+assumption to also benefit from the SMS hypothesis, we
+decouple the causal interventions into two stages and, on this
+basis, propose a novel causal modeling method, Two-stage
+Causal Modeling (TsCM), tailored for the SGG task.
+Our TsCM consists of two stages: 1) Stage 1, causal
+representation learning, where despite the causal-insufficient
+assumption
+of
+the
+built
+SCM,
+we
+find
+that
+similarity
+relationships have inherently sparse properties (see Section 3.3),
+and, hence, sparse perturbations and independent interventions
+on semantic confusion bias are attainable. To achieve this, we
+proposed the Population Loss (P-Loss), which intervenes in the
+model training process to increase the prediction gap between
+similar relationships, allowing the trained model to obtain the
+causal representation that can eliminate the semantic confusion
+bias. As a result, this stage disentangles the confusion bias from
+the variables of the built SCM, thereby getting a disentangled
+factorization. 2) Stage 2, causal calibration learning, where
+thanks to the disentangled factorization obtained in stage 1,
+we calibrate the model’s causal representation to remove the
+long-tailed distribution bias. Specifically, this is achieved by
+our proposed Adaptive Logit Adjustment (AL-Adjustment),
+which can adaptively learn a set of adjustment factors from
+the observed data for sparse perturbations and independent
+interventions.
+In summary, the contributions of our work are three-fold:
+•
+We thoroughly analyze the sources of bias in the biased
+SGG model and experimentally verify the bias, i.e.,
+semantic confusion bias, ignored by current debiasing
+methods.
+•
+We propose a new causal modeling framework, Two-
+stage
+Causal
+Modeling
+(TsCM),
+to
+disentangle
+the
+multiple biases from the biased SGG model. Our TsCM
+decouples the causal intervention into two stages. Stage
+
+---PAGE BREAK---
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+3
+1 leverages the proposed P-Loss to remove the semantic
+confusion bias and obtain a disentangled factorization
+even
+in
+the
+case
+of
+insufficient
+causality,
+thereby
+providing the causal representation that can distinguish
+similar relationships. Stage 2 further calibrates the causal
+representation to eliminate the long-tailed distribution
+bias by using the proposed AL-Adjustment.
+•
+Comprehensive experiments on various SGG backbones
+and the popular benchmark demonstrate the state-of-the-
+art mean recall rate of the proposed TsCM. Furthermore,
+our TsCM can maintain a higher recall rate than other
+debiasing methods, achieving a better tradeoff between
+head and tail relationships.
+2
+RELATED WORKS
+2.1
+Scene Graph Generation
+SGG produces a structured representation of the scene by
+assigning appropriate relationships to object pairs and enables a
+more comprehensive understanding of the scene for intelligent
+agents
+[1].
+Most
+early
+works
+struggled
+with
+employing
+advanced
+network
+structures,
+e.g.,
+Convolutional
+Neural
+Network, Recurrent Neural Network, Graph Neural Network,
+for better feature extraction and representation [2], [43]. Despite
+continuous improvements in the recall rate, these methods fall
+into the trap of biased prediction, i.e., informative fine-grained
+relationships are predicted as less informative coarse-grained
+relationships. As a result, debiasing methods have attracted
+unprecedented attention in the SGG community in recent years.
+To keep focus, here we mainly review the debiasing methods
+for the SGG task. Existing debiasing methods can be roughly
+categorized into four groups as follows.
+Resampling
+methods
+downsample
+the
+head
+category
+relationships and/or upsample the tail ones to balance the
+training data distribution, and often the prior knowledge, e.g.,
+language prior, is taken into account, too. For instance, instead
+of relying on box-level annotations, SegG [19] argues that
+pixel-level grounding would naturally be more valuable and,
+hence, create segmentation annotations for the SGG dataset with
+the help of auxiliary datasets. Recently, TransRwt [20] rectified
+the skewed distribution by creating an enhanced dataset
+using Internal Transfer and External Transfer, the former for
+transferring the coarse-grained relationships to the fine-grained
+ones and the latter for re-labeling the relationships that are
+missing annotations. However, resampling methods may lead to
+overfitting (oversampling) or information loss (undersampling)
+by altering relationship category sample distributions.
+Reweighting methods design debiasing loss functions to make
+the model pay more attention to the tail category relationships
+or to create advanced networks to improve the representation
+ability of these relationships. Some works in this group begin
+by extracting prior knowledge from biased distributions, e.g.,
+cognitive structure in CogTree [21], predicate lattice in FGPL
+[30], relationship probability distribution in PPDL [17], etc., and
+then combine the proposed debiasing loss functions to supervise
+the model training. Besides, GCL [16] presents a Stacked
+Hybrid-Attention network to achieve intra-modal refinement
+and intermodal interaction and then enhances the representation
+ability of tail relationships. Nonetheless, reweighting methods
+may result in an imbalanced focus on relationship categories and
+suboptimal, unstable performance due to manual or heuristic
+weight adjustments.
+Adjustment methods adjust the output of the biased trained
+model to obtain unbiased predictions. The adjustment procedure
+can be based on prior knowledge. For example, Logit-reweight
+[44] uses label frequencies to adjust the logit outputs by the
+biased model. DLFE [24] considers the SGG task as a Learning
+from Positive and Unlabeled data (PU learning) problem,
+where a target PU dataset contains only positive examples
+and unlabeled data. However, its prior knowledge, i.e., label
+frequencies, is obtained iteratively during the training process
+by the proposed Dynamic Label Frequency Estimation method.
+Furthermore, adjustment procedures can also be modeled by
+causal inference. For instance, TDE [14] first builds a causal
+graph for the SGG task and then draws counterfactual causality
+from the trained model to infer the effect from the negative
+bias. Note that adjustment methods will increase computational
+complexity with post-training output adjustments and may
+cause a decline in other relationship category performances.
+Hybrid methods combine some/all of the above techniques.
+HML [28] and CAME [33] first divide the long-tailed distribution
+into some balanced subsets. HML [28] then trains the model
+with coarse-grained relationships and finally learns the fine-
+grained categories. While CAME [33] then proposes to use
+a mixture of experts to handle different subsets. RTPB [29]
+enhances the impact of tail relationships on the training
+process based on prior bias and designs a contextual encoding
+backbone network to improve feature extraction capabilities.
+However, hybrid methods Increase implementation complexity,
+more challenging parameter tuning, higher computational costs,
+and potential performance instability due to the interplay of
+combined methods.
+Despite achieving impressive results, the above debiasing
+methods focus almost exclusively on a single bias, i.e., long-
+tailed distribution bias, which clearly, makes complete debiasing
+impossible. Moreover, these methods sacrifice head relationships
+in pursuit of tail category performance. Differently, our method
+considers multiple biases and removes them using the causal
+inference
+technique.
+Our
+causal
+model
+TsCM consists
+of
+two stages covering both the reweighting and adjustment
+approaches. Thanks to the SMS mechanism, the two stages
+in our method independently intervene in different biases. In
+contrast, the different stages in existing hybrid methods only
+intervene in the same bias.
+2.2
+Causal Inference
+Causal analysis has achieved encouraging performance in
+health, social, behavioral sciences, etc., and it has also attracted
+increasing attention in deep learning community in recent
+years, such as scene graph generation [14], out-of-distribution
+generalization [45], and salient object detection [46]. Compared
+with deep learning models, the causal inference approaches
+can eliminate the influence of biases/confounders when making
+predictions [36], [47]. A typical causal inference paradigm
+usually starts with establishing a graphical model, e.g., the
+Structural Causal Model (SCM) [41], [42], [48], which models the
+dependencies of causal variables. It then intervenes in (e.g., do-
+interventions [41], [47]) these variables to pursue causal inference
+of interest. The models can therefore be generalized to different
+distributions.
+It should be emphasized that the above interventions can
+be achieved because the causal variables satisfy the principle
+of sparse perturbation and independent intervention, which
+is
+the
+cornerstone
+of
+causal
+inference.
+The
+independent
+intervention
+principle
+in
+causality
+emphasizes
+that
+the
+conditional distribution of each causal variable, given its
+causes (i.e., its mechanism), does not inform or influence the
+
+---PAGE BREAK---
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+4
+other mechanisms. The sparse perturbation principle refers to
+small distribution changes that tend to manifest themselves
+in a sparse or local way [38], [49]. The sparse principle is
+extended by independence, which can be seen as a consequence
+of independence, too [39], [48]. Benefiting from the independent
+intervention principle, Scherrer et al. [50] decompose the
+causal
+mechanism
+into
+modules
+with
+knowledge,
+which,
+different from monolithic models where full knowledge will
+be learned directly, enables adaptation to distribution shifts
+by only updating a subset of parameters. Thanks to the
+sparse perturbation principle, Ahuja et al. [49] achieve weakly
+supervised representation learning by perturbing the causal
+mechanism sparsely. Inspired by the above work and the
+multiple confounders in the SGG task, the model proposed
+in this paper removes these confounders independently and
+sparsely, which allows our model to preserve the performance
+of the head categories while pursuing debiasing.
+3
+METHODS
+3.1
+Overview
+The primary goal of SGG is to model the objects existing in the
+scene and their pairwise relationships. Most existing works first
+detect the objects (e.g., “man”, “horse” ) in the scene with an
+object detector and then recognize their pairwise relationships
+(e.g., “riding”, “standing on”) with a relationship classifier. The
+object detector extracts information about objects, like their
+bounding boxes, categories, and features. Then the relationship
+classifier predicts relationships for each pair of objects. Simply,
+a scene graph is a set of visual triples in the formulation of
+<subject, relationship, object>. Formally, let D = {(xi, yi)}ND
+i=1
+denote the observed data with ND samples, where xi is i-th
+image and yi ∈RNi×K is Ni relationships in this sample, yij is K
+dimension one-hot vector denoting the label of j-th relationship
+in xi. We therefore need to label the dataset D with visual triplets
+{< (osub
+i
+, bsub
+i
+), yi, (oobj
+i , bobj
+i ) >}ND
+i=1 to support model training,
+where osub
+i
+, oobj
+i
+∈RNi×C and bsub
+i
+, bobj
+i
+∈RNi×4, oij and bij
+denoting the category and bounding box information of subject
+or object of j-th relationship in xi respectively. C and K are
+the numbers of categories of objects and relationships in the
+observed data, respectively. Although labeling the visual triples
+is very costly, early efforts have contributed a few benchmarks to
+the SGG community, such as Visual Genome [51], Scene Graph
+[1], and Open Images V4 [52]. However, SGG models trained on
+these datasets typically suffer from two challenges: (1) Semantic
+confusion, and (2) Long-tailed distribution.
+In this work, we address the above two challenges from the
+perspective of causal inference. Specifically, in Section 3.2, we
+firstly consider the aforementioned two challenges, i.e., semantic
+confusion and long-tailed distribution, as confounders for the
+standard SGG framework (see Fig. 2 (a)). Therefore, our method
+leverages the data-level confounders to model the causality
+for the SGG task. Compared to model-level confounders [14],
+our approach is model-agnostic, i.e., transferable to arbitrary
+SGG models. We then propose the Population Loss in Section
+3.3 to remove the semantic confusion confounder and get a
+disentangled factorization for the causal model (see Stage 1 in
+Fig. 2 (b)). Next, in Section 3.4, we propose AL-Adjustment
+to remove the long-tailed distribution confounder to obtain
+unbiased predictions (see Stage 2 in Fig. 2). Finally, in Section
+3.5, we show that our method is Fisher-consistent and highlight
+the differences from existing statistical-based approaches.
+3.2
+Modeling structural causal model
+One can use a variety of frameworks to model the causality of
+their system of interest, such as Causal Graphical Models (CGM),
+Structural Causal Models (SCM), and Potential Outcomes (PO)
+[36], [41], [42], [48]. The causality modeling ability of CGM is
+limited since it cannot support counterfactual inference. PO is
+active in the system with binary treatment variables, but it is
+awkward when dealing with special treatment and outcome
+variables. Considering the limitations of CGM and PO, in this
+work, we model the causality using SCM, a structural method
+that contains variables, structural functions, and distributions
+over the variables (see Definition 1).
+Definition 1 (Structural Causal Model (SCM) [41], [42]).
+A
+structural causal model (SCM) M is a 4-tuple ⟨V, U, F, P(U)⟩,
+where U
+= {U1, U2, · · ·, Un} is a set of exogenous variables;
+V = {V1, V2, · · ·, Vn} is a set of endogenous (observed) variables;
+F = {F1, F2, · · ·, Fn} is the set of structural functions determining
+V; P(U) is a distribution over the exogenous variables.
+Definition 2 (Submodel [41], [42]). For the SCM M, let eV be a set
+of variables in V, and ev a particular value of eV. A submodel Mev (of
+M ) is a 4-tuple: Mev = ⟨V, U, Fev, P(U)⟩, where Fev = {Fi : Vi /∈
+eV} ∪{eV ←ev }, and all other components are preserved from M.
+Endogenous variables are the fundamental elements of
+an SCM. However, determining variable V in the SGG task
+is very challenging because its inputs, i.e., images, differ
+greatly from the structured units in traditional causal discovery
+and reasoning tasks [42], [48]. Inspired by FP on head/tail
+relationships in Fig. 1, in this paper, we propose a model-
+agnostic data-level variable that takes semantic confusion
+and long-tailed distribution as the confounders. As a result,
+the induced submodel Mev in our work is ⟨V, U, Fev, P(U)⟩
+(see Definition 2). Where V
+=
+{X, Y, S, L}, X
+is input
+(images in SGG task), Y
+is output (relationships), S is the
+semantic confusion confounder, L is the long-tailed distribution
+confounder; U = {UX, UY , US, UL}; Fev = {F1, F2, F3, F4, F5};
+P(UX, UY , US, UL) is the distribution over the exogenous
+variables. The SCM is shown in Fig. 3 (Biased SGG), and thus
+the structural equations are:
+S = P(S),
+L = P(L),
+X = F1(L, P(L)) + F2(S, P(S)),
+Y = F3(X, P(X)) + F4(L, P(L)) + F5(S, P(S)),
+(1)
+Intuitively, we can directly use interventions to remove the
+confounders in SCM (see Definition 3). These interventions,
+however, do not update P(U), and thus the intervened results
+are noisy causal effects in most cases [36], [42].
+Definition 3 (Interventions in SCM [41], [48]). An intervention
+do (Vi := v′) in an SCM M is modeled by replacing the i-th
+structural equation by Vi := v′, where v′ is a Vi-independent value.
+Definition 4 (Counterfactual in SCM [41], [48]). A counterfactual
+in an SCM M is modeled by replacing the i-th structural equation by
+Vi := v′ and update the P(U), where v′ shares the same meaning as
+it does in Definition 3. The above counterfactual intervention induces
+the submodel MVi.
+Assumption 1 (Causal-insufficient). The exogenous variable U in
+M satisfies that: P(U1, . . . , Un) ̸= P(U1)×P(U2)×· · ·×P(Un).
+Fortunately,
+counterfactual,
+the
+highest-level
+reasoning
+procedure of cognitive ability [36], overcomes this limitation by
+imagining pre/post-intervention results (see Definition 4). Note
+that counterfactual is unfalsifiable since its imaginary results
+cannot be observed. However, significant designs (e.g., average
+
+---PAGE BREAK---
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+5
+(b) Proposed Two stage Causal Modeling (TsCM)
+ Stage 1: Causal representation learning
+ Stage  2: Causal calibration learning
+SGG 
+model
+Population Loss
+Relationship-
+populations
+Extract 
+statistical 
+knowledge
+Trained 
+model
+Test image
+Trained 
+model
+Adjustment
+factors
+Output logits
+Augmented logits
+Adaptive Logit Adjustment
+Test image
+Output logits
+Trained 
+model
+SGG 
+model
+Cross-entropy loss
+Trained 
+model
+(a) Standard SGG framework
+Extract statistical 
+knowledge
+Estimate 
+counterfactual
+Estimate 
+counterfactual
+racket
+hat
+woman
+Unbiased graph
+wearing
+holding
+racket
+hat
+woman
+Biased graph
+wearing
+has
+Adjusted logits
+Unbiased prediction: Predicting the correct relationships.
+(e.g., <woman, holding, racket>)
+Biased prediction: Predicting fine-grained relationships as 
+coarse-grained relationships (e.g., <woman, has, racket>).
+Fig. 2. The illustrations of the standard framework and our proposed pipeline. The standard SGG framework is supervised by cross-entropy loss. While
+TsCM consists of two stages: Stage 1 learns causal representation learning that can better distinguish semantic confusion as well as disentangle the causal-
+insufficient SCM. Specifically, we achieve this through the proposed Population Loss. Stage 2 leverages the proposed Adaptive Logit Adjustment to calibrate
+the entangled factorization from the previous stage. As a result, the adjusted logits can avoid the SSG model biases towards the head relationships.
+treatment effect) in statistics, econometrics, and epidemiology
+can estimate the counterfactuals and are proven effective. The
+principle difference between intervention and counterfactual is
+that the latter updates P(U) when manipulating the structural
+equations [42]. Thus, one can partially seek the intervention
+technique to calculate the counterfactuals. Inspired by the above
+facts, we therefore leverage the counterfactual inference to
+eliminate the semantic confusion confounder S and long-tailed
+distribution confounder L to obtain an unbiased SCM MS,L
+ev
+for
+the SGG task. The counterfactuals results can be calculated as:
+E[Y | X, do (S := s), do (L := l)]
+= ESELE[Y | X, s, l]
+=
+X
+s
+X
+l
+E[Y | X, s, l]P(s)P(l).
+(2)
+where s/l is a S/L-independent value. do interventions involve
+manipulating one or more variables to investigate causal
+relationships [36], where do (L := l) signifies setting the value
+of variable L to l and observing the outcome. Note that,
+causal sufficiency is an essential assumption for Equation
+(2), i.e., the exogenous variables Ui are jointly independent:
+P(U1, . . . , Un) = P(U1) × P(U2) × · · · × P(Un). Thanks to the
+causal sufficiency assumption, the endogenous variables V in M
+can be formulated as a causal/disentangled factorization:
+P (V1, V2, . . . , Vn) =
+n
+Y
+i=1
+P (Vi | pa(Vi)) ,
+(3)
+where pa(Vi) are the parents of Vi. In the SGG task, confounders
+can be, for instance, the observed confounders such as the
+semantic confusion confounder and the long-tailed distribution
+confounder, as well as unobserved ones caused by missing
+labeled relationships and mislabeled relationships. The latter has
+been discussed in much literature [24], [25], [27], [28], [31]. We
+therefore do not expect and cannot model a causal sufficient
+SCM for the SGG task due to the unobserved confounders. In
+accordance with this, we assume that Mev is causal-insufficient
+Biased SGG                                    
+Stage 1                                    
+Stage 2        
+Fig. 3. The proposed Causal Graphical Model (SCM) for SGG. S and L are
+data-level confounders, i.e., the semantic confusion confounder and the long-
+tailed distribution confounder. X and Y are the input image and the predicted
+relationships, respectively.
+(see Assumption 1), and thus its endogenous variables can only
+be formulated as an entangled factorization:
+P (V1, V2, . . . , Vn) =
+n
+Y
+i=1
+P (Vi | Vi+1, . . . , Vn) .
+(4)
+Assumption 2 (Sparse Mechanism Shift (SMS) [38], [39]). Small
+distribution changes tend to manifest themselves sparsely or locally in
+the causal/disentangled factorization (see Equation (3)), that is, they
+should usually not affect all factors simultaneously.
+Assumption 2 tells us that for a disentangled factorization, a
+sparse operation allows the learner to remove the confounders
+and
+even
+generalize
+to
+unseen
+distributions.
+However,
+unfortunately, Mev is causal-insufficient since the SGG task
+inevitably
+contains
+the
+unobserved
+confounders,
+and
+it,
+therefore, cannot benefit from the SMS hypothesis. In response
+to this challenge, we decouple causal modeling into two stages
+to achieve the goal of intervening in the endogenous variables
+sparsely:
+E[Y | X, do (S := s) , do (L := l)]
+= EX[E[Y ′ | X, do(S := s)]
+|
+{z
+}
+stage 1
++ E[Y | X, Y ′, do(L := l)]
+|
+{z
+}
+stage 2
+].
+(5)
+where stage 1 exploits the inherent sparse property of similar
+relationships, even under the condition of causal-insufficient
+assumption, it can achieve sparse perturbations on variable S
+to remove the semantic confusion confounder as well as learn
+
+---PAGE BREAK---
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+6
+a disentangled representation of Mev at the same time, see
+Section 3.3. Based on the disentangled factorization obtained,
+we then, in stage 2, manipulate variable L in a sparse way
+to remove the long-tailed distribution confounder, see Section
+3.4. Both stages are sparse interventions, thereby satisfying
+the SMS assumption, which allows our method to achieve
+unbiased prediction while protecting the performance of head
+relationships. Specifically, stage 1, involving interventions on
+similar relationships, naturally doesn’t harm head relationships.
+Moreover, the adjustment mechanism in stage 2, adaptively
+learned from stage 1, further ensures the protection of head
+relationships.
+3.3
+Causal representation learning
+3.3.1
+Population Loss
+In the SGG task, similar relationships are those with only
+slightly different visual and semantic features. However, existing
+SGG models perform poorly in discriminating these similar
+relationships, for instance, easily mispredicting standing on as
+walking on or vice versa. This is not surprising, as distinguishing
+these similar relationships is even challenging for humans.
+Naturally, one may be curious and then imagine: Would the
+above error still occur if standing on and walking on are no longer
+similar? While this only happens in our imagined spaces, it can
+be formally calculated by counterfactual (see Definition 4) in the
+causal inference paradigm:
+P(y|x, do(S := s))
+= P(y|x, do(S := s1)) −P(y|x, do(S := s0)),
+(6)
+where (x, y) is a particular value of (X, Y ), (X, Y ) ∼D; s1
+and s0 indicate that the relationship y is similar or dissimilar to
+other relationships, respectively. In fact, the above counterfactual
+formulated in Equation (6) simulates the potential outcomes
+of different interventions, i.e., do(S := s1) and do(S := s0).
+It is critical because one can often benefit from imagining;
+for instance, Einstein’s thought experiment brought the Special
+Theory of Relativity to the world. Despite being promising,
+however, calculating Equation (6) takes a lot of work. TDE [14] is
+highly relevant to our work, which simulates two interventions
+by inferring pre/post-processed inputs to obtain counterfactual
+results. However, it requires two model inferences for each
+input, thereby introducing unbearable costs. In contrast, Average
+Treatment Effect (ATE) [53] estimates the counterfactuals in
+one shot by leveraging statistical knowledge. Thanks to its
+high estimation efficiency, ATE is a commonly used technique
+in causal inference, such as exploring the ATE estimation
+with binary treatments and continuous outcomes in [54] and
+discussing the propensity score if the average treatment effect
+is identifiable from observational data in [55]. Inspired by ATE,
+in this paper, we use statistical knowledge from the observed
+data D to estimate counterfactuals:
+E[y|x, do(S := s)]
+= EX[E(Y |X, do(S := s1)) −E(Y |X, do(S := s0))].
+(7)
+Definition 5 (Population in SGG). Let y = {y1, y2, · · ·, yK} be
+relationship categories in observed data D, and let Pyi
+α be population
+of yi. Then, Pyi
+α is a relationship set containing the α most similar
+relationships to yi.
+Formally, we first extract knowledge Pα, Pα = {Pyi
+α }K
+i=1,
+from the observed data (the calculation of Pα is placed in Section
+3.3.2). Pyi
+α is the population of relationship yi, a relationship set
+containing the statistical knowledge of similar relationships; see
+Definition 5. Inspired by penalized head categories in [22], [23],
+[44], here we punish similar relationships based on knowledge
+Pα. Specifically, we discard the widely used cross-entropy
+loss ℓand supervise the SGG model f through the proposed
+Population Loss (P-Loss) ˆℓ:
+ˆℓ(Pα, y, f(x)) = log[1 +
+X
+y′∈Py
+α
+πy′
+πy
+× e(fy′(x)−fy(x))
++
+X
+y′ /∈Py
+α,y′̸=y
+e(fy′(x)−fy(x))],
+(8)
+θ∗= arg min
+θ
+E[
+E
+(x,y)∼D
+ˆℓ(Pα, y, f(x))],
+(9)
+where π is category frequencies on the observed data D and
+θ∗is the parameter used to parameterize SGG model fθ∗. x and y
+(y = {yi}K
+i=1) are the input (e.g., image) and output relationship
+categories, respectively. As an example, for relationship yi, the
+P-Loss ˆℓpenalizes its confusing relationships with the help of
+statistical knowledge π and Pyi
+α extracted from the observed
+data D. The penalty term in Equation (8) can be seen as
+do(S := s) in Equation (6) since it intervenes in the sparse Pα
+and makes the model more capable of distinguishing between
+similar relationships. In other words, P-Loss can remove the
+confounder S in Mev. Thus, the counterfactual can be estimated
+by the statistical knowledge Pα as:
+P(y|x, do(S := s)) = P(y|x, Pα, π)
+= fθ∗(x) .
+(10)
+Assumption 3 (Similar relationships are sparse). Let y = {yi}K
+i=1
+be relationships in observed data D. For any relationship yi (i ∈
+{1, 2, · · · , K}), there exist k relationships similar to it. Then, it holds
+that k ≪K.
+Despite achieving the goal of calculating the counterfactuals,
+however, it is critical to note that our causal-insufficient
+assumption determines that our manipulation (do(S := s)) in
+Equation (7) may perturb other variables simultaneously since
+the entangled factorization of Mev does not satisfy the SMS
+hypothesis. Fortunately, in this paper, we empirically find that
+similar relationships hold the sparse property (see Assumption
+3). Based on our observations, relationships within the SGG
+dataset are often similar to a few specific relationships but
+not to most others. For example, standing on is only similar to
+on, walking on, etc., but differs from most other relationships.
+Therefore, Assumption 3, which shows similar relationships
+have the sparse property that SMS highlighted, guarantees
+that even an entangled factorization can be intervened sparsely
+on the confounder S. In other words, even if Mev is causal-
+insufficient, our proposed P-Loss can still intervene in S without
+worrying about perturbing other exogenous variables, such as
+confounder L.
+Furthermore, we argue that do(S := s) partially disentangles
+the Mev as it removes the confounder S and allows us to get
+a better causal representation. Thus, the endogenous variables
+in the induced submodel MS
+ev can be roughly formulated as a
+disentangled factorization:
+P(X, Y, L) .= P(X) × P(Y ) × P(L).
+(11)
+Disentangled factorization is considered to be the key
+to representation learning due to its potential in abstract
+reasoning, interpretability, generalization to unseen scenarios,
+etc. Although it has attracted significant attention, evaluating
+the disentangled representation is still challenging [56]. We
+will design experiments in the ablation study (Section 4.3) to
+demonstrate our disentangled claim in Equation (11).
+
+---PAGE BREAK---
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+7
+3.3.2
+Calculate the relationship-populations
+As a supplement to Section 3.3.1, this section shows how to
+calculate the relationship-populations Pα. For Pα, we give three
+assumptions (Assumptions 4-6) based on the inspirations of
+causality as well as the hallmarks of the relationships in the SGG
+task.
+Assumption 4 (Relationship-population is learner independent).
+Let fθ1 and fθ2 be SGG models parameterized by θ1 and θ2,
+respectively. Then, E[P
+′
+α | fθ1] = E[P
+′′
+α | fθ2].
+Assumption
+5
+(Relationship-population
+is
+distribution
+insensitive).
+Let D1
+obs
+and D2
+obs
+be two observed datasets.
+Then, E[P
+′
+α | D1
+obs] = E[P
+′′
+α | D2
+obs].
+Assumption 6 (Relationship-population is asymmetric). Let yi
+and yj be two relationships. Then, yi ∈Pyj
+α ⇎yj ∈Pyi
+α .
+Assumption 4 states that whether two relationships are
+similar is irrelevant to the SGG model. Standing on and walking
+on, for instance, should share the same features no matter what
+model we use. In light of this, we should not use any SGG model
+when calculating Pα. Assumption 5 illustrates no correlation
+between the distribution of two relationships and their similarity.
+We highlight this because we observe that the SGG dataset
+often suffers from the long-tailed distribution issue at both the
+relationship and object levels, which may perturb the calculation
+procedure of Pα. Assumption 6 is inspired by the fact that cause
+and effect are directed, i.e., the cause can determine the effect,
+but not vice versa.
+To satisfy Assumption 4, we design a model-agnostic
+relationship feature extraction method. Consider two objects,
+oi and oj, whose bounding boxes are
+bi
+¯x, bi
+¯y, bi
+h, bi
+w
+
+and
+[bj
+¯x, bj
+¯y, bj
+h, bj
+w], respectively. Where, as an example, for the
+bounding box of oi, (bi
+¯x, bi
+¯y) is the center point, and bi
+w and bi
+h
+are the width and height. We denote the model-agnostic feature
+of the relationship between these two objects as ψ<oi,oj>:
+[2(bi
+¯x + bj
+¯x) −(bi
+w + bj
+w)
+4bi
+h
+, 2(bi
+¯y + bj
+¯y) −(bi
+h + bj
+h)
+4bi
+h
+,
+2(bi
+¯x + bj
+¯x) + (bi
+w + bj
+w)
+4bi
+h
+, 2(bi
+¯y + bj
+¯y) + (bi
+h + bj
+h)
+4bi
+h
+, bj
+h
+bi
+h
+, bj
+w
+biw
+].
+(12)
+Our proposed model-agnostic feature emphasizes the relative
+position between object pairs, which is inspired by the fact that
+it is intrinsically linked to the relationships in SGG. For example,
+the object pairs of standing on are up-down, while behind is
+front-back. Thanks to the molecules of Equation (12), ψ<oi,oj>
+is position-insensitive, as the upper left corners of all object pairs
+are moved to the same coordinate. Besides, the denominator of
+Equation (12) normalizes the object pairs, ensuring that ψ<oi,oj>
+is scale-insensitive. The position/scale-insensitive design in our
+model-agnostic feature extraction method can overcome the
+problem that the distance of the lens can make the same
+relationship vary greatly, thereby generalizing to unseen object
+pairs.
+Before extracting the relationship features in the observed
+data using the above method, however, there is a problem
+that needs to address: The object-level long-tailed distribution
+problem may perturb the model-agnostic feature extraction.
+Consider an example with 90% <people, standing on, road> and
+10% <people, standing on, beach> in the observed data. It is
+fusing the features of standing on will undoubtedly bias towards
+<people, standing on, road> due to its dominance in the observed
+data, which is detrimental to extracting the feature of standing
+on. We address this problem by extracting the object-to-object
+level features ξy and then normalizing them. Our method is
+inspired by Inverse Probability Weighting (IPW) [57], a bias
+correction method commonly used in statistics, econometrics,
+epidemiology, etc. As a result of this improvement, the proposed
+method satisfies Assumption 5 since it eliminates the disturbance
+of distribution from the feature extraction. Specifically, ξy ∈R4
+(C × C × K × 6) is a four-dimensional statistic:
+ξy =
+
+
+ξ(1,1)
+y
+ξ(1,2)
+y
+· · ·
+ξ(1,C)
+y
+· · ·
+· · ·
+· · ·
+· · ·
+ξ(C,1)
+y
+ξ(C,2)
+y
+· · ·
+ξ(C,C)
+y
+
+,
+(13)
+where ξ(i,j)
+y
+=
+{ξ(i,j)
+yt
+}K
+t=1
+is the normalized features of
+relationship < oi, yt, oj >, and it can be calculated as:
+ξ(i,j)
+yt
+= ξ<oi,oj>
+yt
+/|ξ<oi,oj>
+yt
+|,
+(14)
+ξ<oi,oj>
+yt
+and |ξ<oi,oj>
+yt
+| are the fusion features and numbers of all
+relationships < oi, yt, oj > in the observed data D, respectively.
+We then calculate the feature of each relationship, for instance,
+for the t-th relationship ξyt:
+ξyt =
+C
+X
+i=1
+C
+X
+j=1
+ξ(i,j)
+yt
+/C2§.
+(15)
+For
+relationship-populations Pα, Pα
+=
+{Pyi
+α }K
+i=1, the
+population of yt can be calculated as:
+Pyt
+α =
+arg smal α
+t,t′∈{1,2,··· ,K},t̸=t′
+ξyt −ξyt′
+ ,
+(16)
+where arg smal α is a computation kernel that selects similar
+relationships based on feature distances. As an example,
+Equation (16) takes the α relationships with the smallest feature
+distance from ξyt. Our method guarantees that the head and
+tail relationship categories have the same population scale and
+thus satisfy Assumption 6. As such, different relationships yield
+different feature distance thresholds in Equation (16), resulting
+in asymmetric relationship-populations.
+3.4
+Causal calibration learning
+3.4.1
+Adaptive Logit Adjustment
+Fig. 1 illustrates the severe long-tailed distribution problem in
+the SGG task. The current SGG models, therefore, easily predict
+informative fine-grained relationships as less informative coarse-
+grained relationships. For instance, looking at is predicted as near.
+To end this, let us seek the imagination again: If one collected the
+balanced data, or, in particular, looking at and near share the same
+distribution in the observed data D, will the above error still
+occur? Similar to Equation (6), this question can also be answered
+with the counterfactual:
+P(y|x, do(L := l))
+= P(y|x, do(L := l1)) −P(y|x, do(L := l0)),
+(17)
+where l1
+and l0
+represent the head and tail categories,
+respectively; as such, Equation (17) simulates the potential
+outcomes of different interventions, i.e., do(L := l1) and do(L :=
+l0). Inspired by logit adjustment [26], [58], [59], in which the class
+prior knowledge (also known as adjustment factors) extracted
+from the training data are used to adjust the model results, we
+§. Object pair < oi, oj > theoretically has C2 triplet categories. However,
+the annotations in SGG dataset are very sparse, i.e., < oi, oj > usually only
+covers a few triplet categories, resulting in a much smaller number of triplet
+categories than C2. As a result, the numerator term in Equation (15) should
+be determined by the observed data D. For instance, for yt, the numerator
+term should be the number of triplet categories composed of yt in D.
+
+---PAGE BREAK---
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+8
+extract the statistical knowledge from the observed data D via
+model fθ∗to estimate counterfactuals:
+E[y|x, do(L := l)]
+= EX[E(Y |X, do(L := l1)) −E(Y |X, do(L := l0))].
+(18)
+Specifically, we leverage the extracted statistical knowledge,
+adjustment factors Tβ, to maximize the recall rate of fθ∗on
+the observed data (the computation of Tβ is placed in Section
+3.4.2). Compared to existing logit adjustment methods, our
+adjustment factors Tβ not only extract knowledge from D but,
+more importantly, it fits adaptively to the SGG model fθ∗.
+Holding this advantage, our adjustment factors Tβ outperform
+the traditional adjustment method by a clear margin (see
+the experiments in Section 4.3). Despite this, the knowledge
+extracted directly from fθ∗and D is still suboptimal. We think
+this is because background relationships will perturb the model
+training, resulting in 1) the logits of the foreground relationships
+being less discriminative; 2) the logits of alternating positive
+and negative make it impossible for the learned factors to
+adjust to some predictions correctly (see the qualitative results in
+Fig. 7). Where foreground relationships in the SGG task are those
+within annotated triplets in the observed data, and background
+relationships are the ones that are absent between object pairs.
+To overcome these problems, we augment the logits of fθ∗:
+˜fθ∗,y(x) = efθ∗,y(x) × f bg
+θ∗,y(x),
+(19)
+where f bg
+θ∗,y(x) is the logit of the corresponding background
+relationship output by fθ∗. f bg
+θ∗,y(x) acts as a guidance term that
+can make the augmented logits ˜fθ∗,y(x) more discriminative,
+which is inspired by the impressive performance of the
+traditional adjustment methods in the simple classification task.
+Augmented logits allow us to get better adjustment factors, and
+then the final prediction yx of input x can be calculated as:
+yx =
+arg max
+y∈{y1,··· ,yK}
+{( ˜fθ∗,y(x) × Tβ)y∈Tβ ∩( ˜fθ∗,y(x))y /∈Tβ}.
+(20)
+Consider a typical false prediction: For an input x belonging
+to the tail category yi, the largest and next largest output logits
+correspond to yj and yi, where yj is a head category. However,
+our proposed adjustment factors can correct this false prediction
+by penalizing the logits corresponding to the head categories and
+encouraging the tail categories, thus, eliminating the negative
+effect caused by the long-tailed distribution problem. Our
+proposed AL-Adjustment acts as do(L
+:=
+l) in Equation
+(18) to remove the confounder L in the induced submodel
+MS
+ev . Therefore, the estimated counterfactual by the statistical
+knowledge Tβ is:
+P(y|x, do(L := l)) = P(y|x, Tβ, ˜fθ∗)
+= ˜fθ∗,y(x) × Tβ
+.
+(21)
+In Section 3.3.1, we show that MS
+ev can be decomposed into a
+disentangled factorization. As a result, manipulating the factor in
+MS
+ev , in most cases, should not affect all factors simultaneously
+(SMS hypothesis, see Assumption 2). We therefore argue that
+do(L := l) in Equation (18) does not affect the exogenous
+variables X and Y , and then the induced submodel MS,L
+ev
+obtained in this stage can be further roughly formulated as a
+disentangled factorization:
+P(X, Y ) .= P(X) × P(Y ).
+(22)
+We will design experiments in the ablation study (Section 4.3)
+to demonstrate our disentangled claim in Equation (22).
+3.4.2
+Calculate the adjustment factors
+This subsection shows how to extract statistical knowledge Tβ
+from the observed data D and the SGG model ˜fθ∗, which can be
+used to adjust the logits to remove the confounder L in submodel
+MS
+ev . For adjustment factors Tβ, we have two assumptions
+(Assumptions 7-8).
+Assumption 7 (Adjustment effect should be sparse).
+Let Tyi
+β
+and Tyj
+β
+are adjustment factors of i-th and j-th prediction logits,
+respectively. Then, P(yi | x) = P(yi | x, Tyj
+β ), P(yj | x) = P(yj |
+x, Tyi
+β ).
+Assumption 8 (Adjustment factors should be independent of
+each other). Let Tyi
+β and Tyj
+β are adjustment factors of i-th and j-
+th prediction logits, respectively. Then, P(y | x, Max(Tyi
+β , Tyj
+β )) =
+Max(P(y
+|
+x, Tyi
+β ), P(y
+|
+x, Tyj
+β )), where Max(·|·) is a
+computation kernel to take the maximum value of the corresponding
+positions of the two sets.
+Assumption 7 is inspired by the SMS hypothesis, and it holds
+due to the disentangled factorization (Equation (11)) obtained
+in stage 1. This assumption also stems from our insight that
+the false predictions in most cases belong to the largest few
+logits (see Table 8). As such, Assumption 7 allows us to correct
+the false predictions with sparse adjustment factors. However,
+the existing methods adjust all logits. Assumption 8 views the
+SMS hypothesis through the relationship level to highlight the
+causality between the relationships. Here is an intuition for this
+assumption: To correct any false prediction logits of a binary
+classification task, we only have to adjust one of these two logits.
+Assumption 8 allows us to learn the adjustment factors of each
+relationship independently.
+Our proposed adaptive adjustment factors Tβ is a two-
+dimensional (K × β) matrix:
+Tβ =
+
+
+Ty1,l1
+β
+Ty1,l2
+β
+· · ·
+Ty1,lβ
+β
+· · ·
+· · ·
+· · ·
+· · ·
+TyK,l1
+β
+TyK,l2
+β
+· · ·
+TyK,lβ
+β
+
+,
+(23)
+where
+Tyi,lj
+β
+adjusts
+the
+j-th
+largest
+prediction
+logit
+to
+correspond to the i-th relationship, and it can be calculated as:
+Tyi,lj
+β
+= arg max
+T
+yi,lj
+β
+∈T
+(
+TP
+(x,y)∼Dyi,lj( ˜fθ∗,y(x) × Tyi,lj
+β
+)
+|
+{z
+}
+true prediction with adjustment
+−
+TP
+(x,y)∼Dyi,lj( ˜fθ∗,y(x)) )
+|
+{z
+}
+true prediction without adjustment
+,
+(24)
+where T ∈R and TP
+(X,Y )(f) is a computation kernel that calculates
+the true prediction numbers (e.g., recall rate (R@K) in SGG
+task) of model f on dataset (X, Y ). Dyi,lj is all relationships
+with the j-th largest prediction logit to correspond to the i-th
+category reasoned by fθ∗, and it can be further divided into
+true predictions T Dyi,lj
+obs
+and false predictions FDyi,lj
+obs . Thus,
+our method is to maximize the recall rate of model fθ∗on the
+observed data D by the adjustment factors learned in Equation
+(24).
+We then propose an upper-lower bound-based method to
+compute Equation (24) quickly. As shown in Fig. 4, for each
+relationship in T Dyi,lj
+obs , we can compute a lower bound that
+keeps the correct prediction. Similarly, we can obtain for each
+relationship in FDyi,lj
+obs
+an upper bound that can adjust it to
+the correct prediction. We denote the lower and upper bounds
+of Dyi,lj as ⊻yi,lj and ⊼yi,lj, respectively. It is clear that we
+
+---PAGE BREAK---
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+9
+[5.8,  3.6,  1.3,  1.1,  0.8, …,  0.2]
+[6.7,  5.8,  2.6,  2.5,  2.2, …,  0.3]
+[7.6,  6.8,  2.6,  1.5,  0.7, …,  0.1]
+…
+[9.6,  8.2,  6.3,  3.1,  2.7, …,  0.7]
+[8.6,  6.1,  5.3,  1.1,  0.9, …,  0.2]
+[6.7,  5.8,  1.6,  1.3,  0.8, …,  0.3]
+…
+Fig. 4. The proposed upper-lower bound-based method of calculating
+Equation (24). Each False/True prediction logit corresponds to an upper/lower
+bound. The most optimal adjustment factor needs to satisfy the most bounds.
+only need to let Tyi,lj
+β
+satisfy the most bounds to maximize the
+number of correct predictions. Therefore, maximizing the recall
+rate of model fθ∗on the observed data D by the adjust factor is
+equivalent to another task that finds the factor that satisfies the
+most bounds in ⊻yi,lj and ⊼yi,lj. As a result, Tyi,lj
+β
+in Equation
+(24) can also be calculated by:
+Tyi,lj
+β
+= arg max
+t∈T
+(
+|⊻yi,lj |
+X
+m=1
+1(t ≥⊻m
+yi,lj)+
+|⊼yi,lj |
+X
+n=1
+1(t < ⊼n
+yi,lj)),
+(25)
+where 1(·) is an indicator function (equals 1 if the expression
+is true and 0 for false) and | · | is the length/size of the
+given set/list. However, we further find that the long-tailed
+distribution problem may perturb the adjustment effect of Tyi,lj
+β
+.
+Specifically, if yi is a head category, | ⊻yi,lj | ≪| ⊼yi,lj |, and
+if it is a tail category, then | ⊼yi,lj | ≫| ⊻yi,lj |. It is due to
+biased training caused by the skewed distribution. To this issue,
+for relationship yi, we randomly sample the same number (e.g.,
+min(|⊻yi,lj |, |⊼yi,lj |)) of bounds ⊻
+′
+yi,lj and ⊼
+′
+yi,lj separately from
+the original lower/upper bounds to ensure unbiased adjustment
+factors. Therefore, Equation (25) will be adjusted to:
+Tyi,lj
+β
+= arg max
+t∈T
+(
+min(|⊻yi,lj |,|⊼yi,lj |)
+X
+m=1
+1(t ≥⊻
+′m
+yi,lj)+
+min(|⊻yi,lj |,|⊼yi,lj |)
+X
+n=1
+1(t < ⊼
+′n
+yi,lj)).
+(26)
+Note that in Equation (26), Tyi,lj
+β
+is an interval with extremely
+close upper and lower bounds, thereby selecting any value
+within this interval as the adjustment factor has a negligible
+impact on the results. Consequently, in this paper, we randomly
+sample a value from Tyi,lj
+β
+as the learned adjustment factor.
+Finally, for each relationship, we learn only β adjustment factors
+corresponding to the 1-β positions in the prediction logits.
+Thus, this sparse adjustment mechanism enables our method
+to satisfy Assumption 7. Meanwhile, the adjustment factors for
+each relationship are independently learned by Equation (26), so
+our method satisfies Assumption 8.
+3.5
+Discussion
+This subsection first shows that our method is Fisher consistent,
+i.e., models based on popular learning strategies (e.g., empirical
+risk minimization (ERM)) lead to the Bayes optimal rule of
+classification that minimizes the balanced error [60], [61]. This is
+very important for the SGG task, as it prevents the model from
+heading down a confusing path, i.e., biased towards predicting
+head categories for a high recall rate. We then highlight the
+differences and advantages of the proposed causal framework
+with existing methods.
+3.5.1
+Fisher consistency
+To demonstrate that our method is Fisher consistent, we
+start with the Bayes perspective. [44] thoroughly explored the
+relationship between the posterior probability of the balanced
+class-probability function P bal(y | x) and the unbalanced one
+P(y | x), and it defined P bal(x | y) ∝P(x | y)/P(x). In the SGG
+task, however, we find that the models suffer from confounders
+other than the long-tailed distribution problem, such as semantic
+confusion confounder, as well as unobserved ones like missing
+labeled relationship confounder and mislabeled relationship
+confounder. As such, here we define:
+P bal(x | y) ∝P(x | y)/P(x)P(S)P(Uo),
+(27)
+where Uo is unobserved confounders. Also, consider:
+P bal(y | x) = (P bal(x | y)P bal(y))/P bal(x),
+(28)
+we therefore have:
+P bal(y | x) ∝(P(x | y)P(X)P bal(y))/(P(X)
+P(Y )P(S)P(Uo)P bal(x)).
+(29)
+For fixed class-conditionals P(x|y), the optimal predictions
+will not be affected by P(Y ) [44], hence:
+P bal(y | x) ∝P(y | x)/(P(S)P(Uo)P bal(x)).
+(30)
+Then, according to the SMS hypothesis (Assumption 2) and
+small distribution changes hypothesis in [39], there exists an
+intervention I such that:
+arg max
+y∈{y1,··· ,yK}
+fθI(x) =
+arg max
+y∈{y1,··· ,yK}
+( ˜fθ∗,y(x) × Tβ).
+(31)
+Note that we cannot model the intervention I directly
+since the induced submodel Mev can only be formulated as
+an entangled factorization. We define the adjustment factors
+corresponding to intervention I as TI
+β, that is:
+arg max
+y∈{y1,··· ,yK}
+fθI(x) =
+arg max
+y∈{y1,··· ,yK}
+( ˜fθ∗,y(x) × TI
+β).
+(32)
+Based on the Theorem 1 in the [62], we have
+argmaxy∈{y1,··· ,yK} ˜fθ∗,y(x) = argmaxy∈{y1,··· ,yK} P(x | y),
+thus:
+arg max
+y∈{y1,··· ,yK}
+fθI(x) =
+arg max
+y∈{y1,··· ,yK}
+((P(y | x)P(y)/P(x)) × TI
+β).
+(33)
+Considering both Equation (30) and Equation (33), when
+TI
+β ∝P(Y )/(P(S)P(X)P(Uo)P bal(x)),
+(34)
+then
+arg max
+y∈{y1,··· ,yK}
+fθI(x) =
+arg max
+y∈{y1,··· ,yK}
+P bal(y | x).
+(35)
+This means that our manipulations on confounder S and
+confounder L can lead to a minimal balanced error (mR@K in
+SGG task), and thus our method is Fisher consistent.
+
+---PAGE BREAK---
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+10
+Decision boundary                             
+Head category
+Tail category
+Similar categories
+Loss weighting                             
+Logit adjustment       
+Causal representation 
+learning                               
+Causal calibration 
+learning              
+Biased SGG                               
+Fig. 5. The merging effect of statistical-based methods (top) and our proposed
+causal components (bottom).
+3.5.2
+Sparsity and independency
+Causal representation learning (stage 1) in our proposed causal
+framework is inspired by the loss-weighting methods [63],
+[64], [65], [66], and causal calibration learning (stage 2) is
+inspired by post-hoc adjustment approaches [26], [58], [59].
+In all of these heuristic works, statistical priors (e.g., category
+frequencies) are extracted from the observed data to calibrate
+the decision boundaries. However, we leverage the extracted
+statistical knowledge to estimate the counterfactual to eliminate
+confounders S and L. Where the statistical knowledge in stage 1
+is extracted via the proposed model-agnostic method, and that of
+in stage 2 is adaptively extracted from the learned model fθ∗and
+the observed data D. Besides, our method differs fundamentally
+from these works in that the interventions using knowledge are
+sparse and independent, which is the key to preserving head
+category performance while pursuing the prediction of high-
+informative tail relationships.
+Causal inference models the observed data with modular
+knowledge, and interventions on partial knowledge can achieve
+rapid distribution changes [38]. These sparse perturbations
+simulate human learning, i.e., the reuse of most knowledge, and
+thus, have great potential for practical applications, especially
+for open-world learning. Both stage 1 and stage 2 of our causal
+framework are sparse, specifically, α in Pα and β in Tβ. The
+former means that each relationship only takes the α most
+similar ones as its population. Therefore, Equation (8) only
+sparsely adjusts the loss for very few relationships. The latter
+represents that only the top-β predict logits will be adjusted.
+Thus, Equation (20) is a sparse adjustment technique.
+Independent Causal Mechanisms (ICM) [50] tells us that
+changing one causal mechanism does not change others. Note
+that ICM requires causal sufficiency, but the SGG task does
+not satisfy this. However, as analyzed in Section 3.3.1, our
+proposed P-Loss can intervene in confounder S without losing
+the independent property due to the sparse nature of similar
+relationships. The result of stage 1 can be roughly formulated
+as a disentangled factorization. Furthermore, the different
+logit positions of Tβ are independently learned. These enable
+independent intervention in stage 2.
+In addition, [44] shows that loss-reweight and logit-reweight
+are identical, and merging them brings no further gain. The
+latter even cancels out the improvement from the former
+in some cases. However, the post-hoc adjustment factors in
+our causal framework are adaptively learned from the model
+obtained in the previous stage and thus always yield positive
+adjustment effects. More importantly, our method can make the
+decision boundaries between similar relationships clearer, which
+traditional methods cannot achieve. We show the two above
+merge routes in Fig. 5 to compare the boundary adjustment
+processes.
+4
+EXPERIMENTS
+4.1
+Implementation
+Datasets. We evaluate our method on VG150 [13], a subset of
+the VG dataset [51] that includes the most frequent 150 object
+categories and 50 relationship classes. VG150 has about 94k
+images, and we follow the split in [14], i.e., 62k training images,
+5k validation images, and 26k test images.
+Evaluation modes. Following MotifsNet [9], we use three
+evaluation modes: 1) Predicate classification (PredCls). This
+mode requires the SGG model to predict relationships given
+the ground truth boxes and object classes. 2) Scene Graph
+Classification (SGCls). This mode requires the SGG model to
+predict object classes and relationships given the ground truth
+boxes. 3) Scene Graph Detection (SGDet). This mode requires the
+SGG model to predict object classes, boxes, and relationships.
+Evaluation metrics. Following [11], [12], [13], we adopt three
+evaluation metrics: 1) Recall rate (R@K). R@K is one of the
+most commonly used evaluation metrics, which calculates the
+fraction of times the correct relationship is predicted in the
+top K confident relationship predictions. Typically, K is set to
+20, 50, and 100, i.e., R@20, R@50, and R@100. 2) mean recall
+rate (mR@K). mR@K calculates the mean of the R@K for each
+relationship. Compared with R@K, mR@K can comprehensively
+evaluate the model performance on all relationship categories,
+especially the tail relationships. 3) Mean of R@K and mR@K
+(MR@K). Due to the severely long-tailed distribution, the SGG
+model only needs to perform well on a few head categories to
+achieve high R@K. Although some current works can achieve
+a high mR@K, they greatly sacrifice the R@K of the head
+categories, which is certainly not what we expected since the
+head categories account for significant proportions in realistic
+scenarios. We therefore aim to achieve a favorable tradeoff
+between R@K and mR@K, allowing the model to accommodate
+both head and tail relationships, which in turn enhances the
+practical value of the generated scene graph. For this purpose,
+we calculate the mean of R@K and mR@K, denoted as MR@K, to
+evaluate the model comprehensively.
+Training and testing. We evaluate our model-agnostic method
+on the popular SGG backbones, including MotifsNet [9], VCTree
+[11], and Transformer [67], in the repository provided by [14].
+We follow most of the settings of this repository: 1) The object
+detector in the pipeline is the Faster R-CNN [68] with the
+backbone of ResNeXt-101-FPN [69]. The detector was trained
+with the VG training set and achieved 28.14 mAP on the VG
+test set. 2) The detector is then frozen and outputs the bounding
+boxes, categories, and features of the detected objects for the
+relationship classifier in the pipeline. The classifier is supervised
+by our proposed P-Loss and optimized by SGD. For MotifsNet
+[9] and VCTree [11], the batch size and initial learning rate
+are set to 12 and 0.01, while these parameters in Transformer
+[67] are 16 and 0.001. We set α in Equation (8) to 5 unless
+otherwise mentioned. 3) In the testing phase, the logits will
+first be augmented by Equation (19) and then adjusted by the
+adjustment factors learned by Equation (20) to obtain the final
+predictions. The β in Equation (23) is set to 3.
+4.2
+Comparison with state-of-the-art
+4.2.1
+Backbones and baselines
+Backbones. We evaluate our proposed method with three popular
+SGG backbones, i.e., MotifsNet [9], VCTree [11], and Transformer
+
+---PAGE BREAK---
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+11
+TABLE 1
+Quantitative results (mR@K) of our method and other baselines on the MotifsNet backbone
+PredCls
+SGCls
+SGDet
+mR@20 mR@50 mR@100 AVGmR mR@20 mR@50 mR@100 AVGmR mR@20 mR@50 mR@100 AVGmR
+MotifsNet (backbone) [9]
+12.2
+15.5
+16.8
+14.8
+7.2
+9.0
+9.5
+8.6
+5.2
+7.2
+8.5
+7.0
+TDE [14]♢† (CVPR’20)
+18.5
+25.5
+29.1
+24.4
+9.8
+13.1
+14.9
+12.6
+5.8
+8.2
+9.8
+7.9
+SegG [19]∆† (ICCV’21)
+14.5
+18.5
+20.2
+17.7
+8.9
+11.2
+12.1
+10.7
+6.4
+8.3
+9.2
+8.0
+BPL+SA [27]♦♢† (ICCV’21)
+24.8
+29.7
+31.7
+28.7
+14.0
+16.5
+17.5
+16.0
+10.7
+13.5
+15.6
+13.3
+CogTree [21]♦† (IJCAI’21)
+20.9
+26.4
+29.0
+25.4
+12.1
+14.9
+16.1
+14.4
+7.9
+10.4
+11.8
+10.0
+DLFE [24]♢† (MM’21)
+22.1
+26.9
+28.8
+25.9
+12.8
+15.2
+15.9
+14.6
+8.6
+11.7
+13.8
+11.4
+EBM-loss [15]♦† (CVPR’21)
+14.2
+18.0
+19.5
+17.2
+8.2
+10.2
+11.0
+9.8
+5.7
+7.7
+9.3
+7.6
+Loss-reweight [44]♦† (ICLR’21)
+26.5
+32.9
+35.3
+31.6
+13.8
+17.4
+19.3
+16.8
+9.2
+12.8
+16.5
+12.8
+Logit-reweight [44]♢† (ICLR’21)
+12.2
+15.4
+16.7
+14.8
+6.4
+7.6
+8.3
+7.4
+4.5
+5.9
+7.7
+6.0
+HML [28]∆♦† (ECCV’22)
+30.1
+36.3
+38.7
+35.0
+17.1
+20.8
+22.1
+20.0
+10.8
+14.6
+17.3
+14.2
+FGPL [30]♦† (CVPR’22)
+24.3
+33.0
+37.5
+31.6
+17.1
+21.3
+22.5
+20.3
+11.1
+15.4
+18.2
+14.9
+TransRwt [20]∆† (ECCV’22)
+−
+35.8
+39.1
+−
+−
+21.5
+22.8
+−
+−
+15.8
+18.0
+−
+GCL [16]♦‡ (CVPR’22)
+30.5
+36.1
+38.2
+34.9
+18.0
+20.8
+21.8
+20.2
+12.9
+16.8
+19.3
+16.3
+PPDL [17]♦† (CVPR’22)
+−
+32.2
+33.3
+−
+−
+17.5
+18.2
+−
+−
+11.4
+13.5
+−
+RTPB [29]♦♢‡ (AAAI’22)
+28.8
+35.3
+37.7
+33.9
+16.3
+19.4
+22.6
+19.4
+9.7
+13.1
+15.5
+12.8
+NICE [31]∆♦† (CVPR’22)
+−
+30.0
+32.1
+−
+−
+16.4
+17.5
+−
+−
+10.4
+12.7
+−
+PKO [25]♢† (arXiv’22)
+25.0
+31.4
+34.0
+30.1
+14.1
+17.6
+19.1
+16.9
+9.6
+13.4
+16.1
+13.0
+LS-KD(Iter) [32]♦† (arXiv’22)
+−
+24.1
+27.4
+−
+−
+13.8
+15.2
+−
+−
+9.7
+11.5
+−
+CAME [33]∆♦‡ (arXiv’22)
+18.1
+26.2
+32.0
+25.4
+10.5
+15.1
+18.0
+14.5
+6.7
+9.3
+12.1
+9.4
+TsCM♦♢†
+31.8
+37.8
+40.9
+36.8
+18.7
+22.4
+23.8
+21.6
+13.7
+17.4
+19.7
+16.9
+AVGmR is the average of mR@20, mR@50, mR@100. ∆, ♦, and ♢indicate resampling methods, reweighting methods, and adjustment
+methods, respectively. † and ‡ indicate model-agnostic and model-dependent, respectively.
+TABLE 2
+Quantitative results (mR@K) of our method and other baselines on the VCTree backbone
+PredCls
+SGCls
+SGDet
+mR@20 mR@50 mR@100 AVGmR mR@20 mR@50 mR@100 AVGmR mR@20 mR@50 mR@100 AVGmR
+VCTree (backbone) [11]
+12.4
+15.4
+16.6
+14.8
+6.3
+7.5
+8.0
+7.3
+4.9
+6.6
+7.7
+6.4
+TDE [14]♢† (CVPR’20)
+18.4
+25.4
+28.7
+24.2
+8.9
+12.2
+14.0
+11.7
+6.9
+9.3
+11.1
+9.1
+SegG [19]∆† (ICCV’21)
+15.0
+19.2
+21.1
+18.4
+9.3
+11.6
+12.3
+11.1
+6.3
+8.1
+9.0
+7.8
+BPL+SA [27]♦♢† (ICCV’21)
+26.2
+30.6
+32.6
+29.8
+17.2
+20.1
+21.2
+19.5
+10.6
+13.5
+15.7
+13.3
+CogTree [21]♦† (IJCAI’21)
+22.0
+27.6
+29.7
+26.4
+15.4
+18.8
+19.9
+18.0
+7.8
+10.4
+12.1
+10.1
+DLFE [24]♢† (MM’21)
+20.8
+25.3
+27.1
+24.4
+15.8
+18.9
+20.0
+18.2
+8.6
+11.8
+13.8
+11.4
+EBM-loss [15]♦† (CVPR’21)
+14.2
+18.2
+19.7
+17.4
+10.4
+12.5
+13.5
+12.1
+5.7
+7.7
+9.1
+7.5
+Loss-reweight [44]♦† (ICLR’21)
+25.5
+31.7
+34.9
+30.7
+16.3
+20.9
+22.3
+19.8
+8.7
+12.4
+14.2
+11.8
+Logit-reweight [44]♢† (ICLR’21)
+11.7
+15.2
+16.3
+14.4
+6.4
+7.6
+8.1
+7.4
+4.1
+5.5
+7.1
+5.6
+HML [28]∆♦† (ECCV’22)
+31.0
+36.9
+39.2
+35.7
+20.5
+25.0
+26.8
+24.1
+10.1
+13.7
+16.3
+13.4
+FGPL [30]♦† (CVPR’22)
+30.8
+37.5
+40.2
+36.2
+21.9
+26.2
+27.6
+25.2
+11.9
+16.2
+19.1
+15.7
+TransRwt [20]∆† (ECCV’22)
+−
+37.0
+39.7
+−
+−
+19.9
+21.8
+−
+−
+12.0
+14.9
+−
+GCL [16]♦‡ (CVPR’22)
+31.4
+37.1
+39.1
+35.9
+19.5
+22.5
+23.5
+21.8
+11.9
+15.2
+17.5
+14.9
+PPDL [17]♦† (CVPR’22)
+−
+33.3
+33.8
+−
+−
+21.8
+22.4
+−
+−
+11.3
+13.3
+−
+RTPB [29]♦♢‡ (AAAI’22)
+27.3
+33.4
+35.6
+32.1
+20.6
+24.5
+25.8
+23.6
+9.6
+12.8
+15.1
+12.5
+NICE [31]∆♦† (CVPR’22)
+−
+30.9
+33.1
+−
+−
+20.0
+21.2
+−
+−
+10.1
+12.1
+−
+PKO [25]♢† (arXiv’22)
+26.1
+32.2
+34.6
+31.0
+18.4
+22.3
+23.7
+21.5
+9.6
+13.2
+15.9
+12.9
+LS-KD(Iter) [32]♦† (arXiv’22)
+−
+24.2
+27.1
+−
+−
+17.3
+19.1
+−
+−
+9.7
+11.3
+−
+CAME [33]∆♦‡ (arXiv’22)
+18.9
+26.6
+32.0
+25.8
+11.7
+17.0
+20.5
+16.4
+5.9
+8.7
+10.8
+8.5
+TsCM♦♢†
+32.3
+38.7
+41.5
+37.5
+23.4
+26.9
+28.9
+26.4
+12.5
+16.9
+19.3
+16.2
+AVGmR is the average of mR@20, mR@50, mR@100. ∆, ♦, ♢, † and ‡ are with the same meanings as in Table 1.
+TABLE 3
+Quantitative results (mR@K) of our method and other baselines on the Transformer backbone
+PredCls
+SGCls
+SGDet
+mR@20 mR@50 mR@100 AVGmR mR@20 mR@50 mR@100 AVGmR mR@20 mR@50 mR@100 AVGmR
+Transformer (backbone) [67]
+12.4
+16.0
+17.5
+15.3
+7.7
+9.6
+10.2
+9.2
+5.3
+7.3
+8.8
+7.1
+BPL+SA [27]♦♢† (ICCV’21)
+24.8
+29.7
+31.7
+28.7
+14.0
+16.5
+17.5
+16.0
+10.7
+13.5
+15.6
+13.3
+CogTree [21]♦† (IJCAI’21)
+20.9
+26.4
+29.0
+25.4
+12.1
+14.9
+16.1
+14.4
+7.9
+10.4
+11.8
+10.0
+Loss-reweight [44]♦† (ICLR’21)
+27.8
+33.1
+36.2
+32.4
+15.8
+19.3
+21.1
+18.8
+11.7
+15.3
+17.9
+15.0
+Logit-reweight [44]♢† (ICLR’21)
+13.5
+16.6
+18.9
+16.3
+6.7
+8.6
+9.8
+8.4
+6.6
+8.3
+9.4
+8.1
+HML [28]∆♦† (ECCV’22)
+30.1
+36.3
+38.7
+35.0
+17.1
+20.8
+22.1
+20.0
+10.8
+14.6
+17.3
+14.2
+FGPL [30]♦† (CVPR’22)
+24.3
+33.0
+37.5
+31.6
+17.1
+21.3
+22.5
+20.3
+11.1
+15.4
+18.2
+14.9
+TransRwt [20]∆† (ECCV’22)
+−
+35.8
+39.1
+−
+−
+21.5
+22.8
+−
+−
+15.8
+18.0
+−
+TsCM♦♢†
+32.8
+40.1
+42.3
+38.4
+19.6
+23.7
+25.1
+22.8
+13.8
+18.3
+21.2
+17.8
+AVGmR is the average of mR@20, mR@50, mR@100. ∆, ♦, ♢, † and ‡ are with the same meanings as in Table 1.
+
+---PAGE BREAK---
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+12
+TABLE 4
+Quantitative results (R@K) of our method and other baselines on the MotifsNet, VCTree, and Transformer backbones
+PredCls
+SGCls
+SGDet
+R@20 R@50 R@100 AVGR R@20 R@50 R@100 AVGR R@20 R@50 R@100 AVGR
+MotifsNet (backbone) [9]
+59.5
+66.0
+67.9
+64.5
+35.8
+39.1
+39.9
+38.3
+25.1
+32.1
+36.9
+31.4
+TDE [14]♢† (CVPR’20)
+33.6
+46.2
+51.4
+43.7
+21.7
+27.7
+29.9
+26.4
+12.4
+16.9
+20.3
+16.5
+CogTree [21]♦† (IJCAI’21)
+31.1
+35.6
+36.8
+34.5
+19.4
+21.6
+22.2
+21.1
+15.7
+20.0
+22.1
+19.3
+Loss-reweight [44]♦† (ICLR’21)
+31.4
+38.3
+40.4
+36.7
+19.9
+22.3
+24.7
+22.3
+14.8
+19.3
+21.4
+18.5
+Logit-reweight [44]♢† (ICLR’21)
+54.8
+61.3
+63.1
+59.8
+32.3
+35.4
+36.6
+34.8
+22.3
+28.9
+34.1
+28.4
+TransRwt [20]∆† (ECCV’22)
+−
+48.6
+50.5
+−
+−
+29.4
+30.2
+−
+−
+23.5
+27.2
+−
+PPDL [17]♦† (CVPR’22)
+−
+47.2
+47.6
+−
+−
+28.4
+29.3
+−
+−
+21.2
+23.9
+−
+TsCM♦♢†
+49.7
+57.1
+59.5
+55.4
+29.8
+33.6
+34.2
+32.5
+23.7
+28.6
+29.6
+27.3
+VCTree (backbone) [11]
+59.8
+66.2
+68.1
+64.7
+37.0
+40.5
+41.4
+39.6
+24.7
+31.5
+36.2
+30.8
+TDE [14]♢† (CVPR’20)
+39.1
+49.9
+54.5
+47.8
+22.8
+28.8
+31.2
+27.6
+14.3
+19.6
+23.3
+19.1
+CogTree [21]♦† (IJCAI’21)
+39.0
+44.0
+45.4
+42.8
+27.8
+30.9
+31.7
+30.1
+14.0
+18.2
+20.4
+17.5
+Loss-reweight [44]♦† (ICLR’21)
+29.7
+36.8
+39.3
+35.3
+18.3
+21.8
+24.2
+21.4
+13.2
+17.6
+20.9
+17.2
+Logit-reweight [44]♢† (ICLR’21)
+59.6
+64.1
+65.3
+63.0
+36.7
+38.5
+39.2
+38.1
+22.7
+29.5
+33.8
+28.7
+TransRwt [20]∆† (ECCV’22)
+−
+48.0
+49.9
+−
+−
+30.0
+30.9
+−
+−
+23.6
+27.8
+−
+PPDL [17]♦† (CVPR’22)
+−
+47.6
+48
+−
+−
+32.1
+33
+−
+−
+20.1
+22.9
+−
+TsCM♦♢†
+52.6
+57.5
+60.3
+56.8
+30.8
+33.7
+35.2
+33.2
+25.3
+29.2
+30.4
+28.3
+Transformer (backbone) [67]
+58.5
+65.0
+66.7
+63.4
+35.6
+38.9
+39.8
+38.1
+24.0
+30.3
+33.3
+29.2
+CogTree [21]♦† (IJCAI’21)
+34.1
+38.4
+39.7
+37.4
+20.8
+22.9
+23.4
+22.4
+15.1
+19.5
+21.7
+18.8
+Loss-reweight [44]♦† (ICLR’21)
+29.7
+36.2
+38.6
+34.8
+18.2
+21.4
+22.5
+20.7
+13.1
+17.5
+20.9
+17.1
+Logit-reweight [44]♢† (ICLR’21)
+53.6
+60.4
+62.5
+58.8
+34.2
+36.8
+37.6
+36.2
+21.1
+27.7
+31.2
+26.6
+TransRwt [20]∆† (ECCV’22)
+−
+49.0
+50.8
+−
+−
+29.6
+30.5
+−
+−
+23.1
+27.1
+−
+TsCM♦♢†
+43.2
+53.1
+57.4
+51.2
+25.3
+29.8
+32.1
+29.1
+22.1
+26.2
+27.7
+25.3
+AVGR is the average of R@20, R@50, R@100. ∆, ♦, ♢, † and ‡ are with the same meanings as in Table 1.
+[67]. Specifically, we first replace the loss function of the above
+backbones with the P-Loss to supervise the model training. We
+then leverage AL-Adjustment to optimize the logits outputted
+by the trained model during inference.
+Baselines. We classify existing baselines from two perspectives
+to comprehensively evaluate our proposed framework. 1)
+Debiasing perspective. We divide the baselines into four
+groups, resampling methods, reweighting methods, adjustment
+methods, and hybrid methods. Resampling methods include
+SegG [19] and TransRwt [20]. Reweighting methods include
+CogTree [21], EBM-loss [15], Loss-reweight [44], FGPL [30],
+GCL [16], PPDL [17], and LS-KD(Iter) [32]. Adjustment methods
+include TDE [14], DLFE [24], Logit-reweight [44], and PKO [25].
+Hybrid methods include BPL+SA [27], HML [28], RTPB [29],
+NICE [31], and CAME [33]. We group from this perspective
+because Stage 1 in our framework is the reweighting method and
+Stage 2 is the adjustment method, and thus our TsCM is a hybrid
+method. 2) Model perspective. We divide the baselines into
+two groups, model-agnostic and model-dependent methods.
+The former group includes TDE [14], Loss-reweight [44], Logit-
+reweight [44], BPL+SA [27], CogTree [21], DLFE [24], HML [28],
+FGPL [30], TransRwt [20], SegG [19], EBM-loss [15], PPDL [17],
+NICE [31], PKO [25], LS-KD (Iter) [32], and the latter group
+includes GCL [16], RTPB [29], CAME [33]. It is generally possible
+to easily transfer model-agnostic methods to different SGG
+backbones, thereby generalizing well in real-world applications.
+4.2.2
+Performance analysis
+Quantitative results analysis. We report the quantitative results in
+Table 1, Table 2, Table 3, Table 4, and Table 5. Our proposed
+method achieves state-of-the-art performance on mR@K, the
+most popular metric for evaluating unbiased SGG. Besides, the
+proposed method shows more gains on the metrics of R@K
+and MR@K, which indicates that TsCM obtains a better tradeoff
+between head and tail categories.
+From
+the
+quantitative
+results,
+we
+have
+the
+following
+observations: 1) Adjustment methods [14], [24], [25], [44] are the
+most relevant to our proposed AL-Adjustment approach since
+they share the same insight in encouraging predicting more
+informative tail relationships by adjusting the output logits.
+However, the adjustment factors in our method are adaptively
+learned from the observed data and thus can support causal
+calibration since they are sparse and independent. Benefiting
+from this, for instance, in PredCls mode, TsCM achieves
+6.7%/6.5% performance gains on MotifsNet (Table 1)/VCTree
+(Table 2) compared with adjustment methods. 2) Reweighting
+methods [15], [16], [17], [21], [30], [32], [44] suppress partial
+relationships by modifying the loss function and are thus
+highly related to our proposed P-Loss as well. However, the
+difference is that our method focuses on relationships with
+semantic confusion, which this group of baseline methods has
+not explored yet. Thanks to P-Loss for providing the causal
+representation that can distinguish similar relationships, for
+example, in SGCls mode, TsCM surpasses the reweighting
+methods on MotifsNet (Table 1)/Transformer (Table 3) by
+1.3%/2.5%. 3) Compared with hybrid methods [27], [28], [29],
+[31], [33], for example, in SGDet mode, our method observes
+2.8%/3.6% improvements on VCTree (Table 2)/Transformer
+(Table 3). We believe this is mainly due to the fact that the
+two stages in our causal framework target different biases.
+While baseline methods mix different techniques, they only
+target the same bias. 4) We model the SCM with the data-level
+confounders so that our method is model-agnostic. TsCM can
+therefore be used for any SGG backbone that wants to pursue
+unbiased predictions. Compared with model-agnostic methods
+[14], [15], [17], [19], [20], [21], [24], [25], [27], [28], [30], [31], [32],
+[44], [44], for instance, in SGDet mode, we observe 2.7%/2.8%
+improvements on MotifsNet (Table 1)/Transformer (Table 3).
+5) Table 4 shows that our method is slightly weaker than logit-
+reweight [44] in terms of R@K. However, [44] provides biased
+prediction, resulting in a poor performance in mR@K, e.g.,
+14.8% mR@K in the PredCls mode of the MotifsNet backbone
+[9], while our method achieves 36.8% in the same set-up.
+This indicates that our approach significantly outperforms
+
+---PAGE BREAK---
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+13
+TABLE 5
+Quantitative results (MR@K) of our method and other baselines on the MotifsNet, VCTree, and Transformer backbones
+PredCls
+SGCls
+SGDet
+AV GmR AV GR MR@K AV GmR AV GR MR@K AV GmR AV GR MR@K
+MotifsNet (backbone) [9]
+14.8
+64.5
+39.7
+8.6
+38.3
+23.5
+7.0
+31.4
+19.2
+TDE [14]♢† (CVPR’20)
+24.4
+43.7
+34.1
+12.6
+26.4
+19.5
+7.9
+16.5
+12.2
+CogTree [21]♦† (IJCAI’21)
+25.4
+34.5
+30.0
+14.4
+21.1
+17.8
+10.0
+19.3
+14.7
+Loss-reweight [44]♦† (ICLR’21)
+31.6
+36.7
+34.2
+16.8
+22.3
+19.6
+12.8
+18.5
+15.7
+Logit-reweight [44]♢† (ICLR’21)
+14.8
+59.8
+37.3
+7.4
+34.8
+21.1
+6.0
+28.4
+17.2
+TsCM♦♢†
+36.8
+55.4
+46.1
+21.6
+32.5
+27.1
+16.9
+27.3
+22.1
+VCTree (backbone) [11]
+14.8
+64.7
+39.8
+7.3
+39.6
+23.5
+6.4
+30.8
+18.6
+TDE [14]♢† (CVPR’20)
+24.2
+47.8
+36.0
+11.7
+27.6
+19.7
+9.1
+19.1
+14.1
+CogTree [21]♦† (IJCAI’21)
+26.4
+42.8
+34.6
+18.0
+30.1
+24.1
+10.1
+17.5
+13.8
+Loss-reweight [44]♦† (ICLR’21)
+30.7
+35.3
+33.0
+19.8
+21.4
+20.6
+11.8
+17.2
+14.5
+Logit-reweight [44]♢† (ICLR’21)
+14.4
+63.0
+38.7
+7.4
+38.1
+22.8
+5.6
+28.7
+17.2
+TsCM♦♢†
+37.5
+56.8
+47.2
+26.4
+33.2
+29.8
+16.2
+28.3
+22.3
+Transformer (backbone) [67]
+15.3
+63.4
+39.4
+9.2
+38.1
+23.7
+7.1
+29.2
+18.2
+CogTree [21]♦† (IJCAI’21)
+25.4
+37.4
+31.4
+14.4
+22.4
+18.4
+10.0
+18.8
+14.4
+Loss-reweight [44]♦† (ICLR’21)
+32.4
+34.8
+33.6
+18.8
+20.7
+19.8
+15.0
+17.1
+16.1
+Logit-reweight [44]♢† (ICLR’21)
+16.3
+58.8
+37.6
+8.4
+36.2
+22.3
+8.1
+26.6
+17.4
+TsCM♦♢†
+38.4
+51.2
+44.8
+22.8
+29.1
+26.0
+17.8
+25.3
+21.6
+MR@K is the average of AVGmR and AVGR. ∆, ♦, ♢, † and ‡ are with the same meanings as in Table 1.
+Input images
+MotifsNet
+TsCM
+Input images
+MotifsNet
+TsCM
+fence
+person 2
+person 1
+girl
+ski
+hat 2
+hat 1
+glove 2
+glove 1
+bed
+book
+pillow
+dog
+man
+girl
+person
+surfboard
+wave
+wave
+beach
+man 2
+surboard 2
+man 1
+wire
+surboard 1
+girl
+surfboard
+man
+person
+   wave
+behind
+behind
+behind
+standing on
+behind
+surfboard
+man
+person
+   wave
+near
+near
+on
+girl
+ behind
+surfboard 1
+has
+has
+bench
+                         on
+on
+wire
+man 2
+man 1
+has
+surfboard 2
+surfboard 1
+carrying
+has
+bench
+walking on
+wire
+man 2
+man 1
+attached to
+surfboard 2
+walking on
+book
+        dog
+near
+near
+pillow
+bed
+on
+on
+on
+book
+        dog
+near
+near
+pillow
+bed
+laying on
+on
+on
+person 1
+    glove 1
+hat 2
+girl
+on
+wearing
+wearing
+wearing
+wearing
+    glove 2
+hat 1
+ski
+fence
+person 2
+near
+near
+on
+person 1
+    glove 1
+hat 2
+girl
+standing on
+wearing
+wearing
+wearing
+wearing
+    glove 2
+hat 1
+ski
+fence
+person 2
+behind
+behind
+standing on
+Fig. 6. Qualitative results of our method and baseline approach (MotifsNet [9]). Different relationship predictions are highlighted in blue.
+traditional logit-adjusted methods [44] in terms of unbiased
+prediction. We attribute this to the inability of conventional
+logit-adjusted methods, particularly those employing non-
+heuristic prior knowledge, to effectively adjust for severely
+biased models in the presence of extremely long-tailed data
+within the SGG task. Compared with other methods, for
+instance, in PredCls mode, TsCM achieves 11.7%/13.8% gains
+on MotifsNet/Transformer. We believe that these exciting
+improvements come from sparse perturbations in our method,
+which do not perturb the SGG model largely, thus preserving
+the performance of head categories while pursuing unbiased
+predictions. 6) Table 5 shows that our method can achieve a
+better tradeoff between R@K and mR@K. Besides methods that
+benefit from recall rate (e.g., Logit-reweight [44]), our method
+achieves 6.4%/7.4%/5.4% improvements in the backbones
+of MotifsNet/VCTree/Transformer. This illustrates that our
+method
+also
+preserves
+head
+category
+performance
+while
+pursuing informative tail category predictions.
+Qualitative results analysis. Fig. 6 shows the qualitative results
+generated by the original MotifsNet [9] and MotifsNet equipped
+with our TsCM. From these qualitative results, we have the
+following observations: 1) Our proposed method tends to predict
+more informative relationships, for instance, { <girl, standing on,
+ski> vs <girl, on, ski> } and { <dog, laying on, bed> vs <dog,
+on, bed> }. We believe these improvements are due, in part,
+to the fact that our proposed AL-Adjustment can refine less
+TABLE 6
+Results under different combinations of P-Loss and AL-Adjustment
+PredCls
+SGCls
+SGDet
+P-L
+AL-Adj
+mR@20/50/100
+mR@20/50/100
+mR@20/50/100
+MotifsNet
+✗
+✗
+12.2/15.5/16.8
+7.2/9.0/9.5
+5.2/7.2/8.5
+✓
+✗
+12.9/16.9/20.1
+7.4/9.6/11.2
+5.3/7.6/8.8
+✗
+✓
+24.4/30.7/33.3
+14.2/17.1/18.4
+8.1/10.8/13.3
+✓
+✓
+31.8/37.8/40.9
+18.7/22.4/23.8/
+13.7/17.4/19.7
+VCTree
+✗
+✗
+12.4/15.4/16.6
+6.3/7.5/8.0
+4.9/6.6/7.7
+✓
+✗
+12.7/16.4/19.8
+8.4/10.6/11.4
+5.8/7.4/9.8
+✗
+✓
+23.6/30.3/33.1
+17.6/20.5/22.7
+10.4/13.7/15.9
+✓
+✓
+32.3/38.7/41.5
+23.4/26.9/28.9
+12.5/16.9/19.3
+Transformer
+✗
+✗
+12.4/16.0/17.5
+7.7/9.6/10.2
+5.3/7.3/8.8
+✓
+✗
+13.1/17.2/20.3
+9.4/11.3/12.4
+6.6/8.1/9.4
+✗
+✓
+24.8/31.2/33.9
+14.3/17.8/19.4
+9.8/13.5/16.5
+✓
+✓
+32.8/40.1/42.3
+19.6/23.7/25.1
+13.8/18.3/21.2
+P-L and AL-Adj represent the two key components of TcCM: P-Loss and
+AL-Adjustment, respectively.
+informative predictions into high-informative outputs, and we
+will discuss this in the ablation study. 2) Our method performs
+well in distinguishing similar relationships, for example, { <wire,
+attached to, surfboard 1> vs <surfboard 1, has, wire> }. Besides, for
+objects where two bounding boxes do not intersect, our method
+can still generate meaningful relationships, e.g., { <person, behind,
+girl> vs <person, near, girl> }. It is evident from the above
+improvements that our method can optimize the features of
+the model and classify relationships based on more than just
+
+---PAGE BREAK---
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+14
+MotifsNet: <bear - on - chair>
+TsCM: <bear - standing on - chair>
+(a)
+(b)
+MotifsNet: <hand- in - phone>
+TsCM: <hand - holding - phone >
+Fig. 7. The ablation study results of our method and baselines. Each image shows only one relationship for clarity. The red and blue bounding boxes represent
+subjects and objects, respectively.
+simple information (e.g., the distance between objects). We think
+the optimized features are achieved by our proposed P-Loss,
+which can learn representations that build causality between
+relationships.
+TABLE 7
+Results obtained by different logit augmentation strategies
+Logit augmentation
+mR@20
+mR@50
+mR@100
+MotifsNet
+No augmentation
+28.3
+34.1
+37.4
+efθ∗,y(x) × 1
+30.9
+36.4
+39.7
+efθ∗,y(x) × 2
+30.7
+36.5
+40.3
+efθ∗,y(x) × f bg
+θ∗,y(x)
+31.8
+37.8
+40.9
+VCTree
+No augmentation
+29.6
+35.1
+38.2
+efθ∗,y(x) × 1
+31.6
+38.1
+40.8
+efθ∗,y(x) × 2
+31.4
+37.3
+40.9
+efθ∗,y(x) × f bg
+θ∗,y(x)
+32.3
+38.7
+41.5
+Transformer
+No augmentation
+30.4
+36.2
+38.7
+efθ∗,y(x) × 1
+31.9
+38.4
+41.7
+efθ∗,y(x) × 2
+32.2
+38.0
+41.5
+efθ∗,y(x) × f bg
+θ∗,y(x)
+32.8
+40.1
+42.3
+The evaluation mode here is PredCls.
+4.3
+Ablation Study
+Exploring the contributions of the two stages. TsCM consists of P-
+Loss and AL-Adjustment to eliminate the confounders S and
+L, respectively. We first ablate our proposed causal framework
+using different combinations of P-Loss and AL-Adjustment,
+and the results are shown in Table 6. The results show that
+both components of TsCM contribute a lot to the performance.
+Specifically, for AL-Adjustment, it can significantly improve
+the mean recall rate of the model. For example, VCTree [11]
+equipped with AL-Adjustment has 11.2%/14.9%/16.5% gains on
+the metrics of mR@20/50/100. Although we can only observe
+trivial boosts for P-Loss alone, its purpose is to obtain causal
+representations that can well distinguish similar relationships.
+Therefore, these trivial boosts can be seen as by-products of the
+pursuit of causal representations. Table 6 shows that the causal
+representation greatly enhances AL-Adjustment. For instance,
+AL-Adjustment equipped with P-Loss achieves 8.7%/8.4%/8.4%
+improvements on the backbone of VCTree [11].
+We also present the output logits, the augmented logits, and
+the adjusted logits in Fig. 7 to show the process of P-Loss and
+AL-Adjustment adjusting the SGG model. These results show
+that AL-Adjustment can adjust less informative predictions
+TABLE 8
+The distribution (%) of the ordering of the logits corresponding to the correct
+categories in the false predictions
+Ordering 2
+Ordering 3
+Ordering 4
+Ordering 5
+Ordering 6
+MotifsNet
+72.5
+16.3
+7.3
+1.4
+0.8
+VCTree
+69.6
+14.8
+6.8
+2.7
+1.4
+Transformer
+68.1
+18.1
+7.9
+1.2
+0.7
+Ordering i means that the logit corresponding to the correct prediction is
+ranked in the i position. The evaluation mode here is PredCls.
+to high-informative ones. For example, <bear, on, chair> is
+adjusted to <bear, standing on, chair> (see Fig. 7 (a)). Then,
+thanks to the proposed P-Loss, compared with MotifsNet [9],
+TsCM performs better at distinguishing similar relationships,
+i.e., similar relationships have more significant logit gaps. As an
+example shown in Fig. 7 (b): In the output logits of MotifsNet
+[9], carrying has a 1.31× logit gap over holding, but in TsCM,
+it is 2.18×. Large logit gaps will clarify the decision boundary
+between similar relationships, thereby overcoming semantic
+confusion. Finally, we can observe the issues discussed in Section
+3.4.1, i.e., the logits of the foreground relationships being less
+discriminative and the logits of alternating positive and negative.
+It is possible, however, to unify logits to positive values and
+improve their discrimination, especially for the top few large
+logits, by using our logit augmentation method (Equation (19)).
+We argue that the logit augmentation procedure is critical for
+learning adjustment factors. To prove this, we ablate our logit
+augmentation method and show the results in Table 7. These
+results demonstrate that our logit augmentation method can
+provide significant improvements. In addition, the guidance
+term f bg
+θ∗,y(x) in Equation (19) also contributes a lot to the
+results. We think this is because the guidance term can make
+the augmented logits ˜fθ∗,y(x) more discriminative.
+Hyperparameters in TsCM. This subsection ablates two critical
+hyperparameters, α in Equation (8) and β in Equation (23), that
+enable causal intervention on model sparsity. Fig. 8 varies the
+α and β, and the results show that a suitable combination of
+hyperparameters is essential for our TsCM. We observe that
+the performance of the model increases when β ∈[1, 3], but
+decreases when β > 3. This can be explained by the facts shown
+in Table 8: For a false prediction, the logit corresponding to the
+ground truth category is often ranked at the top of all logits
+and, in most cases, is the second largest. Therefore, most false
+predictions can be corrected by adjusting the first few logits.
+Table 8 shows the distribution of the ordering of the logits
+corresponding to the correct categories in the false predictions.
+Furthermore, adjusting logits that are ranked low often requires
+
+---PAGE BREAK---
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+15
+Fig. 8. Model performance with different α and β. The evaluation mode here is PredCls. The shaded areas represent the upper and lower bounds of
+performance for different combinations of α and β.
+TABLE 9
+Model performance trained with different loss functions
+Loss
+mR/R@20
+mR/R@50
+mR/R@100
+MotifsNet
+ℓ
+12.2/59.5
+15.5/66.0
+16.8/67.9
+ˆℓ▷
+12.3/58.8
+15.7/65.1
+17.2/66.3
+ˆℓ△
+12.3/58.5
+15.8/64.2
+17.5/65.9
+ˆℓ◁
+12.5/57.7
+16.1/63.3
+17.9/65.4
+ˆℓ
+12.9/53.5
+16.9/59.4
+20.1/61.8
+VCTree
+ℓ
+12.4/59.8
+15.4/66.2
+16.6/68.1
+ˆℓ▷
+12.3/59.3
+15.6/65.4
+17.4/67.2
+ˆℓ△
+12.4/58.8
+15.6/64.3
+17.8/66.4
+ˆℓ◁
+12.5/58.2
+15.9/63.8
+18.2/65.9
+ˆℓ
+12.7/54.3
+16.4/59.9
+19.8/62.3
+Transformer
+ℓ
+12.4/58.5
+16.0/65.0
+17.5/66.7
+ˆℓ▷
+12.5/58.2
+16.2/64.2
+17.6/65.1
+ˆℓ△
+12.7/57.9
+16.3/63.8
+17.6/64.9
+ˆℓ◁
+12.8/57.4
+16.6/63.6
+18.1/63.7
+ˆℓ
+13.1/50.8
+17.2/58.1
+20.3/61.2
+The evaluation mode here is PredCls.
+Fig. 9. The performance of tail categories on the proposed metric mC@K.
+The evaluation mode here is PredCls.
+sharp adjustment factors (refer to the logits shown in Fig. 8),
+which in effect, learn a set of factors that overfit the observed
+data. Fig. 8 also shows that the model performs best when
+α = 5. We think that when α is small, Pα will miss some similar
+relationships, and conversely when α is large, many dissimilar
+relationships will be included in Pα. It is worth noting that α
+should be set according to observed data. In other words, for 50
+relationship categories in VG150, α = 5 is the optimal choice,
+but α may have other optimal values for other datasets.
+Disentangled claim in Equation (11). We set up three baseline
+loss functions to support our disentangled claims: 1) Cross-
+entropy loss ℓ. 2) Modified P-Loss ˆℓ▷. This baseline loss function
+replaces Pα in Equation (8) with P▷
+α. P▷
+α means to take the
+α relationships with the largest feature distance (dissimilar
+relationships) as relationship-population. 3) Modified P-Loss ˆℓ△.
+This baseline loss function replaces Pα in Equation (8) with
+P △
+α. P △
+α means to take the α′ relationships with the largest
+feature distance as relationship-population (α′ > α, α′ = 8).
+4) Modified P-Loss ˆℓ◁. This baseline loss function replaces Pα
+in Equation (8) with P◁
+α. P◁
+α means to take the α relationships
+with the largest feature distance belonging to the tail category
+as the relationship-population. Table 9 reports the model results
+supervised by different loss functions. The results of ℓ, ˆℓ◁, and
+ˆℓ△are very close, which proves that intervening in dissimilar tail
+relationships has very limited impacts. Even with the possible
+inclusion of head categories, the supervised performance of ˆℓ▷is
+still close to ℓand ˆℓ◁. This further shows that only intervening
+in dissimilar relationships has tiny perturbations to the model.
+However, P-Loss observes drastic changes due to intervening in
+similar relationships. Hence, we argue that P-Loss can intervene
+in similar relationships sparsely. In other words, it eliminates
+confounder S without affecting other confounders. As a result,
+the model trained with P-Loss can be roughly formulated as a
+disentangled factorization.
+Disentangled claim in Equation (22). This subsection designs
+a new metric, i.e., mean Correction Rate (mC@K), to support
+our disentangled claims. mC@K calculates the balanced fraction
+of rates that the false relationships are corrected, where K
+shares the same meaning as in mainstream metrics (e.g., R@K
+and mR@K). In keeping with the claim to be demonstrated,
+Fig. 9 shows mC@K on the tail categories, which allows us to
+evaluate the performance of the AL-Adjustment in alleviating
+the long-tailed distribution problem. These results clearly show
+that AL-Adjustment can adjust a considerable number of false
+predictions of tail categories to correct ones, and, hence, the long-
+tailed distribution confounder can be removed by our proposed
+adjustment procedure. Taking together the disentangled claim in
+Equation (11), we can naturally come to the disentangled claim
+in Equation (22).
+5
+CONCLUSION
+In this paper, we have proposed a novel causal modeling
+framework, TsCM, for unbiased scene graph generation, which
+decouples the causal intervention into two stages to eliminate
+semantic confusion bias and long-tailed distribution bias, where
+the former bias is rarely explored in the existing debiasing
+methods. In stage 1, we analyzed that the SCM modeled
+for SGG is always causal-insufficient and the sparsity of
+relationship categories. On this basis, a causal representation
+
+---PAGE BREAK---
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+16
+learning method is proposed to achieve sparse interventions on
+semantic confusion bias in the case of insufficient causality. As
+a result, this stage also provides a disentangled factorization.
+Benefiting from this factorization, stage 2 then proposes causal
+calibration learning to intervene sparsely and independently in
+the long-tailed distribution bias to achieve unbiased predictions.
+Experiments were conducted on the popular SGG backbones
+and dataset, and our method achieved state-of-the-art debiasing
+performance.
+Furthermore,
+our
+method
+achieved
+a
+better
+tradeoff between recall rate and mean recall rate thanks to the
+sparse causal interventions.
+Although our method can remove multiple biases in the
+SGG task, it is still challenging to overcome the unobservable
+biases. In the future, we will focus on exploring the unobservable
+biases and develop the automatic debiasing causal framework to
+pursue unbiased SGG predictions.
+REFERENCES
+[1]
+J. Johnson, R. Krishna, M. Stark, L.-J. Li, D. Shamma, M. Bernstein, and
+L. Fei-Fei, “Image retrieval using scene graphs,” in Proc. IEEE Conf.
+Comput. Vis. Pattern Recognit., 2015, pp. 3668–3678.
+[2]
+X. Chang, P. Ren, P. Xu, Z. Li, X. Chen, and A. Hauptmann, “A
+comprehensive survey of scene graphs: Generation and application,”
+IEEE Trans. Pattern Anal. Mach. Intell., vol. 45, no. 1, pp. 1–26, 2023.
+[3]
+D. Liu, M. Bober, and J. Kittler, “Neural belief propagation for scene
+graph generation,” IEEE Trans. Pattern Anal. Mach. Intell., pp. 1–13, 2023.
+[4]
+V. Ramanathan, C. Li, J. Deng, W. Han, Z. Li, K. Gu, Y. Song, S. Bengio,
+C. Rosenberg, and L. Fei-Fei, “Learning semantic relationships for better
+action retrieval in images,” in Proc. IEEE Conf. Comput. Vis. Pattern
+Recognit., 2015, pp. 1100–1109.
+[5]
+W. Norcliffe-Brown, S. Vafeias, and S. Parisot, “Learning conditioned
+graph structures for interpretable visual question answering,” in Proc.
+32nd Int. Conf. Neural Inf. Process. Syst., vol. 31, 2018, pp. 8334–8343.
+[6]
+J. Shi, H. Zhang, and J. Li, “Explainable and explicit visual reasoning
+over scene graphs,” in Proc. IEEE Conf. Comput. Vis. Pattern Recognit.,
+2019, pp. 8376–8384.
+[7]
+X. Yang, K. Tang, H. Zhang, and J. Cai, “Auto-encoding scene graphs
+for image captioning,” in Proc. IEEE Conf. Comput. Vis. Pattern Recognit.,
+2019, pp. 10 685–10 694.
+[8]
+J. Gu, S. Joty, J. Cai, H. Zhao, X. Yang, and G. Wang, “Unpaired image
+captioning via scene graph alignments,” in Proc. IEEE/CVF Int. Conf.
+Comput. Vis., 2019, pp. 10 323–10 332.
+[9]
+R. Zellers, M. Yatskar, S. Thomson, and Y. Choi, “Neural motifs: Scene
+graph parsing with global context,” in Proc. IEEE Conf. Comput. Vis.
+Pattern Recognit., 2018, pp. 5831–5840.
+[10] C. Lu, R. Krishna, M. Bernstein, and L. Fei-Fei, “Visual relationship
+detection with language priors,” in Proc. Eur. Conf. Comput. Vis., 2016,
+pp. 852–869.
+[11] K. Tang, H. Zhang, B. Wu, W. Luo, and W. Liu, “Learning to compose
+dynamic tree structures for visual contexts,” in Proc. IEEE Conf. Comput.
+Vis. Pattern Recognit., 2019, pp. 6619–6628.
+[12] T. Chen, W. Yu, R. Chen, and L. Lin, “Knowledge-embedded routing
+network for scene graph generation,” in Proc. IEEE Conf. Comput. Vis.
+Pattern Recognit., 2019, pp. 6163–6171.
+[13] D. Xu, Y. Zhu, C. B. Choy, and L. Fei-Fei, “Scene graph generation
+by iterative message passing,” in Proc. IEEE Conf. Comput. Vis. Pattern
+Recognit., 2017, pp. 5410–5419.
+[14] K. Tang, Y. Niu, J. Huang, J. Shi, and H. Zhang, “Unbiased scene graph
+generation from biased training,” in Proc. IEEE Conf. Comput. Vis. Pattern
+Recognit., 2020, pp. 3716–3725.
+[15] M. Suhail, A. Mittal, B. Siddiquie, C. Broaddus, J. Eledath, G. Medioni,
+and L. Sigal, “Energy-based learning for scene graph generation,” in
+Proc. IEEE Conf. Comput. Vis. Pattern Recognit., 2021, pp. 13 936–13 945.
+[16] X. Dong, T. Gan, X. Song, J. Wu, Y. Cheng, and L. Nie, “Stacked hybrid-
+attention and group collaborative learning for unbiased scene graph
+generation,” in Proc. IEEE Conf. Comput. Vis. Pattern Recognit., 2022, pp.
+19 427–19 436.
+[17] W. Li, H. Zhang, Q. Bai, G. Zhao, N. Jiang, and X. Yuan, “PPDL:
+Predicate probability distribution based loss for unbiased scene graph
+generation,” in Proc. IEEE Conf. Comput. Vis. Pattern Recognit., 2022, pp.
+19 447–19 456.
+[18] X. Chang, T. Wang, S. Cai, and C. Sun, “Landmark: Language-guided
+representation enhancement framework for scene graph generation,”
+arXiv:2303.01080, 2023.
+[19] S. Khandelwal, M. Suhail, and L. Sigal, “Segmentation-grounded scene
+graph generation,” in Proc. IEEE/CVF Int. Conf. Comput. Vis., 2021, pp.
+15 879–15 889.
+[20] A. Zhang, Y. Yao, Q. Chen, W. Ji, Z. Liu, M. Sun, and T.-S. Chua, “Fine-
+grained scene graph generation with data transfer,” in Proc. Eur. Conf.
+Comput. Vis., 2022, pp. 409–424.
+[21] J. Yu, Y. Chai, Y. Wang, Y. Hu, and Q. Wu, “Cogtree: Cognition tree loss
+for unbiased scene graph generation,” arXiv:2009.07526, 2020.
+[22] A. Long, W. Yin, T. Ajanthan, V. Nguyen, P. Purkait, R. Garg, A. Blair,
+C. Shen, and A. van den Hengel, “Retrieval augmented classification
+for long-tail visual recognition,” in Proc. IEEE Conf. Comput. Vis. Pattern
+Recognit., 2022, pp. 6959–6969.
+[23] Y. Cui, M. Jia, T.-Y. Lin, Y. Song, and S. Belongie, “Class-balanced loss
+based on effective number of samples,” in Proc. IEEE Conf. Comput. Vis.
+Pattern Recognit., 2019, pp. 9268–9277.
+[24] M.-J. Chiou, H. Ding, H. Yan, C. Wang, R. Zimmermann, and J. Feng,
+“Recovering the unbiased scene graphs from the biased ones,” in Proc.
+29th ACM Int. Conf. Multi., 2021, pp. 1581–1590.
+[25] X. Li, L. Chen, J. Shao, S. Xiao, S. Zhang, and J. Xiao, “Rethinking the
+evaluation of unbiased scene graph generation,” arXiv:2208.01909, 2022.
+[26] Y. Zhao, W. Chen, X. Tan, K. Huang, and J. Zhu, “Adaptive logit
+adjustment loss for long-tailed visual recognition,” in Proc. AAAI Conf.
+Artif. Intell., vol. 36, no. 3, 2022, pp. 3472–3480.
+[27] Y. Guo, L. Gao, X. Wang, Y. Hu, X. Xu, X. Lu, H. T. Shen, and
+J. Song, “From general to specific: Informative scene graph generation
+via balance adjustment,” in Proc. IEEE/CVF Int. Conf. Comput. Vis., 2021,
+pp. 16 383–16 392.
+[28] Y.
+Deng,
+Y.
+Li,
+Y.
+Zhang,
+X.
+Xiang,
+J.
+Wang,
+J.
+Chen,
+and
+J. Ma, “Hierarchical memory learning for fine-grained scene graph
+generation,” in Proc. Eur. Conf. Comput. Vis., 2022, pp. 266–283.
+[29] C. Chen, Y. Zhan, B. Yu, L. Liu, Y. Luo, and B. Du, “Resistance training
+using prior bias: toward unbiased scene graph generation,” in Proc.
+AAAI Conf. Artif. Intell., 2022, pp. 212–220.
+[30] X. Lyu, L. Gao, Y. Guo, Z. Zhao, H. Huang, H. T. Shen, and J. Song,
+“Fine-grained predicates learning for scene graph generation,” in Proc.
+IEEE Conf. Comput. Vis. Pattern Recognit., 2022, pp. 19 467–19 475.
+[31] L. Li, L. Chen, H. Shi, H. Zhang, Y. Yang, W. Liu, and J. Xiao, “Nicest:
+Noisy label correction and training for robust scene graph generation,”
+arXiv:2207.13316, 2022.
+[32] L. Li, L. Chen, H. Shi, W. Wang, J. Shao, Y. Yang, and J. Xiao, “Label
+semantic knowledge distillation for unbiased scene graph generation,”
+arXiv:2208.03763, 2022.
+[33] L. Zhou, Y. Zhou, T. L. Lam, and Y. Xu, “CAME: Context-aware mixture-
+of-experts for unbiased scene graph generation,” arXiv:2208.07109, 2022.
+[34] R.
+J.
+Sternberg,
+“Cognitive
+psychology.”
+Harcourt
+Brace
+College
+Publishers, 1996.
+[35] D. J. Field, A. Hayes, and R. F. Hess, “Contour integration by the human
+visual system: evidence for a local “association field”,” Vision research,
+vol. 33, no. 2, pp. 173–193, 1993.
+[36] J. Pearl, “Causality,” Cambridge university press, 2009.
+[37] R. Christiansen, N. Pfister, M. E. Jakobsen, N. Gnecco, and J. Peters, “A
+causal framework for distribution generalization,” IEEE Trans. Pattern
+Anal. Mach. Intell., vol. 44, no. 10, pp. 6614–6630, 2022.
+[38] Y. Bengio, T. Deleu, N. Rahaman, R. Ke, S. Lachapelle, O. Bilaniuk,
+A. Goyal, and C. Pal, “A meta-transfer objective for learning to
+disentangle causal mechanisms,” in Proc. Int. Conf. Learn. Represent.,
+2019, pp. 1–27.
+[39] B. Sch¨olkopf, F. Locatello, S. Bauer, N. R. Ke, N. Kalchbrenner, A. Goyal,
+and Y. Bengio, “Toward causal representation learning,” Proc. of the
+IEEE, vol. 109, no. 5, pp. 612–634, 2021.
+[40] J. Pearl, “Causal diagrams for empirical research,” Biometrika, vol. 82,
+no. 4, pp. 669–688, 1995.
+[41] J. Pearl et al., “Models, reasoning and inference,” Cambridge, UK:
+CambridgeUniversityPress, vol. 19, no. 2, 2000.
+[42] D.
+Plecko
+and
+E.
+Bareinboim,
+“Causal
+fairness
+analysis,”
+arXiv:2207.11385, 2022.
+[43] Z. Wang, X. Xu, G. Wang, Y. Yang, and H. T. Shen, “Quaternion relation
+embedding for scene graph generation,” IEEE Trans Multimedia, pp. 1–
+12, 2023.
+[44] A. K. Menon, S. Jayasumana, A. S. Rawat, H. Jain, A. Veit, and S. Kumar,
+“Long-tail learning via logit adjustment,” in Proc. Int. Conf. Learn.
+Represent., 2020, pp. 1–27.
+[45] Y. Wang, X. Li, Z. Qi, J. Li, X. Li, X. Meng, and L. Meng, “Meta-causal
+feature learning for out-of-distribution generalization,” in Proc. Eur.
+Conf. Comput. Vis., 2023, pp. 530–545.
+[46] X. Lin, Z. Wu, G. Chen, G. Li, and Y. Yu, “A causal debiasing framework
+for unsupervised salient object detection,” in Proc. AAAI Conf. Artif.
+Intell., vol. 36, no. 2, 2022, pp. 1610–1619.
+[47] J. Pearl, “Statistics and causal inference: A review,” Test, vol. 12, no. 2,
+pp. 281–345, 2003.
+
+---PAGE BREAK---
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+17
+[48] J. v. K. Bernhard Sch¨olkopf, “From statistical to causal learning,”
+arXiv:2204.00607, 2022.
+[49] K. Ahuja, J. Hartford, and Y. Bengio, “Weakly supervised representation
+learning with sparse perturbations,” in Proc. 36nd Int. Conf. Neural Inf.
+Process. Syst., 2022, pp. 15 516–15 528.
+[50] N. Scherrer, A. Goyal, S. Bauer, Y. Bengio, and N. R. Ke, “On
+the generalization and adaption performance of causal models,”
+arXiv:2206.04620, 2022.
+[51] R. Krishna, Y. Zhu, O. Groth, J. Johnson, K. Hata, J. Kravitz, S. Chen,
+Y. Kalantidis, L.-J. Li, D. A. Shamma et al., “Visual genome: Connecting
+language and vision using crowdsourced dense image annotations,”
+Int. J. Comput. Vis., vol. 123, no. 1, pp. 32–73, 2017.
+[52] A. Kuznetsova, H. Rom, N. Alldrin, J. Uijlings, I. Krasin, J. Pont-Tuset,
+S. Kamali, S. Popov, M. Malloci, A. Kolesnikov et al., “The open images
+dataset v4,” Int. J. Comput. Vis., vol. 128, no. 7, pp. 1956–1981, 2020.
+[53] P. C. Austin and E. A. Stuart, “Moving towards best practice when using
+inverse probability of treatment weighting (IPTW) using the propensity
+score to estimate causal treatment effects in observational studies,”
+Statistics in medicine, vol. 34, no. 28, pp. 3661–3679, 2015.
+[54] C. Shi, D. Blei, and V. Veitch, “Adapting neural networks for the
+estimation of treatment effects,” Proc. 36nd Int. Conf. Neural Inf. Process.
+Syst., pp. 2507–2517, 2019.
+[55] C. Fern´andez-Lor´ıa and F. Provost, “Causal classification: Treatment
+effect estimation vs. outcome prediction,” J Mach Learn Res, vol. 23,
+no. 59, pp. 1–35, 2022.
+[56] C. Eastwood and C. K. Williams, “A framework for the quantitative
+evaluation of disentangled representations,” in Proc. Int. Conf. Learn.
+Represent., 2018, pp. 1–15.
+[57] S. R. Seaman and I. R. White, “Review of inverse probability weighting
+for dealing with missing data,” Statistical methods in medical research,
+vol. 22, no. 3, pp. 278–295, 2013.
+[58] B. Kang, S. Xie, M. Rohrbach, Z. Yan, A. Gordo, J. Feng, and
+Y. Kalantidis, “Decoupling representation and classifier for long-tailed
+recognition,” in Proc. Int. Conf. Learn. Represent., 2019, pp. 1–16.
+[59] M. Li, Y.-m. Cheung, and Y. Lu, “Long-tailed visual recognition via
+gaussian clouded logit adjustment,” in Proc. IEEE Conf. Comput. Vis.
+Pattern Recognit., 2022, pp. 6929–6938.
+[60] L. Devroye, L. Gy¨orfi, and G. Lugosi, “A probabilistic theory of pattern
+recognition,” Springer Science & Business Media, vol. 31, 2013.
+[61] Y. Lin, “A note on margin-based loss functions in classification,”
+Statistics & probability letters, vol. 68, no. 1, pp. 73–82, 2004.
+[62] G. Collell, D. Prelec, and K. Patil, “Reviving threshold-moving: a simple
+plug-in bagging ensemble for binary and multiclass imbalanced data,”
+arXiv:1606.08698, 2016.
+[63] M. A. Jamal, M. Brown, M.-H. Yang, L. Wang, and B. Gong, “Rethinking
+class-balanced methods for long-tailed visual recognition from a
+domain adaptation perspective,” in Proc. IEEE Conf. Comput. Vis. Pattern
+Recognit., 2020, pp. 7610–7619.
+[64] Y. Xie and C. F. Manski, “The logit model and response-based samples,”
+Sociological Methods & Research, vol. 17, no. 3, pp. 283–302, 1989.
+[65] B. Li, Y. Yao, J. Tan, G. Zhang, F. Yu, J. Lu, and Y. Luo, “Equalized focal
+loss for dense long-tailed object detection,” in Proc. IEEE Conf. Comput.
+Vis. Pattern Recognit., 2022, pp. 6990–6999.
+[66] T. Li, P. Cao, Y. Yuan, L. Fan, Y. Yang, R. S. Feris, P. Indyk, and D. Katabi,
+“Targeted supervised contrastive learning for long-tailed recognition,”
+in Proc. IEEE Conf. Comput. Vis. Pattern Recognit., 2022, pp. 6918–6928.
+[67] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez,
+Ł. Kaiser, and I. Polosukhin, “Attention is all you need,” in Proc. 31nd
+Int. Conf. Neural Inf. Process. Syst., vol. 30, 2017, pp. 6000–6010.
+[68] S. Ren, K. He, R. Girshick, and J. Sun, “Faster R-CNN: Towards real-time
+object detection with region proposal networks,” IEEE Trans. Pattern
+Anal. Mach. Intell., vol. 39, no. 6, pp. 1137–1149, 2017.
+[69] K. He, X. Zhang, S. Ren, and J. Sun, “Deep residual learning for image
+recognition,” in Proc. IEEE Conf. Comput. Vis. Pattern Recognit., 2016, pp.
+770–778.
+
+---PAGE BREAK---

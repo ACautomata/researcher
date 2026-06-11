@@ -1,0 +1,1418 @@
+Ensemble Predicate Decoding for Unbiased Scene Graph Generation
+Jiasong Fenga,b, Lichun Wanga,b,∗, Hongbo Xua,b, Kai Xua,b and Baocai Yina,b
+aBeijing Key Laboratory of Multimedia and Intelligent Software Technology, Beijing Artificial Intelligence Institute, Beijing, 100124, China
+bSchool of Information Science and Technology, Beijing University of Technology, Beijing, 100124, China
+A R T I C L E I N F O
+Keywords:
+Scene Graph Generation, Image Un-
+derstanding, Long-tailed Distribution
+A B S T R A C T
+Scene Graph Generation (SGG) aims to generate a comprehensive graphical representation that
+accurately captures the semantic information of a given scenario. However, the SGG model’s
+performance in predicting more fine-grained predicates is hindered by a significant predicate bias.
+According to existing works, the long-tail distribution of predicates in training data results in the
+biased scene graph. However, the semantic overlap between predicate categories makes predicate
+prediction difficult, and there is a significant difference in the sample size of semantically similar
+predicates, making the predicate prediction more difficult. Therefore, higher requirements are placed
+on the discriminative ability of the model. In order to address this problem, this paper proposes
+Ensemble Predicate Decoding (EPD), which employs multiple decoders to attain unbiased scene
+graph generation. Two auxiliary decoders trained on lower-frequency predicates are used to improve
+the discriminative ability of the model. Extensive experiments are conducted on the VG, and the
+experiment results show that EPD enhances the model’s representation capability for predicates. In
+addition, we find that our approach ensures a relatively superior predictive capability for more frequent
+predicates compared to previous unbiased SGG methods.
+1. Introduction
+The primary objective of scene graph generation (SGG)
+is to construct a structured representation that effectively
+captures the semantic information of scenario [12]. Specif-
+ically, objects are depicted as nodes, while visual rela-
+tionships between objects are established through edges
+within the scene graph. SGG has been proven to be valu-
+able in various vision downstream tasks, including image
+captioning [27, 3], visual question answering [29, 21], video
+understanding[22, 9], and image retrieval [36].
+Although significant progress has been made in the field
+of scene graph generation in recent years [19, 32], SGG
+still suffers from bias[28]. Specifically, the bias leads to
+the model’s tendency to predict coarse-grained predicates,
+resulting in fragmented scene graph information that cannot
+be effectively applied to downstream tasks. Fig. 1 shows
+the predicted results of different SGG models. In Fig. 1 (b),
+due to the influence of bias, the biased SGG model Motifs
+[5, 18, 11] incorrectly predicts the relationship of the triplet
+⟨bird, –, banana⟩with a head category predicate on, instead
+of the ground truth predicate standing on. Previous works
+[5, 18, 11] have attributed this to the long-tailed distribution
+of predicates in the dataset, and substantial efforts have been
+dedicated to addressing the issue. However, GCL [5] found
+that for a naive SGG model, whether conventional or debi-
+ased, it could only distinguish a limited range of predicates
+with relatively equal amounts of training instances. They
+attribute this limitation to the constrained discriminative
+capacity of single classifiers on predicates representations.
+Based on this discovery, GCL developed a novel group
+collaborative learning strategy, utilizing multiple classifiers
+to improve the classification performance of the model.
+Email address: wanglc@bjut.edu.cn (Lichun Wang)
+∗Corresponding author
+bird
+banana
+bird
+banana
+0
+0.2
+0.4
+0.6
+0.8
+Motifs
+Biased SGG model:
+<bird, on, banana>
+Ground truth:
+<bird, standing on, banana>
+EPD with Motifs:
+<bird, standing on, banana>
+score
+on
+holding
+standing on
+0
+0.2
+0.4
+0.6
+0.8
+score
+( a ) Object detection results
+( b ) Prediction scores of baseline
+( c ) Prediction scores of EPD
+MD
+MD+AD1
+MD+AD1+AD2
+Figure
+1:
+Scores
+of
+top-3
+predictions
+for
+the
+triplet
+⟨bird, –, banana⟩across different SGG models, which ground
+truth is standing on. Motifs is affected by bias, and the
+coarse predicate on receives the highest score. The proposed
+Ensemble Predicate Decoding (EPD) predicts the triplet as
+⟨bird, standing on, banana⟩. EPD includes three decoders, the
+main decoder , the auxiliary decoders 1 and 2.
+In the dataset used to train SGG models, another phe-
+nomenon that coexists with predicate imbalance is that the
+semantics of two predicates with significant differences in
+sample size are similar. For instance, predicates standing
+on and on can be defined as a semantically proximate pair,
+because their representations learned by models exhibit sig-
+nificant similarity [2]. Meanwhile, during the SGG training
+phase, standing on appears 8,768 times and on appears
+429,891 times. The multiple classifier scheme can effectively
+arXiv:2408.14187v1  [cs.CV]  26 Aug 2024
+expand the discriminative capacity of the model, but it does
+not provide a targeted solution for discriminating semanti-
+cally similar predicates. The compounded effect of similarity
+and long-tailed factors poses a catastrophic challenge for
+predicate predictions.
+To cope with the challenge, we propose employing mul-
+tiple decoders to enhance the model’s ability to decode
+predicate representations. In detail, we train one main de-
+coder and two auxiliary decoders 1 and 2.
+The three decoders are trained on distinct subsets of the
+training set. one on the entire dataset, one focusing on
+body-tail predicates, and another on tail predicates exclu-
+sively. is trained on the subset including all predicates.
+1 is trained on the subset that includes body predicates
+and tail predicates. 2 is trained on the subset that only
+includes the tail predicates. Compared to high-frequency
+predicates, low-frequency predicates are used more by de-
+coders in the training process, which helps to reduce the
+impact of long-tail effects on predicate prediction. In addi-
+tion, predicate pairs with similar semantics, such as standing
+on and on, are separated during specific decoder training
+processes. For decoders trained on the subset that only
+contains tail predicates, the predicate on is invisible, which
+can reduce the confusion of the model in understanding
+similar predicates. Fig. 1(c) shows that, by combining more
+auxiliary decoders with the main decoder, the prediction
+of the triplet ⟨bird, –, banana⟩is gradually refined, from
+⟨bird, on, banana⟩to ⟨bird, holding, banana⟩, and then fur-
+ther refined to ⟨bird, standing on, banana⟩.This paper makes
+two contributions:
+• Propose a new model-agnostic SGG approach EPD
+(Ensemble Predicate Decoding), which trains one
+main decoder and two auxiliary decoders. The main
+decoder is responsible for decoding all predicates. The
+auxiliary decoders focus on enhancing the model’s
+decoding capacity for specific infrequent predicates.
+• Extensive experiments are performed on the widely
+used SGG benchmark dataset, Visual Genome (VG).
+EPD achieves exceptional performance when com-
+bined with various scene graph baselines. Specifically,
+when using EPD, mR@K has significantly improve-
+ment and R@K only shows a minimal decrease. Ex-
+perimental results show that our method outperforms
+the state-of-the-art approach.
+2. Related Work
+Unbiased Scene Graph Generation. SGG has made signif-
+icant progress in recent years [14]. However, due to the bias
+in the distribution of predicates in the dataset, the practical
+application of these models is still limited[28, 34]. In order
+to tackle the issues arising from the long-tail effect of pred-
+icates, researchers have introduced various unbiased SGG
+models[18, 30, 16, 23]. PPDL[18] suggested an improved
+re-weighting strategy based on the similarity between the
+predicted probability distribution and the ground truth dis-
+tribution. LS-KD [16] alleviated the training bias by dynam-
+ically generating a soft label for each subject-object instance
+through the fusion of predicted label semantic distribution
+with its original one-hot target label. DDloss [23] reduces
+bias by leveraging a causal graph approach, improving the
+fairness in relation predication. The existing SGG model
+overlooked the relationship between the model’s classifi-
+cation ability and its classification range. Some works are
+dedicated to improving the discriminative ability of classi-
+fiers. MED[30] proposed a multi-expert predicate module to
+weaken the label ambiguity problem in SGG, which includes
+two models that learn from the full label set and the implicit
+label set respectively. GCL [5] introduced a group cooper-
+ative learning strategy to train multiple classifiers on a set
+of relatively balanced predicate groups. However, although
+the multiple classifier scheme can effectively expand the
+discriminative capacity of the model, it lacks consideration
+for discriminating semantically similar predicates.
+Ensemble Learning. The idea of ensemble learning is to
+employ multiple base learners and combine their prediction[24,
+7]. Choosing appropriate training data configurations for
+learners in different contexts is crucial. One common con-
+figuration is that base learners take the entire training set
+as input, as demonstrated in RAMED[26]. When using
+this kind of configuration, base learners generate outputs
+with varying dimensions according to a prescribed pattern
+(e.g., from coarse-grained to fine-grained), which are sub-
+sequently harmonized through specific strategies. Another
+configuration is that each base learner takes input from
+one subset of the complete training set, such as bagging
+strategy[6]. Training on a specially selected subset allows
+the base learners to focus more on specified learning tasks.
+For SGG, due to the effects of semantic overlap and
+the long-tail distribution, low-frequency predicates are more
+difficult to decode[8]. Therefore, following the idea of us-
+ing multiple classifiers[37, 4], we set up multiple decoders
+and provide the second configuration mentioned above for
+decoder training, ensuring that different predicate decoders
+concentrate on issues of different difficulty levels.
+3. Methodology
+3.1. Problem Definition
+Given an input image, the objective of SGG is to trans-
+form it into the form of a scene graph = (, ), where
+each element of the node set corresponds to an object in
+the image, and each element of the edge set corresponds
+to the relation between a pair of objects. The relationship
+between object 𝑛𝑖∈and 𝑛𝑗∈is denoted as 𝑒𝑖𝑗∈,
+then the triplet ⟨𝑛𝑖, 𝑒𝑖𝑗, 𝑛𝑗⟩, is an instance of the triplet
+⟨subject, predicate, object⟩.
+3.2. Overview
+Fig. 2 shows the framework of the proposed EPD. Image
+features are first extracted by utilizing a backbone network,
+such as ResXNet-101 [10], and then processed by an object
+Object Detector
+Object Encoder
+Object Decoder
+Predicate Encoder
+Softmax
+Ensemble Predicate Decoding(EPD)
+FC
+Shared 
+parameter
+Visual
+features
+Spatial 
+features
+Semantic
+features
+main decoder (       )
+man-1
+man-2
+leg
+dog
+bench
+beach
+of
+sitting 
+on
+sitting on
+on back of
+near
+sitting on
+on
+man-1
+man-2
+leg
+dog
+bench
+beach
+of
+sitting 
+on
+sitting on
+on back of
+near
+sitting on
+on
+auxiliary decoder(       )
+Softmax
+ˆX
+ˆO
+md
+B
+ad1
+B
+ad2
+B
+1
+ad
+p
+md
+p
+2
+ad
+p
+FC
+FC
+Shared 
+parameter
+Glove
+backpropagation:
+Softmax
+Softmax
+Softmax
+Figure 2: Overview of SGG model using EPD. In the ensemble predicate decoding stage, we process predicate encoding features
+with multiple decoders. One decoder acts as the main, and the others as auxiliary decoders. Each decoder branch shares parameters
+partially, generating predicate decoding features 𝑝′
+𝑚𝑑, 𝑝′
+𝑎𝑑1, 𝑝′
+𝑎𝑑2. After passing through a shared predicate classifier, the decoders’
+outputs are predicted and subsequently integrated to obtain the result.
+detector like Faster R-CNN [25] to get proposals. For each
+proposal, the detector predicts bounding box coordinates,
+object labels, and visual features. The coordinates are em-
+bedded into spatial features, and the labels are embedded in
+semantic features. These features, along with the visual fea-
+tures, are concatenated and passed through an object encoder
+to generate refined object features ̂𝑂= {̂𝑜1, ..., ̂𝑜𝑛
+}. The
+refined object features are then fed into the object decoder
+to obtain refined labels ̂𝑋= {̂𝑥1, ..., ̂𝑥𝑛
+}, which are labels
+of the nodes in the scene graph.
+Meanwhile, the refined object labels ̂𝑋are embedded
+into refined semantic features. Then, the refined object fea-
+tures, the refined semantic features, and visual features are
+input into the predicate encoder, generating predicate en-
+coding features corresponding to the objects. The predicate
+encoding features of each pair of objects, combined with the
+visual features extracted from the union of their bounding
+boxes, form the predicate features representing their rela-
+tionship. These predicate features are then fed into the main
+decoder and the auxiliary decoders 1 and 2.
+Each decoder branch has its own parameters, generating
+predicate decoding features 𝑝′
+𝑚𝑑, 𝑝′
+𝑎𝑑1, 𝑝′
+𝑎𝑑2, which are then
+fed into the predicate classifier to obtain three decoder logits.
+The logits from decoders are then ensembled and used
+to predict predicate labels. Finally, the scene graph is
+constructed by using the refined object labels as nodes, while
+the predicate labels are employed as edges.
+3.3. Object Encoding and Decoding
+For a single image with 𝑛objects, the object detector
+predicts the bounding boxes 𝐵= {𝑏1, ..., 𝑏𝑛}, visual features
+𝑉= {𝑣1, ..., 𝑣𝑛}, and object labels 𝑋= {𝑥1, ..., 𝑥𝑛}. Then,
+the elements of set 𝐵are passed through the dimensionality-
+increasing embedding layer 𝑊𝑏(⋅) to obtain spatial features
+𝑆= {𝑠1, ..., 𝑠𝑛}. And the elements of set 𝑋are embedded
+by Glove embedding layer to obtain semantic features 𝐺=
+{𝑔1, ..., 𝑔𝑛
+}. Taking the 𝑖𝑡ℎobject as an example, the object
+encoder leverages the visual, spatial, and semantic features
+to obtain refined object features ̂𝑜𝑖, which are formulated as:
+̂𝑜𝑖= 𝐹𝑜_𝑒([𝑣𝑖; 𝑠𝑖; 𝑔𝑖])
+(1)
+where 𝑣𝑖∈𝑉, 𝑠𝑖∈𝑆, and 𝑔𝑖∈𝐺are the visual, spatial, and
+semantic features of the 𝑖𝑡ℎobject. 𝐹𝑜_𝑒(⋅) denotes the linear
+transformation function of the object encoder. The notation
+[⋅; ⋅] represents the concatenation operation.
+During the object decoding stage, the object decoder
+takes ̂𝑂= {̂𝑜1, ..., ̂𝑜𝑛} as input and outputs refined object
+labels ̂𝑋= {̂𝑥1, ..., ̂𝑥𝑛}. The elements of set ̂𝑋are also em-
+bedded by Glove embedding layer to obtain refined semantic
+features ̂𝐺= { ̂𝑔1, ..., ̂𝑔𝑛
+}, which will be used for predicate
+encoding.
+3.4. Predicate Encoding
+In the predicate encoding stage, the SGG model concate-
+nates refined object feature ̂𝑜𝑖with the visual feature 𝑣𝑖and
+refined semantic feature ̂𝑔𝑖. The concatenated feature serves
+as raw predicate representation for the 𝑖𝑡ℎobject and is fed
+into the predicate encoder to obtain the predicate encoding
+feature 𝑝𝑖, as described in the following:
+𝑝𝑖= 𝐹𝑝_𝑒([ ̂𝑔𝑖; ̂𝑜𝑖; 𝑣𝑖])
+(2)
+𝐹𝑝_𝑒(⋅) refers to the linear transformation function of the
+predicate encoder.
+3.5. Ensemble Predicate Decoding
+As illustrated in Fig. 2, ensemble predicate decoding
+is achieved by integrating three decoders: main decoder
+and two auxiliary decoders 1, 2. The three
+decoders are trained on different training subsets. In the
+following description, it is assumed that the relationship
+between the 𝑖𝑡ℎobject and the 𝑗𝑡ℎobject is represented by
+the 𝑘𝑡ℎpredicate.
+First, the model extracts the visual features of the merged
+area of the bounding boxes of two objects 𝑜𝑖and 𝑜𝑗, denoted
+as union feature 𝑢𝑖𝑗. Then, the predicate encoding features
+𝑝𝑖, 𝑝𝑗and the union feature 𝑢𝑖𝑗are fed to decoders to obtain
+predicate decoding features as follows:
+𝑝′
+𝑚𝑑= 𝐵𝑚𝑑(𝐹𝑝_𝑑(𝑊𝑝([𝑝𝑖; 𝑝𝑗]) ∗𝑢𝑖𝑗))
+𝑝′
+𝑎𝑑1 = 𝐵𝑎𝑑1(𝐹𝑝_𝑑(𝑊𝑝([𝑝𝑖; 𝑝𝑗]) ∗𝑢𝑖𝑗))
+𝑝′
+𝑎𝑑2 = 𝐵𝑎𝑑2(𝐹𝑝_𝑑(𝑊𝑝([𝑝𝑖; 𝑝𝑗]) ∗𝑢𝑖𝑗))
+(3)
+where 𝑝′
+𝑚𝑑, 𝑝′
+𝑎𝑑1 and 𝑝′
+𝑎𝑑2 are the predicate decoding fea-
+tures output by the main decoder and the two predicate
+auxiliary decoders, respectively. 𝑊𝑝(⋅) is a linear layer used
+for dimension expansion. 𝐹𝑝_𝑑(⋅) denotes the shared linear
+transformation function. 𝐵𝑚𝑑(⋅), 𝐵𝑎𝑑1(⋅), and 𝐵𝑎𝑑2(⋅) are
+batch normalization layers that are independent, each with
+its own learnable parameters.
+Finally, the predicate decoding features 𝑝′
+𝑚𝑑, 𝑝′
+𝑎𝑑1 and
+𝑝′
+𝑎𝑑2 are input to a fully connected layer to obtain three
+groups of predicted logits of the predicate:
+𝑧𝑚𝑑= 𝐹𝐶(𝑝′
+𝑚𝑑)
+𝑧𝑎𝑑1 = 𝐹𝐶(𝑝′
+𝑎𝑑1)
+𝑧𝑎𝑑2 = 𝐹𝐶(𝑝′
+𝑎𝑑2)
+(4)
+In order to make the model give more attention to
+low-frequency predicates, all three decoders are involved
+in learning low-frequency predicates. Specifically, for low-
+frequency predicates, losses are calculated based on the
+predictions obtained from three decoders and used for back-
+propagation. To improve the decoding ability of the model,
+the three decoders are required to focus on learning predi-
+cates within different ranges, which is achieved by training
+the three decoders with different sample sets. Specifically,
+the training samples are divided into three parts based on
+predicate frequency: head predicate, body predicate, and tail
+predicate, as outlined in previous work [18].
+Denote the set containing all head predicate samples as
+𝑁1, the set containing all body predicate samples as 𝑁2,
+and the set containing all tail predicate samples as 𝑁3. The
+union of 𝑁1, 𝑁2, and 𝑁3 is the complete set of training
+samples, that is, 𝑁= 𝑁1 ∪𝑁2 ∪𝑁3. The complete set of
+training samples 𝑁is assigned to the main decoder ,
+denoted as 𝑁𝑚𝑑. The training sample subset 𝑁2 ∪𝑁3 is
+assigned to auxiliary decoder 1, denoted as 𝑁𝑎𝑑1. The
+training sample subset 𝑁3 is assigned to auxiliary decoder
+2, denoted as 𝑁𝑎𝑑2. The loss functions for decoders are
+described as follows:
+𝑚𝑑=
+1
+|𝑁𝑚𝑑|
+∑
+𝑘∈𝑁𝑚𝑑
+𝐶𝐸(𝑠𝑐𝑘
+𝑚𝑑, ̂𝑦𝑘)
+𝑎𝑑1 =
+1
+|𝑁𝑎𝑑1|
+∑
+𝑘∈𝑁𝑎𝑑1
+𝐶𝐸(𝑠𝑐𝑘
+𝑎𝑑1, ̂𝑦𝑘)
+𝑎𝑑2 =
+1
+|𝑁𝑎𝑑2|
+∑
+𝑘∈𝑁𝑎𝑑2
+𝐶𝐸(𝑠𝑐𝑘
+𝑎𝑑2, ̂𝑦𝑘)
+(5)
+where 𝑠𝑐𝑘
+𝑚𝑑, 𝑠𝑐𝑘
+𝑎𝑑1, and 𝑠𝑐𝑘
+𝑎𝑑2 are obtained by applying the
+softmax function to 𝑧𝑘
+𝑚𝑑, 𝑧𝑘
+𝑎𝑑1, and 𝑧𝑘
+𝑎𝑑2, ̂𝑦𝑘is the ground
+truth predicate label in the form of one-hot vector.
+In order to ensure collaborative prediction among the
+three decoders and consistency settings between the training
+and inference phases, we also employ an aggregated loss
+𝑎𝑔𝑔, which is calculated based on the aggregated prediction
+score𝑠𝑐𝑘
+𝑠𝑢𝑚:
+𝑎𝑔𝑔=
+1
+|𝑁|
+∑
+𝑘∈𝑁
+𝐶𝐸(𝑠𝑐𝑘
+𝑠𝑢𝑚, ̂𝑦𝑘)
+(6)
+where 𝑠𝑐𝑘
+𝑠𝑢𝑚is obtained by applying the softmax function to
+the aggregated prediction 𝑧𝑠𝑢𝑚of the three decoders. 𝑧𝑠𝑢𝑚is
+computed as follows:
+𝑧𝑠𝑢𝑚= 𝜆𝑚𝑑𝑧𝑚𝑑+ 𝜆𝑎𝑑1𝑧𝑎𝑑1 + 𝜆𝑎𝑑2𝑧𝑎𝑑2
+(7)
+where 𝜆𝑚𝑑, 𝜆𝑎𝑑1 and 𝜆𝑎𝑑2 are weighting factors correspond-
+ing to , 1 and 2 . Due to training on the complete
+dataset, the main decoder is more robust. Therefore, it is
+necessary to ensure that it is in a dominant position and
+receives effective support from the auxiliary decoders. So,
+among the weights of the three decoders, we specify that
+the weight of the main decoder is the maximum value.
+For the weights of two auxiliary decoders, considering that
+the subset used for training 2 includes the most biased
+samples of the training set, 𝜆𝑎𝑑2 is assigned a larger value
+than 𝜆𝑎𝑑1. As a result, the assignment 𝜆𝑚𝑑> 𝜆𝑎𝑑2 > 𝜆𝑎𝑑1
+aims to maintain a balance between the three decoders.
+During the inference phase, the aggregated prediction is the
+final prediction.
+The total loss is the combination of the aggregated loss
+and each decoder’s individual loss :
+𝑎𝑙𝑙= (1 −𝛾)(𝑚𝑑+ 𝛼𝑎𝑑1 + 𝛽𝑎𝑑2) + 𝛾𝑎𝑔𝑔
+(8)
+where the hyperparameters 𝛼and 𝛽are used to adjust atten-
+tion to errors from auxiliary decoders during training, and
+𝛾is utilized to balance the decoding ability of individual
+decoders and the collaborative ability of the three decoders.
+4. Experiments
+In this section, we first assess the performance of the
+proposed EPD on the widely-used VG dataset for scene
+graph generation. Then, ablation experiments and hyperpa-
+rameter experiments are conducted. The final visualization
+experiment demonstrates that EPD does not excessively sup-
+press the head and body predicates, which also explains why
+EPD achieves good Mean performance while improving the
+prediction accuracy of tail predicates.
+4.1. Dataset and Evaluation Criteria
+Dataset We evaluate our approach on commonly used large-
+scale VG benchmark [13], which comprises 108,077 images
+annotated with 75,000 object categories and 40,000 predi-
+cate categories. Following the prior studies [18, 5], we train
+Table 1
+Performance comparison on VG. The best results are in bold. † denotes the results are reproduced based on the code [28].
+Methods
+PredCls
+SGCls
+SGDet
+R@50/100
+mR@50/100
+Mean
+R@50/100
+mR@50/100
+Mean
+R@50/100
+mR@50/100
+Mean
+Motifs†[35]
+65.3/67.2
+14.9/16.3
+40.9
+38.9/39.8
+8.3/8.8
+23.9
+32.1/36.8
+6.6/7.9
+20.8
+VCTree†[29]
+65.9/67.5
+17.2/18.5
+42.2
+45.3/46.2
+10.6/11.3
+28.3
+31.9/36.2
+7.1/8.3
+20.8
+BGNN[17]
+59.2/61.3
+30.4/32.9
+45.9
+37.4/38.5
+14.3/16.5
+26.6
+31.0/35.8
+10.7/12.6
+22.5
+PCPL[31]
+50.8/52.6
+35.2/37.8
+44.1
+27.6/28.4
+18.6/19.6
+23.5
+14.6/18.6
+9.5/11.7
+13.6
+HetSGG[33]
+57.1/59.4
+32.3/34.5
+45.8
+37.6/38.5
+15.8/17.7
+27.4
+30.2/34.5
+11.5/13.5
+22.4
+Motifs+PPDL[18]
+47.2/47.6
+32.2/33.3
+40.0
+28.4/29.3
+17.5/18.2
+23.3
+22.4/23.9
+11.4/13.5
+17.8
+Motifs+TDE[28]
+46.2/51.4
+25.5/29.1
+38.0
+27.7/29.9
+13.1/14.9
+21.4
+16.9/20.3
+8.2/9.8
+13.8
+Motifs+LS-KD[16]
+55.1/59.1
+24.1/27.4
+41.4
+33.8/35.8
+13.8/15.2
+24.6
+25.6/29.7
+9.7/11.5
+19.1
+Motifs+DKBL[2]
+57.2/58.8
+29.7/32.2
+44.4
+32.7/33.4
+18.2/19.4
+25.8
+27.0/30.7
+12.6/15.1
+21.3
+Motifs+Inf[1]
+51.5/55.1
+24.6/30.7
+40.3
+32.2/33.8
+14.5/17.4
+24.5
+23.9/27.1
+9.4/11.7
+18.0
+Motifs+GCL[5]
+42.7/44.4
+36.1/38.2
+40.4
+26.1/27.1
+20.8/21.8
+24.0
+18.4/22.0
+16.8/19.3
+19.1
+Motifs+EPD(ours)
+54.1/56.0
+36.3/38.8
+46.3
+30.8/31.9
+21.2/22.4
+26.5
+29.5/31.5
+17.3/19.0
+24.3
+VCTree+PPDL[18]
+47.6/48.0
+33.3/33.8
+40.6
+32.1/33.0
+21.8/22.4
+27.3
+20.1/22.9
+11.3/13.3
+16.9
+VCTree+TDE[28]
+47.2/51.6
+25.4/28.7
+38.2
+25.4/27.9
+12.2/14.0
+19.9
+19.4/23.2
+9.3/11.1
+15.8
+VCTree+LS-KD[16]
+55.7/59.5
+24.2/27.1
+41.6
+38.4/40.5
+17.3/19.1
+28.8
+25.3/29.5
+9.7/11.3
+19.0
+VCTree+DKBL[2]
+60.1/61.8
+28.7/31.3
+45.4
+38.8/39.7
+21.2/22.6
+30.5
+26.9/30.7
+11.8/14.2
+20.9
+VCTree+Inf[1]
+59.5/61.0
+28.1/30.7
+44.8
+40.7/ 41.6
+17.3/19.4
+31.7
+27.7/30.1
+10.4/11.9
+20.0
+VCTree+GCL[5]
+40.7/42.7
+37.1/39.1
+39.9
+27.7/28.7
+22.5/23.5
+25.6
+17.4/20.7
+15.2/17.5
+17.7
+VCTree+EPD(ours)
+55.4/58.7
+32.0/35.2
+45.3
+33.1/35.4
+22.9/25.0
+29.1
+21.7/25.4
+13.8/16.3
+19.3
+the model on VG which includes the top 150 most frequent
+object classes and 50 predicate classes of VG.
+Tasks On the VG dataset, performance evaluation of SGG
+models is typically based on three tasks, including Predicate
+Classification(PredCls), Scene Graph Classification (SGCls)
+and Scene Graph Detection (SGDet). PredCls requires pre-
+dicting the relationship between a pair of objects when given
+bounding boxes and object labels. SGCls requires predicting
+both the object category and predicate category given the
+ground-truth object bounding boxes. SGDet has the most
+challenging setting, requiring predicting object bounding
+boxes, object categories, and their relationships.
+Metrics Following [31], three different evaluation met-
+rics are employed, including Recall (R@K), Mean recall
+(mR@K), and Mean. R@K measures the proportion of the
+correctly predicted relationships among the top K confident
+predictions[20], which provides an evaluation of the model
+on the sample level. mR@K is obtained by calculating the
+average R@K score for each relationship[29], reflecting the
+performance of the model on category level. Due to the
+influence of the long tailed distribution of training data, the
+SGG model usually has poor performance in recognizing tail
+categories with a small number of samples. So, both R and
+mR tend to reflect the performance of the model in certain
+categories. Mean computes the average of R@K and mR@K
+[31], which provides a more comprehensive evaluation of the
+SGG model.
+4.2. Implementation Details
+We implemented the proposed method using PyTorch
+trained the model with a batch size of 12 on a NVIDIA
+GeForce RTX 3090 GPU. The Faster R-CNN [25] with
+ResXNet-101-FPN [10] is employed as an object detector,
+and it remains frozen during training. The optimizer is SGD
+with a learning rate set to 0.0025. During the validation
+phase, the approach [29] is followed, introducing a valida-
+tion set of 5,000 samples.
+4.3. Peformance Comparison
+Tab. 1 shows the comparison of our method with the
+state-of-the-art models on the VG dataset. According to
+whether it can be used as a plugin to combine with other
+methods, the comparison methods are divided into two cat-
+egories, model-specific methods and model-agnostic meth-
+ods. The proposed EPD is a kind of model-agnostic method.
+For the model-agnostic methods, two robust SGG baselines,
+Motifs[35] and VCTree[29], are used for integration.
+In Tab. 1, the regular models without debiasing strategies
+achieve the best performance on R@K, the proposed EPD
+performs best on Mean except for the SGCls task, and
+performs best on mR@K except for PredCls. The results
+demonstrate that the proposed EPD can effectively improve
+the prediction accuracy of low-frequency predicates with-
+out significantly reducing the prediction accuracy of high-
+frequency predicates.
+Concretely, when using Motifs as the baseline, the pro-
+posed EPD outperforms the baseline and the other model-
+agnostic methods in terms of mR@K and Mean across all
+three tasks. Compared with the baseline Motifs, the other
+model-agnostic methods can improve mR@K but can not
+guarantee the improvement in Mean, such as the perfor-
+mance of Inf and GCL on the PredCls task.
+When using VCTree as the baseline, the proposed EPD
+achieves a competitive result. Specifically, EPD obtains the
+second Mean performance on PredCls and the third-best
+Mean performance on SGCls and SGDet, which is lower
+Table 2
+Ablation results on EPD.
+Settings
+R@50/100
+mR@50/100
+Mean
+baseline(Motifs)
+65.3/67.2
+14.9/16.3
+40.9
+single-decoder+′
+𝑎𝑙𝑙
+48.1/50.6
+28.5/30.3
+39.4
+multiple-decoder+′
+𝑎𝑙𝑙
+54.1/56.0
+36.3/38.8
+46.3
+than Inf and DKBL. We analyzed the reason that they
+employed the triplet prior to the dataset, which receives a
+higher performance on R@K, further resulting in a higher
+Mean performance. However, our EPD performs better on
+mR@K, which indicates the more balanced performance of
+EPD among all predicates.
+4.4. Ablation Experiments
+In this section, experiments are conducted for EPD,
+using one or three decoders in EPD, different structures of
+EPD, and different training data configurations for decoders
+in EPD. All ablation experiments are conducted on the
+PredCls task and use Motifs [35] as the baseline.
+Ablation for the structure of EPD Ensemble predicate
+decoding is implemented through a multiple-decoder archi-
+tecture and the loss 𝑎𝑙𝑙. According to Eq. 8, the loss 𝑎𝑙𝑙
+is the weighted sum of 𝑚𝑑, 𝑎𝑑1, 𝑎𝑑2 and 𝑎𝑔𝑔, which
+appears to have the same form of loss as the traditional
+re-weighting model. In order to verify the difference be-
+tween EPD and traditional re-weighting models, we ab-
+lated the contribution of multiple-decoder and weighted
+loss to EPD. The ablation experiment is conducted using
+a single-decoder structure () and a multiple-decoder
+structure (+1+2) respectively, while maintain-
+ing the same loss 𝑎𝑙𝑙.
+Denote the decoder’s output in the single-decoder setting
+as 𝑧, then the 𝑧𝑚𝑑, 𝑧𝑎𝑑1, and 𝑧𝑎𝑑2 in 𝑎𝑙𝑙equals 𝑧. Define
+𝑁1, 𝑁2, and 𝑁3 as the losses calculated for the head,
+body, and tail category predicates, respectively. Then, 𝑚𝑑
+can be expressed as 𝑚𝑑= 𝑁1 +𝑁2 +𝑁3. Similarly, we
+can obtain the expression 𝑎𝑑1 = 𝑁2 + 𝑁3, 𝑎𝑑2 = 𝑁3
+and 𝑎𝑔𝑔= 𝑁1 + 𝑁2 + 𝑁3. Finally, the total loss ′𝑎𝑙𝑙
+in the single-decoder setting is expressed as:
+′
+𝑎𝑙𝑙= 𝑁1 + (1 + 𝛼)(1 −𝛾)𝑁2
++ (1 + 𝛼+ 𝛽)(1 −𝛾)𝑁3
+(9)
+The ablation results are shown in Tab. 2. Compared to
+the baseline, the single-decoder setting improves mR@K
+and shows a slight decrease in the Mean metric, indicating
+that the re-weighting can improve the prediction accuracy of
+low-frequency predicates. When using a multiple-decoder
+setting, mR@K and Mean are significantly improved, in-
+dicating that the combination with multiple-decoder set-
+ting can further improve the prediction accuracy of low-
+frequency predicates.
+Ablation for components of decoder As shown in Fig. 2,
+each decoder in EPD consists of two linear layers and batch
+normalization(BN) layers. The linear layer parameters of the
+Table 3
+Ablation results in components of the decoder in EPD. “Y”
+indicates that the parameters of 𝐹𝑝_𝑑in different decoders are
+shared, while “N” means independent. “w.” indicates that the
+BN layers 𝐵𝑥is included in the decoders of EPD, while “w.o.”
+means that 𝐵𝑥is not adopted.
+𝐹𝑝_𝑑
+𝐵𝑥
+R@50/100
+mR@50/100
+Mean
+Y
+w.
+54.1/56.0
+36.3/38.8
+46.3
+N
+w.
+49.9/52.0
+35.0/37.3
+43.5
+Y
+w.o.
+47.7/50.0
+30.3/32.0
+40.0
+N
+w.o.
+51.1/52.9
+30.9/32.8
+41.9
+Table 4
+Ablation results on training data configuration.
+
+1
+2
+R@50/100
+mR@50/100
+Mean
+𝑁1
+𝑁2
+𝑁3
+59.9/61.5
+22.0/24.1
+41.9
+𝑁1 ∪𝑁2 ∪𝑁3
+𝑁2
+𝑁3
+52.2/54.1
+34.8/37.2
+44.6
+𝑁1 ∪𝑁2 ∪𝑁3
+𝑁2 ∪𝑁3
+𝑁3
+54.1/56.0
+36.3/38.8
+46.3
+three decoders are shared, while the BN layer parameters are
+independent. In order to explore the role of BN layers and the
+impact of parameter sharing in linear layers, we conducted
+ablation experiments on the linear layer 𝐹𝑝_𝑑and BN layers
+𝐵𝑑(𝑑∈{𝑚𝑑, 𝑎𝑑1, 𝑎𝑑2}) of the decoder in EPD.
+The ablation results are shown in Tab. 3. Comparing the
+first two rows and the last two rows, when the decoder does
+not include the BN layers, both mR@K and Mean decrease,
+meaning that independent BN is helpful for learning differ-
+ent subtasks. Comparing the first row with the second row,
+when the parameters of 𝐹𝑝_𝑑are independent, both mR@K
+and Mean decrease, meaning that sharing initial features
+is important for the collaboration of the three decoders.
+Comparing the third row with the other rows, mR@K and
+Mean are the lowest because the model is a single-decoder
+structure when the parameters of 𝐹𝑝_𝑑are shared and the BN
+layers are not included, while in the other cases, the model is
+multiple-decoder structure due to the independence of 𝐹𝑝_𝑑
+or inclusion of the BN layers. This trend is consistent with
+the experimental results in Tab. 2, that is, the performance
+of a single-decoder is lower than that of a multiple-decoder.
+Ablation of training data configurations In order to verify
+the impact of the training set configuration on the ensemble
+predicate decoding, we trained the model based on different
+data configurations. The experiment consists of three dif-
+ferent configurations. Three decoders are trained on three
+disjoint subsets, i.e., main decoder , auxiliary decoders
+1 and 2 are assigned with the subsets 𝑁1, 𝑁2, and
+𝑁3 respectively. The main decoder is trained on the
+complete set of training samples 𝑁1 ∪𝑁2 ∪𝑁3, and the
+auxiliary decoders 1 and 2 are trained on two disjoint
+subsets, i.e., 𝑁2 and 𝑁3 are assigned to 1 and 2
+respectively. Three decoders are trained on three intersecting
+subsets, i.e., The main decoder is trained on 𝑁1 ∪
+𝑁2 ∪𝑁3, the auxiliary decoder 1 is trained on 𝑁2 ∪𝑁3,
+and the auxiliary decoder 2 is trained on 𝑁3. The latter
+two configurations allocate more decoders to predicates with
+lower frequencies.
+Predicate distribution in training stage
+on(429891)
+standing on(8798)
+Figure 3: The predicate distribution in the training subsets 𝑁1, 𝑁2 and 𝑁3 obtained by the average partitioning method, i.e.,
+16:17:17 (head:body:tail). The predicate samples used for statistics are from the VG dataset.
+Table 5
+Performance of EPD with different partition for 𝑁1, 𝑁2 and
+𝑁3.
+Cardinality
+Metric
+𝑁1
+𝑁2
+𝑁3
+R@50/100
+mR@50/100
+Mean
+16
+17
+17
+57.4/59.2
+33.3/35.8
+46.4
+10
+10
+30
+54.9/56.7
+35.2/37.6
+46.1
+5
+10
+35
+54.1/56.0
+36.3/38.8
+46.3
+5
+15
+30
+52.5/54.5
+35.8/38.1
+45.2
+The ablation results are shown in Tab. 4. When the
+three decoders are assigned with disjoint subsets, the mR@K
+and Mean are the lowest, as shown in the first row. When
+the training data assigned to decoders has an intersection,
+mR@K and Mean are improved. The predicates in the in-
+tersection of training data from different decoders belong to
+body predicate set 𝑁2 or tail predicate set 𝑁3, which have
+lower frequency and more informativeness compared to the
+predicates in the head predicate set 𝑁1. According to the
+viewpoint of Goel et al., [8], the prediction for the predicates
+with more informativeness requires deliberate reasoning.
+The configurations shown in the last two rows in Tab. 4 allow
+the more informative samples to receive more attention,
+which makes subsequent inferences of such predicates more
+thoughtful.
+4.5. Hyperparameter Selection Experiments
+In this section, experiments are conducted to select the
+optimal hyperparameter values. All experiments are con-
+ducted on the PredCls task and use Motifs [35] as a baseline.
+The cardinality of 𝑁1, 𝑁2 and 𝑁3 Previous works [15, 17]
+set 𝑁1, 𝑁2 and 𝑁3 include 16, 17, and 17 categories, respec-
+tively. The partitioning process first arranges the predicate
+categories in descending order based on the frequency of
+their associated samples in the dataset, and then evenly
+divides the predicate categories in the sequence. As shown
+in Fig. 3, when the predicates are evenly divided, predicate
+pairs with similar semantics, such as standing on and on, are
+Table 6
+Coefficients experiments on the loss function. The "Head,"
+"Body," and "Tail" represent the averaged recall rates of
+predicates within their respective groups. The results are
+obtained with Motifs as the baseline, in the PredCls task.
+Weights
+mR@100
+𝛼
+𝛽
+𝛾
+Head
+Body
+Tail
+All
+8
+10
+0.02
+54.0
+24.9
+35.7
+36.4
+8
+10
+0.005
+51.8
+33.9
+35.4
+37.6
+8
+10
+0.01
+53.8
+30.4
+37.7
+38.8
+2
+3
+0.01
+57.5
+40.3
+27.4
+33.6
+grouped into the same subset. This situation will increase
+the difficulty of the task faced by the decoder. In addition,
+due to the large variance of predicate frequency, the 𝑁1
+obtained by averaging based on the number of categories
+includes predicate categories with lower frequencies. The
+idea of EPD is to make low-frequency predicates participate
+more in the training process than high-frequency predicates,
+so the partition containing fewer low-frequency predicate
+categories in 𝑁1 is more advantageous for EPD.
+Based on different partition principles, we obtained mul-
+tiple sets of training subsets and used each set of training
+subsets to train EPD. The corresponding model performance
+is listed in Tab. 5. Comparing the first row and the last two
+rows, when 𝑁1 contains fewer categories, mR@K of the
+model is higher. Comparing the first row and the third row,
+when 𝑁1 contains fewer categories, the model has a higher
+mR@K and a similar Mean. We ultimately set the number
+of samples in 𝑁1, 𝑁2 and 𝑁3 to 5, 10, and 35, respectively.
+Weights in Loss Function: In Eq. 8, there are three weights
+𝛼, 𝛽and 𝛾in the total loss 𝑎𝑙𝑙. 𝛼and 𝛽are used to balance
+auxiliary decoders and the main decoder, 𝛾is utilized to bal-
+ance individual predictions and the aggregated prediction.
+We conduct experiments with various settings for 𝛼, 𝛽and
+𝛾. The experimental results are shown in Tab. 7. When 𝛾
+decreases, the recall rates of the three groups become more
+balanced. When the value of 𝛼∕𝛽is less than 1, mR@100 is
+man
+hair
+0
+0.2
+0.4
+0.6
+<man, has, hair>
+MD
+MD+AD1
+MD+AD1+AD2
+0
+0.2
+0.4
+0.6
+MD
+MD+AD1
+MD+AD1+AD2
+<dog, walking on, beach>
+has
+hanging from
+between
+walking on
+on back of
+laying on
+( a ) Scores of the predictions for the triplet <man, -, hair> which GT is "has".
+( b ) Scores of the predictions for the triplet <dog, -, beach> which GT is "walking on".
+dog
+beach
+man
+hair
+0
+0.2
+0.4
+0.6
+<man, has, hair>
+MD
+MD+AD1
+MD+AD1+AD2
+0
+0.2
+0.4
+0.6
+MD
+MD+AD1
+MD+AD1+AD2
+<dog, walking on, beach>
+has
+hanging from
+between
+walking on
+on back of
+laying on
+( a ) Scores of the predictions for the triplet <man, -, hair> which GT is "has".
+( b ) Scores of the predictions for the triplet <dog, -, beach> which GT is "walking on".
+dog
+beach
+Figure 4: Visualization of collaborative scoring with multiple decoders, using Motifs with EPD. The head predicate triplet
+⟨man, has, hair⟩and the body predicate triplet ⟨dog, walking on, beach⟩are taken as examples. For each triplet, the scores given
+by EPD using different decoder combinations are shown, including: main decoder only; main decoder and auxiliary decoder 1;
+main decoder, auxiliary decoder 1, and auxiliary decoder 2.
+Table 7
+Coefficients experiments on the loss function. The "Head,"
+"Body," and "Tail" represent the averaged recall rates of
+predicates within their respective groups. The results are
+obtained with Motifs as the baseline, in the PredCls task.
+Weights
+mR@100
+𝛼
+𝛽
+𝛾
+Head
+Body
+Tail
+All
+8
+10
+0.02
+54.0
+24.9
+35.7
+36.4
+8
+10
+0.005
+51.8
+33.9
+35.4
+37.6
+8
+10
+0.01
+53.8
+30.4
+37.7
+38.8
+2
+3
+0.01
+57.5
+40.3
+27.4
+33.6
+higher. As indicated in the third row, the model achieves the
+best mR@K while 𝛼= 8, 𝛽= 10, and 𝛾= 0.01.
+Weights in the aggregated prediction According to Eq. 7,
+the aggregated prediction is the weighted sum of the indi-
+vidual prediction. Compared with the main decoder ,
+auxiliary decoders 1 and 2 are trained on a relatively
+limited set of predicate categories. Thus, 1 and 2
+should play a supporting role in serving as supplements to
+assist the main decoder in making predictions. In terms
+of 1 and 2, focusing more on low-frequency samples
+helps the model reduce bias effects. We conduct experiments
+with various settings for the weights 𝜆𝑚𝑑, 𝜆𝑎𝑑1 and 𝜆𝑎𝑑2. The
+experimental results are shown in Tab. 8. 𝜆𝑚𝑑is always given
+the maximum value, while 𝜆𝑎𝑑1 and 𝜆𝑎𝑑2 are given smaller
+values. As indicated in the third row, the model achieves the
+best mR@K while 𝜆𝑚𝑑= 0.4, 𝜆𝑎𝑑1 = 0.2 and 𝜆𝑎𝑑2 = 0.4.
+Table 8
+Performance with different settings for 𝜆𝑚𝑑, 𝜆𝑎𝑑1 and 𝜆𝑎𝑑2 in
+𝑧𝑠𝑢𝑚.
+𝜆𝑚𝑑
+𝜆𝑎𝑑1
+𝜆𝑎𝑑2
+R@50/100
+mR@50/100
+Mean
+0.4
+0.3
+0.3
+43.1/45.3
+37.8/40.3
+41.6
+0.5
+0.3
+0.2
+48.4/50.8
+34.4/36.8
+42.6
+0.4
+0.2
+0.4
+46.5/48.7
+38.2/40.9
+43.5
+0.5
+0.2
+0.3
+54.1/56.0
+36.3/38.8
+46.3
+4.6. Visualization
+In Fig. 1, for the tail predicate triplet ⟨bird, –, banana⟩,
+the prediction becomes correct by combining auxiliary de-
+coders to continuously improve the rating of ⟨standing on⟩.
+Do the auxiliary decoders have a negative impact? There-
+fore, we conducted experiments of visualizing the collabo-
+rative scoring with multiple decoders for the triplets which
+ground truths are head and body predicates. The visualiza-
+tion results are shown in Fig. 4. The instance in the top
+row is a head predicate ⟨man, –, hair⟩which ground truth
+is has. When only including , EPD gives the correct
+prediction. When auxiliary decoders 1 and 2 are
+combined progressively, the prediction still remains correct.
+In the bottom row, the prediction of the body predicate
+walking on is also the same situation. The reason is that the
+auxiliary decoder 2 can make reasonable judgments on
+learned tail predicates, such as giving hanging from and on
+back of a lower score, thereby reducing the scores of non-
+ground truth predicates.
+5. Conclusion
+In this paper, we analyzed the influencing factors beyond
+the long tail of the dataset that led to biased predictions
+in the SGG model. Based on the analysis, we introduce a
+model-agnostic strategy called Ensemble Predicate Decod-
+ing (EPD). EPD enhances the model’s decoding capabil-
+ity for infrequent categories by training multiple decoders
+learned on different subtasks. Experimental results on the
+VG dataset demonstrate the excellent performance of our
+method across different baseline models.
+Acknowledgements
+This work was supported by the National KeyR&D
+Program of China (No. 2021ZD0111902), National Nat-
+ural Science Foundation of China(U21B2038, 62376014,
+62172022), and Foundation for China universityIndustry-
+university Research Innovation(No.2021JQR023)
+References
+[1] Biswas, B.A., Ji, Q., 2023. Probabilistic debiasing of scene graphs, in:
+Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, pp. 10429–10438.
+[2] Chen, G., Li, L., Luo, Y., Xiao, J., 2023. Addressing predicate overlap
+in scene graph generation with semantic granularity controller, in:
+2023 IEEE International Conference on Multimedia and Expo, IEEE.
+pp. 78–83.
+[3] Chen, S., Jin, Q., Wang, P., Wu, Q., 2020.
+Say as you wish:
+Fine-grained control of image caption generation with abstract scene
+graphs, in: Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pp. 9962–9971.
+[4] Cui, J., Liu, S., Tian, Z., Zhong, Z., Jia, J., 2022. Reslt: Residual
+learning for long-tailed recognition. IEEE Transactions on Pattern
+Analysis and Machine Intelligence 45, 3695–3706.
+[5] Dong, X., Gan, T., Song, X., Wu, J., Cheng, Y., Nie, L., 2022. Stacked
+hybrid-attention and group collaborative learning for unbiased scene
+graph generation, in: Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, pp. 19427–19436.
+[6] García-Pedrajas, N., 2009. Constructing ensembles of classifiers by
+means of weighted instance selection. IEEE Transactions on Neural
+Networks 20, 258–277.
+[7] Geiselhart, M., Elkelesh, A., Ebada, M., Cammerer, S., ten Brink, S.,
+2021. Automorphism ensemble decoding of reed–muller codes. IEEE
+Transactions on Communications 69, 6424–6438.
+[8] Goel, A., Fernando, B., Keller, F., Bilen, H., 2022. Not all relations
+are equal: Mining informative labels for scene graph generation, in:
+Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, pp. 15596–15606.
+[9] Han, Y., Zhuo, T., Zhang, P., Huang, W., Zha, Y., Zhang, Y., Kankan-
+halli, M., 2022.
+One-shot video graph generation for explainable
+action reasoning. Neurocomputing 488, 212–225.
+[10] He, K., Zhang, X., Ren, S., Sun, J., 2016. Deep residual learning
+for image recognition, in: Proceedings of the IEEE conference on
+computer vision and pattern recognition, pp. 770–778.
+[11] Herzig, R., Bar, A., Xu, H., Chechik, G., Darrell, T., Globerson, A.,
+2020. Learning canonical representations for scene graph to image
+generation, in: European Conference on Computer Vision, pp. 210–
+227.
+[12] Johnson, J., Krishna, R., Stark, M., Li, L.J., Shamma, D., Bernstein,
+M., Fei-Fei, L., 2015.
+Image retrieval using scene graphs, in:
+Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, pp. 3668–3678.
+[13] Krishna, R., Zhu, Y., Groth, O., Johnson, J., Hata, K., Kravitz, J.,
+Chen, S., Kalantidis, Y., Li, L.J., Shamma, D.A., et al., 2017. Visual
+genome: Connecting language and vision using crowdsourced dense
+image annotations. International Journal of Computer Vision 123,
+32–73.
+[14] Li, H., Zhu, G., Zhang, L., Jiang, Y., Dang, Y., Hou, H., Shen, P., Zhao,
+X., Shah, S.A.A., Bennamoun, M., 2024. Scene graph generation: A
+comprehensive survey. Neurocomputing 566, 127052.
+[15] Li, L., Chen, L., Huang, Y., Zhang, Z., Zhang, S., Xiao, J., 2022a.
+The devil is in the labels: Noisy label correction for robust scene
+graph generation, in: Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, pp. 18869–18878.
+[16] Li, L., Xiao, J., Shi, H., Wang, W., Shao, J., Liu, A.A., Yang, Y., Chen,
+L., 2023. Label semantic knowledge distillation for unbiased scene
+graph generation.
+IEEE Transactions on Circuits and Systems for
+Video Technology 34, 195–206.
+[17] Li, R., Zhang, S., Wan, B., He, X., 2021. Bipartite graph network
+with adaptive message passing for unbiased scene graph generation,
+in: Proceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, pp. 11109–11119.
+[18] Li, W., Zhang, H., Bai, Q., Zhao, G., Jiang, N., Yuan, X., 2022b.
+Ppdl: Predicate probability distribution based loss for unbiased scene
+graph generation, in: Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, pp. 19447–19456.
+[19] Lin, X., Ding, C., Zeng, J., Tao, D., 2020. Gps-net: Graph property
+sensing network for scene graph generation, in: Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+pp. 3746–3753.
+[20] Lu, C., Krishna, R., Bernstein, M., Fei-Fei, L., 2016a.
+Visual
+relationship detection with language priors, in: European Conference
+on Computer Vision, Springer. pp. 852–869.
+[21] Lu, J., Yang, J., Batra, D., Parikh, D., 2016b. Hierarchical question-
+image co-attention for visual question answering, in: Proceedings of
+the 30th International Conference on Neural Information Processing
+Systems, p. 289–297.
+[22] Nguyen, T.T., Nguyen, P., Luu, K., 2024. Hig: Hierarchical inter-
+lacement graph approach to scene graph generation in video under-
+standing, in: Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pp. 18384–18394.
+[23] Peng, R., Zhao, C., Chen, X., Wang, Z., Liu, Y., Liu, Y., Lan, X.,
+2024. A causality guided loss for imbalanced learning in scene graph
+generation. Neurocomputing , 128042.
+[24] Polikar, R., 2012. Ensemble learning. Ensemble machine learning:
+Methods and applications , 1–34.
+[25] Ren, S., He, K., Girshick, R., Sun, J., 2017. Faster r-cnn: Towards
+real-time object detection with region proposal networks.
+IEEE
+Transactions on Pattern Analysis and Machine Intelligence 39.
+[26] Shen, L., Yu, Z., Ma, Q., Kwok, J.T., 2021. Time series anomaly
+detection with multiresolution ensemble decoding, in: Proceedings of
+the AAAI Conference on Artificial Intelligence, pp. 9567–9575.
+[27] Song, X., Chen, J., Wu, Z., Jiang, Y.G., 2021.
+Spatial-temporal
+graphs for cross-modal text2video retrieval. IEEE Transactions on
+Multimedia 24, 2914–2923.
+[28] Tang, K., Niu, Y., Huang, J., Shi, J., Zhang, H., 2020.
+Unbiased
+scene graph generation from biased training, in: Proceedings of the
+IEEE/CVF conference on computer vision and pattern recognition,
+pp. 3716–3725.
+[29] Tang, K., Zhang, H., Wu, B., Luo, W., Liu, W., 2019. Learning to
+compose dynamic tree structures for visual contexts, in: Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern Recog-
+nition, pp. 6619–6628.
+[30] Tong, X., Wang, R., Jing, L., 2023. Alleviating training bias with less
+cost via multi-expert de-biasing method in scene graph generation,
+in: Proceedings of the 1st International Workshop on Multimedia
+Content Generation and Evaluation: New Methods and Practice, pp.
+99–103.
+[31] Yan, S., Shen, C., Jin, Z., Huang, J., Jiang, R., Chen, Y., Hua, X.S.,
+2020. Pcpl: Predicate-correlation perception learning for unbiased
+scene graph generation, in: Proceedings of the 28th ACM Interna-
+tional Conference on Multimedia, pp. 265–273.
+[32] Yang, G., Zhang, J., Zhang, Y., Wu, B., Yang, Y., 2021. Probabilistic
+modeling of semantic ambiguity for scene graph generation, in:
+Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, pp. 12527–12536.
+[33] Yoon, K., Kim, K., Moon, J., Park, C., 2023. Unbiased heterogeneous
+scene graph generation with relation-aware message passing neural
+network, in: Proceedings of the AAAI Conference on Artificial Intel-
+ligence, pp. 3285–3294.
+[34] Yu, J., Chai, Y., Wang, Y., Hu, Y., Wu, Q., 2021. Cogtree: Cognition
+tree loss for unbiased scene graph generation, in: Proceedings of the
+Thirtieth International Joint Conference on Artificial Intelligence, pp.
+1274–1280.
+[35] Zellers, R., Yatskar, M., Thomson, S., Choi, Y., 2018. Neural motifs:
+Scene graph parsing with global context, in: Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+pp. 5831–5840.
+[36] Zeng, P., Gao, L., Lyu, X., Jing, S., Song, J., 2021. Conceptual and
+syntactical cross-modal alignment with cross-level consistency for
+image-text matching, in: Proceedings of the 29th ACM International
+Conference on Multimedia, pp. 2205–2213.
+[37] Zhang, Y., Hooi, B., Hong, L., Feng, J., 2022. Self-supervised ag-
+gregation of diverse experts for test-agnostic long-tailed recognition,
+in: Advances in Neural Information Processing Systems, pp. 34077–
+34090.

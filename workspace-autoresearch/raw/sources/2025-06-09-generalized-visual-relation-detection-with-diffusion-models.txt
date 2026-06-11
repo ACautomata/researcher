@@ -1,0 +1,2101 @@
+IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY, VOL. *, NO. *, OCTOBER 2024
+1
+Generalized Visual Relation Detection with
+Diffusion Models
+Kaifeng Gao, Siqi Chen, Hanwang Zhang, Jun Xiao∗, Yueting Zhuang, and Qianru Sun
+Abstract—Visual relation detection (VRD) aims to identify
+relationships (or interactions) between object pairs in an image.
+Although recent VRD models have achieved impressive perfor-
+mance, they are all restricted to pre-defined relation categories,
+while failing to consider the semantic ambiguity characteristic of
+visual relations. Unlike objects, the appearance of visual relations
+is always subtle and can be described by multiple predicate
+words from different perspectives, e.g., “ride” can be depicted
+as “race” and “sit on”, from the sports and spatial position
+views, respectively. To this end, we propose to model visual
+relations as continuous embeddings, and design diffusion models
+to achieve generalized VRD in a conditional generative manner,
+termed Diff-VRD. We model the diffusion process in a latent
+space and generate all possible relations in the image as an
+embedding sequence. During the generation, the visual and text
+embeddings of subject-object pairs serve as conditional signals
+and are injected via cross-attention. After the generation, we
+design a subsequent matching stage to assign the relation words
+to subject-object pairs by considering their semantic similarities.
+Benefiting from the diffusion-based generative process, our Diff-
+VRD is able to generate visual relations beyond the pre-defined
+category labels of datasets. To properly evaluate this generalized
+VRD task, we introduce two evaluation metrics, i.e., text-to-image
+retrieval and SPICE PR Curve inspired by image captioning.
+Extensive experiments in both human-object interaction (HOI)
+detection and scene graph generation (SGG) benchmarks attest
+to the superiority and effectiveness of Diff-VRD.
+Index Terms—Visual Relation Detection, Diffusion Models.
+I. INTRODUCTION
+Visual Relation Detection (VRD) aims to localize subject-
+object pairs and recognize pairwise relations (or interactions),
+such as the “person-ride-horse” example illustrated in Fig-
+ure 1. It serves as a fundamental component for AI agents to
+comprehend scenes and perceive their surroundings. Recent
+VRD models have demonstrated impressive performance by
+leveraging state-of-the-art model designs: either in an end-
+to-end manner [1], [2], [3], [4], [5], [6] based on DETR
+(DEtection TRansformer) frameworks [7], or in a two-stage
+fashion [8], [9], [10], [11], [12], [13], where subject-object
+pairs are initially localized, followed by relation recognition.
+∗Jun Xiao is the corresponding author.
+Kaifeng Gao, Siqi Chen, Jun Xiao, and Yueting Zhuang are with Zhe-
+jiang University, Hangzhou, 310027, China. E-mail: kite phone@zju.edu.cn,
+siqic@zju.edu.cn, junx@cs.zju.edu.cn, yzhuang@zju.edu.cn.
+Hanwang Zhang is with the School of Computer Science and Engineer-
+ing, Nanyang Technological University, 639798, Singapore. E-mail: han-
+wangzhang@ntu.edu.sg.
+Qianru Sun is with the School of Information Systems, Singapore Manage-
+ment University, 178902, Singapore. E-mail: qianrusun@smu.edu.sg.
+This work was supported by the National Natural Science Foundation
+of China (62337001) and the Fundamental Research Funds for the Central
+Universities(226-2024-00058).
+straddle 
+sit on 
+ride
+gallop
+race
+Condition
+Discriminative 
+Classifier
+Diffusion 
+Model
+...
+Latent Space 
+ride
+straddle
+Localization & 
+Feature extraction
+(a) Discriminative VRD (Existing Methods)
+(b) Generative VRD (Ours)
+generated embedding
+seen interaction
+unseen interaction
+Gaussian 
+Input
+Fig. 1. An example of visual relation detection (VRD). (a) Existing methods
+achieve VRD through discriminative classification. (b) We propose to generate
+visual relations via a diffusion model, conditioned on visual features of
+subject-object pairs. We model all visual relations collectively as one sequence
+but display only the relations of one subject-object pair for clarity.
+However, a significant limitation of existing approaches lies
+in their constrained definition of relations within predefined
+category labels. This limitation poses challenges when at-
+tempting to extend the vocabulary of relations to include new
+categories. Such extension typically involves labor-intensive
+data annotation for new categories and computationally expen-
+sive retraining or finetuning of models. Consequently, an ideal
+solution would be training VRD models capable of generalized
+visual relation detection. Such a model should be trained on
+all available relation labels and be able to conjecture potential
+new relation categories at test time.
+Similar attempts have been widely explored in the field
+of object detection. Existing works enable detectors to be
+trained on limited annotations while being able to recognize
+new object categories at test time (e.g., open-vocabulary object
+detection [14], [15], [16]). They classify unseen objects into
+specific categories by leveraging external knowledge trans-
+ferred from pre-trained visual-language models (VLMs) such
+as CLIP [17]. However, addressing visual relations presents
+a more significant challenge due to their inherent semantic
+ambiguity. Unlike objects, the appearance of relations is often
+subtle and can be described by multiple predicate words from
+different perspectives, e.g., the relation of person and horse
+in Figure 1 can be described as “ride”, “straddle”, and so
+on. Therefore, recognizing visual relations by discriminative
+classification might be sub-optimal. Although zero-shot [18] or
+open-vocabulary [19], [20], [21] settings are also explored in
+existing VRD methods, they still resort to discriminative multi-
+label classification, as shown in Figure 1 (a), which treats each
+interaction discretely and ignores the semantic ambiguity.
+arXiv:2504.12100v1  [cs.CV]  16 Apr 2025
+IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY, VOL. *, NO. *, OCTOBER 2024
+2
+To this end, we propose to model visual relations using
+continuous embeddings, as depicted in Figure 1 (b), and
+perform generalized relation detection in a generative manner.
+Considering the inherent interconnectedness of visual relations
+(or interactions)1, we treat all interactions in the image holisti-
+cally to capture overall contexts and develop a diffusion model
+to “decode” these interactions in a generative manner. This
+diffusion model, dubbed Diff-VRD, is specially tailored for
+visual relation detection. It operates by using a sequence of
+Gaussian noise vectors as input, which are gradually denoised
+to generate interaction embeddings conditioned on the visual
+cues of subject-object pairs. The diffusion process is modeled
+using a transformer decoder, and cross-attention layers are
+employed to incorporate the conditional signals from visual
+appearance. The underlying working logic is that the presence
+of Gaussian noise in the interaction embeddings forces the
+model to consider semantic ambiguity (during denoising).
+Meanwhile, as the conditional signals are introduced, the inter-
+action embeddings are learned to be semantically meaningful
+by aligning with the visual appearance.
+Given the fact that visual relations would be eventually
+described by discrete words (or phrases), we extend the
+diffusion-denoising process with an embedding step and a
+rounding step (Sec. III-B), in which an embedding function is
+jointly trained with the diffusion model as in [22], [23]. After
+generating the relation sequence, we conduct a matching step
+to match each relation in the sequence to subject-object pairs
+according to semantic similarities (Sec. III-C). In addition, we
+design an auxiliary loss and introduce matching supervision
+into the diffusion model, which empirically improves the
+matching quality (Sec. III-D). Thanks to the generative process
+in the diffusion model, our Diff-VRD is able to identify visual
+relations that are not covered by the pre-defined categories
+in datasets, i.e., achieving generalized VRD by rounding the
+relation embeddings to discrete phrases according to a large
+external relation vocabulary.
+To effectively evaluate the generalized VRD, we introduce
+two proxy tasks and metrics: namely text-to-image (T2I)
+retrieval and SPICE [24] precision-recall curve (PR curve)
+adapted from image captioning. They account for results that
+go beyond the ground-truth annotations, capturing reasonable
+but unannotated relation categories. The experiment results
+show that our Diff-VRD outperforms conventional state-of-
+the-art VRD models on both T2I retrieval and SPICE. For
+example, compared to UPT [8], we achieve an absolute
+improvement of 11.31% Recall@10 in terms of T2I retrieval
+on the HICO-DET [25] dataset. We also evaluated the re-
+lation diversity using the SPICE targets. The results show
+that, compared to existing methods—both the closed-set ap-
+proach UPT [8] and the open-set methods GNE-VLKT [26]
+and the CLIP [17] baseline, Diff-VRD correctly identifies a
+larger number of meaningful relations.
+In addition, Diff-
+VRD can also be applied on top of existing VRD models
+as an enhancement module (i.e., post-processing) to refine the
+relation predictions. When applied on IEtrans [27], it brings
+1we use the words “visual relation” and “interaction” interchangeably
+depending on the context.
+an absolute improvement of 5.60% recall of the T2I retrieval
+task on the Visual Genome [28] dataset.
+Our contributions are thus three-fold. 1) We achieve gen-
+eralized visual relation detection in a generative paradigm for
+the first time, which considers the inherent semantic ambiguity
+of visual relations. 2) We introduce two new metrics (i.e., text-
+to-image retrieval and SPICE PR curve) to properly evaluate
+reasonable visual relations that go beyond the ground-truth
+annotations. 3) We propose a diffusion-based VRD model, i.e.,
+Diff-VRD. It achieves comparable performance with SOTA
+VRD models while excelling in capturing more subtle and
+diverse visual relationships.
+II. RELATED WORKS
+Visual Relation Detection (VRD) has been widely studied
+in tasks such as scene graph generation (SGG) [29], [2],
+[1], [11] and human-object detection (HOI) [30], [3], [8],
+[6], [31]. Existing works on VRD can be grouped into two-
+stage methods and one-stage (end-to-end) methods. Two-stage
+methods [32], [10], [9], [8], [31] first apply an off-the-shelf
+object detector to detect object bounding boxes, and then
+exhaustively combine them as subject-object pairs which are
+fed to a subsequent module for interaction classification. One-
+stage methods [1], [2], [4], [6], [5] detect subject-object bound-
+ing boxes and their visual relations simultaneously, typically
+in a DETR [7]-based paradigm. They adopt a set of learnable
+queries as the input of the Transformer decoder, aggregate the
+image-wide context information based on the cross-attention
+layers, and finally predict the bounding boxes simultane-
+ously with their pair-wise relations. Unlike existing works
+that classify visual relations within pre-defined categories,
+we recognize visual relations in a generative paradigm by
+diffusion models, covering relation categories that go beyond
+the ground-truth annotations.
+Zero-Shot and Open-vocabulary VRD aim to recognize
+new relation categories which are unseen during training.
+A straightforward and feasible way to achieve Zero-Shot
+VRD is aligning visual representations to pre-trained word
+embeddings (e.g., GloVe [33] or ELMo [34]), and classifying
+the visual relations according to the similarities between
+them [35], [36], [37]. Recently, pretrained visual-language
+models (VLMs) have demonstrated their extraordinary zero-
+shot ability (e.g., CLIP [17], X-VLM [38]) by learning a joint
+visual-language space through contrastive pretraining [39].
+Consequently, many works adopted such VLMs and trans-
+ferred the knowledge of the learned joint space to their VRD
+models [18], [19], [20], [21]. With the encyclopedic knowledge
+from VLMs, they can achieve open-vocabulary VRD when
+an open-world relation vocabulary is provided at deployment.
+However, they (both zero-shot and open-vocabulary VRD)
+still recognize visual relations by discriminative classification,
+and evaluate the results on seen/unseen (also referred to as
+base/novel) relation categories split within the annotations of
+datasets. In contrast, Diff-VRD is the first one to recognize
+visual relations in a generative manner, and introduce new
+IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY, VOL. *, NO. *, OCTOBER 2024
+3
+proxy tasks to properly evaluate reasonable but unannotated
+relation categories 2.
+Diffusion Models are generative models that aim to model a
+target distribution x0 ∼q(x) by learning a denoising process
+pθ(xt−1|xt) with varying noise levels. Conditional generation
+can be achieved by introducing classifier-free guidance [40] to
+the denoising process as pθ(xt−1|xt, y), where the conditional
+signal y can be injected via cross-attention [41], token-wise
+concatenation [23], adaptive layer normalization [42], etc.
+Diffusion models have demonstrated remarkable success in
+vision [43], [41], audio [44], [45], and language [22], [23]
+domains. Our work for the first time introduces diffusion
+models to visual relation detection, and achieves generalized
+VRD beyond the datasets’ annotations.
+Diffusion-based Discrete Text Generation. Recent works
+have explored the application of diffusion models for discrete
+text generation in vision-language tasks, e.g., image and video
+captioning. Bit Diffusion [46] encodes the text tokens into
+binary bits and then represents them as real numbers (analog
+bits), allowing the model to follow a continuous diffusion
+process. Following this spirit, SCD-Net [47] concatenates
+semantic features to the analog bits and encodes them via self-
+attention. MM-Diff-Net [48] explores various modality fusion
+techniques to incorporate multi-modal semantic features. In
+addition, some works [49], [50] use discrete masks instead of
+continuous noise to model the diffusion process and develop
+image captioning models. We follow the continuous diffusion
+process. But unlike Bit Diffusion [46], we introduce the
+embedding-rounding module. It projects the discrete relation
+words to continuous embeddings and initializes them with
+CLIP text features, which is inherently more sematic mean-
+ingful than directly converting text tokens into binary bits.
+III. METHOD
+We first briefly introduce the preliminaries of diffusion mod-
+els and the problem setup of generalized VRD (Sec. III-A).
+Then, we introduce the proposed Diff-VRD, as illustrated
+in Figure 2. Diff-VRD first generates a relation sequence
+conditioned on subject-object features via diffusion models
+(Sec. III-B), and then matches visual relations to certain
+subject-object pairs based on their similarities (Sec. III-C).
+Finally, we introduce auxiliary matching supervision into Diff-
+VRD (Sec. III-D) to improve the matching quality.
+A. Preliminaries and Problem Setup
+Preliminaries. Diffusion models [43], [51] are designed to
+model a target distribution x0 ∼q(x) by learning a denoising
+(reverse) process with arbitrary noise levels. To do this, a
+Markov diffusion (forward) process is defined to gradually
+corrupt x0 into a standard Gaussian noise. Specifically, each
+forward step samples xt as
+xt ∼q(xt|xt−1) = N(xt;
+p
+1 −βtxt−1, βtI),
+(1)
+2Our model can generate relations not only go beyond the annotations of
+the train set but also the test set. Hence our setting is more general than the
+base/novel category splits of the existing open-vocabulary setting.
+where t = 1, . . . , T and βt ∈(0, 1) is the variance schedule.
+By applying the reparameterization trick [43], xt can also
+be directly sampled conditioned on x0, i.e., xt = √¯αtx0 +
+√1 −¯αtϵt, where ϵt ∼N(0, I) and ¯αt = Qt
+i=1(1 −βi).
+Given the forward process, a diffusion model is then trained
+to approximate the denoising process, where each step samples
+xt−1 ∼pθ(xt−1|xt) = N(xt−1; µθ(xt, t), Σθ(xt, t)),
+(2)
+where θ contains learnable parameters, e.g., characterized by
+a U-Net [41] or a Transformer [52].
+Existing diffusion models [43], [53], [52] are trained with
+the variational lower bound (VLB) of x0’s log-likelihood,
+which can be formulated as
+Lori
+VLB(x0) =
+E
+x1:T ∼q(x1:T |x0)
+
+log q(xT |x0)
+p(xT )
++
+T
+X
+t=2
+log q(xt−1|xt, x0)
+pθ(xt−1|xt)
+−log pθ(x0|x1)
+#
+. (3)
+Here the first two terms are the the Kullback-Leibler (KL)
+divergence of q and pθ. Since q and pθ are both Gaussian,
+their KL divergence is determined by the mean µθ and
+covariance Σθ. Following [43], a common approach is to
+define Σθ as a fixed variance schedule, i.e., Σθ = σ2
+t I,
+where σ2
+t = 1−¯αt−1
+1−¯αt βt. Then, By re-parameterizing µθ as a
+noise prediction network, the model can be optimized using a
+simplified training objective:
+Lori
+simple(x0) =
+E
+xt,ϵ,t
+
+∥ϵθ(xt, t) −ϵ∥2
+2
+
+,
+(4)
+where xt ∼q(xt|x0), ϵ ∼N(0, 1), and t ∼U{1, 2, ..., T}.
+Problem Setup. Given an image, the task of VRD aims to
+detect all the objects and identify their pair-wise visual rela-
+tions. In our work, we follow the two-stage VRD paradigm.
+We first apply an off-the-shelf detector to obtain a set of object
+predictions, where each prediction is characterized by a bound-
+ing box and an object category co ∈Co. Then, we recognize all
+the possible visual relations (or interactions) for each subject-
+object pair (i, j), denoted as Ri,j = {r1, . . . , rk} ⊆Cr. Here
+Co and Cr are sets of object and relation categories defined by
+the annotations from VRD datasets. In our setting, we replace
+Cr with a much larger vocabulary V (i.e., Cr ⊆V) to achieve
+generalized VRD 3. Since our main focus is relation detection,
+we keep the object category set Co unchanged for simplicity.
+B. Conditional Relation Generation via Diffusion Models
+We first extend the vanilla diffusion pipeline to do relation
+generation, and then introduce the conditional information
+based on the subject-object pairs, as shown in Figure 2.
+Relation Generation. Given the fact that relation categories
+are described by discrete text, we must map the text into a
+continuous space at the beginning of the forward process, and
+round the continuous embedding back into text at the end of
+the reverse process. Following [22], [23], we design an embed-
+ding function Embϕ to map each vi ∈V to a continuous vector
+in Rd. Then, we concatenate all the relations in the image as
+3In practice, V contains phrases and prepositions such as “sit on”, “in front
+of”. Refer to Sec. IV-B for details.
+IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY, VOL. *, NO. *, OCTOBER 2024
+4
+𝒙𝒙𝑇𝑇
+𝒙𝒙𝑡𝑡
+𝒙𝒙𝑡𝑡−1
+𝒙𝒙0
+𝒗𝒗
+𝑞𝑞𝜙𝜙(𝒙𝒙0|𝒗𝒗)
+𝑞𝑞(𝒙𝒙𝑡𝑡|𝒙𝒙𝑡𝑡−1)
+...
+...
+Rounding
+Embedding
+𝑝𝑝𝜃𝜃(𝒙𝒙𝑡𝑡−1|𝒙𝒙𝑡𝑡)
+𝑝𝑝𝜃𝜃(𝒗𝒗|𝒙𝒙0)
+Interaction Labels: [ sit on, sit on, carry, ride, ..., hold]
+Transformer 
+Decoder ( 𝑓𝑓𝜃𝜃)
+...
+bicycle   bag          ...
+bag
+𝒙𝒙𝑡𝑡
+𝑡𝑡
+𝒙𝒙𝑡𝑡−1
+...
+Conditional Signal 
+concat
+(d) Matching Stage
+...
+...
+Multi-Round
+Bipartite Matching
+sit on
+...
+sit on
+ride
+hold
+carry
+...
+Object Detection & 
+Subject-Object Pairing
+via cross-attention
++
+Timestamp 
+Embedding
+(b) Diffusion-Denoising Processes
+CLIPvis
+CLIPtxt
+for each 𝑡𝑡in [𝑇𝑇, … , 1]
+(c) Generation Stage
+(a) Preprocessing
+𝒚𝒚
+Semantic
+Similarity
+as K,V
+Fig. 2.
+Overview of Diff-VRD. (a): Given an image, we first detect all the objects with their categories and enumerate the subject-object pairs. (b): We
+extend the diffusion-denoising process with an embedding step qϕ(x0|v) and a rounding step pθ(v|x0). We introduce a tailored training objective for this
+extended diffusion-denoising process, as described in Sec. III-B. (c): The parameter θ in the denoising process is implemented by a Transformer decoder fθ.
+The conditional signal includes CLIP encoded visual and text embeddings of subject-object pairs, which are concatenated as y, projected by τθ, and injected
+via cross-attention layers (cf. Eq. (8)). (d): After generating the relation sequence v, we assign each vi to a subject-object pair by using multi-round bipartite
+matching based on their semantic similarities. Our contributions are highlighted in light blue.
+a sequence Embϕ(v) = [Embϕ(v1), . . . , Embϕ(vL)] ∈RL×d,
+where L is the total number of relations in the image (L is
+set to a fixed value that is large enough during testing).
+Consequently, we extend the forward process with an extra
+Markov transition from the discrete relation sequence v to
+x0 (as shown in Figure 2 (b)), parameterized by qϕ(x0|v) =
+N(x0; Embϕ(v), σ0I). On the other hand, the reverse process
+is extended with a trainable rounding step, parameterized by
+pθ(v|x0) = QL
+i=1 pθ(vi|x(i)
+0 ), where vi and x(i)
+0
+are the i-th
+item in v and x0, respectively.
+A closer analysis reveals that the embedding-rounding step
+functions like an extra variational auto-encoder (VAE) [54]
+hierarchy 4 on top of x0. Thus, the training objective of our
+model can be derived by incorporating the original VLB in
+Eq. (3) and the following VAE training objective:
+min
+θ,ϕ
+E
+q(¯z|¯x)
+
+log
+qϕ(¯z|¯x)
+pθ(¯x|¯z)p(¯z)
+
+.
+(5)
+Note that Eq. (5) denotes a generic VAE, where we use ¯x, ¯z to
+represent the variables to avoid confusion. By comparing the
+embedding-rounding step w.r.t. VAE, it can be observed that
+x0 serves as the latent variable ¯z and v serves the variable ¯x.
+Besides, since x0 is further conditioned on x1, yielding that
+p(¯z) is corresponding to pθ(x0|x1), which has been already
+included in Eq. (3). Therefore, after adding the embedding-
+4Diffusion models can be viewed as a special type of hierarchical VAEs
+that has multiple hierarchies over latent variables [55], [56], [57], [58]
+rounding step, the VLB of our model is derived as
+LVLB =
+E
+qϕ(x0|v)
+
+Lori
+VLB(x0) + log qϕ(x0|v)
+pθ(v|x0)
+
+=
+E
+qϕ(x0:T |v)
+"
+log q(xT |x0)
+p(xT )
++
+T
+X
+t=2
+log q(xt−1|xt, x0)
+pθ(xt−1|xt)
++ log
+qϕ(x0|v)
+pθ(v|x0)pθ(x0|x1)
+
+.
+(6)
+Following Ho et al. [43] and like Eq. (18), LVLB can also
+be simplified as mean-squared errors. In our case, we re-
+parameterize µθ as a denoising network fθ(xt, t) to predict
+x0, which is modeled as a Transformer decoder as shown in
+Figure 2 (c). Then, the training objective is simplified to
+Lsimple =
+E
+qϕ(x0:T |v)
+" T
+X
+t=2
+∥x0 −fθ(xt, t)∥2
++ ∥Embϕ(v) −fθ(x1, 1)∥2 −log pθ(v|x0)
+
+.
+(7)
+During training, x0 is sampled by the embedding step, i.e.,
+x0 ∼qϕ(x0|v). Then, xt (t = 1, . . . , T) is sampled via the
+forward diffusion process following Eq. (1).
+Introducing conditional Information. To explicitly control
+the generated result, conditional information is introduced in
+diffusion models [40], [41], [59], guiding the model to learn
+conditional distribution p(x|y). In our setting, the conditional
+information includes the visual appearance features of subject-
+object pairs and the text features of their categories, as shown
+in Figure 2 (c). This information guides the relation em-
+beddings to become more and more semantically meaningful
+during the denoising process.
+Specifically, we use CLIP [17] encode the features. The
+visual features are extracted by CLIP’s visual encoder where
+IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY, VOL. *, NO. *, OCTOBER 2024
+5
+the image patches are from the detected bounding boxes. They
+include the features of subject, object, and subject-object union
+region. The text features of object categories are extracted by
+CLIP’s text encoder with a prompt “a photo of <object>”.
+Then, we get the conditional information by concatenating all
+the visual and text features, resulting in y =∈RN×dy where
+N is the total number of subject-object pairs in the image.
+To integrate conditional information from different modal-
+ities, we encode y by an encoder τθ and inject it by us-
+ing cross-attention [60], [41]. Formally, in each layer of
+the Transformer decoder, the cross-attention is calculated as
+Attention(Q, K, V ) = Softmax(QKT/
+√
+d)V (we only show
+one attention head for brevity), where
+Q = φt(xt)WQ,
+K = τθ(y)WK,
+V = τθ(y)WV .
+(8)
+Here, φt(xt) ∈RL×d is the intermediate representation
+of xt in the Transformer, τθ(y) ∈RN×d is the projected
+conditional features, and WQ, WK, WV ∈Rd×d are learnable
+weights. Based on this mechanism, fθ(xt, t) can be rewritten
+as fθ(xt, t, τθ(y)). As a result, we can train Diff-VRD by sub-
+stituting fθ(xt, t, τθ(y)) in the objective functions in Eq. (6)
+and (7), where fθ, τθ and Embϕ are jointly optimized.
+C. Matching Visual Relations to Subject-Object Pairs
+After generating the relation sequence, we need to match
+each relation word (or phrase) to a certain subject-object pair,
+to get the final VRD result as a <subject,predicate,object>
+triplet, as shown in Figure 2 (d). This is achieved by finding
+a bipartite matching between the sequence of relations and
+the sequence of subject-object pairs, based on their semantic
+similarities.
+Semantic Similarity. A straightforward way to compute the
+semantic similarity is using CLIP [17]. Specifically, we ini-
+tialize the embedding function Embϕ with CLIP-encoded text
+embeddings. Once Embϕ is learned, we compute the cosine
+similarities between the relation embeddings and the CLIP-
+encoded visual embeddings of subject-object union regions.
+Formally, the similarity matrix S has a shape of L × N with
+each item is calculated as
+S[i, j] = cos(Embϕ(vi), y(j)
+so ),
+(9)
+where cos(a, b) = aTb/(∥a∥∥b∥) is the cosine similarity,
+and y(j)
+so ∈Rd is the visual embedding of j-th subject-object
+pair (which is a part of the conditional features y). Intuitively,
+since the relation embeddings participate in the cross-attention
+with the projected conditional features τθ(y), we can also
+calculate the similarity as cos(Embϕ(vi), τθ(y(j))). Our exper-
+iments (Sec. IV-F) empirically show that they achieve similar
+performance on both T2I retrieval and VRD recall.
+Multi-Round Bipartite Matching. Given the computed
+similarity matrix S, our goal is to assign each relation to a
+subject-object pair based on S. Let
+v = [v1, . . . , vL] and o = [o1, . . . , oN, ∅]
+(10)
+be the sequence of relations and the sequence of subject-
+object pairs, respectively. o is padded with no pair ∅to length
+L. Usually, we have L ≥N, since one subject-object pair
+can have multiple relations. We perform bipartite matching
+for multiple rounds, where each round returns a one-to-one
+assignment. For example, for the first round, we search for a
+permutation of L elements ˆσ by optimizing the cost:
+ˆσ = arg min
+σ
+PL
+j=1C(vσ(j), hj),
+(11)
+where C(vσ(j), hj) = −1{hj̸=∅}S[σ(j), j] and 1{·} is an indi-
+cator function. This optimization problem can be solved effi-
+ciently by the Hungarian algorithm [61], following DETR [7].
+After the matching in each round, we remove the assigned
+relations from v and repeat the matching operation until each
+relation is assigned to a subject-object pair.
+D. Auxiliary Matching Supervision
+In fact, till now the model is trained only under the supervi-
+sion of image-level visual relation labels. In other words, the
+relation sequence is unordered in the generation stage. In the
+matching stage, the relations are assigned based on semantic
+similarities without extra training.
+Thus, to achieve more precise semantic similarities, we add
+an auxiliary matching loss to further utilize the ground-truth
+annotations. To do this, we first assign ground-truth relations to
+detected subject-object pairs based on the bounding box IoU
+following common VRD methods [62], [63], [8]. Then we
+construct a binary matching matrix M ∈{0, 1}L×N based
+on the assigned relation labels, where M is zero-padded if
+the number of ground-truth relations is less than L. Finally,
+we add the following binary cross-entropy (BCE) loss in the
+generation stage:
+Lmatch = Et∼{0,...,T } [BCE(Sigmoid(St/κ), M)] ,
+(12)
+where St ∈RL×N with each item at (i, j) calculated as
+cos(x(i)
+t , τθ(y(j))), and κ is the temperature parameter. Note
+that Lmatch handles various levels of noisy input, which consid-
+ers the semantic ambiguity and enables more robust similarity
+predictions. The overall objective function after adding the
+matching supervision is L = Lsimple + λLmatch, where λ is a
+hyperparameter. We show that it helps the model improve the
+VRD detection recall in ablation studies (cf. Sec. IV-F).
+IV. EXPERIMENTS
+A. Datasets and Implementation Details
+Datasets. We evaluated our model on both human-object
+detection (HOI) and scene graph generation (SGG) tasks. For
+HOI, we used HICO-DET [64] and V-COCO [65]. HICO-
+DET contains 37,633 training and 9,546 test images. It was
+annotated with 117 interaction categories and 80 object cate-
+gories. V-COCO is a subset of MS-COCO [66], which contains
+2,533 training images, 2,867 validation images, and 4,946
+test images. It was annotated with 26 interaction categories
+and the same 80 object categories (as in MS-COCO). For
+SGG, we used the Visual Genome (VG) [28] dataset, which
+contains 108,073 images. Since the number of instances in
+most predicate categories is quite limited, we followed the
+widely-used data splits [67] with ground-truth annotations
+covering 150 object categories and 50 predicate categories.
+IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY, VOL. *, NO. *, OCTOBER 2024
+6
+On the VG dataset, we used 70% images for training and
+30% images for testing.
+Evaluation Metrics. For SGG, we evaluated the model
+on the three sub-tasks following prior works [67], [10], [62],
+i.e., Predicate Classification (PredCls), Scene Graph Classifi-
+cation (SGCls), and Scene Graph Generation (SGGen). The
+results are evaluated by two metrics: 1) Recall@K (R@K):
+It calculates the proportion of top-K confident predicted
+<subject, predicate, object> triplets that are true positives.
+A predicted triplet is true positive if there is the same triplet
+category in the ground truth and the bounding boxes of subject
+and object have sufficient IoUs (e.g., 0.5) with the ground
+truth. 2) mean Recall@K (mR@K): It calculates R@K within
+each predicate category separately and then averages the R@K
+for all predicates.
+For HOI, a common evaluation metric used in existing
+HOI works is mean average precision (mAP) [64], [8], [18].
+However, our generative VRD allows the model to predict
+interactions beyond the pre-defined categories in HOI datasets,
+resulting in many “false positives” w.r.t. ground-truth anno-
+tations (i.e., reasonable but may not be annotated as ground-
+truth). This makes the mAP meaningless in our setting. There-
+fore, we used Recall@K instead. To cover more reasonable
+predictions, we extended ground-truth predicate classes with
+synonyms when evaluating the detection recall.
+B. Implementation Details
+Vocabulary Construction. To support the generative VRD,
+we constructed a large predicate vocabulary V with all possible
+verbs for visual relations. We first excluded abstract verbs that
+cannot be visually depicted, such as “insist” or “recall”, by
+employing a POS tagger [68] to collect verbs from image
+captions. Only verbs that have a frequency greater than 0.5
+are considered. This process ensures that we focus on verbs
+that are visually representable and relevant to the content of the
+image. In addition, we parsed the captions using the Stanford
+Scene Graph Parser [69] and collected all the predicate words.
+This also brings many reasonable prepositions and phrases into
+the predicate vocabulary. Consequently, we have a common
+relation vocabulary V of 4858 words and phrases, which
+covers all the annotated relation categories in VRD datasets.
+Model Details. We model fθ as a Transformer decoder
+where each layer includes a multi-head self-attention, a multi-
+head cross-attention, and a feed-forward network (FFN). Each
+block is connected with layer normalization and residual
+connection. The hidden dimension of attention layers is 512
+(the same as the dimension of CLIP embeddings). The number
+of decoder layers is 6, and the number of attention heads is
+8. The FFN and the condition encoder τθ are two-layer MLPs
+with an intermediate dimension of 2048 and ReLU activation.
+Training Details. The length of the relation sequence is set
+to L = 32, which is usually larger than the total number of
+relation annotations in an image. For the embedding function,
+each Embϕ(vi) is initialized by CLIP-encoded text embedding
+of vi. The total number of diffusion steps T is 2,000 and the
+total training steps is 40,000. We set the loss weight and the
+sigmoid temperature as λ = 1.0 and κ = 0.05, respectively.
+TABLE I
+RECALL OF HOI DETECTION ON HICO-DET [64]. † STANDS FOR
+IMPLEMENTATIONS THAT CONTRADICT OUR DESIGN SPIRIT, AS
+DISCUSSED IN SEC. IV-C. THE VOCABULARY OF TRAINING STANDS FOR
+THE REFERENCE RELATION SET FOR THE EMBEDDING-ROUNDING STEP,
+AND THE GT LABELS USED IN OUR TRAINING ARE STILL WITHIN Cr.
+Methods
+Vocabulary
+HOI Detection (%)
+Training / Testing
+R@5
+R@10
+R@15
+EoID [18]
+Cr / Cr
+47.08
+57.91
+62.51
+CDN [4]
+Cr / Cr
+48.84
+59.03
+63.63
+UPT [8]
+Cr / Cr
+52.30
+64.35
+69.71
+GEN-VLKT [26]
+Cr / Cr
+53.28
+64.35
+69.14
+GEN-VLKT [26]
+Cr / V
+0.71
+1.22
+1.59
+THID [70]
+Cr / V
+1.99
+3.32
+4.36
+CLIP
+VCLIP / V
+1.21
+2.72
+3.08
+CLIP
+VCLIP / Cr
+17.08
+20.25
+22.00
+Ours
+V / V
+17.28
+21.52
+23.49
+Ours†
+V / Cr
+25.23
+31.50
+34.21
+Ours†
+Cr / V
+4.92
+5.06
+5.11
+The model is trained on 4 2080Ti GPUs with a batch size of
+128 and a learning rate of 1e-4.
+During training, we pad the relation sequence to L by
+pseudo labels. They are collected from the predictions of CLIP,
+i.e., based on the semantic similarities between visual em-
+beddings of subject-object union regions and text embeddings
+of relation words. The number of ground-truth subject-object
+pairs is usually less than L (cf. Eq. (10)). So zero-padding is
+used for the visual features of subject-object pairs (i.e., the
+conditional information), and a corresponding attention mask
+is used in the cross-attention layers. In case some images
+have too many objects, the visual features are truncated with
+a maximum number of L.
+Inference Details. Given an image, we first use DETR [7]
+to detect object bounding boxes and their categories. Then,
+our Diff-VRD starts from a Gaussian noise to generate rela-
+tion embeddings conditioned on the visual and text features
+of subject-object pairs. In the denoising process, we used
+DDIM [51] scheduler and set the number of denoising steps
+as 50. The final prediction is formatted as a list of <subject,
+predicate, object> triplets, where each one is scored by the
+probability from the rounding step pθ(v|x0).
+C. Evaluation for Conventional VRD
+Baseline Method. Since existing VRD methods are all
+trained under the constraint of dataset-specific relation labels,
+they are not directly comparable with our Diff-VRD which
+is trained with the common relation vocabulary V. Thus, we
+developed a baseline method based on CLIP [17]. Specifically,
+we use CLIP’s visual encoder to extract visual embeddings of
+subject-object union regions and use its text encoder to extract
+the text embeddings for all relation words. Then, we classify
+the relations of each subject-object pair based on the cosine
+similarities between the visual and text embeddings. We keep
+the top-10 interactions for each subject-object pair.
+Comparison with SOTA Methods. We compared our
+method with state-of-the-art HOI detection methods includ-
+ing EoID [18], CDN [4], UPT [8], GEN-VLKT [26], and
+THID [70]. The results are shown in Table I. We can observe
+that conventional HOI methods achieve higher recall than our
+IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY, VOL. *, NO. *, OCTOBER 2024
+7
+Diff-VRD and the CLIP baseline. However, one notable point
+is that our vocabulary constraints are different, i.e., Cr versus
+V. For comparisons on the same testing vocabulary constraint
+V, we modified some zero-shot HOI models (GEN-VLKT [26]
+and THID [70]) by equipping them with V. The results show
+that our Diff-VRD has a significant improvement over them
+as well as the CLIP baseline, e.g., 17.28% vs. 1.21% (from
+CLIP) and 1.99% (from THID) on R@5.
+For training and testing Diff-VRD using Cr, we provide
+further discussions as follows:
+• Testing with Cr. Intuitively, a more precise vocabulary
+constraint brings a higher recall. For example, when
+replacing V with Cr for our model, R@5 improves
+greatly from 17.28% to 25.23%. However, the goal of our
+Diff-VRD is to identify more meaningful relations in a
+generative manner and resolve the semantic ambiguity. So
+we trained the model with a large vocabulary V, based on
+which the model learned more diverse relations (as well
+as various synonyms). Testing with a narrower constraint
+(Cr) is contrary to our original goal, where the model
+loses a lot of information. For example, it has poor T2I
+retrieval recall (e.g., 30.59% on R@10 in Table II).
+• Training with Cr. Training on a narrow vocabulary con-
+tradicts our diffusion model’s design, which inherently re-
+sults in low performance, e.g., 4.92% on R@5 in Table I.
+Specifically, we use an embedding step x0 ∼qϕ(x0|v) to
+bridge the discrete word embeddings and the continuous
+embeddings used in the diffusion process. Here each
+x0 is sampled from the interaction embedding space,
+and v can be viewed as anchor points provided by the
+vocabulary. Thus, when the vocabulary is small (e.g.,
+|Cr| = 117 << |V| = 4858), the initial anchor points are
+very sparse and it hurts the learning of the embedding
+function qϕ as well as the whole diffusion model.
+D. Evaluation for Generative VRD
+Proxy Tasks and Metrics. To cover the generated relations
+that exceed the annotations and evaluate the VRD results more
+comprehensively, we introduce two proxy tasks for indirect
+evaluation: 1) Text-to-Image (T2I) Retrieval. We tile the
+detected relation triplets as caption and use a visual-language
+model (VLM) to perform zero-shot text-to-image retrieval.
+It assesses the comprehensiveness of the detected triplets by
+evaluating their ability to accurately describe the contents of
+the image. We used Recall@K (K=1,5,10) to evaluate this
+task. 2) SPICE PR Curve. SPICE [24] originally measures
+the F1 score of semantic tuples parsed from caption prediction.
+Unlike caption being a holistic prediction, the VRD predictions
+are a list of triplets ranked by a confidence score. So we
+computed the precision-recall curve (PR Curve) by varying
+the number of top-k triplets returned. As for target captions,
+we used the official caption annotations for V-COCO, and
+used a captioning model OFA [71] to generate captions for
+HICO-DET. For HOI predictions, we introduced synonyms of
+“person”. A predicted triplet is considered a true positive if
+its predicate and object are in ground-truth, and its subject is
+one of the synonyms of “person”.
+TABLE II
+RECALL OF T2I RETRIEVAL ON HICO-DET [64] DATASET. OURS†
+STANDS FOR THE IMPLEMENTATION THAT CONTRADICTS OUR DESIGN
+SPIRIT, AS DISCUSSED IN SEC. IV-C. THE CAPTION OF EACH IMAGE WAS
+BUILT BY TILING THE TOP 10 DETECTED RELATION TRIPLETS.
+Methods
+Vocabulary
+Retrieval
+T2I Retrieval (%)
+Train / Test
+Model
+R@1
+R@5
+R@10
+EoID [18]
+Cr / Cr
+CLIP
+5.21
+19.16
+30.59
+CDN [4]
+Cr / Cr
+CLIP
+6.03
+19.63
+32.12
+UPT [8]
+Cr / Cr
+CLIP
+7.20
+22.03
+33.76
+GEN-VLKT [26]
+Cr / Cr
+CLIP
+6.85
+23.21
+34.34
+Ours†
+V / Cr
+CLIP
+4.92
+19.92
+30.59
+GEN-VLKT [26]
+Cr / V
+CLIP
+8.96
+28.13
+41.32
+THID [70]
+Cr / V
+CLIP
+7.91
+23.79
+35.69
+CMMP [72]
+Cr / V
+X-VLM [38]
+6.66
+20.87
+30.36
+CLIP [17]
+VCLIP / V
+X-VLM [38]
+16.00
+41.32
+57.67
+Ours
+V / V
+CLIP
+11.13
+32.00
+45.07
+Ours
+V / V
+X-VLM [38]
+15.12
+39.03
+53.63
+TABLE III
+RECALL (%) OF T2I RETRIEVAL ON HICO-DET [64] AND V-COCO [65]
+DATASETS. ∗STANDS FOR USING THE SAME OBJECT DETECTION RESULTS.
+Method
+HICO-DET
+V-COCO
+R@1
+R@5
+R@10
+R@1
+R@5
+R@10
+GT-Object
+4.51
+16.82
+27.43
+7.70
+24.34
+34.31
+GT
+7.97
+24.97
+37.86
+8.60
+26.27
+37.71
+UPT-Object
+5.55
+20.57
+32.53
+9.51
+24.68
+36.91
+UPT∗[8]
+7.20
+22.03
+33.76
+7.36
+22.87
+35.33
+Diff-VRD∗
+11.13
+32.00
+45.07
+10.07
+28.42
+44.05
+T2I Retrieval Evaluation. We evaluated text-to-image re-
+trieval on HICO-DET and V-COCO datasets (cf. Table II and
+III). Firstly, we compared Diff-VRD with SOTA HOI models
+as shown in Table II. We can observe that the T2I recall of
+Diff-VRD improves when the vocabulary constraint changes
+from Cr to V, e.g., 4.92%→11.13% on R@1. When compared
+zero-shot HOI models equipped with V (GEN-VLKT [26],
+THID [70] and CMMP [72]), Diff-VRD still shows clear
+improvement, e.g., 11.13% vs. 8.96% and 7.91% on R@1.
+In addition, we also compared our model with the CLIP
+baseline. Since the CLIP’s prediction and the T2I retrieval are
+both conditioned on the similarity between the visual and text
+embeddings, we utilized another VLM as the retrieval model,
+i.e., X-VLM [38]. We notice that the CLIP baseline shows
+slightly higher recall than Diff-VRD. This is because CLIP
+predicts relations solely based on the text-visual similarity
+ranking, regardless of whether they make sense or not. For
+example, as shown in Figure 6 (a), CLIP predicts “barbeque”
+simply because the image depicts an outdoor cooking activity,
+where barbeque is a common example of such activities.
+Therefore, we also conducted the SPICE (cf. Figure 3) and
+diversity (cf. Figure 4) evaluations for a more comprehensive
+assessment in the subsequent analysis, where our Diff-VRD
+shows better overall performance than CLIP.
+We further investigated the proportion of the predicate’s
+contribution to overall performance, by removing it from the
+text query and using only object names for T2I retrieval. The
+results are shown in Table III. Here “GT” means using the
+ground-truth triplet annotations to build the text query, and
+“-Object” means removing all the predicate words. We have
+the following conclusions: 1) Including predicate words in
+the text query is necessary and effective for T2I retrieval,
+IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY, VOL. *, NO. *, OCTOBER 2024
+8
+Fig. 3. SPICE [24] precision-recall curve (PR curve) on HICO-DET [64] and
+V-COCO [65] datasets. We used the official caption annotations for COCO and
+the generated captions from OFA [71] for HICO-DET. The VRD predictions
+are ranked by their confidence score for SPICE precision and recall evaluation.
+e.g., the R@1 of GT improves from 4.51% to 7.97% on
+HICO-DET. 2) When using the same object detection results
+from a SOTA HOI model, i.e., UPT-Object [8], our Diff-
+VRD predicts more meaningful and helpful predicate words
+than UPT, e.g., 11.13% vs. 7.20% on R@1 of HICO-DET. 3)
+Diff-VRD achieved clear improvement over the GT’s retrieval
+results, e.g., 11.13% vs. 7.97 and 10.07% vs. 7.70% on R@1
+of HICO-DET and V-COCO, respectively. This means it does
+predict many reasonable visual relations that are uncovered by
+the GT annotations.
+SPICE Evaluation. We evaluated the precision-recall curve
+of SPICE [24] score on the HICO-DET [64] and V-COCO [65]
+datasets. We compared Diff-VRD with the CLIP baseline and
+UPT [8]. Results as shown in Figure 3. Here we used a
+commonsense-based post-processing to filter out unreasonable
+relation predictions. This technique has been widely adopted
+in many HOI works [18], [4], [73], [74], where they use the
+provided prior from HICO-DET [64] to filter out unreasonable
+human-object combinations. In our setting, the target triplets
+(parsed from captions) for SPICE evaluation are not limited
+to the annotations of datasets. Thus, we used a large language
+model to construct plausible interactions for each subject-
+object combination, by masked-language modeling (MLM).
+Here we use BERT-base [75] and prompt it by “a photo of s
+[MASK] o”, where s and o are the catogories of subject and
+object, respectively. Then, it returns a probability distribution
+pMLM(v) over all possible predicate words in the vocabulary5.
+Consequently, each triplet in the prediction list is re-ranked
+based on a refined score, i.e., pθ(v|x) · pMLM(v).
+From the results in Figure 3, we have the following obser-
+vations: 1) Compared to the CLIP baseline, Diff-VRD exhibits
+clear and large advantages in terms of both precision and
+recall. Given the fact that they share the same vocabulary
+(i.e., V), this justifies the superiority of our Diff-VRD over
+the CLIP-based classification model. 2) Compared to UPT,
+Diff-VRD achieves larger improvement after introducing com-
+5the common relation vocabulary V contains many relations represented as
+phrases (e.g., “sit on”, “in front of”), which are not covered the vocabulary
+of BERT tokenizer (VBERT). We map them to tokens in VBERT according to
+the semantic similarities between their embeddings.
+monsense knowledge. This demonstrates its higher modeling
+capacity, which is attributed to the diffusion-based design. 3)
+Diff-VRD achieves the best recall among the three methods,
+with a slight sacrifice of precision compared to UPT. It also
+has a larger precision-recall trade-off space.
+# Predicted 
+Categories
+Diff-VRD
+UPT
+CLIP
+GEN-VLKT
+Ground-Truth
+28,077
+520
+86,884
+37,594
+7,551
+Prediction
+Ground-Truth
+DIff-VRD (Ours)
+UPT
+CLIP
+GEN-VLKT
+Fig. 4. Relation diversity evaluation on HICO-DET [64] test set. Each relation
+category is a predicate-object combination. The x-axis represents category IDs.
+The y-axis denotes the total number of relation instances of each category. For
+a clear visualization, we show only the top 100 categories where at least one
+of the compared methods hits a ground-truth instance. We also counted the
+total number of categories predicted by each method, shown at the bottom.
+Diversity Evaluation. We further evaluated the diversity
+of the detected relation categories. We used the relations
+(predicate-object combinations) parsed in the SPICE task as
+the ground-truth relations, which cover many more categories
+than the annotations in the HICO-DET [64] dataset. With
+results presented in Figure 4, we have the following observa-
+tions: 1) Compared to existing methods—both the closed-set
+approach UPT [8] and the open-vocabulary methods GNE-
+VLKT [26] and the CLIP [17] baseline, Diff-VRD correctly
+identifies a larger number of ground-truth relations. 2) While
+the open-vocabulary methods also predict a diverse set of
+categories, their precision is significantly lower, e.g., 37,594 by
+GNE-VLKT and 86,884 by CLIP (in terms of predicate-object
+combination categories). They have many incorrect predictions
+that do not hit the ground truth.
+E. Diff-VRD as Enhancement
+Our Diff-VRD can also be applied as an enhancement
+module for off-the-shelf VRD models. In this case, we first
+project the detected relations to embeddings via the learned
+qϕ(x0|v) and corrupt it using T ′ diffusion steps (we used
+T ′ = 250 in our experiments). Then, we run Diff-VRD
+on these relation embeddings to generate new relations. We
+evaluated Diff-VRD on top of a state-of-the-art SGG method
+IETrans [27]. The results of SGG and T2I retrieval are shown
+in Table IV and Table V, respectively. For SGG, since IEtrans
+is a de-bias SGG method implemented based on a foundation
+model Moift [74], we displayed the results of Moift and
+another baseline method VCTree [76] in Table IV. We also
+compared our results to other SOTA models implemented on
+Moifts, e.g., TDE [77], CogTree [78].
+IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY, VOL. *, NO. *, OCTOBER 2024
+9
+TABLE IV
+PERFORMANCE OF SGG ON VG [28] TEST SET. † MEANS THE MODEL IS IMPLEMENTED ON
+MOTIF [74]. OUR DIFF-VRD IS IMPLEMENTED ON IETRANS [27] AS AN ENHANCEMENT MODULE.
+THE PREDICATE CATEGORIES GENERATED BY DIFF-VRD ARE BASED ON THE VOCABULARY V
+AND THEN MAPPED TO VG’S PREDICATE SYNONYMS FOR THE CLOSED-SET SGG EVALUATION.
+Method
+PredCls (%)
+SGCls (%)
+SGGen (%)
+Recall
+Mean Recall
+Recall
+Mean Recall
+Recall
+Mean Recall
+50
+100
+50
+100
+50
+100
+50
+100
+50
+100
+50
+100
+CLIP [17]
+2.1
+2.9
+8.4
+11.3
+1.3
+1.7
+4.4
+6.4
+1.2
+1.5
+4.4
+5.3
+VCTree [76]
+64.5
+66.5
+16.3
+17.7
+39.3
+40.2
+8.9
+9.5
+30.2
+34.6
+6.7
+8.0
+Moift [74]
+64.0
+66.0
+15.2
+16.2
+38.0
+38.9
+8.7
+9.3
+31.0
+35.1
+6.7
+7.7
+†TDE [77]
+46.2
+51.4
+25.5
+29.1
+27.7
+29.9
+13.1
+14.9
+16.9
+20.3
+8.2
+9.8
+†CogTree [78]
+35.6
+36.8
+26.4
+29.0
+21.6
+22.2
+14.9
+16.1
+20.0
+22.1
+10.4
+11.8
+†IEtrans [27]
+48.6
+50.5
+35.8
+39.1
+29.4
+30.2
+21.5
+22.8
+23.5
+27.2
+15.5
+18.0
++Diff-VRD
+47.9
+52.0
+33.0
+38.0
+29.5
+31.5
+20.0
+22.7
+21.0
+25.5
+13.3
+16.8
+TABLE V
+RECALL OF T2I RETRIEVAL ON VG [28] TEST
+SET. THE CAPTION OF EACH IMAGE WAS BUILT
+BY TILING THE TOP 10 DETECTED RELATION
+TRIPLETS (BASED ON THEIR CONFIDENCE
+SCORES). WE USED X-VLM [38] FOR
+RETRIEVAL.
+Method
+T2I Retrieval (%)
+R@1
+R@5
+R@10
+CLIP [17]
+9.20
+21.35
+28.64
+IEtrans [27]
+12.12
+28.49
+37.73
+IEtrans+Diff-VRD
+17.72
+36.71
+46.52
+TABLE VI
+ABLATIONS FOR MATCHING SUPERVISION (M) (cf. EQ. (12)) AND
+DIFFERENT SEMANTIC SIMILARITIES (S) (cf. EQ. (9)) ON HICO-DET [64]
+AND V-COCO [65] TEST SETS.
+M
+S
+HOI Detection (%)
+T2I Retrieval (%)
+R@5
+R@10
+R@15
+R@1
+R@5
+R@10
+×
+yho
+17.28
+21.52
+23.49
+11.13
+32.00
+45.07
+×
+y
+16.14
+20.31
+22.34
+11.37
+31.88
+44.84
+✓
+y
+21.83
+25.44
+27.12
+8.67
+26.49
+39.03
+TABLE VII
+ABLATIONS OF HOI DETECTION WITH DIFFERENT SEQUENCE LENGTHS
+(L) ON HICO-DET [64] TEST SET. IN TRAINING, PSEUDO LABELS WERE
+USED FOR PADDING WHEN THE NUMBER OF GROUND-TRUTH RELATIONS
+IS LESS THAN L, cf. SECTION IV-B.
+L
+HOI Detection (%)
+R@5
+R@10
+R@15
+16
+21.38
+24.61
+25.94
+32
+21.83
+25.44
+27.12
+48
+22.60
+26.62
+28.24
+With the results in Table IV, we can observe that our Diff-
+VRD, implemented on IEtrans, achieves considerable mean
+recall improvements over TED and CogTree. On the other
+hand, the performance compared to IEtrans drops a bit. This
+is because the ground-truth labels (i.e., the evaluation target)
+in VG [28] only have one predicate category for each subject-
+object pair. However, Diff-VRD generates multiple and more
+diverse predicates for each pair, which are not necessarily
+covered by the labels but are still meaningful. To this end,
+a more comprehensive evaluation is the T2I retrieval task, as
+shown in Table V. Here, Diff-VRD shows a clear improvement
+over IEtrans, e.g., 17.72% vs. 12.12% on R@1. The previous
+diversity evaluation (cf. Figure 4) also demonstrated this point.
+F. Ablation Studies
+Semantic Similarity and Matching Supervision. As dis-
+cussed in Sec. III-C (cf. Eq. (9)), the semantic similarity for the
+matching stage can be computed by interaction embeddings
+w.r.t. the visual embeddings of subject-object union regions
+yso, or the projected conditional features τθ(y). For the latter,
+additional matching supervision can be added during training
+as Eq. (12). We compared these three designs on HICO-
+DET [64]. From the results in Table VI, we have the following
+observations. 1) When removing the matching supervision,
+Prediction
+Ground-Truth
+K=1
+K=2
+K=4
+K=8
+Fig. 5.
+Ablation studies by diversity evaluation for the number of relations
+(K) of each subject-object pair, where Diff-VRD serves as an enhancement
+on IEtrans [27]. The experiments were conducted on VG [28] test set. We
+used the additionally annotated predicates from [27] as the ground-truth labels,
+covering more categories than the original VG dataset.
+yso achieves slightly better HOI detection recall than y while
+performing similar as y in terms of text-to-image retrieval.
+2) The matching supervision helps the model achieve better
+detection recall (e.g., 16.14% →21.83% on R@5), but it
+hurts the text-to-image retrieval recall (e.g., 11.37% →8.67%
+on R@1). This is because the matching information from
+ground-truth annotations only covers pre-defined interaction
+categories. It guides the model towards generating more in-
+domain interactions that satisfy the matching labels while
+suppressing the diversity.
+TABLE VIII
+ABLATIONS FOR THE NUMBER OF RELATIONS (K) OF EACH SUBJECT
+-OBJECT PAIR WHEN USING DIFF-VRD AS AN ENHANCEMENT ON
+IETRANS [27]. WE EVALUATED PREDCLS TASK ON VG [28] TEST SET.
+K
+Recall
+Mean Recall
+R@50
+R@100
+mR@50
+mR@100
+1
+47.9
+52.0
+33.0
+38.0
+2
+47.2
+52.9
+31.0
+37.0
+4
+46.2
+53.8
+28.8
+35.5
+8
+44.8
+54.5
+26.2
+33.5
+Sequence Length. We investigated the length of interaction
+sequence (i.e., L) on the HICO-DET [64] dataset, and show
+the results in Table VII. We can see that larger L always
+improves the performance but requires more computational
+IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY, VOL. *, NO. *, OCTOBER 2024
+10
+person-6 booze couch-0
+person-6 restacked couch-0
+person-4 lounge on couch-0
+person-6 lie on couch-0
+person-4 rest couch-0
+person-1 rest couch-0
+person-1 lie on couch-0
+person-6 lie on couch-0
+person-4 lie on couch-0
+hit ground-truth
+person-0 slice on sandwich-1
+person-5 eat from sandwich-1
+person-3 barbeque person-5
+person-0 make sandwich-1
+person-0 hold knife-2
+person-0 wield knife-2
+person-0 prepare sandwich-1
+person-5 inspect person-0
+person-0 cut sandwich-1
+CLIP
+Ours
+UPT
+CLIP
+Ours
+UPT
+CLIP
+Ours
+UPT
+person-0 hold wine_glass-1
+person-3 booze wine_glass-2
+person-3 support wine_glass-2
+person-0 clink wine_glass-1
+person-3 drinking wine_glass-2
+person-3 clink wine_glass-1
+person-0 hold wine_glass-1
+person-3 hold wine_glass-2
+person-3 toast wine_glass-2
+CLIP
+Ours
+UPT
+person-4 service car-0
+person-4 repair car-0
+person-2 service car-0
+person-4 hitchhike car-0
+person-4 drive through car-0
+person-2 parking car-0
+person-4 hose car-0
+person-2 wash car-0
+person-4 direct car-0
+out of ground-truth set, but reasonable 
+(b)
+(a)
+(c)
+(d)
+Fig. 6. Qualitative examples of UPT [8], the CLIP [17] baseline, and our Diff-VRD on HICO-DET [64] dataset. For clarity, we only drew bounding boxes
+related to the displayed triplets.
+cost. To strike a balance between effectiveness and efficiency,
+we set L = 32 for all the experiments.
+Number of Relations for Enhancement. We investigated
+the number of noisy relation embeddings (denoted as K)
+of each subject-object pair when implementing Diff-VRD as
+an enhancement. Note that typical SGG models [27], [77]
+only predict on predicate category for pair. In our setting, we
+evaluated different variants with K = 1, 2, 4, 8 and modeled
+v (i.e., the relation sequence) by all the relations within each
+subject-object pair. We conducted the diversity evaluation and
+the PredCls evaluation, as shown in Figure 5 and Table VIII.
+In the diversity evaluation, we used additionally annotated
+predicates from [27] as the target, covering 1,807 categories,
+significantly more than the original VG [28] dataset. We can
+observe that increasing K hurts the conventional SGG metrics
+(i.e., recall and mean recall). But it can improve the diversity of
+relation predictions. This is also consistent with our motivation
+on generalized VRD and the design of Diff-VRD.
+G. Qualitative Results
+We show some qualitative examples in Figure 7 and Figure 6
+for V-COCO [65] and HICO-DET [64] datasets, respectively.
+We can observe that our Diff-VRD can detect meaningful and
+reasonable interactions beyond the pre-defined category, e.g.,
+“person cooking sandwich” in Figure 7 and “person service
+car” in Figure 6 (d).
+V. CONCLUSIONS AND LIMITATIONS
+In this paper, we introduce a novel diffusion-based visual re-
+lation model, i.e., Diff-VRD. It extends the diffusion-denoising
+process with an embedding step to project the discrete words
+to continuous latent embeddings, and a rounding step to
+round the denoised embeddings to relation words. Diff-VRD
+person pet dog
+person lie on bed
+person play on bed
+person look snowboard
+person on snowboard
+person ride in snowboard
+person cooking sandwich 
+person hold spoon
+person eat from spoon
+hit ground-truth
+out of ground-truth but reasonable 
+Fig. 7. Qualitative examples of Diff-VRD in V-COCO [65] dataset. For clarity,
+we only drew bounding boxes related to the displayed triplets.
+achieved generalized VRD by predicting diverse and mean-
+ingful relation descriptions that are beyond the ground-truth
+categories. Two new proxy tasks and metrics are introduced to
+properly evaluate the generalized VRD predictions, i.e., Text-
+to-Image (T2I) Retrieval and SPICE PR Curve. We validated
+the effectiveness of Diff-VRD on both conventional VRD
+recall and the two proxy tasks.
+IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY, VOL. *, NO. *, OCTOBER 2024
+11
+A. Limitations
+In some cases, our Diff-VRD makes predictions based on
+purely visual information rather than interaction information,
+e.g., “person booze wine glass” in Figure 6 (c). This might
+be due to the infeasible conditional features which solely
+focus on objects’ visual features while ignoring the context.
+Our future work will involve modeling improved conditional
+features and designing enhanced conditional mechanisms for
+diffusion-based VRD models.
+REFERENCES
+[1] Y. Cong, M. Y. Yang, and B. Rosenhahn, “Reltr: Relation transformer
+for scene graph generation,” IEEE Transactions on Pattern Analysis and
+Machine Intelligence, vol. 45, no. 9, pp. 11 169–11 183, 2023.
+[2] R. Li, S. Zhang, and X. He, “Sgtr: End-to-end scene graph generation
+with transformer,” in CVPR, 2022, pp. 19 486–19 496.
+[3] Y. Wang, Q. Liu, and Y. Lei, “Ted-net: Dispersal attention for perceiving
+interaction region in indirectly-contact hoi detection,” IEEE Transactions
+on Circuits and Systems for Video Technology, vol. 34, no. 7, pp. 5603–
+5615, 2024.
+[4] A. Zhang, Y. Liao, S. Liu, M. Lu, Y. Wang, C. Gao, and X. Li, “Mining
+the benefits of two-stage and one-stage hoi detection,” NeurIPS, vol. 34,
+pp. 17 209–17 220, 2021.
+[5] X. Zhong, C. Ding, Z. Li, and S. Huang, “Towards hard-positive query
+mining for detr-based human-object interaction detection,” in ECCV.
+Springer, 2022, pp. 444–460.
+[6] Y. Cheng, Z. Wang, W. Zhan, and H. Duan, “Multi-scale human-object
+interaction detector,” IEEE Transactions on Circuits and Systems for
+Video Technology, vol. 33, no. 4, pp. 1827–1838, 2023.
+[7] N. Carion, F. Massa, G. Synnaeve, N. Usunier, A. Kirillov, and
+S. Zagoruyko, “End-to-end object detection with transformers,” in
+ECCV.
+Springer, 2020, pp. 213–229.
+[8] F. Z. Zhang, D. Campbell, and S. Gould, “Efficient two-stage detection
+of human-object interactions with a novel unary-pairwise transformer,”
+in CVPR, 2022, pp. 20 104–20 112.
+[9] W. Ren, J. Luo, W. Jiang, L. Qu, Z. Han, J. Tian, and H. Liu, “Learning
+self- and cross-triplet context clues for human-object interaction detec-
+tion,” IEEE Transactions on Circuits and Systems for Video Technology
+(Early Access), 2024.
+[10] L. Li, J. Xiao, H. Shi, W. Wang, J. Shao, A.-A. Liu, Y. Yang, and
+L. Chen, “Label semantic knowledge distillation for unbiased scene
+graph generation,” IEEE Transactions on Circuits and Systems for Video
+Technology, vol. 34, no. 1, pp. 195–206, 2023.
+[11] Z. Fu, C. Zheng, J. Feng, Y. Cai, X.-Y. Wei, Y. Wang, and Q. Li, “Drake:
+Deep pair-wise relation alignment for knowledge-enhanced multimodal
+scene graph generation in social media posts,” IEEE Transactions on
+Circuits and Systems for Video Technology, vol. 33, no. 7, pp. 3199–
+3213, 2023.
+[12] Z. Wang, J. Lian, L. Li, and J. Zhao, “A novel framework for scene
+graph generation via prior knowledge,” IEEE Transactions on Circuits
+and Systems for Video Technology, vol. 34, no. 5, pp. 3768–3781, 2024.
+[13] H. Tian, N. Xu, M. Kankanhalli, and A.-A. Liu, “Gaussian distribution-
+aware commonsense knowledge learning for scene graph generation,”
+IEEE Transactions on Circuits and Systems for Video Technology (Early
+Access), 2024.
+[14] A. Zareian, K. D. Rosa, D. H. Hu, and S.-F. Chang, “Open-vocabulary
+object detection using captions,” in CVPR, 2021, pp. 14 393–14 402.
+[15] X. Gu, T.-Y. Lin, W. Kuo, and Y. Cui, “Open-vocabulary object detection
+via vision and language knowledge distillation,” in ICLR, 2022.
+[16] X. Wu, F. Zhu, R. Zhao, and H. Li, “Cora: Adapting clip for open-
+vocabulary detection with region prompting and anchor pre-matching,”
+in CVPR, 2023.
+[17] A. Radford, J. W. Kim, C. Hallacy, A. Ramesh, G. Goh, S. Agarwal,
+G. Sastry, A. Askell, P. Mishkin, J. Clark et al., “Learning transferable
+visual models from natural language supervision,” in ICML, 2021, pp.
+8748–8763.
+[18] M. Wu, J. Gu, Y. Shen, M. Lin, C. Chen, and X. Sun, “End-to-end
+zero-shot hoi detection via vision and language knowledge distillation,”
+in AAAI, vol. 37, no. 3, 2023, pp. 2839–2846.
+[19] T. He, L. Gao, J. Song, and Y.-F. Li, “Towards open-vocabulary scene
+graph generation with prompt-based finetuning,” in ECCV.
+Springer,
+2022, pp. 56–73.
+[20] R. Li, S. Zhang, D. Lin, K. Chen, and X. He, “From pixels to graphs:
+Open-vocabulary scene graph generation with vision-language models,”
+in CVPR, 2024, pp. 28 076–28 086.
+[21] Y. Zhang, Y. Pan, T. Yao, R. Huang, T. Mei, and C.-W. Chen, “Learning
+to generate language-supervised and open-vocabulary scene graph using
+pre-trained visual-semantic space,” in CVPR, 2023, pp. 2915–2924.
+[22] X. Li, J. Thickstun, I. Gulrajani, P. S. Liang, and T. B. Hashimoto,
+“Diffusion-lm improves controllable text generation,” NeurIPS, vol. 35,
+pp. 4328–4343, 2022.
+[23] S. Gong, M. Li, J. Feng, Z. Wu, and L. Kong, “Diffuseq: Sequence to
+sequence text generation with diffusion models,” in ICLR, 2023.
+[24] P. Anderson, B. Fernando, M. Johnson, and S. Gould, “Spice: Semantic
+propositional image caption evaluation,” in ECCV.
+Springer, 2016, pp.
+382–398.
+[25] Y. Du, F. Wei, Z. Zhang, M. Shi, Y. Gao, and G. Li, “Learning to prompt
+for open-vocabulary object detection with vision-language model,” in
+CVPR, 2022, pp. 14 084–14 093.
+[26] Y. Liao, A. Zhang, M. Lu, Y. Wang, X. Li, and S. Liu, “Gen-vlkt:
+Simplify association and enhance interaction understanding for hoi
+detection,” in CVPR, 2022, pp. 20 123–20 132.
+[27] A. Zhang, Y. Yao, Q. Chen, W. Ji, Z. Liu, M. Sun, and T.-S. Chua, “Fine-
+grained scene graph generation with data transfer,” in ECCV.
+Springer,
+2022, pp. 409–424.
+[28] R. Krishna, Y. Zhu, O. Groth, J. Johnson, K. Hata, J. Kravitz, S. Chen,
+Y. Kalantidis, L.-J. Li, D. A. Shamma et al., “Visual genome: Connecting
+language and vision using crowdsourced dense image annotations,”
+International journal of computer vision, vol. 123, pp. 32–73, 2017.
+[29] N. Xu, A.-A. Liu, Y. Wong, W. Nie, Y. Su, and M. Kankanhalli, “Scene
+graph inference via multi-scale context modeling,” IEEE Transactions
+on Circuits and Systems for Video Technology, vol. 31, no. 3, pp. 1031–
+1041, 2021.
+[30] D. Yang, Y. Zou, C. Zhang, M. Cao, and J. Chen, “Rr-net: Relation
+reasoning for end-to-end human-object interaction detection,” IEEE
+Transactions on Circuits and Systems for Video Technology, vol. 32,
+no. 6, pp. 3853–3865, 2021.
+[31] J. Park, J.-W. Park, and J.-S. Lee, “Viplo: Vision transformer based pose-
+conditioned self-loop graph for human-object interaction detection,” in
+CVPR, 2023.
+[32] B. Zhao, Z. Mao, S. Fang, W. Zang, and Y. Zhang, “Semantically
+similarity-wise dual-branch network for scene graph generation,” IEEE
+Transactions on Circuits and Systems for Video Technology, vol. 32,
+no. 7, pp. 4573–4583, 2022.
+[33] J. Pennington, R. Socher, and C. D. Manning, “Glove: Global vectors
+for word representation,” in Proceedings of the 2014 conference on
+empirical methods in natural language processing (EMNLP), 2014, pp.
+1532–1543.
+[34] M. E. Peters, M. Neumann, M. Iyyer, M. Gardner, C. Clark, K. Lee,
+and L. Zettlemoyer, “Deep contextualized word representations,” in
+Proceedings of the 2018 Conference of the North American Chapter of
+the Association for Computational Linguistics. New Orleans, Louisiana:
+Association for Computational Linguistics, Jun. 2018, pp. 2227–2237.
+[35] X. Wang, Y. Ye, and A. Gupta, “Zero-shot recognition via semantic
+embeddings and knowledge graphs,” in CVPR, 2018, pp. 6857–6866.
+[36] Y. Liu, J. Yuan, and C. W. Chen, “Consnet: Learning consistency graph
+for zero-shot human-object interaction detection,” in ACM MM, 2020,
+pp. 4235–4243.
+[37] A. Bansal, S. S. Rambhatla, A. Shrivastava, and R. Chellappa, “Detect-
+ing human-object interactions via functional generalization,” in AAAI,
+vol. 34, no. 07, 2020, pp. 10 460–10 469.
+[38] Y. Zeng, X. Zhang, and H. Li, “Multi-grained vision language pre-
+training: Aligning texts with visual concepts,” in International Confer-
+ence on Machine Learning.
+PMLR, 2022, pp. 25 994–26 009.
+[39] C.-Y. Chuang, J. Robinson, Y.-C. Lin, A. Torralba, and S. Jegelka,
+“Debiased contrastive learning,” NeurIPS, vol. 33, pp. 8765–8775, 2020.
+[40] J. Ho and T. Salimans, “Classifier-free diffusion guidance,” in NeurIPS
+2021 Workshop on Deep Generative Models and Downstream Applica-
+tions, 2021.
+[41] R. Rombach, A. Blattmann, D. Lorenz, P. Esser, and B. Ommer, “High-
+resolution image synthesis with latent diffusion models,” in CVPR, 2022,
+pp. 10 684–10 695.
+[42] H. Lu, G. Yang, N. Fei, Y. Huo, Z. Lu, P. Luo, and M. Ding, “Vdt:
+General-purpose video diffusion transformers via mask modeling,” in
+The Twelfth International Conference on Learning Representations,
+2024.
+[43] J. Ho, A. Jain, and P. Abbeel, “Denoising diffusion probabilistic models,”
+NeurIPS, vol. 33, pp. 6840–6851, 2020.
+IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY, VOL. *, NO. *, OCTOBER 2024
+12
+[44] Z. Kong, W. Ping, J. Huang, K. Zhao, and B. Catanzaro, “Dif-
+fwave: A versatile diffusion model for audio synthesis,” arXiv preprint
+arXiv:2009.09761, 2020.
+[45] S. Kim, H. Kim, and S. Yoon, “Guided-tts 2: A diffusion model for high-
+quality adaptive text-to-speech with untranscribed data,” arXiv preprint
+arXiv:2205.15370, 2022.
+[46] T. Chen, R. ZHANG, and G. Hinton, “Analog bits: Generating discrete
+data using diffusion models with self-conditioning,” in International
+Conference on Learning Representations, 2023.
+[47] J. Luo, Y. Li, Y. Pan, T. Yao, J. Feng, H. Chao, and T. Mei, “Semantic-
+conditional diffusion networks for image captioning,” in CVPR, 2023,
+pp. 23 359–23 368.
+[48] J. Kainulainen, Z. Guo, and J. Laaksonen, “Diffusion-based multimodal
+video captioning,” in Proceedings of the Asian Conference on Computer
+Vision, 2024, pp. 2820–2837.
+[49] Z. Zhu, Y. Wei, J. Wang, Z. Gan, Z. Zhang, L. Wang, G. Hua, L. Wang,
+Z. Liu, and H. Hu, “Exploring discrete diffusion models for image
+captioning,” arXiv preprint arXiv:2211.11694, 2022.
+[50] W. Tian, W. Xu, J. Zhao, and Z. Zhao, “Image captioning with masked
+diffusion model,” in International Conference on Intelligent Computing.
+Springer, 2024, pp. 216–227.
+[51] J. Song, C. Meng, and S. Ermon, “Denoising diffusion implicit models,”
+in International Conference on Learning Representations, 2021.
+[52] W. Peebles and S. Xie, “Scalable diffusion models with transformers,”
+in ICCV, 2023, pp. 4195–4205.
+[53] A. Q. Nichol and P. Dhariwal, “Improved denoising diffusion probabilis-
+tic models,” in International conference on machine learning.
+PMLR,
+2021, pp. 8162–8171.
+[54] D. P. Kingma and M. Welling, “Auto-encoding variational bayes,” arXiv
+preprint arXiv:1312.6114, 2013.
+[55] C. Luo, “Understanding diffusion models: A unified perspective,” arXiv
+preprint arXiv:2208.11970, 2022.
+[56] D. Kingma, T. Salimans, B. Poole, and J. Ho, “Variational diffusion
+models,” Advances in neural information processing systems, vol. 34,
+pp. 21 696–21 707, 2021.
+[57] C. K. Sønderby, T. Raiko, L. Maaløe, S. K. Sønderby, and O. Winther,
+“Ladder variational autoencoders,” Advances in neural information pro-
+cessing systems, vol. 29, 2016.
+[58] D. P. Kingma, T. Salimans, R. Jozefowicz, X. Chen, I. Sutskever, and
+M. Welling, “Improved variational inference with inverse autoregressive
+flow,” Advances in neural information processing systems, vol. 29, 2016.
+[59] K. Preechakul, N. Chatthee, S. Wizadwongsa, and S. Suwajanakorn,
+“Diffusion autoencoders: Toward a meaningful and decodable represen-
+tation,” in CVPR, 2022, pp. 10 619–10 629.
+[60] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez,
+Ł. Kaiser, and I. Polosukhin, “Attention is all you need,” NeurIPS,
+vol. 30, 2017.
+[61] J. Munkres, “Algorithms for the assignment and transportation prob-
+lems,” Journal of the society for industrial and applied mathematics,
+pp. 32–38, 1957.
+[62] L. Li, J. Xiao, H. Shi, H. Zhang, Y. Yang, W. Liu, and L. Chen, “Nicest:
+Noisy label correction and training for robust scene graph generation,”
+IEEE Transactions on Pattern Analysis and Machine Intelligence, 2024.
+[63] F. Z. Zhang, D. Campbell, and S. Gould, “Spatially conditioned graphs
+for detecting human-object interactions,” in ICCV, 2021, pp. 13 319–
+13 327.
+[64] Y.-W. Chao, Y. Liu, X. Liu, H. Zeng, and J. Deng, “Learning to detect
+human-object interactions,” in WACV.
+IEEE, 2018, pp. 381–389.
+[65] S. Gupta and J. Malik, “Visual semantic role labeling,” arXiv preprint
+arXiv:1505.04474, 2015.
+[66] T.-Y. Lin, M. Maire, S. Belongie, J. Hays, P. Perona, D. Ramanan,
+P. Doll´ar, and C. L. Zitnick, “Microsoft coco: Common objects in
+context,” in ECCV.
+Springer, 2014, pp. 740–755.
+[67] D. Xu, Y. Zhu, C. B. Choy, and L. Fei-Fei, “Scene graph generation by
+iterative message passing,” in CVPR, 2017, pp. 5410–5419.
+[68] S. Bird, E. Klein, and E. Loper, Natural Language Processing with
+Python: Analyzing Text with the Natural Language Toolkit.
+O’Reilly
+Media, Inc., 2009.
+[69] S. Schuster, R. Krishna, A. Chang, L. Fei-Fei, and C. D. Manning,
+“Generating semantically precise scene graphs from textual descriptions
+for improved image retrieval,” in EMNLP 4th Workshop on Vision and
+Language, 2015, pp. 70–80.
+[70] S. Wang, Y. Duan, H. Ding, Y.-P. Tan, K.-H. Yap, and J. Yuan, “Learning
+transferable human-object interaction detector with natural language
+supervision,” in CVPR, 2022, pp. 939–948.
+[71] P. Wang, A. Yang, R. Men, J. Lin, S. Bai, Z. Li, J. Ma, C. Zhou, J. Zhou,
+and H. Yang, “Ofa: Unifying architectures, tasks, and modalities through
+a simple sequence-to-sequence learning framework,” in ICML.
+PMLR,
+2022, pp. 23 318–23 340.
+[72] T. Lei, S. Yin, Y. Peng, and Y. Liu, “Exploring conditional multi-
+modal prompts for zero-shot hoi detection,” in European Conference
+on Computer Vision.
+Springer, 2024, pp. 1–19.
+[73] S. Yan, C. Shen, Z. Jin, J. Huang, R. Jiang, Y. Chen, and X.-S.
+Hua, “Pcpl: Predicate-correlation perception learning for unbiased scene
+graph generation,” in ACM MM, 2020, pp. 265–273.
+[74] R. Zellers, M. Yatskar, S. Thomson, and Y. Choi, “Neural motifs: Scene
+graph parsing with global context,” in CVPR, 2018, pp. 5831–5840.
+[75] J. Devlin, M.-W. Chang, K. Lee, and K. Toutanova, “Bert: Pre-training
+of deep bidirectional transformers for language understanding,” arXiv
+preprint arXiv:1810.04805, 2018.
+[76] K. Tang, H. Zhang, B. Wu, W. Luo, and W. Liu, “Learning to compose
+dynamic tree structures for visual contexts,” in CVPR, 2019, pp. 6619–
+6628.
+[77] K. Tang, Y. Niu, J. Huang, J. Shi, and H. Zhang, “Unbiased scene graph
+generation from biased training,” in CVPR, 2020, pp. 3716–3725.
+[78] J. Yu, Y. Chai, Y. Wang, Y. Hu, and Q. Wu, “Cogtree: Cognition tree loss
+for unbiased scene graph generation,” in IJCAI, 2021, pp. 1274–1280.
+[79] Y. Song and S. Ermon, “Improved techniques for training score-based
+generative models,” NeurIPS, vol. 33, pp. 12 438–12 448, 2020.
+[80] P. Dhariwal and A. Nichol, “Diffusion models beat gans on image
+synthesis,” NeurIPS, vol. 34, pp. 8780–8794, 2021.
+IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY, VOL. *, NO. *, OCTOBER 2024
+13
+Kaifeng Gao received the B.Eng. degree from Zhe-
+jiang University, Hangzhou, China, in 2020, where
+he is currently pursuing the Ph.D. degree with the
+College of Computer Science. From 2022 to 2023,
+he was a visiting Ph.D. at Nanyang Technological
+University and Singapore Management University,
+Singapore. His current research interests include
+computer vision, scene analysis and understanding,
+and video generation.
+Siqi Chen received the B.Eng. degree in Software
+Engineering from Zhejiang University, Hangzhou,
+China, in 2021, where he subsequently received
+the master’s degree with the College of Computer
+Science in 2024. His research interests include com-
+puter vision, machine learning, and scene graph
+generation.
+Hanwang
+Zhang
+received
+the
+B.Eng.
+degree
+in computer science from Zhejiang University,
+Hangzhou, China, in 2009, and the PhD degree in
+computer science from the National University of
+Singapore, in 2014. He is currently an associate
+professor with Nanyang Technological University,
+Singapore. He was a research scientist with the
+Department of Computer Science, Columbia Univer-
+sity, USA. His research interests include computer
+vision, multimedia, and social media.
+Jun Xiao received the Ph.D. degree in computer sci-
+ence and technology from the College of Computer
+Science, Zhejiang University, Hangzhou, China, in
+2007. He is currently a Professor with the College
+of Computer Science, Zhejiang University. His cur-
+rent research interests include computer animation,
+multimedia retrieval, and machine learning.
+Yueting Zhuang received his B.Sc., M.Sc. and
+Ph.D. degrees in Computer Science from Zhejiang
+University, China, in 1986, 1989 and 1998 respec-
+tively. From February 1997 to August 1998, he
+was a visiting scholar at the University of Illinois
+at Urbana-Champaign. He served as the Dean of
+College of Computer Science, Zhejiang University
+from 2009 to 2017, the director of Institute of
+Artificial Intelligence from 2006 to 2015. He is now
+a CAAI Fellow (2018) and serves as a standing
+committee member of CAAI. He is a Fellow of
+the China Society of Image and Graphics (2019). Also, he is a member of
+Zhejiang Provincial Government AI Development Committee (AI Top 30).
+Qianru Sun received the Ph.D. degree from Peking
+University, Beijing, China, in 2016. She is currently
+an associate professor with the School of Computing
+and Information System, Singapore Management
+University, Singapore. Her research interests include
+computer vision and machine learning that aim to
+develop efficient algorithms and systems for visual
+understanding.
+IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY, VOL. *, NO. *, OCTOBER 2024
+14
+APPENDIX
+We first derive the simplified surrogate objective Lori
+simple of the original VLB Lori
+VLB. Then, following the same spirit, we
+derive Lsimple from LVLB.
+A. Lori
+VLB →Lori
+simple
+We first derive the simplified surrogate objective Lori
+simple of the original VLB. By decomposing the expectation operation,
+the Lori
+VLB in Eq. (3) can be rewritten as:
+Lori
+VLB(x0) = DKL(q(xT |x0)∥p(xT ))
+|
+{z
+}
+LT
++
+T
+X
+t=2
+E
+q(xt|x0) [DKL(q(xt−1|xt, x0)∥pθ(xt−1|xt))]
+|
+{z
+}
+Lt−1
+−
+E
+q(x1|x0) [log pθ(x0|x1)]
+|
+{z
+}
+L0
+,
+(13)
+where DKL(q∥p) =
+R ∞
+−∞q(x) log q(x)
+p(x)dx is the Kullback–Leibler divergence of two distributions.
+For LT , it has no learnable parameters when the variance schedule {βt} is fixed.
+For Lt−1, it can be calculated analytically when both q(xt−1|xt, x0) and pθ(xt−1|xt) are Gaussian. First, following Ho et
+al. [43], we apply a re-parameterization to xt. Let αt = 1 −βt, ¯αt = Qt
+i=1 αi, and {ϵt}
+iid
+∼N(0, I), we have
+xt = √αtxt−1 +
+√
+1 −αtϵt−1 = √αtαt−1xt−2 +
+p
+1 −αtαt−1ϵt−2
+= . . . = √¯αtx0 +
+√
+1 −¯αtϵ0
+(14)
+Recall that q(xt|xt−1) = N(xt; √1 −βtxt−1, βtI), and by substituting Eq. (14) in q with Bayes’ rule, we have
+q(xt−1|xt, x0) = N(xt−1; ˜µt(xt, x0), ˜σtI),
+where ˜µt(xt, x0) =
+√¯αt−1βt
+1 −¯αt
+x0 +
+√αt(1 −¯αt−1)
+1 −¯αt
+xt, and ˜σt = 1 −¯αt−1
+1 −¯αt
+βt.
+(15)
+Then Lt−1 can be simplified as
+Lt−1 =
+E
+q(xt|x0)
+ 1
+2˜σ2
+t
+∥˜µt(xt, x0) −µθ(xt, t)∥2
+
++ C,
+t = 2, . . . , T,
+(16)
+where C is a constant and µθ(xt, t) is modeled by a neural network to predict ˜µt.
+For L0, it can also be re-written as a mean-squared error since pθ is Gaussian. Specifically,
+−L0 =
+E
+q(x1|x0)
+ 1
+2σ2
+1
+∥x0 −µθ(x1, 1)∥2
+
++ C′,
+(17)
+where C′ is a constant and σ1 is defined independently. Actually, when t = 1, the mean of the posterior q(xt−1|xt, x0) directly
+becomes x06. By combining Lt−1 and L0 and ignoring the weighting factors (i.e.,
+1
+2˜σ2
+t and
+1
+2σ2
+1 ), we have the simplified objective
+function:
+Lori
+simple(x0) =
+T
+X
+t=1
+E
+q(xt|x0)
+
+∥˜µt(xt, x0) −µθ(xt, t)∥2
+.
+(18)
+Although Eq. (18) is not a valid lower bound, previous works [43], [79], [80], [22] found it beneficial to sample quality
+(and also simpler to implement).
+6 ˜µt and ˜σt are only defined for t ≥2 as in Eq. (15). But we can extend them to t = 1, where ˜µ1 is acutally x0 and ˜σ1 is treated as an independently
+defined value σ1.
+IEEE TRANSACTIONS ON CIRCUITS AND SYSTEMS FOR VIDEO TECHNOLOGY, VOL. *, NO. *, OCTOBER 2024
+15
+B. LVLB →Lsimple
+In a similar spirit, we can derive Lsimple from LVLB. First, the LVLB can be rewritten as
+LVLB =
+E
+qϕ(x0|v)
+
+Lori
+VLB(x0) + log qϕ(x0|v)
+pθ(v|x0)
+
+=
+E
+qϕ(x0|v)
+"
+DKL(q(xT |x0)∥p(xT )) +
+T
+X
+t=2
+E
+q(xt|x0) [DKL(q(xt−1|xt, x0)∥pθ(xt−1|xt))]
+#
++
+E
+qϕ(x0|v)
+
+log qϕ(x0|v)
+pθ(v|x0) −
+E
+q(x1|x0) [log pθ(x0|x1)]
+
+=
+E
+qϕ(x0|v) [DKL(q(xT |x0)∥p(xT ))]
+|
+{z
+}
+LT
++
+T
+X
+t=2
+E
+qϕ(xt,x0|v) [DKL(q(xt−1|xt, x0)∥pθ(xt−1|xt))]
+|
+{z
+}
+Lt−1
++
+E
+qϕ(x1,x0|v)
+
+log qϕ(x0|v)
+pθ(x0|x1)
+
+|
+{z
+}
+L0
+−
+E
+qϕ(x0|v) [log pθ(v|x0)]
+|
+{z
+}
+Lround
+(19)
+Similarily, LT has no learnable parameters and can be ignored. Lt−1 can be simplified to a mean squared error as ∥˜µt(xt, x0)−
+µθ(xt, t)∥2 with a constant scaling factor. L0 can also be rewritten as a mean squared error (ignoring the scaling factor) as
+E
+qϕ(x0|v)
+
+E
+x0∼qϕ
+[x0|v] −
+E
+x0∼pθ
+[x0|x1]
+
+=
+E
+qϕ(x0|v)[∥Embϕ(v) −µθ(x1, 1)∥2].
+(20)
+For the last term Lround, it is a negative log-likelihood with pθ(v|x0) = QL
+i=1 pθ(vi|x(i)
+0 ), where x(i)
+0
+∈Rd is the i-th item of
+x0, and pθ(vi|x(i)
+0 ) is modeled as softmax distribution (as introduced in Sec. III-B). Therefore, the overall simplified objective
+is
+Lsimple-µ =
+T
+X
+t=2
+E
+qϕ(xt,x0|v)
+
+∥˜µt(xt, x0) −µθ(xt, t)∥2
++
+E
+qϕ(x0|v)
+
+∥Embϕ(v) −µθ(x1, 1)∥2 −log pθ(v|x0)
+
+.
+(21)
+In our implementation, we re-parameterize Lsimple-µ to predict x0 by fθ(xt, t) in every term (i.e., µθ(xt, t) =
+√¯αt−1βt
+1−¯αt
+fθ(xt, t)+
+√αt(1−¯αt−1)
+1−¯αt
+xt), and then ∥˜µt(xt, x0) −µθ(xt, t)∥2 ∝∥x0 −fθ(xt, t)∥2 with a constant scaling factor. Consequently, the
+final form of Lsimple is 7
+Lsimple =
+T
+X
+t=2
+E
+qϕ(xt,x0|v)
+
+∥x0 −fθ(xt, t)∥2
++
+E
+qϕ(x0|v)
+
+∥Embϕ(v) −fθ(x1, 1)∥2 −log pθ(v|x0)
+
+.
+(22)
+7Compared to the form in Eq. (7), here we use a separate (and also more specific) notation of expectations.

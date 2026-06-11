@@ -1,6 +1,6 @@
 # CI/CD benchmark compose profile.
 # Mirrors the upstream openclaw-docker-cn-im structure but with ALL channels,
-# plugins, and sandbox mode disabled, and bind restricted to loopback.
+# plugins disabled, and bind restricted to loopback.
 # Only the LLM provider is wired in.
 services:
   openclaw-bench:
@@ -20,26 +20,22 @@ services:
       LANG: en_US.UTF-8
       LANGUAGE: en_US:en
       LC_ALL: en_US.UTF-8
-      # Sync flags. Model config sync is allowed to create a valid provider
-      # skeleton from MODEL_ID/BASE_URL at startup. API_KEY stays empty below,
-      # so init.sh does not write plaintext credentials to disk; env_setup.sh
-      # patches a SecretRef into openclaw.json before benchmark calls run.
-      SYNC_OPENCLAW_CONFIG: "true"
+      # Sync flags. Keep model config sync disabled so init.sh never writes
+      # plaintext credentials from API_KEY to disk. env_setup.sh patches a
+      # SecretRef into openclaw.json instead; benchmark calls pass
+      # MINIMAX_API_KEY only to each `docker exec ... openclaw agent --local`
+      # process.
+      SYNC_OPENCLAW_CONFIG: "false"
       SYNC_EXTENSIONS_ON_START: "false"
       SYNC_EXTENSIONS_MODE: "none"
-      SYNC_MODEL_CONFIG: ${SYNC_MODEL_CONFIG:-true}
-      # Model
-      MODEL_ID: ${MODEL_ID}
-      PRIMARY_MODEL: ${PRIMARY_MODEL}
-      BASE_URL: ${BASE_URL}
-      # Keep API_KEY empty so init.sh does not write plaintext credentials to disk.
-      # The runtime SecretRef uses DEEPSEEK_API_KEY from the container env instead.
-      API_KEY: ""
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY}
-      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL}
-      API_PROTOCOL: ${API_PROTOCOL}
-      CONTEXT_WINDOW: ${CONTEXT_WINDOW}
-      MAX_TOKENS: ${MAX_TOKENS}
+      SYNC_MODEL_CONFIG: "false"
+      # Model config comes from openclaw.json (checked in + SecretRef patch by
+      # bench_reapply_setup), NOT from env vars. Removing MODEL_ID / PRIMARY_MODEL /
+      # BASE_URL / API_PROTOCOL / CONTEXT_WINDOW / MAX_TOKENS from the container
+      # env prevents init.sh from writing models.providers.default (which lacks
+      # models and causes the upgraded gateway to reject the config).
+      MINIMAX_API_KEY: ${MINIMAX_API_KEY}
+      MINIMAX_BASE_URL: ${MINIMAX_BASE_URL}
       # Channels: explicitly disabled so the gateway never tries to dial out.
       DM_POLICY: disabled
       GROUP_POLICY: disabled
@@ -57,8 +53,7 @@ services:
       # never use this token (the CLI runs --local embedded), so a stable
       # dummy value is enough.
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:-bench-only-not-a-real-token}
-      # Sandbox off in CI
-      OPENCLAW_SANDBOX_MODE: off
+      # Sandbox enabled for agent workspace isolation
       OPENCLAW_PLUGINS_ENABLED: "false"
     volumes:
       - ${OPENCLAW_DATA_DIR}:/home/node/.openclaw

@@ -1,0 +1,1797 @@
+Improving Scene Graph Generation
+with Superpixel-Based Interaction Learning
+Jingyi Wang
+Tsinghua University
+wang-jy20@mails.tsinghua.edu.cn
+Can Zhang
+Tencent Media Lab
+cannyzhang@tencent.com
+Jinfa Huang
+University of Rochester
+jhuang90@ur.rochester.edu
+Botao Ren
+Tsinghua University
+rbt22@mails.tsinghua.edu.cn
+Zhidong Deng∗
+Tsinghua University
+michael@mail.tsinghua.edu.cn
+ABSTRACT
+Recent advances in Scene Graph Generation (SGG) typically model
+the relationships among entities utilizing box-level features from
+pre-defined detectors. We argue that an overlooked problem in
+SGG is the coarse-grained interactions between boxes, which in-
+adequately capture contextual semantics for relationship model-
+ing, practically limiting the development of the field. In this pa-
+per, we take the initiative to explore and propose a generic para-
+digm termed Superpixel-based Interaction Learning (SIL) to remedy
+coarse-grained interactions at the box level. It allows us to model
+fine-grained interactions at the superpixel level in SGG. Specifically,
+(i) we treat a scene as a set of points and cluster them into superpix-
+els representing sub-regions of the scene. (ii) We explore intra-entity
+and cross-entity interactions among the superpixels to enrich fine-
+grained interactions between entities at an earlier stage. Extensive
+experiments on two challenging benchmarks (Visual Genome and
+Open Image V6) prove that our SIL enables fine-grained interaction
+at the superpixel level above previous box-level methods, and sig-
+nificantly outperforms previous state-of-the-art methods across all
+metrics. More encouragingly, the proposed method can be applied
+to boost the performance of existing box-level approaches in a plug-
+and-play fashion. In particular, SIL brings an average improvement
+of 2.0% mR (even up to 3.4%) of baselines for the PredCls task on
+Visual Genome, which facilitates its integration into any existing
+box-level method.
+CCS CONCEPTS
+• Computing methodologies →Scene understanding.
+KEYWORDS
+scene graph, superpixel, clustering, visual understanding
+∗Corresponding author. Zhidong Deng is with Beijing National Research Center for
+Information Science and Technology (BNRist), Institute for Artificial Intelligence at
+Tsinghua University (THUAI), Department of Computer Science, State Key Laboratory
+of Intelligent Technology and Systems, Tsinghua University, Beijing 100084, China.
+Permission to make digital or hard copies of all or part of this work for personal or
+classroom use is granted without fee provided that copies are not made or distributed
+for profit or commercial advantage and that copies bear this notice and the full citation
+on the first page. Copyrights for components of this work owned by others than the
+author(s) must be honored. Abstracting with credit is permitted. To copy otherwise, or
+republish, to post on servers or to redistribute to lists, requires prior specific permission
+and/or a fee. Request permissions from permissions@acm.org.
+MM ’23, October 29-November 3, 2023, Ottawa, ON, Canada
+© 2023 Copyright held by the owner/author(s). Publication rights licensed to ACM.
+ACM ISBN 979-8-4007-0108-5/23/10...$15.00
+https://doi.org/10.1145/3581783.3611889
+ACM Reference Format:
+Jingyi Wang, Can Zhang, Jinfa Huang, Botao Ren, and Zhidong Deng.
+2023. Improving Scene Graph Generation with Superpixel-Based Interaction
+Learning. In Proceedings of the 31st ACM International Conference on Multi-
+media (MM ’23), October 29-November 3, 2023, Ottawa, ON, Canada. ACM,
+New York, NY, USA, 12 pages. https://doi.org/10.1145/3581783.3611889
+1
+INTRODUCTION
+(a) Previous Box-level Methods
+Coarse-grained Interaction
+1
+ⅰ                  ⅱ
+(b) Superpixel-level Method (ours)
+Fine-grained Interaction
+Pred:
+Pred:
+ⅰ
+2
+3 4
+5
+6
+1
+ⅰ
+…
+6
+ⅱ
+person
+racket
+holding
+person
+racket
+around
+1       2      3        4        5         6
+Figure 1: The illustration of the difference between (a) previ-
+ous box-level methods and (b) our superpixel-level method.
+Previous methods only consider coarse-grained box-level in-
+teractions. In our method, we treat the image as a set of
+superpixels and extract visual features using the cluster-
+ing algorithm. We explore the intra-entity interaction and
+cross-entity interaction at the superpixel level, obtaining
+fine-grained interaction information.
+Scene graphs depict multiple entities and their interaction rela-
+tionships in scenes with a graph data format. In a scene graph, enti-
+ties in the original scene are represented as nodes, and relationships
+among these nodes are represented as edges among nodes. These
+entities and relationships form <subject-predicate-object> triplets
+in the scene graph. The understanding and reasoning capabilities
+of scenes conveyed in the scene graph have driven researchers
+to further explore the generation and application of scene graphs.
+Scene graphs are useful for performing various tasks such as vi-
+sual question answering[12], image captioning[10, 59], and other
+application scenarios[4, 32, 43], all of which are helpful for visual
+understanding[15, 22, 63, 64].
+arXiv:2308.02339v1  [cs.CV]  4 Aug 2023
+
+---PAGE_BREAK---
+MM ’23, October 29-November 3, 2023, Ottawa, ON, Canada
+Jingyi Wang, Can Zhang, Jinfa Huang, Botao Ren, and Zhidong Deng
+The typical pipeline of SGG includes three steps. The first step
+is using an object detector to identify entities in the image, getting
+the bounding boxes and classification labels of entities. Then, the
+box-level features from the detector output are adopted to model
+the interactions between entities. Finally, we classify the relation-
+ships between entities and construct the scene graph with detected
+entity nodes and classified relations. Existing SGG methods have
+focused on modeling interactions and utilizing contextual infor-
+mation, which is crucial for generating scene graphs[17, 18, 28].
+However, the existing methods rely on box-level features and in-
+teractions as shown in Fig. 1(a). Such coarse-grained interactions
+result in two drawbacks. Firstly, at the entity level, existing box-
+level methods can not model the interactions between different
+sub-regions inside entities. The box-level features they used are
+just rough representations of the rectangular box, without distin-
+guishing different sub-regions within the bounding box explicitly.
+Such features can not capture the important sub-region within
+the entities. Secondly, at the relation level, researchers have over-
+looked more fine-grained interactions among entities. With the
+rough box-level features, the later relation prediction modules in-
+adequately capture contextual semantics for relationship modeling.
+Besides, such coarse-grained interactions among boxes would be
+confused by redundant background information, failing to focus
+on the specific location where the relation between entities occurs.
+To address the aforementioned limitations in SGG brought by
+box-level features, we reformulate the existing pipeline into a new
+superpixel-level SGG process as shown in Fig. 1(b). This process
+aims to treat an entity as a set of sub-regions. In our method, an
+image is viewed as a set of points first and the points are clustered
+into superpixels as the expression of sub-regions. With regard to the
+rough box-level features, superpixels refine entity representation, al-
+lowing for a more fine-grained analysis of the interactions between
+entities. In this way, we obtain more specific entity features for the
+SGG task. At the relation level, we inject intra-entity and cross-
+entity interaction into superpixels. In Fig. 1(b), pink curves indicate
+cross-entity interactions among superpixels, and blue curves indi-
+cate intra-entity interactions. Light-colored curves indicate weak
+interactions. As we know, we are the first to view entities as sets
+of superpixels and modify the previous box-based methods with
+coarse-grained interactions into superpixel-based methods with
+fine-grained interactions in the field of scene graph generation.
+Accordingly, we propose a Superpixel-based Interaction Learn-
+ing (SIL) block, converting box-level features into superpixel-level
+features and injecting intra-entity and cross-entity interactions into
+superpixels for the SGG task. First, SIL views an entity as a set of
+sub-regions and uses superpixels to express them. We aggregate
+the pixels in an image or the elements in a feature map using clus-
+tering algorithm. The cluster results form multiple superpixels as
+the expression of the image. Equipped with SIL, existing methods
+are strengthened with more fine-grained visual features. Second,
+with a box as multiple irregular sub-regions, we model intra-entity
+interactions, aggregating the superpixels inside an entity. We assign
+different weights to different superpixels to emphasize their varying
+importance for the corresponding entity and calibrate superpixel
+features. Third, as a remedy for coarse-grained interactions at the
+box level in previous methods, we inject cross-entity interactions
+into superpixels. This step allows the model to benefit from the
+fine-grained interactions between superpixels and help the judg-
+ment of entity-level relations by focusing on specific sub-regions
+related to predicates. Besides, this step enables us to start modeling
+interactions between entities at an earlier stage in the SGG pipeline.
+Finally, the enhanced visual features are fed into an arbitrary re-
+lation prediction module of previous SGG methods to construct
+scene graphs.
+We evaluate our SIL on the Visual Genome (VG) [19] and Open
+Images V6 (OI V6) [21] datasets using typical and latest SGG base-
+lines. Extensive experiments demonstrate the effectiveness and
+generalization ability of our SIL method. On VG dataset, the SIL
+block brings an average improvement of 2.0% to the mean Recall
+of baselines on the PredCls task. With SIL, we outperform previ-
+ous state-of-the-art methods on VG and OI V6 datasets. Our main
+contributions are summarized as follows: (1) To the best of our
+knowledge, we are the first to reformulate the existing box-based
+SGG pipeline into a new superpixel-level SGG process. We regard a
+scene as a set of superpixels obtained using the clustering algorithm
+and adapt the features of these superpixels to the final scene graph
+generation task. (2) We model intra-entity and cross-entity inter-
+actions between the superpixels to perform fine-grained relation
+modeling among entities, helping the judgment of relationships
+between entities of scene graphs. (3) We propose a plug-and-play
+Superpixel-based Interaction Learning block, which improves the
+performance of the mainstream SGG methods stably on the public
+VG and OI V6 datasets.
+2
+RELATED WORK
+2.1
+Scene Graph Generation
+A scene graph is a graphical representation that captures the entities
+and their relationships in a scene, with nodes representing the
+entities and edges denoting the relationships between them. Scene
+graph generation (SGG) has extracted significant research interests
+due to its potential to facilitate visual comprehension of images and
+videos[3, 11, 47, 50, 58], and help scene understanding[27, 52]. There
+are also methods for video and using of distillation[7, 23, 24, 36, 38].
+The typical SGG pipeline includes three stages. First, detect entities
+in a scene and extract visual features of entities. Second, associate
+entities and enhance the contextual information between them.
+Third, classify the relations between entities and construct a scene
+graph with detected entities and classified relations.
+Numerous methods have been proposed to improve SGG. Most
+of them focus on the last two stages mentioned above, namely
+contextualization and relation classification[6, 25, 46, 55, 62]. As
+for the contextualization stage, [61] adopts the object context to
+compute and propagated contextual information among objects,
+and constructs edge context that gives global context for edge
+predictions. Researchers fuse the feature representations of entities
+and relations for SGG[29]. Cross-modal methods are also been
+applied and borrowed[13, 14, 49]. As for the relation classification
+and graph construction stage, researchers try to tackle the long-
+tail and biasing problem[6, 16, 26, 67]. [54] adjust loss weights
+by perceiving and utilizing the correlation among all predicate
+classes. [9] exploits relation labels based on their informativeness.
+The authors of [8] use a group of classifiers that are expert in
+distinguishing different subsets of classes.
+
+---PAGE_BREAK---
+Improving Scene Graph Generation with Superpixel-Based Interaction Learning
+MM ’23, October 29-November 3, 2023, Ottawa, ON, Canada
+(a) Superpixel Clustering
+Faster 
+R-CNN
+ሺM ൈDሻ
+ሺC ൈDሻ
+chair: [0.041, 0.032, 0.443, 0.949], 
+table: [0.284, 0.308, 0.998, 0.945], 
+…
+plant: [0.746, 0.308, 0.842, 0.403],
+book: [0.406, 0.317, 0.710, 0.409]
+plant: 
+book: 
+table: 
+chair: 
+…
+ሺ1 ൈDሻ
+ሺ1 ൈDሻ
+ሺ1 ൈDሻ
+ሺ1 ൈDሻ
+(b) Intra-Entity Interaction
+…
+(c) Cross-Entity Interaction
+…
+Relation 
+Prediction
+Attention
+Mechanism
+: clustering
+book
+plant
+table
+chair
+ሺC1 ൈDሻ
+ሺC2 ൈDሻ
+ሺCN_1 ൈDሻ
+ሺCN ൈDሻ
+: cluster center
+: box center
+𝐹ଵ
+௔
+𝐹ଶ
+௔
+𝐹ேିଵ
+௔
+𝐹ே
+௔
+𝐹
+𝐹ௌ஼
+𝐹ଵ
+௔
+𝐹ଵ
+ூே
+𝐹ଶ
+ூே
+𝐹ேିଵ
+ூே
+𝐹ே
+ூே
+ሺM ൈDሻ
+𝐹ௌூ௅
+beside
+on
+on
+in front of
+Figure 2: The structure of our Superpixel-based Interaction Learning (SIL) block and its application in Scene Graph Generation
+(SGG). In SGG, we first detect the entities in the input image, obtaining their bounding boxes and the feature map of the image.
+With the proposed SIL block, we perform clustering on pixels of the image to obtain superpixel-level features as depicted in (a).
+With the detected boxes and superpixel-level features, we perform Intra-Entity Interaction in (b) and Cross-Entity Interaction
+in (c). Finally, we perform relation prediction as usual to construct scene graphs.
+As we can see, the majority of the current methods concentrate
+on the contextualization and relation classification stage. Existing
+methods simply use the box-level features without finer interaction
+modeling whether they are bottom-up two-stage or end-to-end
+structures. Such coarse-grained interactions between boxes inad-
+equately capture contextual semantics and limit the development
+of the SGG field. They ignore the role of interactions between
+sub-regions within boxes in scene graph generation. Addressing
+this deficiency, we reformulate the existing pipeline into a new
+superpixel-level SGG process and explore fine-grained interactions
+between entities.
+2.2
+Superpixel Algorithm
+SuperPixel groups pixels with similar features in an image to form
+a more representative pixel using the clustering algorithm[41]. The
+grouped superpixel can be used as the basic unit for other image
+processing algorithms. To reduce the computational costs of the
+original SuperPixel method, the Simple Linear Iterative Clustering
+(SLIC) algorithm performs local clustering of image pixels, result-
+ing in compact and approximately uniformly-sized superpixels[1].
+There are also some superpixel segmentation methods based on
+other structures such as linear spectral clustering[30], convolutional
+networks[51, 56], and spanning forest[2]. Recently, researchers pro-
+pose using the clustering algorithm to group and extract deep
+features of images hierarchically[37]. It relies on the clustering
+algorithm for spatial interaction and provides a new perspective
+to interpret images. CLUSTSEG[31] proposes a transformer-based
+framework that tackles different image segmentation tasks[39] in-
+cluding superpixel through a clustering scheme.
+3
+METHOD
+In this section, we first introduce the basic workflow of the SGG task
+and the drawbacks of previous SGG methods. Then, we introduce
+the plug-and-play Superpixel-based Interaction Learning (SIL) block
+for scene graph generation. The overview of our SIL is shown
+in Fig. 2 and Algorithm 1. The SIL block takes an image or its
+feature map as the input. The clustering step in Fig. 2(a) performs
+clustering on the pixels or elements of the input to split it into
+multiple sub-regions based on their visual features. The orange
+splits in the image of Fig. 2(a) show the clustering result. Then,
+we model the interactions inside each entity as shown in Fig. 2(b).
+Superpixels inside a box are aggregated with different weights to
+emphasize their varying importance for the corresponding entity.
+In Fig. 2(b), green circles indicate the centers of each bounding box,
+and red circles indicate the centers of each cluster. For each entity,
+we calculate the distance between the center of the box and each
+cluster center within the entity. Clusters at far distances have low
+weights. The aggregated feature are then dispatched to superpixels
+to enhance interactions within each entity. Tensors with different
+colors in Fig. 2(b) indicate features of different entities. After that,
+we inject interactions into all superpixels to achieve fine-grained
+cross-entity interactions to serve the SGG task as shown in Fig.
+2(c). Interactions among superpixels of different entities imply the
+interaction between entities. These three modules in the SIL block
+will be clarified in the latter subsections.
+3.1
+Problem Definition
+Scene graph generation takes an image as the input and generates
+a graph 𝐺= (𝑂, 𝑅), where 𝑂is the set of entities as nodes of the
+scene graph and 𝑅is the set of relations as edges among nodes
+in 𝑂. The object detector provides the feature map 𝐹of the input
+image. Suppose 𝑂= {𝑜1,𝑜2, · · · ,𝑜𝑁} with 𝑁as the number of
+entities in the input image. We use 𝑏= {𝑏1,𝑏2, · · · ,𝑏𝑁} to denote
+the bounding boxes of entites in 𝑂. Entities in 𝑂and relationships
+in 𝑅form multiple <subject-predicate-object> triplets and construct
+a scene graph of the input image. Existing methods align the box
+coordinates in 𝑏with the feature map 𝐹to obtain the box-level
+feature 𝑓𝑘for each 𝑜𝑘. 𝑓𝑘of entities are usually adopted directly
+as the input of the relation prediction module. However, 𝑓𝑘lacks
+differentiation of sub-regions within 𝑏𝑘and disables more fine-
+grained interaction between sub-regions within boxes.
+
+---PAGE_BREAK---
+MM ’23, October 29-November 3, 2023, Ottawa, ON, Canada
+Jingyi Wang, Can Zhang, Jinfa Huang, Botao Ren, and Zhidong Deng
+Algorithm 1 The proposed superpixel-based interaction learning block.
+Require: Image features 𝐹∈R𝑀×𝐷,
+Entity boxes 𝑏= 𝑏1,𝑏2, · · · ,𝑏𝑁,
+Entity reference features 𝑔= 𝑔1,𝑔2, · · · ,𝑔𝑁,
+Points 𝑄∈R𝑀×2, Centers 𝑇∈R𝐶×2
+# Superpixel Clustering
+1: for each center 𝑇𝑗in 𝑇do
+2:
+𝐹𝑐
+𝑗←Í
+𝑄𝑖∈KNN(𝑇𝑗) 𝐹𝑖/𝑛𝑘
+# Eq. (1)
+3: end for
+4: for each point 𝑄𝑖in 𝑄do
+5:
+𝑃𝑄𝑇
+𝑖
+←argmax𝑗𝑠𝑖𝑚(𝐹𝑖, 𝐹𝑐
+𝑗)
+# Eq. (2)
+6: end for
+7: for each center 𝑇𝑗in 𝑇do
+8:
+𝐹𝑆𝐶
+𝑗
+= 𝐻′(𝐹𝑐
+𝑗, 𝑃𝑄𝑇, 𝐹)
+# Eq. (3)
+9: end for
+# Intra-Entity Interaction
+10: for each entity box 𝑏𝑘in 𝑏do
+11:
+𝑃𝐵𝑇
+𝑘
+←{𝑇𝑗: (𝑥𝑇
+𝑗, 𝑦𝑇
+𝑗) falls within 𝑏𝑘}
+12:
+𝐹𝑎
+𝑘= 𝐻𝑎(𝑔𝑘, 𝑃𝐵𝑇
+𝑘
+,𝑏𝑘,𝑇, 𝐹𝑆𝐶)
+# Eq. (4)
+13:
+𝐹𝐼𝑁
+𝑘
+←∅
+14:
+for each center 𝑇𝑗in 𝑃𝐵𝑇
+𝑘
+do
+15:
+𝐹𝐼𝑁
+𝑘
+←𝐹𝐼𝑁
+𝑘
+∪{𝐹𝑆𝐶
+𝑗
++ 𝐹𝑎
+𝑘× 𝑤(𝑗,𝑘)}
+# Eq. (6)
+16:
+end for
+17: end for
+# Cross-Entity Interaction
+18: 𝐹𝐶𝑅←Multihead(𝐹𝐼𝑁, 𝐹𝐼𝑁, 𝐹𝐼𝑁)
+# Eq. (7)
+19: for each point 𝑄𝑖in 𝑄do
+20:
+𝐹𝑆𝐼𝐿
+𝑖
+= 𝐻′′(𝐹𝑖, 𝑃𝑄𝑇
+𝑖
+, 𝐹𝑐, 𝐹𝐶𝑅)
+# Eq. (9)
+21: end for
+22: return 𝐹𝑆𝐼𝐿
+Therefore, we propose a Superpixel-based Interaction Learning
+framework for SGG. In the following subsections, we will introduce
+the overall structure of our SIL and clarify its key modules.
+3.2
+Superpixel Clustering
+Unlike previous methods based on box-level features, SIL consid-
+ers an image as a set of points and clusters these points to form
+superpixels. Correspondingly, in Fig. 2(a), we convert the format
+of the input as follows. First, with 𝑀= 𝑤× ℎ, we view pixels
+in the input feature map as 𝐹∈R𝑀×𝐷with 𝑀points. We use
+𝑄= {(𝑥𝑄
+1 ,𝑦𝑄
+1 ), (𝑥𝑄
+2 ,𝑦𝑄
+2 ), · · · , (𝑥𝑄
+𝑀,𝑦𝑄
+𝑀)} to denote the 2-D coordi-
+nates of these 𝑀points. Second, we propose 𝐶centers denoted by
+𝑇= {(𝑥𝑇
+1 ,𝑦𝑇
+1 ), (𝑥𝑇
+2 ,𝑦𝑇
+2 ), · · · , (𝑥𝑇
+𝐶,𝑦𝑇
+𝐶)} as the clustering centers of
+the points in 𝑄. As usual, we propose centers on the two dimensions
+of the 2D input evenly and separately. Then we pair up the centers
+of the two dimensions to obtain all the final centers. For example,
+if 7 clustering centers are assigned for each dimension, 49 centers
+will be found eventually. Following [1], we average the features of
+the nearest points with each center in 𝑇to obtain the feature of
+centers denoted by 𝐹𝑐∈R𝐶×𝐷, which is calculated with:
+𝐹𝑐
+𝑗= 1
+𝑛𝑘
+∑︁
+𝑄𝑖∈KNN(𝑇𝑗)
+𝐹𝑖,
+(1)
+where KNN(𝑇𝑗) denotes the 𝑛𝑘-Nearest Neighbors of 𝑇𝑗and 𝑛𝑘is
+the number of the nearest neighbours we use. Third, we perform
+clustering on these points. Specifically, we evaluate the pairwise
+similarity between the point features 𝐹and the center features 𝐹𝑐.
+According to the similarities, the 𝑀points in 𝑄are grouped into
+the nearest clusters in 𝑇. We denote the clustered results from 𝑄to
+𝑇as 𝑃𝑄𝑇= {𝑃𝑄𝑇
+1
+, 𝑃𝑄𝑇
+2
+, · · · , 𝑃𝑄𝑇
+𝑀} and we can get:
+𝑃𝑄𝑇
+𝑖
+= argmax
+𝑗∈[1,𝐶]
+𝑠𝑖𝑚(𝐹𝑖, 𝐹𝑐
+𝑗),
+(2)
+where 𝑠𝑖𝑚calculates the cosine similarity. The value of 𝑃𝑄𝑇
+𝑖
+indi-
+cates which cluster point 𝑄𝑖belongs to. In this way, the input is
+converted into 𝐶clusters and each cluster corresponds to a super-
+pixel in the image.
+After the clustering step, we update the features of clustering
+centers in 𝑇. To be specific, we aggregate features of points in a
+cluster and update the feature of the cluster center, that is, we update
+𝐹𝑐with 𝐹in each cluster to get 𝐹𝑆𝐶∈R𝐶×𝐷. The calculation of
+center 𝑇𝑗of 𝐹𝑆𝐶can be formulated as:
+𝐹𝑆𝐶
+𝑗
+= 𝐻′ 𝐹𝑐
+𝑗+ Í
+𝑖(𝐹𝑖× 𝑠𝑖𝑚(𝐹𝑖, 𝐹𝑐
+𝑗) × 1(𝑃𝑄𝑇
+𝑖
+= 𝑗))
+1 + Í
+𝑖(𝑠𝑖𝑚(𝐹𝑖, 𝐹𝑐
+𝑗) × 1(𝑃𝑄𝑇
+𝑖
+= 𝑗)))
+
+,
+(3)
+where 𝐻′ is a network for feature dimension transformation and
+1(·) is an indicator function. After clustering and superpixel-level
+feature extracting, 𝐹𝑆𝐶provides finer superpixel-level visual infor-
+mation than 𝐹. The updated center features 𝐹𝑆𝐶would participate
+in the Intra-Entity Interaction module as shown in Fig. 2(b).
+3.3
+Intra-Entity Interaction
+In the Superpixel Clustering step described above, we cluster the
+image pixels into multiple superpixels as sub-regions and obtain
+the features 𝐹𝑆𝐶as the features of these superpixels. However, the
+feature map is manipulated using only clustering algorithms with-
+out any involvement of bounding boxes. Besides, the contribution
+of each superpixel to the associated entity is not differentiated.
+Therefore, it is necessary to perform Intra-Entity Interaction as
+shown in Fig. 2(b) to emphasize the varying importance of different
+superpixels and capture finer internal structures and relationships
+within each entity. To be specific, we conduct the following opera-
+tions in the intra-entity interaction module. First, with the detected
+bounding boxes as the reference, we filter the centers involved
+in each entity. We denote the results of this filtering process as
+𝑃𝐵𝑇= {𝑃𝐵𝑇
+1 , 𝑃𝐵𝑇
+2 , · · · , 𝑃𝐵𝑇
+𝑁}. 𝑃𝐵𝑇
+𝑘
+consists of all the centers in 𝑇
+where the 2-D coordinates of 𝑇𝑗fall inside 𝑏𝑘in the image. Second,
+we aggregate the superpixels inside each entity getting 𝐹𝑎∈R𝑁×𝐷
+in Fig. 2(b), which is calculated with:
+𝐹𝑎
+𝑘= 𝐻𝑎𝑔𝑘+ Í
+𝑗𝐹𝑆𝐶
+𝑗
+× 𝑤(𝑗,𝑘) × 1(𝑇𝑗∈𝑃𝐵𝑇
+𝑘)
+1 + Í
+𝑗𝑑(𝑇𝑗,𝑏𝑘) × 1(𝑇𝑗∈𝑃𝐵𝑇
+𝑘)
+
+,
+(4)
+where 𝑑(𝑇𝑗,𝑏𝑘) indicates the Euclidean distance between the 2-
+D coordinates of 𝑇𝑗and the center coordinates of 𝑏𝑘. 1(·) is an
+indicator function. 𝑔𝑘in Eq. (4) is the reference visual feature of 𝑏𝑘.
+𝐻𝑎denotes a network for feature dimension transformation.𝑤(𝑗,𝑘)
+evaluates the importance of superpixel 𝑇𝑗in entity 𝑜𝑘, which is
+calculated with:
+𝑤(𝑗,𝑘) =
+𝑑(𝑇𝑗,𝑏𝑘)
+Í
+𝑗𝑑(𝑇𝑗,𝑏𝑘) × 1(𝑇𝑗∈𝑃𝐵𝑇
+𝑘)
+.
+(5)
+
+---PAGE_BREAK---
+Improving Scene Graph Generation with Superpixel-Based Interaction Learning
+MM ’23, October 29-November 3, 2023, Ottawa, ON, Canada
+Table 1: Mean Recall (%) comparison results on the VG dataset over three tasks. ∗denotes the results reproduced using the
+official trained model or released code.
+Model
+PredCls
+SGCls
+SGGen
+mR@20
+mR@50
+mR@100
+mR@20
+mR@50
+mR@100
+mR@20
+mR@50
+mR@100
+MOTIFS[61]CVPR’18
+11.7
+14.8
+16.1
+6.3
+8.3
+8.8
+5.0
+6.8
+7.9
+MOTIFS+SIL
+13.6 (+1.9)
+16.9 (+2.1)
+18.4 (+2.3)
+8.5 (+2.2)
+10.2 (+1.9)
+10.8 (+2.0)
+5.5 (+0.5)
+7.3 (+0.5)
+8.5 (+0.6)
+∗G-RCNN[57]ECCV’18
+13.5
+16.7
+17.4
+7.5
+9.1
+9.6
+4.8
+6.1
+6.7
+G-RCNN+SIL
+15.3 (+1.8)
+18.1 (+1.4)
+19.4 (+2.0)
+8.8 (+1.3)
+10.7 (+1.6)
+11.1 (+1.5)
+5.9 (+1.1)
+6.9 (+0.8)
+7.6 (+0.9)
+KERN[5]CVPR’19
+14.7
+17.0
+19.4
+7.4
+9.0
+10.0
+4.8
+6.3
+7.3
+KERN+SIL
+16.0 (+1.3)
+18.8 (+1.8)
+21.0 (+1.6)
+8.4 (+1.0)
+10.5 (+1.5)
+11.7 (+1.7)
+5.3 (+0.5)
+6.9 (+0.6)
+7.9 (+0.6)
+VCTree[45]CVPR’19
+13.2
+16.7
+18.2
+9.6
+11.8
+12.5
+5.4
+7.4
+8.7
+VCTree+SIL
+14.5 (+1.3)
+18.1 (+1.4)
+19.6 (+1.4)
+10.1 (+0.5)
+12.6 (+0.8)
+13.9 (+1.4)
+5.7 (+0.3)
+7.6 (+0.2)
+8.9 (+0.2)
+GPS-Net[33]CVPR’20
+17.4
+21.3
+22.8
+10.0
+11.8
+12.6
+6.9
+8.7
+9.8
+GPS-Net+SIL
+19.1 (+1.7)
+23.8 (+2.5)
+25.2 (+2.4)
+11.7 (+1.7)
+13.2 (+1.4)
+14.0 (+1.4)
+6.9 (+0.0)
+9.1 (+0.4)
+10.4 (+0.6)
+∗BGNN[25]CVPR’21
+24.9
+29.5
+31.8
+12.2
+14.3
+14.8
+7.5
+10.4
+12.5
+BGNN+SIL
+27.9 (+3.0)
+32.9 (+3.4)
+35.0 (+3.2)
+13.1 (+0.9)
+15.7 (+1.4)
+16.8 (+2.0)
+8.2 (+0.7)
+11.1 (+0.7)
+13.1 (+0.6)
+PE-Net[68]CVPR’23
+25.8
+31.4
+33.5
+15.2
+18.2
+19.3
+9.2
+12.3
+14.3
+PE-Net+SIL
+26.9 (+1.1)
+33.1 (+1.7)
+35.3 (+1.8)
+16.7 (+1.5)
+19.9 (+1.7)
+20.7 (+1.4)
+10.0 (+0.8)
+13.0 (+0.7)
+15.1 (+0.8)
+After that, we use 𝐹𝑎to update superpixels inside each entity getting
+𝐹𝐼𝑁∈R𝐶×𝐷in Fig. 2(b). We have 𝐹𝐼𝑁= {𝐹𝐼𝑁
+1 , 𝐹𝐼𝑁
+2 , · · · , 𝐹𝐼𝑁
+𝐶} and
+𝐹𝐼𝑁
+𝑘
+∈R𝐶𝑘×𝐷where 𝐶𝑘= |𝑃𝐵𝑇
+𝑘
+| indicates the number of cluster
+centers that fall within box 𝑏𝑘. The calculation of an entity for 𝐹𝐼𝑁
+can be formulated as:
+𝐹𝐼𝑁
+𝑘
+= {𝐹𝑆𝐶
+𝑗
++ 𝐹𝑎
+𝑘× 𝑤(𝑗,𝑘)},
+(6)
+for all 𝑗that satisfy 𝑇𝑗∈𝑃𝐵𝑇
+𝑘. In this way, we differentiate super-
+pixels in an entity by weights and achieve intra-entity interaction.
+3.4
+Cross-Entity Interaction
+Following the above modules in Fig. 2(a) and (b), the traditional
+box-level features are transformed into superpixel-level features
+for SGG through the clustering algorithm and interaction modeling
+inside each entity. After that, we obtain superpixel features 𝐹𝐼𝑁
+that imply intra-entity interaction. In Fig. 2(c), we design to inject
+cross-entity interaction information into superpixels.
+Existing methods focus on the interactions at the entity level for
+SGG. As a remedy for the deficiency of more fine-grained interac-
+tions, we inject cross-entity interaction information using 𝐹𝐼𝑁. In
+Fig. 2(c), we collect all the clustering centers in𝑇. Then we adopt the
+attention mechanism to model the cross-entity interaction of these
+superpixels obtaining 𝐹𝐶𝑅∈R𝐶×𝐷, which could be formulated as:
+𝐹𝐶𝑅= MultiHead(𝐹𝐼𝑁, 𝐹𝐼𝑁, 𝐹𝐼𝑁)
+= Concat(head1, · · · , headℎ)𝑊𝑂,
+(7)
+head𝑖= Attention(𝐹𝐼𝑁𝑊𝑄, 𝐹𝐼𝑁𝑊𝐾, 𝐹𝐼𝑁𝑊𝑉),
+(8)
+where 𝑊𝑂∈R𝐷′×𝐷, 𝑊𝑄∈R𝐷×𝐷′, 𝑊𝐾∈R𝐷×𝐷′, and 𝑊𝑉∈
+R𝐷×𝐷′ are projection matrices. 𝐷′ is the feature dimension of the
+attention module. In this way, we achieve the interaction modeling
+among entities because each clustering center corresponds to a
+specific superpixel. Before the relation prediction module, we inject
+interaction information earlier at the superpixel level.
+Finally, we dispatch the superpixel-level feature 𝐹𝐶𝑅into points
+in the corresponding superpixel to obtain 𝐹𝑆𝐼𝐿∈R𝑀×𝐷as the
+output of the SIL block. To be specific, the dispatching process can
+be formulated as:
+𝐹𝑆𝐼𝐿
+𝑖
+= 𝐹𝑖+ 𝑠𝑖𝑚(𝐹𝑖, 𝐹𝑐
+𝑗) × 𝐻′′(𝐹𝐶𝑅
+𝑗
+),
+(9)
+where 𝑗= 𝑃𝑄𝑇
+𝑖
+indicates the index of the cluster to which point 𝑄𝑖
+belongs according to the clustering result.
+3.5
+Superpixel-Based Interaction Learning
+Network
+Applying SIL blocks in scene graph generation, we adopt a hier-
+archical superpixel-based interaction learning network. During
+this hierarchical process, the degree of interaction increases grad-
+ually. After the calculation of all SIL blocks, we obtain features
+with superpixel-level interaction information, which is finer than
+the existing box-level features. We replace 𝐹with the output 𝐹𝑆𝐼𝐿
+of the last SIL block as the new feature map of the input image.
+Features of entities are extracted using 𝐹𝑆𝐼𝐿and their bounding
+boxes. Then we continue the remaining steps of the traditional SGG
+methods with these features that contain superpixel-level interac-
+tion information. Finally, the detected entities and the classified
+relations construct the output scene graph as usual.
+4
+EXPERIMENTS
+We report the experimental results of SIL on multiple scene graph
+generation baselines in this section. Firstly, we introduce the dataset
+preparation and experimental configurations scheme utilized in our
+study. Secondly, the implementation details of SIL in experiments
+are provided. Finally, we provide and analyze the experimental
+results, which include overall assessments, ablation studies, and
+the visualization of SIL.
+4.1
+Dataset
+In this paper, experiments were conducted on the Visual Genome
+(VG) dataset[19] and the Open Images V6 (OI V6) dataset[21], all
+of which are the benchmark datasets for scene graph generation.
+
+---PAGE_BREAK---
+MM ’23, October 29-November 3, 2023, Ottawa, ON, Canada
+Jingyi Wang, Can Zhang, Jinfa Huang, Botao Ren, and Zhidong Deng
+Table 2: Comparison with existing state-of-the-art methods on the VG dataset over three tasks.
+Model
+Type
+PredCls
+SGCls
+SGGen
+mR@20
+mR@50
+mR@100
+mR@20
+mR@50
+mR@100
+mR@20
+mR@50
+mR@100
+VTransE[65]CVPR’17
+Box-based
+-
+14.7
+15.8
+-
+8.2
+8.7
+-
+5.0
+6.1
+RelDN[66]CVPR’19
+Box-based
+-
+15.8
+17.2
+-
+9.3
+9.6
+-
+6.0
+7.3
+GBNet-𝛽[60]ECCV’20
+Box-based
+-
+22.1
+24.0
+-
+12.7
+13.4
+-
+7.1
+8.5
+FCSGG[35]CVPR’21
+Box-based
+-
+6.3
+7.1
+-
+3.7
+4.1
+-
+3.6
+4.2
+IWSL[34]arXiv’22
+Box-based
+-
+30.0
+32.1
+-
+17.4
+18.9
+-
+13.7
+15.9
+IS-GGT[20]CVPR’23
+Box-based
+-
+26.4
+31.9
+-
+15.8
+18.9
+-
+9.1
+11.3
+PE-Net[68]CVPR’23
+Box-based
+25.8
+31.4
+33.5
+15.2
+18.2
+19.3
+9.2
+12.3
+14.3
+Ours
+Superpixel-based
+26.9
+33.1
+35.3
+16.7
+19.9
+20.7
+10.0
+13.0
+15.1
+Table 3: The performance of methods without or with SIL
+and comparison with existing state-of-the-art methods on
+the OI V6 dataset.
+Methods
+R@50
+wmAPrel
+wmAPphr
+scorewtd
+Motif[61]CVPR’18
+71.6
+29.9
+31.6
+38.9
+Motif+SIL
+72.3 (+0.7)
+30.4 (+0.5)
+31.8 (+0.2)
+39.4 (+0.5)
+G-RCNN[57]ECCV’18
+74.5
+33.2
+34.2
+41.9
+G-RCNN+SIL
+75.5 (+1.0)
+33.8 (+0.6)
+34.7 (+0.5)
+42.5 (+0.6)
+GPS-Net[45]CVPR’20
+74.8
+32.9
+34.0
+41.7
+GPS-Net+SIL
+75.7 (+0.9)
+33.9 (+1.0)
+34.9 (+0.9)
+42.7 (+1.0)
+BGNN[25]CVPR’21
+75.0
+33.5
+34.2
+42.1
+BGNN+SIL
+76.4 (+1.4)
+34.2 (+0.7)
+35.0 (+0.8)
+43.0 (+0.9)
+PE-Net[68]CVPR’23
+76.5
+36.6
+37.4
+44.9
+PE-Net+SIL
+77.1 (+0.6)
+37.2 (+0.6)
+37.8 (+0.4)
+45.5 (+0.6)
+Visual Genome contains 108,077 annotated images. Following pre-
+vious works[25], we adopt the most frequent 150 entity categories
+and 50 relation categories in the VG dataset. OI V6 dataset for scene
+graph generation has 126,368 images for training, 1,813 ones for
+validation, and 5,322 ones for test. The details of these two datasets
+are provided in the supplementary material.
+4.2
+Evaluation Datasets and Metrics
+4.2.1
+Visual Genome. In the same way as [25], we evaluate SGG
+methods with or without SIL on the VG dataset under three tasks:
+predicate classification (PredCls), scene graph classification (SGCls),
+and scene graph detection (SGGen). In PredCls, the bounding boxes
+and object categories are both provided, and the model needs to
+predict relation categories. In the SGCls task, only the bounding
+boxes of entities are given. In the SGGen task, no information about
+the positions and categories of entities is provided at all. The model
+relies on itself to detect entities and predict the relations. We take
+Mean Recall@K (i.e. mR@K) as the evaluation metric for the scene
+graph generation task in order to alleviate the misleading effects of
+Recall on the performance caused by long-tailed datasets.
+4.2.2
+Open Images V6. Following [21, 25, 66], we evaluate different
+methods using 𝑅𝑒𝑐𝑎𝑙𝑙@50 (𝑅@50), weighted mean AP of relations
+(𝑤𝑚𝐴𝑃𝑟𝑒𝑙), and weighted mean AP of phrases (𝑤𝑚𝐴𝑃𝑝ℎ𝑟). In line
+with the standard evaluation of Open Images, we report the weight
+metric 𝑠𝑐𝑜𝑟𝑒𝑤𝑡𝑑which is obtained as 0.2×𝑅@50+0.4×𝑤𝑚𝐴𝑃𝑟𝑒𝑙+
+0.4 × 𝑤𝑚𝐴𝑃𝑝ℎ𝑟following [21, 66].
+Table 4: Ablation study on the component of our SIL block.
+SC denotes the Superpixel Clustering step. IEI denotes the
+Intra-Entity Interaction module.  means using weighted su-
+perpixels in IEI. # means IEI without the superpixel weights.
+CEI denotes the Cross-Entity Interaction module.
+SC
+IEI
+CEI
+mR@20
+mR@50
+mR@100
+-
+-
+-
+12.31
+15.03
+16.10
+!
+-
+-
+12.59 (+0.28)
+15.54 (+0.51)
+16.75 (+0.65)
+!
+ 
+-
+12.61 (+0.30)
+15.76 (+0.73)
+17.08 (+0.98)
+!
+-
+!
+13.16 (+0.85)
+16.40 (+1.37)
+17.70 (+1.60)
+!
+#
+!
+13.12 (+0.81)
+16.52 (+1.49)
+17.78 (+1.68)
+!
+ 
+!
+13.62 (+1.31)
+16.91 (+1.88)
+18.36 (+2.26)
+4.3
+Implementation Details
+To ensure the fairness of comparison, we employ the same visual
+backbone as the previous methods, that is, we use ResNeXt-101-FPN
+[53] as the backbone network and FasterRCNN [40] as the object
+detector. We keep the model parameters of these visual backbone
+modules frozen in the training process of SGG models. In this way,
+we ensure that the improvement in experimental results comes from
+the conversion and enhancement of the same basic visual features,
+rather than using more favorable ones. As for our SIL block, we
+adopt the multi-head design [48] to enhance the context clustering
+step following [37]. The embedding dimension is 256 during the
+superpixel clustering. Before the intra-entity interaction module,
+we perform feature dimension transformation on the output of
+superpixel clustering using a simple Multilayer Perceptron (MLP)
+network. The feature dimension used in the intermediate layer of
+the MLP is 1024. We use the corresponding feature in the output of
+ResNeXt-101-FPN backbone as the reference visual feature 𝑔𝑘we
+used in Eq. (4). In the cross-entity interaction module, we use a 2-
+layer transformer encoder. The encoder is multi-head style and each
+head is expressed with the embedding dimension of 32. The dropout
+is 0.1 in the encoder. We keep the optimizer, the scheduler, and the
+number of iterations the same with each baseline. Experiments
+in this paper are implemented with PyTorch. We use an NVIDIA
+GeForce RTX 3090 GPU to train the SGG models.
+4.4
+Overall Performance Assessments
+4.4.1
+Visual Genome. To demonstrate the effectiveness and gen-
+eralization ability of our SIL block, we conducted experiments on
+
+---PAGE_BREAK---
+Improving Scene Graph Generation with Superpixel-Based Interaction Learning
+MM ’23, October 29-November 3, 2023, Ottawa, ON, Canada
+4
+9
+25
+49
+81
+Number of Clustering Centers C
+13
+14
+15
+16
+17
+18
+mean Recall
+12.72
+15.96
+17.27
+12.93
+16.12
+17.38
+13.18
+16.39
+17.75
+13.25
+16.47
+17.77
+13.25
+16.49
+17.78
+mR@20
+mR@50
+mR@100
+Figure 3: The influence of the number of clustering centers
+𝐶in the SIL block.
+various scene graph generation methods. The results on the VG
+dataset are shown in Table 1. In such the baselines, Motif[61], G-
+RCNN[57], KERN[5], and VCTree[45] are classical methods for
+SGG. GPS-Net[33], BGNN[25], and PENet[68] are relatively lately-
+published methods. These baselines contain methods with vari-
+ous implementations including Recurrent Neural Networks (RNN),
+Graph Neural Networks (GNN), and Graph Convolutional Networks
+(GCN). For the experiments of original baseline models, we report
+the results according to [25, 44]. As we can see, the SIL block enables
+all these scene graph generation methods to achieve very stable
+improvements. No matter what structure the baseline is based on,
+we could use the SIL block to convert the original box-level fea-
+tures to superpixel-level ones, which could model the fine-grained
+interactions among entities. As shown in Table 1, on the PredCls
+task which attaches great importance to the relation prediction, the
+SIL block has brought an average improvement of 2.0% to the mean
+Recall metric of these baselines. Without any additional sources
+of information and supervision signals, SIL improves these base-
+lines with the help of newly introduced superpixel-level feature
+extraction and fine-grained interaction.
+4.4.2
+Open Images V6. Similarly to Sec. 4.4.1, we perform exper-
+iments on the OI V6 dataset with Motif[61], G-RCNN[57], GPS-
+Net[33], BGNN[25], and PE-Net[68] as baselines. The experimental
+results are shown in Table 3. The results of baselines in Table 3 are
+borrowed from [25, 68]. Baselines are improved stably thanks to the
+superpixel-level features and interactions our SIL block achieved.
+The complete experimental results table is provided in the supple-
+mentary material.
+4.4.3
+Comparison with the State of the Art. We validate the effec-
+tiveness of our SIL block by comparison with existing state-of-the-
+art (SOTA) methods. The comparison results with SOTA on the VG
+and OI V6 datasets are shown in Table 2 and Table 3 respectively.
+In Table 2, Results of IS-GGT[20] and IWSL[34] are borrowed from
+corresponding papers. We report the results of PE-net[68] accord-
+ing to the model provided by the author. As we can see, our model
+with the SIL block outperforms state-of-the-art methods on the VG
+and OI V6 datasets.
+4.5
+Ablation Study
+In order to confirm the effect of each component in our SIL block, we
+perform ablation experiments. Experiments of our ablation studies
+0
+1
+2
+3
+Cross-Entity Interaction Degree L
+16
+17
+18
+mean Recall @ 100
+16.74
+17.39
+17.77
+17.69
+Motif+SIL
+Motif
+Figure 4: The influence of varying interaction degree 𝐿in the
+SIL block.
+are all done on the PredCls task on the Visual Genome dataset. We
+choose the typical Motif[61] model as the baseline to facilitate the
+observation of the effects of different components.
+4.5.1
+Component Ablation. In order to illustrate the effect of each
+component of our SIL block, we conduct ablation experiments on
+the three main components of the SIL block, namely Superpixel
+Clustering, Intra-Entity Interaction, and Cross-Entity Interaction.
+The ablation study results are shown in Table 4. As we can see, each
+module contributes to the improvement of the Motif baseline.
+In Table 4, the first row denotes the results of Motif we repro-
+duced according to [44, 61]. In the second row with only Superpixel
+Clustering, we extract visual features in the form of superpixel,
+without any explicit superpixel-level interaction operations. In this
+case, we still achieve improvements over the original Motif model,
+which confirms the benefits of superpixel-level features for SGG.
+The third and fourth rows demonstrate the necessity of Intra-Entity
+Interaction and Cross-Entity Interaction respectively. Finally, with
+the complete SIL block, we achieve the result in the last row of
+Table 4. Besides, we also evaluate the SIL block without superpixel
+weights, that is, assign the same weights to superpixels in Eq. (5).
+The corresponding experimental results are shown in the fifth row
+of Table 4. The comparison between the fifth row and the last row
+demonstrates that our differentiation of superpixels inside each
+entity helps SGG indeed.
+4.5.2
+The Number of Clustering Centers. In Fig. 2(a), the input is
+viewed as the sets of points. We perform clustering on the points
+to obtain superpixels. In the process, we propose 𝐶centers denoted
+by 𝑇as the clustering centers as mentioned in 3.2. The number of
+clustering centers directly determines the number of superpixels
+into which the input is divided. In order to investigate the influence
+of the number of clustering centers, we have trials of SIL block
+with 4, 9, 25, 49, and 81 centers, respectively. Considering memory
+constraints, we adopt 256-D MLP and 4 heads in Superpixel Clus-
+tering in this ablation experiment. The results are shown in Fig. 3
+where 𝐶denotes the number of centers we pre-defined. According
+to Fig. 3, as the number of clustering centers increased from 4 to
+9, 25, and 49, the performance of the models improves gradually
+and slightly. SIL is not highly sensitive to the number of clustering
+centers. Therefore, through making a trade-off between model per-
+formance and program memory, we chose 49 as the vanilla number
+of clustering centers in this paper.
+
+---PAGE_BREAK---
+MM ’23, October 29-November 3, 2023, Ottawa, ON, Canada
+Jingyi Wang, Can Zhang, Jinfa Huang, Botao Ren, and Zhidong Deng
+Image
+Previous Methods
+(box-level)
+Our SIL
+(superpixel-level)
+Figure 5: Visualization of clustering results. The first col-
+umn shows the original image. The second column shows
+the bounding boxes. The last column shows the superpixels
+inside bounding boxes. Masks of different colors denote dif-
+ferent clusters.
+4.5.3
+The Influence of Cross-entity Interaction Degree. In the SIL
+block, we perform the cross-entity interaction as shown in Fig. 2(c)
+employing a Transformer encoder with the attention mechanism.
+The more layer we use in the encoder, the more interaction infor-
+mation entities obtain. In order to demonstrate the effect of our
+superpixel-level interaction learning, we perform experiments with
+different degrees of interaction denoted by 𝐿. The results are given
+in Fig. 4. We use 256-D MLP and 4 heads in Superpixel Clustering
+here considering memory constraints. Larger values on the hori-
+zontal axis mean more encoder layers and deeper superpixel-level
+interaction. There is no superpixel-level interaction modeling in the
+baseline Motif, therefore the performance of the baseline doesn’t
+vary with the increasing degree of interaction. The 0-layer result is
+obtained without cross-entity interaction. As the interaction degree
+increases from 0 to 2, the performance improves gradually. How-
+ever, too frequent interactions would lead to information confusion
+as shown in the results of a 3-layer encoder in SIL.
+4.6
+Visualization
+4.6.1
+Clustering Result. Clustering is a crucial algorithm used in
+the SIL block. We cluster the points in the input image or feature
+map to obtain superpixels as the expression for SGG. We visualize
+the clustering results in Fig. 5. The second column displays the
+rough boxes used in existing methods, while the last column shows
+the fine-grained superpixels used in our SIL block. Such specific
+superpixel-level information endows our approach with differenti-
+ated visual features inside each entity and the base for fine-grained
+interaction, and therefore helps SGG. As we can see from the last
+column, the Superpixel Clustering module can effectively aggregate
+similar pixels. The superpixels generated by clustering imply the
+boundaries of entities clearly. For example, the outline of the tower
+in the second row is delineated by clustering.
+4.6.2
+Relation Activation. We perform GradCAM [42] on the union
+regions of subjects and objects with the relation in a triplet as the
+Baseline
+Baseline + SIL
+bottle
+table
+on
+man
+short
+wearing
+car
+track
+on
+Figure 6: Comparisons of GradCAM on features without/with
+the SIL block. Red words indicate the relation to which Grad-
+CAM is applied.
+goal. We adopt the Motif model as the baseline. The GradCAM re-
+sults are shown in Fig. 6. With the clustering algorithm, our method
+extracts superpixel-level features and interactions. Therefore, our
+method could capture the specific interactive sub-regions corre-
+sponding to the relations for scene graph generation. For example,
+in the third case of Fig. 6, the baseline is confused by the ambiguous
+information inside boxes, while our method captures the interaction
+position of the car on the track accurately.
+5
+CONCLUSION
+In this paper, we propose the Superpixel-based Interaction Learn-
+ing (SIL) block to convert the traditional box-based pipeline for
+scene graph generation into a superpixel-based one. In SIL, any
+input image is regarded as a set of points. We use the clustering
+algorithm to aggregate all the points into superpixels and extract
+deep features of them. Furthermore, we perform intra-entity inter-
+action to ensure the differentiation of superpixels in an entity. We
+design a cross-entity interaction module, so as to get more fine-
+grained interaction information among entities for the generation
+of scene graphs. We evaluate SIL on various scene graph generation
+baselines. The experimental results demonstrate the effectiveness
+and generalization ability of SIL on the scene graph generation
+task. With experimental validation, our SIL outperforms previous
+state-of-the-art methods on SGG.
+ACKNOWLEDGMENTS
+This work was supported in part by the National Science Foundation
+of China (NSFC) under Grant No. 62176134, by a grant from the
+Institute Guo Qiang (2019GQG0002), Tsinghua University, and by
+research and application on AI technologies for smart mobility
+funded by SAIC Motor.
+
+---PAGE_BREAK---
+Improving Scene Graph Generation with Superpixel-Based Interaction Learning
+MM ’23, October 29-November 3, 2023, Ottawa, ON, Canada
+REFERENCES
+[1] Radhakrishna Achanta, Appu Shaji, Kevin Smith, Aurélien Lucchi, Pascal Fua,
+and Sabine Süsstrunk. 2012. SLIC Superpixels Compared to State-of-the-Art
+Superpixel Methods. IEEE transactions on pattern analysis and machine intelligence
+34, 11 (2012), 2274–2282.
+[2] Felipe Belém, Silvio Jamil Ferzoli Guimarães, and Alexandre X. Falcão. 2020.
+Superpixel Segmentation Using Dynamic and Iterative Spanning Forest. IEEE
+Signal Process. Lett. 27 (2020), 1440–1444.
+[3] Bashirul Biswas Biswas and Qiang Ji. 2023. Probabilistic Debiasing of Scene
+Graphs. In Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition.
+[4] Xiaojun Chang, Pengzhen Ren, Pengfei Xu, Zhihui Li, Xiaojiang Chen, and Alex
+Hauptmann. 2021. A comprehensive survey of scene graphs: Generation and
+application. IEEE Transactions on Pattern Analysis and Machine Intelligence 45, 1
+(2021), 1–26.
+[5] Tianshui Chen, Weihao Yu, Riquan Chen, and Liang Lin. 2019. Knowledge-
+Embedded Routing Network for Scene Graph Generation. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition. Computer
+Vision Foundation / IEEE, 6163–6171.
+[6] Meng-Jiun Chiou, Henghui Ding, Hanshu Yan, Changhu Wang, Roger Zimmer-
+mann, and Jiashi Feng. 2021. Recovering the unbiased scene graphs from the
+biased ones. In Proceedings of the 29th ACM International Conference on Multime-
+dia. 1581–1590.
+[7] Peijie Dong, Lujun Li, and Zimian Wei. 2023. Diswot: Student architecture search
+for distillation without training. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition. 11898–11908.
+[8] Xingning Dong, Tian Gan, Xuemeng Song, Jianlong Wu, Yuan Cheng, and Liqiang
+Nie. 2022. Stacked hybrid-attention and group collaborative learning for unbiased
+scene graph generation. In Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition. 19427–19436.
+[9] Arushi Goel, Basura Fernando, Frank Keller, and Hakan Bilen. 2022. Not all
+relations are equal: Mining informative labels for scene graph generation. In
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition.
+15596–15606.
+[10] Jiuxiang Gu, Shafiq R. Joty, Jianfei Cai, Handong Zhao, Xu Yang, and Gang Wang.
+2019. Unpaired Image Captioning via Scene Graph Alignments. In Proceedings of
+the IEEE/CVF International Conference on Computer Vision. 10322–10331.
+[11] Yunqing He, Tongwei Ren, Jinhui Tang, and Gangshan Wu. 2022. Heterogeneous
+Learning for Scene Graph Generation. In Proceedings of the 30th ACM International
+Conference on Multimedia. 4704–4713.
+[12] Marcel Hildebrandt, Hang Li, Rajat Koner, Volker Tresp, and Stephan Günne-
+mann. 2020. Scene Graph Reasoning for Visual Question Answering. CoRR
+abs/2007.01072 (2020).
+[13] Peng Jin, Jinfa Huang, Fenglin Liu, Xian Wu, Shen Ge, Guoli Song, David Clifton,
+and Jie Chen. 2022. Expectation-maximization contrastive learning for compact
+video-and-language representations. Advances in Neural Information Processing
+Systems 35 (2022), 30291–30306.
+[14] Peng Jin, Jinfa Huang, Pengfei Xiong, Shangxuan Tian, Chang Liu, Xiangyang Ji,
+Li Yuan, and Jie Chen. 2023. Video-text as game players: Hierarchical banzhaf in-
+teraction for cross-modal representation learning. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition. 2472–2482.
+[15] Peng Jin, Hao Li, Zesen Cheng, Jinfa Huang, Zhennan Wang, Li Yuan, Chang
+Liu, and Jie Chen. 2023. Text-Video Retrieval with Disentangled Conceptualiza-
+tion and Set-to-Set Alignment. In International Conference on International Joint
+Conferences on Artificial Intelligence.
+[16] Tianlei Jin, Fangtai Guo, Qiwei Meng, Shiqiang Zhu, Xiangming Xi, Wen Wang,
+Mu Zonghao, and Wei Song. 2023. Fast Contextual Scene Graph Generation with
+Unbiased Context Augmentation. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition.
+[17] Deunsol Jung, Sanghyun Kim, Won Hwa Kim, and Minsu Cho. 2023. Devil’s on
+the Edges: Selective Quad Attention for Scene Graph Generation. In IEEE/CVF
+Conference on Computer Vision and Pattern Recognition (CVPR).
+[18] Mahmoud Khademi and Oliver Schulte. 2020. Deep generative probabilistic
+graph neural networks for scene graph generation. In Proceedings of the AAAI
+Conference on Artificial Intelligence. 11237–11245.
+[19] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson, Kenji Hata, Joshua
+Kravitz, Stephanie Chen, Yannis Kalantidis, Li-Jia Li, David A Shamma, et al.
+2017. Visual genome: Connecting language and vision using crowdsourced dense
+image annotations. International journal of computer vision 123 (2017), 32–73.
+[20] Sanjoy Kundu and Sathyanarayanan Aakur. 2023. IS-GGT: Iterative Scene Graph
+Generation with Generative Transformers. Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition.
+[21] Alina Kuznetsova, Hassan Rom, Neil Alldrin, Jasper Uijlings, Ivan Krasin, Jordi
+Pont-Tuset, Shahab Kamali, Stefan Popov, Matteo Malloci, Alexander Kolesnikov,
+Tom Duerig, and Vittorio Ferrari. 2020. The Open Images Dataset V4: Unified
+image classification, object detection, and visual relationship detection at scale.
+IJCV (2020).
+[22] Hao Li, Jinfa Huang, Peng Jin, Guoli Song, Qi Wu, and Jie Chen. 2023. Weakly-
+Supervised 3D Spatial Reasoning for Text-based Visual Question Answering.
+IEEE Transactions on Image Processing (2023).
+[23] Lujun Li. 2022. Self-regulated feature learning via teacher-free feature distillation.
+In European Conference on Computer Vision. 347–363.
+[24] Lujun Li and Zhe Jin. 2022. Shadow knowledge distillation: Bridging offline and
+online knowledge transfer. Advances in Neural Information Processing Systems 35
+(2022), 635–649.
+[25] Rongjie Li, Songyang Zhang, Bo Wan, and Xuming He. 2021. Bipartite graph
+network with adaptive message passing for unbiased scene graph generation. In
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition.
+11109–11119.
+[26] Xingchen Li, Long Chen, Wenbo Ma, Yi Yang, and Jun Xiao. 2022. Integrating
+object-aware and interaction-aware knowledge for weakly supervised scene
+graph generation. In Proceedings of the 30th ACM International Conference on
+Multimedia. 4204–4213.
+[27] Xiangtai Li, Xia Li, Ansheng You, Li Zhang, Guangliang Cheng, Kuiyuan Yang,
+Yunhai Tong, and Zhouchen Lin. 2021. Towards efficient scene understanding via
+squeeze reasoning. IEEE Transactions on Image Processing 30 (2021), 7050–7063.
+[28] Yikang Li, Wanli Ouyang, Bolei Zhou, Jianping Shi, Chao Zhang, and Xiaogang
+Wang. 2018. Factorizable net: an efficient subgraph-based framework for scene
+graph generation. In Proceedings of the European Conference on Computer Vision
+(ECCV). 335–351.
+[29] Yikang Li, Wanli Ouyang, Bolei Zhou, Kun Wang, and Xiaogang Wang. 2017.
+Scene Graph Generation from Objects, Phrases and Region Captions. In Proceed-
+ings of the IEEE/CVF International Conference on Computer Vision. 1270–1279.
+[30] Zhengqin Li and Jiansheng Chen. 2015. Superpixel segmentation using Linear
+Spectral Clustering. In Proceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition. 1356–1363.
+[31] James Liang, Tianfei Zhou, Dongfang Liu, and Wenguan Wang. 2023. CLUSTSEG:
+Clustering for Universal Segmentation. In Proceedings of the 40th International
+Conference on Machine Learning.
+[32] Zeming Liao, Qingbao Huang, Yu Liang, Mingyi Fu, Yi Cai, and Qing Li. 2021.
+Scene graph with 3D information for change captioning. In Proceedings of the
+29th ACM International Conference on Multimedia. 5074–5082.
+[33] Xin Lin, Changxing Ding, Jinquan Zeng, and Dacheng Tao. 2020. Gps-net: Graph
+property sensing network for scene graph generation. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition. 3746–3753.
+[34] Daqi Liu, Miroslaw Bober, and Josef Kittler. 2022. Importance Weighted Structure
+Learning for Scene Graph Generation. arXiv preprint arXiv:2205.07017 (2022).
+[35] Hengyue Liu, Ning Yan, Masood Mortazavi, and Bir Bhanu. 2021. Fully convo-
+lutional scene graph generation. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition. 11546–11556.
+[36] Xiaolong Liu, Lujun Li, Chao Li, and Anbang Yao. 2023. NORM: Knowledge Dis-
+tillation via N-to-One Representation Matching. arXiv preprint arXiv:2305.13803
+(2023).
+[37] Xu Ma, Yuqian Zhou, Huan Wang, Can Qin, Bin Sun, Chang Liu, and Yun Fu.
+2023. Image as Set of Points. In The Eleventh International Conference on Learning
+Representations.
+[38] Sayak Nag, Kyle Min, Subarna Tripathi, and Amit Roy-Chowdhury. 2023. Unbi-
+ased Scene Graph Generation in Videos. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition.
+[39] Jie Qin, Jie Wu, Xuefeng Xiao, Lujun Li, and Xingang Wang. 2022. Activation
+modulation and recalibration scheme for weakly supervised semantic segmen-
+tation. In Proceedings of the AAAI Conference on Artificial Intelligence, Vol. 36.
+2117–2125.
+[40] Shaoqing Ren, Kaiming He, Ross B. Girshick, and Jian Sun. 2015. Faster R-CNN:
+Towards Real-Time Object Detection with Region Proposal Networks. In NIPS.
+91–99.
+[41] Xiaofeng Ren and Jitendra Malik. 2003. Learning a Classification Model for Seg-
+mentation. In Proceedings of the IEEE/CVF International Conference on Computer
+Vision. 10–17.
+[42] Ramprasaath R Selvaraju, Michael Cogswell, Abhishek Das, Ramakrishna Vedan-
+tam, Devi Parikh, and Dhruv Batra. 2017. Grad-cam: Visual explanations from
+deep networks via gradient-based localization. In Proceedings of the IEEE interna-
+tional conference on computer vision. 618–626.
+[43] Sitong Su, Lianli Gao, Junchen Zhu, Jie Shao, and Jingkuan Song. 2021. Fully
+functional image manipulation using scene graphs in a bounding-box free way. In
+Proceedings of the 29th ACM International Conference on Multimedia. 1784–1792.
+[44] Kaihua Tang, Yulei Niu, Jianqiang Huang, Jiaxin Shi, and Hanwang Zhang. 2020.
+Unbiased Scene Graph Generation From Biased Training. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition. 3713–3722.
+[45] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan Luo, and Wei Liu. 2019.
+Learning to Compose Dynamic Tree Structures for Visual Contexts. In Conference
+on Computer Vision and Pattern Recognition.
+[46] Hongshuo Tian, Ning Xu, An-An Liu, Chenggang Yan, Zhendong Mao, Quan
+Zhang, and Yongdong Zhang. 2021. Mask and Predict: Multi-step Reasoning for
+Scene Graph Generation. In Proceedings of the 29th ACM International Conference
+
+---PAGE_BREAK---
+MM ’23, October 29-November 3, 2023, Ottawa, ON, Canada
+Jingyi Wang, Can Zhang, Jinfa Huang, Botao Ren, and Zhidong Deng
+on Multimedia. 4128–4136.
+[47] Hongshuo Tian, Ning Xu, An-An Liu, and Yongdong Zhang. 2020. Part-Aware
+Interactive Learning for Scene Graph Generation. In ACM Multimedia. ACM,
+3155–3163.
+[48] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones,
+Aidan N. Gomez, Łukasz Kaiser, and Illia Polosukhin. 2017. Attention is All
+you Need. In Advances in Neural Information Processing Systems 30. Curran
+Associates, Inc., 5998–6008.
+[49] Jingyi Wang, Jinfa Huang, Can Zhang, and Zhidong Deng. 2023. Cross-Modality
+Time-Variant Relation Learning for Generating Dynamic Scene Graphs. In IEEE
+International Conference on Robotics and Automation (ICRA).
+[50] Shuang Wang, Lianli Gao, Xinyu Lyu, Yuyu Guo, Pengpeng Zeng, and Jingkuan
+Song. 2022. Dynamic Scene Graph Generation via Temporal Prior Inference. In
+Proceedings of the 30th ACM International Conference on Multimedia. 5793–5801.
+[51] Yaxiong Wang, Yunchao Wei, Xueming Qian, Li Zhu, and Yi Yang. 2021. AINet:
+Association implantation for superpixel segmentation. In Proceedings of the
+IEEE/CVF International Conference on Computer Vision. 7078–7087.
+[52] Tete Xiao, Yingcheng Liu, Bolei Zhou, Yuning Jiang, and Jian Sun. 2018. Unified
+Perceptual Parsing for Scene Understanding. In European Conference on Computer
+Vision, Vol. 11209. 432–448.
+[53] Saining Xie, Ross B. Girshick, Piotr Dollár, Zhuowen Tu, and Kaiming He. 2017.
+Aggregated Residual Transformations for Deep Neural Networks. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. 5987–
+5995.
+[54] Shaotian Yan, Chen Shen, Zhongming Jin, Jianqiang Huang, Rongxin Jiang,
+Yaowu Chen, and Xian-Sheng Hua. 2020. PCPL: Predicate-Correlation Perception
+Learning for Unbiased Scene Graph Generation. In ACM Multimedia. 265–273.
+[55] Dongming Yang, Yuexian Zou, Can Zhang, Meng Cao, and Jie Chen. 2021. RR-
+Net: Relation reasoning for end-to-end human-object interaction detection. IEEE
+Transactions on Circuits and Systems for Video Technology 32, 6 (2021), 3853–3865.
+[56] Fengting Yang, Qian Sun, Hailin Jin, and Zihan Zhou. 2020. Superpixel Seg-
+mentation With Fully Convolutional Networks. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition. IEEE, 13961–13970.
+[57] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi Parikh. 2018. Graph
+R-CNN for Scene Graph Generation. In ECCV (1) (Lecture Notes in Computer
+Science, Vol. 11205). 690–706.
+[58] Jingkang Yang, Wenxuan Peng, Xiangtai Li, Zujin Guo, Liangyu Chen, Bo Li,
+Zheng Ma, Wayne Zhang, Kaiyang Zhou, Chen Change Loy, and Ziwei Liu.
+2023. Panoptic Video Scene Graph Generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition.
+[59] Xu Yang, Kaihua Tang, Hanwang Zhang, and Jianfei Cai. 2019. Auto-Encoding
+Scene Graphs for Image Captioning. In 2019 IEEE Conference on Computer Vision
+and Pattern Recognition (CVPR). 10685–10694.
+[60] Alireza Zareian, Svebor Karaman, and Shih-Fu Chang. 2020. Bridging Knowledge
+Graphs to Generate Scene Graphs. In ECCV (23) (Lecture Notes in Computer
+Science, Vol. 12368). 606–623.
+[61] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin Choi. 2018. Neural Motifs:
+Scene Graph Parsing With Global Context. In 2018 IEEE Conference on Computer
+Vision and Pattern Recognition (CVPR). 5831–5840.
+[62] Ao Zhang, Yuan Yao, Qianyu Chen, Wei Ji, Zhiyuan Liu, Maosong Sun, and
+Tat-Seng Chua. 2022. Fine-Grained Scene Graph Generation with Data Transfer.
+In European Conference on Computer Vision. 409–424.
+[63] Can Zhang, Tianyu Yang, Junwu Weng, Meng Cao, Jue Wang, and Yuexian
+Zou. 2022. Unsupervised pre-training for temporal action localization tasks. In
+Proceedings of the IEEE/CVF Conference on Computer Vision and Pattern Recognition.
+14031–14041.
+[64] Can Zhang, Yuexian Zou, Guang Chen, and Lei Gan. 2019. Pan: Persistent
+appearance network with an efficient motion cue for fast action recognition. In
+Proceedings of the 27th ACM International conference on Multimedia. 500–509.
+[65] Hanwang Zhang, Zawlin Kyaw, Shih-Fu Chang, and Tat-Seng Chua. 2017. Visual
+Translation Embedding Network for Visual Relation Detection. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern Recognition. IEEE
+Computer Society, 3107–3115.
+[66] Ji Zhang, Kevin J. Shih, Ahmed Elgammal, Andrew Tao, and Bryan Catanzaro.
+2019. Graphical Contrastive Losses for Scene Graph Parsing. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition. 11535–11543.
+[67] Yong Zhang, Yingwei Pan, Ting Yao, Rui Huang, Tao Mei, and ChangWen Chen.
+2023. Learning to Generate Language-supervised and Open-vocabulary Scene
+Graph using Pre-trained Visual-Semantic Space. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition.
+[68] Chaofan Zheng, Xinyu Lyu, Lianli Gao, Bo Dai, and Jingkuan Song. 2023.
+Prototype-based Embedding Network for Scene Graph Generation. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern Recognition.
+
+---PAGE_BREAK---
+Improving Scene Graph Generation with Superpixel-Based Interaction Learning
+MM ’23, October 29-November 3, 2023, Ottawa, ON, Canada
+A
+DATASETS AND EVALUATION METRICS
+A.1
+Datasets
+Visual Genome. Visual Genome(VG) is the benchmark dataset of
+Scene Graph Generation (SGG). On average, there are 38 entities
+and 22 relation instances in each image. The dataset is partitioned
+into a training set containing 70% of the images, and a testing set
+containing the remaining 30% images. 5k images from the training
+set are used for validation.
+Open Images V6. The Open Image V6 (OI V6) dataset is also used
+for the evaluation of scene graph generation methods. On average,
+each image in OI V6 contains 4.1 entities and 2.8 relation instances.
+There are 301 entity categories and 31 relation categories in total.
+A.2
+Evaluation Metrics
+Visual Genome. In line with [25], we take Mean Recall@𝐾(i.e.
+𝑚𝑅@𝐾) as evaluation metrics for the scene graph generation task.
+For each image, the ground truth triplets are matched with the
+top-𝐾predicted triplets. The recall rate is calculated as the ratio
+of the number of matched ground truth triplets to the total num-
+ber of ground truth triplets in the image. Finally, we obtain mean
+Recall@𝐾by averaging the recall rate over all types of predicates.
+Open Images V6. Following the settings in [21, 25, 66], we evalu-
+ate different methods using 𝑅𝑒𝑐𝑎𝑙𝑙@50 (𝑅@50), weighted mean
+AP of relations (𝑤𝑚𝐴𝑃𝑟𝑒𝑙), and weighted mean AP of phrases
+(𝑤𝑚𝐴𝑃𝑝ℎ𝑟). 𝑅@50 has the same definition as that used in VG eval-
+uation. As for <subject-predicate-object> triplets, 𝐴𝑃𝑟𝑒𝑙assesses
+the subject box and the object box, along with three labels of the
+subject, the object, and the predicate in a triplet. Compared to 𝐴𝑃𝑟𝑒𝑙,
+𝐴𝑃𝑝ℎ𝑟evaluates the union bounding box of the subject box and the
+object box, and the same three labels. We report the weighted aver-
+age of 𝐴𝑃𝑟𝑒𝑙and 𝐴𝑃𝑝ℎ𝑟of each relation category as 𝑤𝑚𝐴𝑃𝑟𝑒𝑙and
+𝑤𝑚𝐴𝑃𝑝ℎ𝑟to mitigate the impact of the dataset bias on evaluation.
+B
+IMPLEMENTATION DETAILS
+B.1
+CodeBase
+We implemented the proposed Superpixel-based Interaction Learn-
+ing (SIL) and conducted comparative experiments on the baselines
+using the general codebase for SGG1, the official codebase of BGNN2
+and PE-Net3.
+B.2
+Training Details
+We use the commonly used pretrained object detector1 which is
+provided by the author of [44]. The model parameters of these
+visual backbone modules are frozen in the training process of SGG
+models. We did not modify the relation prediction modules in the
+baseline methods.
+C
+RESULTS ON OPEN IMAGES V6
+We presented the performance of methods without or with SIL on
+the OI V6 dataset in the main paper. The complete experimental
+results are shown in Table 5.
+1https://github.com/KaihuaTang/Scene-Graph-Benchmark.pytorch
+2https://github.com/SHTUPLUS/PySGG
+3https://github.com/VL-Group/PENET
+Table 5: The comparison results of methods without or with
+SIL on the OI V6 dataset.
+Methods
+R@50
+wmAPrel
+wmAPphr
+scorewtd
+RelDN[66]CVPR’19
+73.1
+32.2
+33.4
+40.8
+VCTree[45]CVPR’19
+74.1
+34.2
+33.1
+40.2
+IWSL[34]arXiv’22
+74.7
+33.1
+34.3
+41.9
+Motif[61]CVPR’18
+71.6
+29.9
+31.6
+38.9
+Motif+SIL
+72.3 (+0.7)
+30.4 (+0.5)
+31.8 (+0.2)
+39.4 (+0.5)
+G-RCNN[57]ECCV’18
+74.5
+33.2
+34.2
+41.9
+G-RCNN+SIL
+75.5 (+1.0)
+33.8 (+0.6)
+34.7 (+0.5)
+42.5 (+0.6)
+GPS-Net[45]CVPR’20
+74.8
+32.9
+34.0
+41.7
+GPS-Net+SIL
+75.7 (+0.9)
+33.9 (+1.0)
+34.9 (+0.9)
+42.7 (+1.0)
+BGNN[25]CVPR’21
+75.0
+33.5
+34.2
+42.1
+BGNN+SIL
+76.4 (+1.4)
+34.2 (+0.7)
+35.0 (+0.8)
+43.0 (+0.9)
+PE-Net[68]CVPR’23
+76.5
+36.6
+37.4
+44.9
+PE-Net+SIL
+77.1 (+0.6)
+37.2 (+0.6)
+37.8 (+0.4)
+45.5 (+0.6)
+D
+VISUALIZATION
+D.1
+Clustering Result
+In the Superpixel Clustering module of our SIL block, we cluster the
+points in the input image or feature map to obtain superpixels as the
+expression for SGG. We visualize the clustering results of Motif[61]
+equipped with SIL on the PredCls task in Fig. 7. As we can see,
+the Superpixel Clustering module could aggregate similar pixels
+effectively. As the clustering gets deeper, the clustered superpixels
+become more holistic and imply larger sub-regions in the original
+image. The superpixels generated by clustering could represent the
+boundary of entities clearly and enable the modeling of fine-grained
+interactions.
+D.2
+Relation Activation
+We perform GradCAM visualization to better understand the ef-
+fect of our modeling of fine-grained interactions. Specifically, we
+perform GradCAM [42] on the union regions of subjects and ob-
+jects with the predicate in a triplet as the goal. We adopt the Motif
+model as the baseline for the PredCls task. The GradCAM results
+are shown in Fig. 8. We compare the GradCAM results of the base-
+line without and with SIL, and annotate the corresponding triplets.
+The baseline method with coarse-grained interactions is inaccurate
+in capturing the specific location where interactions occur. With
+the fine-grained interaction modeling at the superpixel level in
+the proposed SIL, our method could capture the specific interac-
+tive sub-regions corresponding to the relations for scene graph
+generation.
+E
+BROADER IMPACT AND LIMITATIONS
+We propose SIL converting the previous box-level SGG pipeline
+into a superpixel-based one with fine-grained interactions. The
+presented SIL method can be integrated into any existing box-
+level model in a plug-and-play way. However, while improving
+the performance on scene graph generation, frequent fine-grained
+interactions lead to more time consumption. Therefore, a more
+efficient and sparse fine-grained interaction approach should be
+explored in further work.
+
+---PAGE_BREAK---
+MM ’23, October 29-November 3, 2023, Ottawa, ON, Canada
+Jingyi Wang, Can Zhang, Jinfa Huang, Botao Ren, and Zhidong Deng
+Clusters
+( level = 1)
+Image
+Clusters
+( level = 2)
+Clusters
+( level = 3)
+Figure 7: Visualization of the clustering results in SIL. The first column shows the original image and boxes of entities in each
+image. The other columns show the clustering results of visual features at different levels.
+boy
+jacket
+with
+Baseline + SIL
+sign
+letter
+has
+head
+person
+of
+woman
+shirt
+wearing
+Baseline
+Baseline + SIL
+Baseline
+Baseline + SIL
+Baseline
+Baseline + SIL
+Baseline
+Figure 8: More comparisons of GradCAM on features without/with the SIL block. Blue boxes indicate subjects in triplets. Pink
+boxes indicate objects.
+
+---PAGE_BREAK---

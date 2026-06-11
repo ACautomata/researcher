@@ -1,0 +1,5670 @@
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+1
+A Reverse Causal Framework to Mitigate Spurious
+Correlations for Debiasing Scene Graph Generation
+Shuzhou Sun, Li Liu, Tianpeng Liu, Shuaifeng Zhi, Ming-Ming Cheng, Janne Heikkil¨a, Yongxiang Liu
+Abstract—Existing two-stage Scene Graph Generation (SGG) frameworks typically incorporate a detector to extract relationship features and a
+classifier to categorize these relationships; therefore, the training paradigm follows a causal chain structure, where the detector’s inputs
+determine the classifier’s inputs, which in turn influence the final predictions. However, such a causal chain structure can yield spurious
+correlations between the detector’s inputs and the final predictions, i.e., the prediction of a certain relationship may be influenced by other
+relationships. This influence can induce at least two observable biases: tail relationships are predicted as head ones, and foreground
+relationships are predicted as background ones; notably, the latter bias is seldom discussed in the literature. To address this issue, we propose
+reconstructing the causal chain structure into a reverse causal structure, wherein the classifier’s inputs are treated as the confounder, and both
+the detector’s inputs and the final predictions are viewed as causal variables. Specifically, we term the reconstructed causal paradigm as the
+Reverse causal Framework for SGG (RcSGG). RcSGG initially employs the proposed Active Reverse Estimation (ARE) to intervene on the
+confounder to estimate the reverse causality, i.e. the causality from final predictions to the classifier’s inputs. Then, the Maximum Information
+Sampling (MIS) is suggested to enhance the reverse causality estimation further by considering the relationship information. Theoretically,
+RcSGG can mitigate the spurious correlations inherent in the SGG framework, subsequently eliminating the induced biases. Comprehensive
+experiments on popular benchmarks and diverse SGG frameworks show the state-of-the-art mean recall rate.
+Index Terms—Scene graph generation, causal inference, long-tailed distribution
+✦
+1
+INTRODUCTION
+Scene Graph Generation (SGG) is an essential task to bridge
+computer vision and natural language processing [1], [2], [3], [4].
+This task primarily focuses on producing a structured semantic
+representation of a scene, describing both the objects within
+the scene and their relationships. SGG offers a higher level
+understanding of a visual scene [5], [6], [7], which is crucial for
+cognitive tasks. It, therefore, has attracted significant attention
+due to its great potential for improving various downstream
+vision tasks, such as image-text retrieval [1], [8], visual question
+answering [9], [10], visual captioning [11], [12], etc.
+Despite
+considerable
+advancements
+in
+SGG
+task,
+the
+challenge
+of
+biased
+predictions
+persists
+as
+a
+relatively
+unaddressed
+concern.
+Within
+the
+body
+of
+research,
+such
+biased predictions typically refer to predicting fine-grained
+tail relationships as those belonging to coarse-grained head
+categories. The prevailing view attributes this to the imbalanced
+relationship distribution within SGG datasets. As illustrated
+in Figure 1 (a), the relationships are dominated by a few head
+categories, exemplified by the “on” relationship, which accounts
+for an extraordinary 34.8% of cases. The impact of this skewed
+distribution is showcased in Figure 1 (c), where it’s observed
+•
+This work was partially supported by the National Key Research and
+Development Program of China No. 2021YFB3100800, the Academy of Finland
+under grant 331883, Infotech Project FRAGES, and the National Natural
+Science Foundation of China under Grant 62376283 and 62201603.
+•
+Li Liu, Tianpeng Liu, Shuaifeng Zhi, and Yongxiang Liu are with the College of
+Electronic Science and Technology, National University of Defense Technology
+(NUDT), Changsha, Hunan, China.
+Li Liu (dreamliu2010@gmail.com), Yongxiang Liu (lyxbible@sina.com), and
+Tianpeng Liu (everliutianpeng@sina.cn) are the corresponding authors.
+•
+Shuzhou Sun is with the Department of Computer Science & Technology,
+Tsinghua University, Beijing, China, and also with the Center for Machine
+Vision and Signal Analysis (CMVS), University of Oulu, 90570 Oulu, Finland.
+Janne Heikkila is with the Center for Machine Vision and Signal Analysis
+(CMVS), University of Oulu, 90570 Oulu, Finland.
+•
+Ming-Ming Cheng is with the TKLNDST, College of Computer Science, Nankai
+University, Tianjin 300350, China.
+that a significant portion of the tail relationships are predicted
+as head ones; for instance, “covered in” is predicted as “on”.
+For the biased predictions, substantial efforts have been made
+through various approaches, including resampling [13], [14],
+reweighting [15], [16], [17], [18], adjustment [19], [20], and hybrid
+strategies [21], [22], [23], [24]. The above methods emphasize
+that imbalanced relationship distributions can mislead the SGG
+model; however, they overlook relationship features that are
+not derived through independent and identical distribution
+(i.i.d.) sampling within the relationship feature space but are
+aggregated from the image feature space (please refer to Section
+3.2 and Figure 3 (a) for a detailed analysis). As a result,
+these strategies inherently fail to address the gap of training
+relationship-level classifiers using image-level features, which,
+however, we believe, is pivotal to biased predictions.
+In this paper, we go beyond merely skewed relationship
+distributions, initiating our inquiry from the perspective of the
+training framework to uncover the roots of biased predictions
+within SGG task. Conventional SGG frameworks typically
+employ a sequential arrangement, featuring an object detector
+followed by a relationship classifier, all within a two-stage
+training paradigm [5], [6], [7], [25]. In the first stage, an object
+detector pre-trained on the SGG dataset for object detection
+tasks, extracts relationship features R from the input images
+X. These features R typically encompass the features of the
+objects involved in the pairwise relationships and their bounding
+boxes, often cropped from the complete feature map to maintain
+uniformity in size, the process can be achieved by RoI Pooling as
+seen in Faster R-CNN [26]. In the second stage, these extracted
+features R serve as the foundation for training a relationship
+classifier. Note that during this classifier’s training stage, the
+detector’s parameters are kept frozen. Thus, our goal is to build
+an optimal mapping between the classifier’s inputs (relationship
+features R) and outputs (final predictions Y ).
+However, the aforementioned decoupled SGG framework
+arXiv:2505.23451v1  [cs.CV]  29 May 2025
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+2
+(a)
+(b)
+Foreground relationships
+Background relationships
+(d)
+(c)
+bird
+wing
+wing
+bird
+head
+wing
+bird
+head
+on
+Foreground relationships
+Background relationships
+(No annotations provided)
+covered in
+covering
+from 
+laying on
+hanging from 
+on back of
+0
+50
+100
+150
+200
+250
+300
+350
+400
+Number of relationships in the test set
+ Right predictions
+ Wrong predictions
+ Wrong predictions on "on"
+ Wrong predictions on "has"
+ Wrong predictions on "in"
+ Wrong predictions on "of"
+above
+at
+carrying
+eating hanging from riding
+under
+using
+with
+0
+100
+200
+300
+400
+500
+600
+700
+ Right predictions with background output 
+ Right predictions without background output
+Number of relationships in the test set
+Foreground relationships
+Background relationships
+0%
+5%
+10%
+15%
+20%
+25%
+30%
+35%
+50 relationships in VG150
+Percentage of each relationship category
+Head relationships, e.g., 
+‘on’=34.8%, 
+‘has’=13.6%, etc.
+Tail relationships, e.g., 
+‘standing on’=0.7%, 
+‘carrying’=0.3%, etc.
+Fig. 1. The motivations of RcSGG. Images and count numbers are sourced from VG150. Test results were obtained from the MotifsNet model under the
+PredCls mode. (a) Distribution of head and tail relationships. Here, we approximate the top 50% as head relationships (on, has, in, of, wearing), with the
+remainder classified as tail relationships. (b) Foreground and background relationships in the scene graph generation task and their respective proportions
+over the entire dataset. (c) The number of right and wrong predictions, where we also showcase the number of instances incorrectly predicted as partial head
+relationships. (d) The number of right predictions under two scenarios: considering and not considering background relationships.
+results in a semantic gap between training features and the
+target model, i.e., relationship features sampled from the
+image space are utilized to train the relationship classifier.
+Focusing
+on
+aggregated
+relationship
+features
+within
+the
+image domain compromises the independence of relationship
+predictions, meaning that predictions for one relationship
+in an image should not be influenced by others. In this
+paper,
+we
+formally
+define
+such
+compromised
+predictive
+independence as spurious correlations within the two-stage
+SGG framework: The relationship features employed in classifier
+training are aggregated within the image domain, thus causing
+predictions for a particular relationship to be influenced by
+other relationships within the same image; this influence is
+defined in this paper as spurious correlations from the input
+image to relationship predictions. Clearly, any imbalance in
+image domain aggregation exacerbates the impact of these
+spurious correlations. Unfortunately, existing SGG datasets
+typically exhibit two types of imbalance at the image domain
+level: 1) Head and tail relationship imbalance, as seen in Figure
+1(a), and 2) Foreground-background relationship imbalance, as
+illustrated in Figure 1(b). Consequently, spurious correlations in
+SGG tasks lead to two types of prediction biases: 1) Predicting
+head relationships as tail relationships (Figure 1(c)), and 2)
+Predicting foreground relationships as background relationships
+(Figure 1(d)). To distinguish these biases, we refer to them
+respectively as head-tail bias and fore-back bias. Additionally,
+it is important to note that in SGG tasks, the image domain
+exhibits significant relationship co-occurrences. For instance,
+the probability of encountering “mounted on” and “growing
+on” within the same image is considerably higher than seeing
+“mounted on” and “flying on” together. Such co-occurrences
+can exacerbate the impact of spurious correlations, extensively
+analyzed in Section 3.2.
+For head-tail bias and fore-back bias induced by spurious
+correlations, we resort to causal inference [27], [28], [29], [30], an
+inference procedure that has demonstrated remarkable efficacy
+across fields such as statistics, econometrics, and epidemiology
+and has also gained considerable traction within the deep
+learning community in recent times. Our primary insight is that
+causal inference can model non-linear, high-order dependencies
+between variables [31], [32]. In our approach, we initially build a
+Structural Causal Model (SCM) [30], [33] tailored for the SGG
+task. From previous discussions, it is clear that a two-stage
+training paradigm should adhere to the causal chain structure
+X →R →Y , where →denotes the direction of causality. Thus,
+the problem simplifies to focusing on the causality R →Y ,
+which is influenced by spurious correlations between X and Y .
+Intuitively, ensuring statistical independence between X and Y
+within the chain structure X →R →Y can effectively eliminate
+the spurious correlations. Inspired by reverse causality [27], we
+reconstruct the causal chain X →R →Y into a reverse causal
+structure X →R ←Y . In this configuration, the correlation
+between X and Y is eliminated, effectively preventing spurious
+correlations in SGG tasks. This restructuring is supported by the
+two-stage training paradigm where: 1) A static object detector
+extracts relationship features R from image features X, which a
+relationship classifier then uses to predict labels Y . R inherently
+carries predictive information about Y , shaped by the label-
+guided training process. Thus, the observed causal relationship
+R →Y can effectively be modeled in reverse as Y
+→R,
+making R a mediator between X and Y . 2) Reverse causality
+[27] posits that Y →R reconstructs the dependency when the
+outcome Y can impact the intermediary R. In our framework,
+the distribution of R is continuously refined based on the
+outcomes from Y during the training of relationship classifier
+(as detailed in Section 3.3.1), aligning with the reverse causality’s
+requirements for dependency reconstruction.
+For the restructured framework X →R ←Y , we need
+to estimate the reverse causality, i.e., R ←Y . To achieve this,
+we propose Active Reverse Estimation (ARE), inspired by the
+model-to-data training paradigm in Active Learning (AL) [34],
+[35], [36], [37]. AL emphasizes the impact of inference outcomes
+on training data, aligning with our reconstructed inverse
+relationship R ←Y . ARE first establishes a query condition
+to sample from the query set for optimizing the feature space,
+where the query set constitutes a subset of the entire relationship
+feature space. Specifically, the query condition iterates based on
+the loss during training, thereby ensuring adaptive optimization
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+3
+of the relationship feature space. Unfortunately, the SGG task
+confronts a dual bias dilemma, i.e., head-tail bias and fore-back
+bias. To address dual imbalance, our proposed Active Reverse
+Estimation (ARE) encompasses two stages: 1) Borrowing from
+active learning’s model-to-data paradigm, each training iteration
+within our framework refines the space of foreground relations
+based on the prior iteration’s results, effectively addressing
+the challenge of head-tail bias. Additionally, SGG tasks face
+significant challenges due to dual imbalances: relationship and
+object imbalances, where object imbalances further lead to
+disparities among object pairs. Consequently, the ARE sampling
+tends to converge on prominent object pairs, as elaborated in
+Section 3.3.2. To counteract this issue, we introduce Maximum
+Information Sampling (MIS), which focuses on maximizing
+the information yield from sampling outcomes based on the
+distribution of object pairs. 2) For the optimized foreground
+relationship space, we selectively discard certain background
+relationships to mitigate fore-back bias, while our meticulously
+designed foreground-background preservation ratio enhances
+model training stability. Notably, our approach is designed to be
+seamlessly incorporated into any two-stage framework, offering
+a model-agnostic solution that supports both reverse causality
+estimation during training phase and forward causality inference
+during testing phase, as detailed in Section 3.4.4.
+In summary, the contributions of our work are three-fold:
+•
+We thoroughly analyze the biased prediction problem in
+the SGG task, including the widely studied head-tail bias
+and the less-discussed fore-back bias. Importantly, we
+identify that both types of bias originate from the same
+underlying issue, i.e., spurious correlations.
+•
+We reconstruct the causal chain structure of the standard
+SGG paradigm into a reverse causal structure, denoted as
+RcSGG. RcSGG incorporates Active Reverse Estimation
+for reverse causality estimation, alongside employing
+Maximum Information Sampling to refine this estimation
+process. Theoretically, our method eradicates biased
+predictions induced by spurious correlations between
+input images and final outputs.
+•
+RcSGG attains state-of-the-art performance in terms
+of mean recall rate, as demonstrated by extensive
+experimental results on popular benchmarks and SGG
+frameworks, while also achieving a better trade-off
+between recall and mean recall rates.
+2
+RELATED WORKS
+2.1
+Unbiased cene Graph Generation
+Scene Graph Generation (SGG) assigns a triplet relationship,
+such as <people, sitting on, chair>, to each pair of objects in
+an image [3], [4]. Hence, compared to image classification [38],
+[39] and object detection [26], it facilitates a more profound
+understanding of the given scenes. Benefiting from this, SGG
+has shown promising utility across a spectrum of downstream
+applications, such as image-text retrieval [1], [8], visual question
+answering [9], [10], and visual captioning [11], [12]. However, the
+challenge of data imbalance within SGG datasets [40], which can
+yield biased predictions, has prompted a shift in research focus
+towards developing debiasing strategies. Consequently, our
+discussion narrows to the examination of debiasing approaches
+within the SGG task, highlighting efforts to enhance the
+influence of tail relationships during model training. These
+efforts can broadly be categorized into four distinct categories:
+Resampling methods [13], [14], [41] upsample tail relationships
+and/or downsample head ones to rebalance the training data
+distribution. For instance, Decoupled Training for Devil in the
+Tails (DT2) [41] devised a novel sampling method, Alternating
+Class-Balanced Sampling (ACBS), to capture the interplay
+between long-tailed entities and the predicate distribution of
+visual relationships.
+Reweighting methods [15], [16], [17], [18], [42] modify the
+contributions of various relationships during training, for
+instance, by weighting prediction losses to improve the model’s
+ability to represent tail categories. Recently, Multi-Label Meta
+Weight Net (ML-MWN) [42] introduced a multi-label meta-
+learning framework to address biased relationship distributions,
+learning a meta-weight network for each training sample.
+Adjustment methods [19], [20] adjust the biased models to
+achieve debiased predictions, for example, by adjusting output
+logits to enhance the probability of neglected relationships
+during training. Dynamic Label Frequency Estimation (DLFE)
+[19] frames SGG as a Learning from Positive and Unlabeled data
+(PU learning) task and introduces Dynamic Label Frequency
+Estimation (DLFE) to refine label frequency estimates, leveraging
+training-time data augmentation over multiple iterations.
+Hybrid methods [21], [22], [23], [24] typically integrate a
+subset or even all of the aforementioned strategies. For example,
+NICE [22] initially detects noise in samples to reassign them
+high-quality soft predicate labels and incorporates a dynamic
+balancing weighting strategy during the knowledge distillation
+phase to penalize biases across different teacher networks.
+Beyond the strategies previously outlined, some recent
+works [43], [44], [45] enhance learning for tail relationships
+through network modifications to pursue debiased predictions.
+Furthermore, incorporating additional knowledge, especially
+from large models, shows promise in mitigating biases in SGG
+models. For instance, CaCao [46] enhances tail relationships
+using the pretrained language models. Recently, Semantic
+Granularity
+Controller
+(SGC)
+[47]
+has
+been
+proposed
+to
+address predicate overlap by dynamically adjusting predicate
+granularity. While both SGC and RcSGG aim to mitigate biases
+in SGG, their focuses differ: SGC primarily targets predicate-
+level adjustments to resolve annotation inconsistencies, whereas
+RcSGG
+addresses
+spurious
+correlations
+by
+reconstructing
+the
+causal
+structure
+of
+the
+training
+paradigm.
+Although
+debiasing research is rather active in the SGG community, these
+approaches primarily emphasize the influence of the long-tail
+distribution on relationship classifier training while neglecting
+the fundamental source of bias: spurious correlations arising
+from the current two-stage training paradigm. Furthermore, the
+foreground-background imbalance is rarely considered in these
+methods. In contrast, our work traces the model bias from the
+causal perspective and proposes a debiased scene graph model,
+RcSGG. Our method estimates the reverse causality and thus
+can eliminate both head-tail and fore-back biases induced by
+spurious correlations within the two-stage training paradigm.
+2.2
+Causal Inference
+Causal
+inference
+investigates
+causal
+relationships
+between
+variables, employing experimental design and observational
+studies to mitigate confounding factors, and has achieved
+impressive
+performance
+in
+statistics,
+econometrics,
+and
+epidemiology [27], [29], [30], [32], [48], [49]. Causal inference
+has also attracted significant attention in the SGG community
+recently. Such approaches focus on the intrinsic features of
+the relationships through causal interventions, mitigating the
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+4
+Stage 2
+ book
+people
+sitting on
+behind
+holding
+chair
+dog
+output
+Relationship
+feature
+Object pair
+feature
+Relation
+classifier
+Feature cropping
+Spatial embedding
+Class
+label
+Word embedding
+Bounding
+box
+input
+Object
+detector
+Visual
+feature
+Stage 1
+X
+fo
+R
+fc
+Y
+Fig. 2. The standard pipeline of the two-stage scene graph generation framework, where the input image X is processed by a pre-trained object detector to
+obtain relationship features R, followed by a relationship classifier to produce the final output Y .
+effects of confounding variables, and thereby making debiased
+predictions even in the face of skewed distributions. For
+instance, TDE [20] employs counterfactual estimation for the
+debiasing of the trained SGG model. DSDI [50] addresses dual
+imbalances in observed data by incorporating biased resistance
+loss and a causal intervention tree, consequently enhancing
+foreground representation and mitigating context bias. More
+recently, TsCM [51] introduced a two-stage causal learning
+approach: the first stage focuses on causal representation
+learning, eliminating the semantic confusion bias in the SGG
+task, while the second stage emphasizes causal calibration
+learning, addressing the long-tailed distribution bias. Compared
+to
+the
+aforementioned
+methods,
+our
+approach,
+RcSGG,
+emphasizes two key distinctions:
+1) Source of bias. Our work investigates biases from
+the perspective of model architecture. Specifically, we analyze
+the spurious correlations inherent in the prevalent two-stage
+training paradigm and identify two observable biases: head-tail
+bias and fore-back bias. Notably, the latter has received limited
+attention in the existing literature. In contrast, methods such as
+TsCM [51] focus on bias sources primarily at the data distribution
+level, such as the imbalance in relationship distributions.
+2) Bias mitigation. RcSGG mitigates spurious correlations by
+reconstructing the causal chain into a reverse causal structure,
+effectively addressing the biases introduced by the two-stage
+training paradigm. In contrast, existing methods like TsCM [51]
+are predominantly data-driven, relying on statistical knowledge
+extracted from the training set, such as relationship populations
+and adjustment factors. These methods fail to address the root
+causes of bias and overlook architecture-specific biases.
+3
+METHODS
+3.1
+Overview
+Popular Scene Graph Generation (SGG) frameworks typically
+involve
+two
+subtasks:
+object
+detection
+and
+relationship
+classification [1], [2], [5], [20], [25]. As depicted in Figure 2,
+the object detector, denoted as fo, begins by extracting class
+labels, bounding boxes and visual features from the images X.
+Since fo is frozen, such information for an image remains fixed
+throughout the training process. Class labels and bounding
+boxes are embedded into vectors of specific dimensions,
+while visual features are cropped based on bounding boxes
+to represent vectors of individual objects, typically achieved
+through RoI pooling. These vectors are then jointly embedded
+into relationship features R. Subsequently, these features R are
+paired and fed into the relationship classifier fc to produce
+the final output Y . However, it’s worth emphasizing that the
+detector fo is typically pre-trained on the SGG dataset with the
+object detection task and remains frozen during the training of
+classifier fc. Hence, the central goal of this typical two-stage
+SGG framework is to develop a high-performing relationship
+classifier fc, with fo serving merely to extract relationship
+features from X necessary for fc’s training.
+The typical two-stage SGG framework, refined for debiasing,
+primarily scrutinizes skewed annotations as the main source of
+model biases. However, these approaches overlook the model
+biases induced by the decoupled two-stage training regime,
+where “decoupled” refers to fo and fc undergoing separate
+training phases. Such biases are attributable to fc being trained
+with a skewed feature space, yet this non-ideal space is actually
+extracted from images by a pre-trained and subsequently
+frozen detector. Evidently, there exists a training gap here:
+fc’s training input is relationship features. These features do
+not come as independently and identically distributed samples
+from the relationship space but are instead extracted from the
+image space, leading us to argue that this introduces spurious
+correlations between the input images and the final predictions.
+Formally, in Section 3.2, we discuss the origins of spurious
+correlations and how they induce model biases, especially the
+head-tail bias and fore-back bias. We further analyze why a
+potential solution, batch balance, is inappropriate for the SGG
+task. In Section 3.3, we introduce a slightly tempered alternative,
+approximate batch balance; however, as a compensation for
+the approximation, we suggest leveraging a reverse causal
+estimation strategy to optimize the feature space in each batch.
+In Section 3.4, we highlight how our method differentiates
+from reweighting and resampling techniques, and detail its
+integration of both reverse and forward causal estimations
+into any SGG framework, enhancing its utility for debiased
+predictions.
+To clarify upcoming sections, we define key notations and
+symbols here. Let D = {(X, Y )} = {(xi, yi)}ND
+i=1 denote the
+observed data with ND samples, where xi is i-th instance in
+image set X; yi ∈RNi×K represents the Ni relationships in the
+i-th image, and its element yij ∈RK is a K dimension one-
+hot vector denoting the label of j-th relationship in xi. For the
+observed data D, we denote the extracted relationship features as
+R = {ri}ND
+i=1; ri ∈RNi×d represents the Ni relationship features
+extracted from image xi, while rij ∈Rd denotes the feature
+of the j-th relationship. Following the batch-based training
+procedure, each iteration comprises multiple batches of equal
+size. We define the b-th batch in the t-th iteration as Btb, where
+t ∈Z+ denotes the iteration index and NB is the batch size;
+therefore, D can be partitioned into ⌈ND/NB⌉batches in each
+iteration. For simplicity, we assume ND/NB ∈Z+. Additionally,
+for brevity in the following text (Section 3.2, 3.3, and 3.4), we
+define [K] .= 1, 2, . . . , K to represent the set of category indices,
+and separately, we use | · | to denote the length/size of the given
+set/list.
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+5
+3.2
+Spurious Correlations in SGG Task
+As elucidated in Section 3.1, we focus mainly on the relationship
+classifier fc instead of the object detector fo. The latter, being
+pre-trained, remains frozen during training and solely extracts
+relationship features from X to support fc training. However,
+this training approach compromises the independence of the
+relationship space for fc training. Ideally, in an independent and
+identically distributed (i.i.d.) sampling scenario, relationships
+should be sampled independently to ensure that the recognition
+of each is unaffected by others. In reality, however, the typical
+training procedures sample on a per-image basis rather than per-
+relationship, resulting in similar or identical relationships within
+a single image. For example, in an image with many people
+sitting on chairs, the predominant relationship is ”people, sitting
+on, chair.” As a result, the relationship features fo extracts from
+a single image are not independent but highly correlated.
+In Figure 3 (a), we depict an example with three class,
+showing their feature distribution at the relationship level.
+For simplicity, we assume ND/NB = 3. Hence, in an ideal
+scenario, after i.i.d. sampling, the distribution within each batch
+is expected to align with the original feature space distribution.
+However, because relationship features are aggregated at the
+image level in the SGG task, this ideal i.i.d. condition is violated.
+Relationships like ”standing on” and ”eating” frequently appear
+in indoor scenes, while ”flying in” is common in outdoor images,
+as shown in Figure 3 (a). Additionally, there is strong co-
+occurrence of relationships in SGG tasks, as illustrated in Figure
+3 (b). For instance, the probability of ”growing on” co-occurring
+with ”mounted on” is much higher than with ”flying on” in a
+scene. As a result, even if the images are i.i.d. sampled, the
+derived relationship features are dependent. Such dependency
+results in the identification of a relationship being impacted
+by other relationships in the image, constituting the spurious
+correlation between X and Y . The detailed proof of spurious
+correlations between X and Y is provided in Appendix A.
+A salient pathway through which spurious correlations
+clearly arise from transferring bias from X to R, consequently
+misleading fc and ultimately yielding biased predictions Y :
+fbias = argminf∈F RCE(fc),
+(1)
+where RCE is the Relationship Classification Error and RCE(·)
+is a supervised kernel (e.g. cross-entropy loss). Recently, Wang
+et al. [48] employed a balanced minibatch sampling strategy to
+achieve Bayes-optimal classifiers by leveraging the invariance in
+the underlying causal mechanisms of the data. Inspired by this
+work, we give two assumptions, Assumptions 1 and 2, for the
+spurious correlation in SGG tasks from the batch perspective.
+Assumption 1 (Spurious correlations in a single batch). For
+any relationship feature rp
+tb in batch Btb, its outcome is influenced by
+another feature rq
+tb in the same batch. Formally, Y (rp
+tb) ̸= Y (rp
+tb∪rq
+tb),
+where Y (·) represents the prediction of the first instance in the given
+feature combination.
+Assumption 2 (No spurious correlations across batches). For
+any relationship feature rp
+tb in batch Btb, its outcome is unaffected
+by any feature rq
+mn from a different batch Bmn. Formally, Y (rp
+tb) =
+Y (rp
+tb ∪rq
+mn), where b ̸= m.
+Assumptions 1 and 2 are foundational to this paper;
+Assumption 1 posits that relationships within the same batch
+influence each other, whereas Assumption 2 asserts no such
+influence across different batches. The detailed mathematical
+proofs supporting Assumptions 1 and 2, including the analysis
+of parameter updates and the effects on the loss function, are
+provided in Appendix C.
+batch b
+batch b+1
+batch b+2
+image 
+space 
+i.i.d.
+i.i.d.
+batch b
+batch b+1
+batch b+2
+relationship
+feature space
+independent
+dependent
+(a)
+(b)
+across
+against
+covered in
+flying in
+from
+growing on
+made of
+mounted on
+painted on
+parked on
+part of
+playing
+says
+to
+walking in
+across
+against
+covered in
+flying in
+from
+growing on
+made of
+mounted on
+painted on
+parked on
+part of
+playing
+says
+to
+walking in
+0.000
+5.200
+10.40
+15.60
+20.80
+26.00
+Fig. 3. (a) Sampling independence of the relationship feature space and the
+image space. Solid spheres,
+,
+, and
+, denote different relationships. An
+irregular closed black curve symbolizes an image. (b) Co-occurrences of
+relationships in the VG150 train set; only a subset is displayed for clarity.
+Theorem 1 (Bayesian optimal classifier induced by epoch
+balance). The model fc trained on D is a Bayesian optimal classifier
+f ∗
+c , i.e. argmaxy∈[K] fc(r) = argmaxy∈[K] f ∗
+c (r), if the following
+two conditions hold: 1) ND = NB, 2) |rm| = |rn| (m ∈[K], n ∈
+[K], m ̸= n), where rm is the feature of m-th relationship class in D.
+Theorem 2 (Bayesian optimal classifier induced by batch
+balance). The model fc trained on D is a Bayesian optimal classifier,
+i.e. argmaxy∈[K] fc(r) = argmaxy∈[K] f ∗
+c (r), if the following two
+conditions hold: 1) ND/NB ∈{2, 3, 4 · · · }, 2) |rbm| = |rbn|
+(b ∈[ND/NB], m ∈[K], n ∈[K], m ̸= n), where rbm represents
+the features of the m-th relationship category in the b-th batch.
+Assumptions 1 and 2 highlight the sources of spurious
+correlations in the SGG task, thereby revealing that we only need
+to balance within each batch to prevent spurious correlations. Let
+us consider the simplest full batch training case where ND equals
+NB. In this case, we only need to ensure that the entire dataset is
+category-balanced to obtain the Bayes optimal classifier, which
+is unaffected by spurious correlations (see Theorem 1). The
+detailed proof of Theorem 1 can be found in Appendix D.
+However,
+due
+to
+practical
+hardware
+constraints,
+most
+training
+pipelines
+conform
+to
+batches
+where
+ND/NB ∈{2, 3, 4 · · · }. In such cases, achieving a Bayesian
+optimal classifier merely necessitates balancing data within
+each batch (see Theorem 2) [48], [52]. Based on Theorem 1,
+we can easily derive Theorem 2. Even though ND ̸= NB,
+the classification remains balanced within each batch, i.e.,
+|rim| = |rin|. This implies that the model’s updates on each
+batch will resemble those made over D, leading to the equation:
+∇θLfc(Bt; θ) ≈∇θLfc(D; θ),
+(2)
+where ∇
+and θ
+correspond
+to
+the
+gradient and
+model
+parameters, respectively, while Lfc denotes the loss function of
+the model fc, typically the cross-entropy loss.
+Owing to the similarity in the direction of updates, it can be
+further ensured that after multiple iterations, the model weights
+θ will gradually converge to what they would have been had
+the updates been performed on D. As a result, while Theorem 2
+makes use of more approximations, it still arrives at a conclusion
+analogous to Theorem 1, i.e., fc is a Bayesian optimal classifier.
+Unfortunately,
+despite
+the
+potential
+of
+Theorem
+2
+in
+facilitating debiased SGG, its implementation (e.g. rebalancing
+strategies [13], [14]) faces significant challenges. The serious
+long-tail distribution in SGG tasks makes achieving balanced
+relationship
+categories
+within
+each
+training
+batch
+nearly
+impossible. In this paper, we argue that spurious correlations in
+SGG are due to the fact that the relationship features R in the
+standard pipeline inevitably absorb the data bias of input X,
+thereby failing to estimate a satisfactory causality of R →Y .
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+6
+3.3
+Reverse Causal Framework
+Section 3.2 underscores the spurious correlations in the SGG task
+and discusses the inadequacy of the batch balance method in
+resolving this issue. In this work, we conceptualize spurious
+correlations as dependencies among causal variables. We first
+model the Structural Causal Model (SCM) [30], [33] for the two-
+stage SGG training pipeline, which clearly follows a causal chain
+structure, X →R →Y , where →denotes the causal direction, as
+shown in Figure 4 (a). Hence, the relationship classifier fo in the
+standard two-stage SGG framework essentially aims to estimate
+the causality between R and Y , while the spurious correlations
+pertain to the dependency between X and Y :
+P(X, Y ) =
+X
+R
+P(X, R, Y ) =
+X
+R
+P(X)P(R | X)P(Y | R). (3)
+Equation (3) highlights the dependency between X and Y in the
+causal chain X →R →Y , resulting in spurious correlations that
+negatively affect fo. Inspired by causal inference theory [27], we
+model the SGG task with a reverse causal structure X →R ←Y ;
+this approach inherently circumvents the spurious correlation
+between X and Y , as shown in Figure 4 (b). According to the D-
+Separation principle, if R is not given, X and Y are independent
+since R acts as a collider, resulting in P(X, Y ) = P(X)P(Y ).
+Additionally, even when R is given, the paths from X →R and
+R ←Y are decoupled, preventing collider bias and maintaining
+independence between X and Y . Hence, we still have:
+P(X, Y ) =
+X
+R
+P(X, R, Y )
+= P(X)P(Y )
+X
+R
+P(R | X, Y ) = P(X)P(Y ).
+(4)
+As depicted in Equation (4), X
+and Y
+are independent.
+This independence does not mean that image features X are
+unrelated to outcomes Y , but that relationship predictions in
+a scene do not depend on other concurrent relationships. For
+instance, consider a scene with N + 1 relationships; even if N of
+these relationships are “sitting on,” it does not necessarily follow
+that the additional one is also “sitting on.” Unfortunately, in the
+existing paradigms based on chain causality, X and Y are highly
+dependent, and in the example given above, another relationship
+might be predicated as “sitting on,” meaning the prediction of
+a instance could be influenced by other relationships, which is
+the spurious correlations we focus on in this paper. Inspired by
+Equation (4), to eliminate spurious correlations between X and
+Y , all we need is an appropriate intervention on the confounder
+R within the reconstructed reverse causal structure [27]. To
+achieve this goal, our method intervenes on the relationship
+features provided by fo; these obtained features can, therefore,
+be regarded as independent and identically distributed samples
+from the entire relationship feature space. Consequently, RcSGG
+estimates a clean reverse causality, i.e. R ←Y .
+To estimate the reverse causality R ←Y , we propose Active
+Reverse Estimation (ARE), inspired by the Active Learning (AL)
+paradigm [34], [35], [36]. Our main insight is that R ←Y
+signifies that the relationship features R are derived from the
+predictions Y , which is highly similar to the fundamental
+concept of AL, i.e. model-to-data, where the sampling process
+in the current AL round is often guided by the model results
+obtained from the previous rounds. Specifically, AL acquires
+a limited number of data points from the query set based on
+the query conditions for model training, thereby alleviating
+expensive labeling costs. Generally, the query conditions of the
+current AL round are determined by the model results of the
+(a)
+Spurious correlations
+Causal
+Reverse causal
+(b)
+X
+R
+Y
+X
+R
+Y
+Fig. 4. Structural Causal Model (SCM). (a) is the causal chain structure of the
+typical two-stage SGG method. (b) is the reverse causal structure we propose.
+previous rounds. Readers may refer to AL literature [35], [36]
+and its exploration [37] in the SGG task for more information.
+Theorem
+3
+(Bayesian
+optimal
+classifier
+induced
+by
+approximate batch balance). The model fc trained on D is a Bayesian
+optimal classifier, i.e. argmaxy∈[K] fc(r) = argmaxy∈[K] f ∗
+c (r),
+if the following two conditions hold: 1) ND/NB ∈{2, 3, 4 · · · }, 2)
+|rbm| ≈|rbn| (b ∈[ND/NB], m ∈[K], n ∈[K], m ̸= n).
+In summary, ARE leverages the model-to-data paradigm of
+AL to simulate reverse causality R ←Y . Although AL sampling
+results are often not class-balanced because query conditions do
+not apply equally to all classes, they can achieve rough balance
+through adaptive adjustments in subsequent rounds [37]. This
+enables ARE to optimize the relationship feature R effectively,
+leading to an approximate batch balance. While this may not
+fully satisfy the strict balance conditions of Theorem 2, it still
+supports achieving a Bayesian optimal classifier as outlined in
+Theorem 3, with a detailed proof in Appendix E.
+3.3.1
+Active Reverse Estimation
+Section 3.2 highlights that the unobserved confounder Z
+introduces spurious correlations between X and Y , and thus, the
+relationship classifier fc is actually learned within a perturbed
+effective parameter space FR from the parameter space F. It
+should be noted that in this paper, effective parameter space
+and parameter space have distinct meanings. The former refers
+to the range of parameters learnable given the training data
+under a specific model, while the latter denotes the set of
+all possible parameter values within the model. Consequently,
+FR is determined by both fc and R, whereas F is solely fc
+dependent. As a result, even under ideal training conditions, the
+fc cannot evade the impact of these correlations. This prompts us
+to seek an effective parameter space F eR devoid of such spurious
+correlations, wherein the Bayesian optimal classifier f ∗
+c can be
+achieved using a standard classification supervised kernel:
+f ∗
+c = argminfc∈Ff
+R RCE(fc).
+(5)
+Equation (5) shows that achieving the Bayesian optimal classifier
+f ∗
+c necessitates the identification of the effective parameter space
+F eR, governed by fc and R. In the two-stage SGG framework,
+this space is composed of Spurious Correlation Error (SCE) and
+Overlapping Error (OE), with OE representing the intersection of
+SCE and RCE; further analysis of F eR can be found in Appendix
+B. To ensure fc learns within F eR, we propose Active Reverse
+Estimation (ARE), which optimizes the relationship feature R
+by estimating the reverse causality R ←Y . ARE is inspired by
+AL, which designs query conditions to select high-information
+samples from the query set to reduce annotation costs [34], [37].
+Similarly, we first establish the query set Q and design the
+query conditions Qcond, both of which are conducted within
+the relationship feature space, inherently avoiding spurious
+correlations between X and Y . Specifically, let Q = {Qi}K′
+i=1
+(K′ < K), where Qi denotes all the features corresponding
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+7
+to the i-th relationship. Q does not encompass all relationship
+categories for two primary reasons: 1) The extreme long-tail
+distribution of the SGG dataset ensures that nearly all images
+in each batch include head relationship features. 2) While our
+designed query condition Qcond offers some resilience against
+disturbances in the distribution of the query set Q, it remains
+crucial to prevent severe long-tail distribution issues within the
+relationship classes of Q, as attested to in Section 4.3. Intuitively,
+this can be achieved by down-sampling Q, but this sacrifices
+some features. Instead, we achieve this aim by adjusting K′,
+ensuring that relationship features are fully leveraged and
+offering a scalable avenue for applying our method to datasets
+with varying degrees of long-tail distributions.
+Then, we design the query conditions Qcond to sample from
+the query set Q to estimate the reverse causality R ←Y .
+Inspired by the model-to-data training mode in AL, we propose
+a loss-driven estimation approach that spans across batches.
+Considering the consistency of query conditions across batches,
+we focus on the query condition Qtb
+cond of a specific batch, i.e.
+the b-th batch in the t-th iteration, as well as its entire process of
+reverse causality estimation. let Ltb = {Lk
+tb}K′
+k=1 and Lk
+tb denote
+the average loss of the k-th category in query set Q when training
+fc with Btb. We then model the query condition Qtb
+cond using the
+probability distribution Ptb = {P k
+tb}K′
+k=1 of Ltb, where
+P k
+tb = exp(−αLk
+tb)/
+K′
+X
+k=1
+exp(−αLk
+tb),
+(6)
+and α here is a weight factor used to adjust the attention to
+categories within different loss intervals. Qtb
+cond is built upon Ptb;
+therefore, Qtb
+cond captures the reverse causality R ←Y , as the
+relationship feature space R for the current batch is determined
+by the loss of the previous batch, with the loss naturally
+interpreted as the category-level training outcome Y . Based on
+this observation, we model the reverse causality estimation as
+sampling K′ categories from the query set Q based on the loss
+probability distribution Ptb and incorporate the sampled results
+into the current batch’s relationship feature space. Specifically,
+for Qtb
+cond, it implies that the sampling size for the corresponding
+category in Q is Ntb = {enk
+tb}K′
+k=1, where
+enk
+tb = λP k
+tb|Qk|,
+and λ is a hyper-parameter utilized to control the order of
+magnitude of the sampling process. To ensure coverage of the
+entire relationship feature space, we employ a sampling without
+replacement strategy from the query set Q. Once a particular
+relationship feature is completely sampled, all features of that
+category in D are replenished back into Q.
+The reverse causality estimation consists of two steps: Step
+1) Calculate the query condition Qtb
+cond based on Ptb. Step 2)
+Sample and integrate relationship features R+
+tb = {rk+
+tb }K′
+k=1 into
+the current batch’s feature space based on Qtb
+cond. These features
+are derived using the sampling kernel ξ∆(·, ·), with ∆denoting
+the sampling method, focusing on the quantity and source pool
+for each category. For instance, the sampled relationship feature
+of k-th category in Q can be calculated as:
+rk+
+tb = ξ∆(Qk, enk
+tb).
+Intuitively, ∆in the above formula can be random sampling
+(rnd).
+However,
+this
+naive
+approach
+often
+yields
+low-
+information samples. Consequently, we propose a Maximum
+Information Sampling (MIS) approach (detailed in Section 3.3.2).
+Thus, within our framework, rk+
+tb is computed as:
+rk+
+tb = ξMIS(Qk, enk
+tb).
+(7)
+(a) Overall feature space
+(b) Feature space without ARE
+(c) Feature space with ARE
+Backcground relationship
+Foreground relationship
+erbg
+tb
+R+
+tb
+Fig. 5. (a) Distribution of relationship features across the entire dataset.
+(b) and (c) depict the distribution of relationship features within a batch;
+the former represents the original distribution, while the latter illustrates the
+distribution optimized by our proposed Active Reverse Estimation (ARE).
+It can be observed that rk+
+tb
+is sampled from Q based on the
+query condition Qtb
+cond, and each feature cannot be traced back
+to its original image X, as the reverse causality estimation
+intervenes in the feature space R. As a result, we have
+P(X, Y ) = P(X)P(Y ).
+Beyond the reverse causality estimation for foreground
+relationships, we also observed that the SGG dataset is replete
+with extensive background relationships, as depicted in Figure 1
+(b). This may cause fc to misclassify foreground relationships as
+background ones, i.e., fore-back bias, as discussed in Section 1.
+Continuing with the example of the t-th iteration’s b-th
+batch, rfg
+tb and rbg
+tb represent the foreground and background
+relationships within the batch, respectively. For rbg
+tb , we retain
+only min(|rbg
+tb |, enbg
+tb ) background relationships, where min(·, ·)
+is a computation kernel to take the minimum value of the input
+at two positions. It is given that:
+enbg
+tb = π({enk
+tb}K′
+k=1 + |rfg
+tb |),
+and π is a hyper-parameter. Herein, {enk
+tb}K′
+k=1 + |rfg
+tb | computes
+the number of foreground relationships within the batch after
+reverse causality estimation. Consequently, the aforementioned
+equation aims to maintain a fixed ratio between background and
+foreground relationships, specifically at π:1. Thus, the retained
+background relationships erbg
+tb can be sampled as:
+erbg
+tb = ξrnd(rbg
+tb , enbg
+tb ).
+(8)
+Here, we have an interesting observation. MIS demonstrates
+significant enhancement for foreground relationships, while its
+effect on background relationships closely resembles that of
+random sampling, as elaborated in Section 4.3. Thus, we employ
+random sampling rnd in Equation (8) to maintain high efficiency.
+We argue that the intervention on background relationships
+focuses on maintaining its ratio with foreground relationships
+rather than on the relationships themselves. This assertion can
+be validated by adjusting π, also explored in Section 4.3. Within
+the t-th iteration, the relationship features Btb of the b-th batch
+is eventually updated to eBtb,
+eBtb = erbg
+tb ∪rfg
+tb ∪R+
+tb,
+(9)
+serving as the basis for training the desired model fc. As
+illustrated in Figure 5 (b), in a typical training procedure,
+a batch often covers only a limited number of foreground
+relationships while being inundated with numerous background
+relationships. However, our proposed reverse causal estimation,
+by emphasizing the impact of Y on R, significantly optimizes
+this skewed relationship feature space, as seen in Figure 5 (c). It is
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+8
+man-bench
+woman-bench
+person-bench
+man-chair
+woman-chair
+person-chair
+people-bench
+glass-table
+plate-table
+man-motorcycle
+person-sidewalk
+man-sidewalk
+person-street
+woman-sidewalk
+people-sidewalk
+man-street
+man-beach
+person-beach
+people-street
+woman-street
+person-snow
+man-snow
+person-sidewalk
+man-sidewalk
+man-surfboard
+person-beach
+man-beach
+people-sidewalk
+person-street
+man-street
+0
+100
+200
+300
+400
+500
+600
+Number of object pairs
+ sitting on
+ walking on
+ standing on
+Fig. 6. Given the distribution of object pairs under specific relationships, for
+clarity, only the top 10 object pairs are displayed for each relationship.
+worth mentioning that R+
+tb can achieve approximate balance by
+adjusting λ without sacrificing the properties of reverse causal
+estimation. The trained model will, therefore, be a Bayesian
+optimal classifier; see Theorem 3. Moreover, ARE depends on
+Assumption 2’s premise of batch independence. Even in practical
+scenarios where this assumption is not strictly satisfied, we argue
+that ARE remains effective due to: 1) The local optimization of
+feature spaces for each batch, driven by the dynamic condition
+Qcond, minimizes disruptions between consecutive batches,
+and 2) The non-replacement strategy prevents the propagation
+of correlations across batches, enabling ARE to maintain its
+robustness even when the ideal conditions are not fully met.
+In summary, we propose ARE to intervene in the relationship
+feature space during classifier training. While this method may
+appear similar to the resampling methods [13], [14] reviewed in
+Section 2.1, ARE distinguishes itself in three key ways:
+1)
+Different
+sampling
+drivers.
+Resampling
+methods
+address imbalances by reweighting class frequencies through
+oversampling or undersampling, whereas ARE, inspired by AL,
+is loss-driven and enhances the feature space during training.
+To our knowledge, ARE is the first method to leverage AL
+techniques for intervening in causal relationships in SGG tasks.
+2) Focus on both foreground and background relationships.
+Existing resampling methods primarily focus on foreground
+relationships. ARE, however, incorporates both foreground and
+background relationships through reverse causal estimation,
+enabling it to address both head-tail bias and fore-back bias.
+3) Granularity of sampling. Resampling methods typically
+focus solely on relationship distributions, overlooking the impact
+of object distributions. ARE, guided by the proposed MIS,
+simultaneously considers both relationship and object attributes,
+ensuring that the feature space captures the maximum possible
+information. Details of MIS are provided in Section 3.3.2.
+3.3.2
+Maximum Information Sampling
+This subsection introduces Maximum Information Sampling
+(MIS). The motivation for MIS arises from several unique
+challenges of integrating AL concepts into SGG tasks:
+1) Dual imbalances in SGG. SGG tasks are characterized by
+both relationship imbalance and object imbalance, which further
+propagate into object pair imbalance, as illustrated in Figure 6.
+For instance, object pairs such as “<man, sitting on, bench>”
+dominate the dataset, while rarer combinations are severely
+underrepresented. This imbalance not only skews the sampled
+feature space but also exacerbates spurious correlations, limiting
+the representativeness of training batches.
+2) Category-to-instance sampling gap. The query conditions
+in AL are typically at the instance-level [35], [36], [37]; however,
+the relationship query conditions we proposed are at the
+category-level. This implies that we need to conduct instance-
+level sampling from Q using category-level query conditions,
+which, could result in ambiguous reverse causal estimations.
+3) Integration with reverse causality. Effective sampling
+in SGG must also align with the reverse causal framework
+introduced.
+Sampling
+strategies
+need
+to
+simultaneously
+maximize mutual information and adaptively refine relationship
+features (R) based on outcomes (Y ) to ensure the elimination of
+spurious correlations and maintain causal consistency.
+In response to these challenges, we introduce MIS, which
+assesses relationship feature information using object pairs to
+maximize diversity within each sampled batch. For the sake of
+generality, we illustrate MIS using the k-th relationship category
+as an example, where enk
+tb samples are drawn from Qk. For
+this category, assuming that the frequency of the object pair
+< oµ, oν > in the current sampling pool is p(oµ, oν), where oµ
+and oν represent the object and subject respectively, we define
+its information content within Qk as −log(p(oµ, oν)). Hence, the
+entropy of Qk can be formulated as:
+H(Qk) = −
+X
+(oµ,oν)∈Qk
+p(oµ, oν) log(p(oµ, oν)).
+(10)
+Following sampling without replacement, similarly, the entropy
+of Qk is given by:
+H(Qk | rk+
+tb ) =
+X
+(oµ,oν)∈Qk
+p(oµ, oν)H(Qk | oµ, oν)
+= −
+X
+(oµ,oν)∈rk+
+tb
+p(oµ, oν)×
+X
+(oζ,oω)∈Qk
+p(oζ, oω | oµ, oν) log(p(oζ, oω | oµ, oν)).
+(11)
+We then define the mutual information I(rk+
+tb ; Qk) of rk+
+tb
+and
+Qk, i.e., the degree of information sharing between the two sets.
+I(rk+
+tb ; Qk) can therefore be calculated as:
+I(rk+
+tb ; Qk) = H(Qk) −H(Qk | rk+
+tb ).
+(12)
+This implies that to achieve maximum information sampling,
+we merely need to select an object pair < oµ, oν >, µ ∈[K′], ν ∈
+[K′] from Qk without replacement, where < oµ, oν > maximizes
+I(Qk ∪{< oµ, oν >}; rk+
+tb ). Hence, for each sampling iteration,
+we compute the estimated mutual information gain, ∆I (oµ, oν),
+for every object pair that has not been selected yet. If all object
+pairs have been chosen, we reset them as unselected. ∆I (oµ, oν)
+can be calculated as:
+∆I(oµ, oν) = p(oµ, oν | Qk) log(
+p(oµ, oν | Qk)
+p(oµ | Qk) × p(oν | Qk))
++ p(oµ, oν | rk+
+tb ) log(
+p(oµ, oν | rk+
+tb )
+p(oµ | rk+
+tb ) × p(oν | rk+
+tb )).
+(13)
+We select the sample < oµmax, oνmax > with the maximum
+information content in the current sampling pool, where
+< oµmax, oνmax >= argmaxoµ,oν ∆I (oµ, oν) .
+(14)
+Ultimately, we add < oµmax, oνmax > to rk+
+tb
+and remove it
+from Qk, repeating this process until the sample count reaches
+enk
+tb. Equation (14) seeks to maximize mutual information,
+essential but computationally intense due to the large number
+of relationships in SGG tasks. Despite setting K′ to limit Q’s
+size, calculating mutual information directly remains costly.
+However, maximizing diversified relationship features within
+each batch is crucial for SGG tasks and aligns with batch balance
+as indicated in Theorem 3. This observation provides us with
+an opportunity for optimization. Specifically, we forego detailed
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+9
+Algorithm 1: Maximum Information Sampling
+Require: Q = {Qi}K′
+i=1, Ntb = {enk
+tb}K′
+k=1
+Ensure: R+
+tb = {rk+
+tb }K′
+k=1
+1: for k = 1 to K′
+2:
+rk+
+tb = 0, remaining pairs = Qi
+3:
+while |rk+
+tb | < enk
+tb do
+4:
+get unique pairs
+5:
+if |rk+
+tb | + |unique pairs| ≤enk
+tb
+6:
+then add unique pairs to rk+
+tb
+7:
+else need num = enk
+tb −|rk+
+tb |, randomly
+select need num instances from
+unique pairs and add them to rk+
+tb
+8:
+update remaining pairs
+frequency considerations of object pairs p(oµ, oν), we focus on
+maximizing information by selecting unique or non-redundant
+instances from Q. While ”maximum information” differs subtly
+from ”maximum mutual information,” their effects are similar in
+SGG contexts. Our optimized method is delineated in Algorithm
+1, where we seek maximum information sampling by selecting
+as diverse object pairs as possible (lines 6-7 in Algorithm 1).
+3.4
+Discussion
+3.4.1
+Compared to the Reweighting and Resampling Methods
+As noted in related work, common strategies like resampling
+and reweighting adjust the input or output to balance each
+relationship’s impact on model training. While there are certain
+similarities, our approach fundamentally differs from these
+strategies. We emphasize the following two distinctions:
+Elimination
+of
+Spurious
+Correlations.
+Resampling
+and
+reweighting adjust the contribution of different classes within
+a batch. Clearly, these strategies cannot address the spurious
+correlation issues in the two-stage SGG framework because 1)
+all extracted relationship features can be directly traced back
+to their respective images and 2) the relationships derived are
+solely from a limited set of images (correlated with the batch
+size), inundated with many scene-specific, similar features.
+However, our method, by establishing a relationship-level query
+set, can decouple the relationship from its originating image,
+eliminating the scene restrictions and batch size limitations
+within the batch, thereby mitigating the spurious correlation.
+Direction
+of
+causality
+estimation.
+Both
+reweighting
+and
+resampling techniques intervene with features typically based
+on relationship distributions or, more advanced, by enabling
+the model to learn the intervention procedure adaptively.
+Regardless, these methods adhere to the intrinsic feature
+extraction and processing pipeline within the original batch,
+thereby
+essentially
+estimating
+the
+forward
+causality
+from
+R →Y . In contrast, our approach emphasizes leveraging the
+training results from a preceding batch as query conditions
+for the relationship feature space of the current batch. As a
+result, our interventions on the feature space operate based on a
+reverse causality estimation, specifically, R ←Y .
+3.4.2
+Compared the Re-annotate Methods
+Some existing works attribute fore-back bias to the mislabeling
+of certain foreground relationships as background, and thus,
+these studies often re-annotate background relationships [22],
+[53]. For instance, NICE [22] identifies contentious background
+relationships
+and
+reallocates
+them
+with
+soft
+foreground
+labels. Clearly, our method is orthogonal to such approaches.
+Intuitively, applying our method on top of re-annotation
+approaches could further alleviate the fore-back bias issue,
+because fore-back bias would still exist even in an ideal state
+without any missing foreground relationship labels. Combining
+re-annotation methods with RcSGG is part of our future work.
+3.4.3
+Compared to Debiased SGG for Dual Imbalance (DSDI)
+DSDI [50] is the work most similar to our approach, also
+addressing both fore-back bias and head-tail bias as well. For
+fore-back bias, DSDI designed BR Loss to decouple background
+classification from foreground relationship recognition. For
+head-tail bias, BR Loss uses a weighting mechanism to prioritize
+tail relationships. Despite focusing on similar challenges, our
+method significantly differs from DSDI: 1) Unlike DSDI, which
+processes background and foreground relationships separately,
+our approach treats background relationships as a regular class,
+alleviating fore-back bias by maintaining a fixed background
+to foreground ratio. 2) Inspired by AL, we introduce ARE,
+which updates the distribution of foreground relationships in
+each batch to address fore-back bias. Importantly, the updated
+distribution extends beyond individual batch contexts, helping
+to disrupt spurious correlations between images and predictions,
+unlike DSDI which confines its approach to weighting tail
+relationships within batch boundaries.
+3.4.4
+Training and Testing
+Training. This section discusses how to incorporate reverse
+causal estimation into any SGG framework to eliminate spurious
+correlations from X to Y . Importantly, within RcSGG, the reverse
+estimation and the training of classifier fc are decoupled at
+the batch level. For relationship features R and predictions Y ,
+we denote symbols from batch b as Rb and Yb, and symbols
+from batch b + 1 as Rb+1 and Yb+1. At the batch granularity,
+the causal intervention and relationship classifier training occur
+within separate data flows; their finer-grained structure can
+be described as Yb →Rb+1 →Yb+1. Wherein, Yb →Rb+1
+emphasizes the reverse causal estimation, while Rb+1 →Yb+1
+denotes training the classifier fc along the forward causality
+direction. Thus, for any SGG framework, by refining the feature
+space R at the batch level using ARE and then training fc in
+the standard procedure; typically, we can use cross-entropy loss
+to supervise the training of the model. In this way, we can
+effectively eliminate the spurious correlation between X and Y .
+Testing. The reverse causality estimation requires relationship
+labels; however, it’s important to note that this estimation
+process only occurs during the training phase. In other words,
+for the ARE-based SGG framework, during the testing phase, it
+suffices to follow the regular data flow, X →R →Y , to obtain
+predictions devoid of spurious correlations. This is because the
+trained classifier f ∗
+c is a Bayesian optimal classifier, learned
+within a parameter space F eR that is already free of spurious
+correlations, as shown in Equation (5).
+4
+EXPERIMENTS
+4.1
+Experiment Setup
+Implementations. We conducted extensive experiments across
+three datasets, VG150 [7], GQA [65], Open Images V6 (OI V6)
+[66], and PSG, with details outlined below.
+VG150 [7] is a subset of the VG dataset [40] comprising 150
+object categories and 50 relationship categories. We follow the
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+10
+TABLE 1
+Quantitative results (mR@K) of RcSGG and baseline methods on the MotifsNet, VCTree, and Transformer backbones. AVG∆
+mR denotes the mean of mR@20,
+mR@50, and mR@100, while AVG♢
+mR represents the mean of mR@50 and mR@100. We underline the optimal results for emphasis. Please note that the
+backbone method is provided for reference only and is not included in the ranking.
+PredCls
+SGCls
+SGDet
+mR@20
+mR@50
+mR@100
+AVG∆
+mR
+AVG♢
+mR
+mR@20
+mR@50
+mR@100
+AVG∆
+mR
+AVG♢
+mR
+mR@20
+mR@50
+mR@100
+AVG∆
+mR
+AVG♢
+mR
+VG150 [7]
+SSRCNN-SGG [54] (CVPR’22)
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+6.1
+8.4
+10.0
+8.2
+9.2
+HetSGG [55] (AAAI’23)
+−
+32.3
+34.5
+−
+33.4
+−
+15.8
+17.7
+−
+16.8
+−
+11.5
+13.5
+−
+12.5
+SQUAT [56] (CVPR’23)
+−
+30.9
+33.4
+−
+32.2
+−
+17.5
+18.8
+−
+18.2
+−
+14.1
+16.5
+−
+15.3
+CV-SGG [57] (CVPR’23)
+−
+32.6
+36.2
+−
+34.4
+−
+−
+−
+−
+−
+−
+14.6
+17.0
+−
+15.8
+PE-Net [43] (CVPR’23)
+−
+31.5
+33.8
+−
+32.7
+−
+17.8
+18.9
+−
+18.4
+−
+12.4
+14.5
+−
+13.5
+DSDI [50] (TPAMI’23)
+28.5
+33.6
+35.5
+32.5
+34.6
+16.6
+20.4
+21.4
+19.5
+20.9
+7.7
+10.3
+12.1
+10.0
+11.2
+MotifsNet (backbone) [5]
+12.2
+15.5
+16.8
+14.8
+16.2
+7.2
+9.0
+9.5
+8.6
+9.3
+5.2
+7.2
+8.5
+7.0
+7.9
+HML [21] (ECCV’22)
+30.1
+36.3
+38.7
+35.0
+37.5
+17.1
+20.8
+22.1
+20.0
+21.5
+10.8
+14.6
+17.3
+14.2
+16.0
+FGPL [15] (CVPR’22)
+24.3
+33.0
+37.5
+31.6
+35.3
+17.1
+21.3
+22.5
+20.3
+21.9
+11.1
+15.4
+18.2
+14.9
+16.8
+TransRwt [14] (ECCV’22)
+−
+35.8
+39.1
+−
+37.5
+−
+21.5
+22.8
+−
+22.2
+−
+15.8
+18.0
+−
+16.9
+PPDL [16] (CVPR’22)
+−
+32.2
+33.3
+−
+32.8
+−
+17.5
+18.2
+−
+17.9
+−
+11.4
+13.5
+−
+12.5
+GCL [17] (CVPR’22)
+30.5
+36.1
+38.2
+34.9
+37.2
+18.0
+20.8
+21.8
+20.2
+21.3
+12.9
+16.8
+19.3
+16.3
+18.1
+NICE [22] (CVPR’22)
+−
+29.9
+32.3
+−
+31.1
+−
+16.6
+17.9
+−
+17.3
+−
+12.2
+14.4
+−
+13.3
+RTPB [23] (AAAI’22)
+28.8
+35.3
+37.7
+33.9
+36.5
+16.3
+19.4
+22.6
+19.4
+21.0
+9.7
+13.1
+15.5
+12.8
+14.3
+SGC+B2F [47] (ICME’23)
+−
+37.5
+40.7
+−
+39.1
+−
+20.8
+22.1
+−
+21.5
+−
+15.0
+18.0
+−
+16.5
+FGPL-A [58] (TPAMI’23)
+28.4
+38.0
+42.4
+36.1
+40.0
+20.5
+24.0
+25.4
+23.3
+24.7
+13.4
+18.0
+21.0
+17.5
+19.5
+EICR [59] (ICCV’23)
+−
+34.9
+37.0
+−
+36.0
+−
+20.8
+21.8
+−
+21.3
+−
+15.5
+18.2
+−
+16.9
+PSCV [60] (arXiv’23)
+28.1
+33.2
+35.2
+32.2
+34.2
+17.1
+20.8
+21.9
+19.9
+21.4
+6.4
+10.1
+13.9
+10.1
+12.0
+CFA [61] (ICCV’23)
+−
+35.7
+38.2
+−
+37.0
+−
+17.0
+18.4
+−
+17.7
+−
+13.2
+15.5
+−
+14.4
+MEET [45] (ICCV’23)
+−
+25.3
+33.5
+−
+29.4
+−
+19.0
+23.7
+−
+21.4
+−
+8.5
+11.8
+−
+10.2
+HiLo [62] (ICCV’23)
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+14.7
+17.7
+−
+16.2
+NICEST [63] (TPAMI’24)
+−
+29.5
+31.6
+−
+30.6
+−
+15.7
+16.5
+−
+16.1
+−
+10.4
+12.4
+−
+11.4
+RcSGG (ours)
+32.6
+38.8
+41.4
+37.6
+40.1
+19.8
+23.2
+24.1
+22.4
+23.7
+13.3
+16.9
+19.9
+16.7
+18.4
+VCTree (backbone) [25]
+12.4
+15.4
+16.6
+14.8
+16.0
+6.3
+7.5
+8.0
+7.3
+7.8
+4.9
+6.6
+7.7
+6.4
+7.2
+HML [21] (ECCV’22)
+31.0
+36.9
+39.2
+35.7
+30.1
+20.5
+25.0
+26.8
+24.1
+25.9
+10.1
+13.7
+16.3
+13.4
+15.0
+FGPL [15] (CVPR’22)
+30.8
+37.5
+40.2
+36.2
+38.9
+21.9
+26.2
+27.6
+25.2
+26.9
+11.9
+16.2
+19.1
+15.7
+17.7
+TransRwt [14] (ECCV’22)
+−
+37.0
+39.7
+−
+38.4
+−
+19.9
+21.8
+−
+20.9
+−
+12.0
+14.9
+−
+13.5
+PPDL [16] (CVPR’22)
+−
+33.3
+33.8
+−
+33.6
+−
+21.8
+22.4
+−
+22.1
+−
+11.3
+13.3
+−
+12.3
+GCL [17] (CVPR’22)
+31.4
+37.1
+39.1
+35.9
+37.5
+19.5
+22.5
+23.5
+21.8
+23.0
+11.9
+15.2
+17.5
+14.9
+16.4
+NICE [22] (CVPR’22)
+−
+30.7
+33.0
+−
+31.9
+−
+19.9
+21.3
+−
+20.6
+−
+11.9
+14.1
+−
+13.0
+RTPB [23] (AAAI’22)
+27.3
+33.4
+35.6
+32.1
+34.5
+20.6
+24.5
+25.8
+23.6
+25.2
+9.6
+12.8
+15.1
+12.5
+14.0
+SGC+B2F [47] (ICME’23)
+−
+36.2
+40.4
+−
+38.3
+−
+22.5
+25.1
+−
+23.8
+−
+14.6
+17.6
+−
+16.1
+FGPL-A [58] (TPAMI’23)
+34.5
+41.6
+44.3
+40.1
+43.0
+24.1
+28.8
+30.6
+27.8
+29.7
+12.2
+16.9
+20.0
+16.4
+18.5
+EICR [59] (ICCV’23)
+−
+35.6
+37.9
+−
+36.8
+−
+26.2
+27.4
+−
+26.8
+−
+15.2
+17.5
+−
+16.4
+PSCV [60] (arXiv’23)
+30.2
+34.8
+37.2
+34.1
+36.0
+22.1
+25.8
+27.1
+25.0
+26.5
+6.5
+9.9
+13.3
+9.9
+11.6
+CFA [61] (ICCV’23)
+−
+34.5
+37.2
+−
+35.6
+−
+19.1
+20.8
+−
+20.0
+−
+13.1
+15.5
+−
+14.3
+MEET [45] (ICCV’23)
+−
+25.5
+34.5
+−
+30.0
+−
+14.5
+18.6
+−
+16.6
+−
+8.2
+11.5
+−
+9.9
+HiLo [62] (ICCV’23)
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+12.9
+15.2
+−
+14.1
+NICEST [63] (TPAMI’24)
+−
+30.6
+32.9
+−
+31.8
+−
+18.9
+20.0
+−
+19.5
+−
+10.2
+11.9
+−
+11.1
+RcSGG (ours)
+33.7
+38.9
+42.4
+38.3
+40.7
+24.3
+27.4
+29.6
+27.1
+28.5
+12.6
+17.3
+20.4
+16.8
+18.9
+Transformer (backbone) [64]
+12.4
+16.0
+17.5
+15.3
+16.8
+7.7
+9.6
+10.2
+9.2
+9.9
+5.3
+7.3
+8.8
+7.1
+8.1
+HML [21] (ECCV’22)
+30.1
+36.3
+38.7
+35.0
+37.5
+17.1
+20.8
+22.1
+20.0
+21.5
+10.8
+14.6
+17.3
+14.2
+16.0
+FGPL [15] (CVPR’22)
+24.3
+33.0
+37.5
+31.6
+35.3
+17.1
+21.3
+22.5
+20.3
+21.9
+11.1
+15.4
+18.2
+14.9
+16.8
+TransRwt [14] (ECCV’22)
+−
+35.8
+39.1
+−
+37.5
+−
+21.5
+22.8
+−
+22.2
+−
+15.8
+18.0
+−
+16.9
+FGPL-A [58] (TPAMI’23)
+27.2
+36.3
+40.7
+34.7
+38.5
+19.9
+23.2
+24.5
+22.5
+23.9
+12.5
+17.0
+19.8
+16.4
+18.4
+EICR [59] (ICCV’23)
+−
+36.9
+39.1
+−
+38.0
+−
+21.6
+22.4
+−
+22.0
+−
+17.3
+19.7
+−
+18.5
+PSCV [60] (arXiv’23)
+30.2
+34.8
+36.4
+33.8
+35.6
+18.6
+21.3
+22.2
+20.7
+21.8
+7.3
+11.1
+14.5
+11.0
+12.8
+CFA [61] (ICCV’23)
+−
+30.1
+33.7
+−
+31.9
+−
+15.7
+17.2
+−
+16.5
+−
+12.3
+14.6
+−
+13.5
+HiLo [62] (ICCV’23)
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+14.6
+17.6
+−
+16.1
+RcSGG (ours)
+32.4
+39.6
+41.3
+37.8
+40.5
+19.9
+22.3
+24.4
+22.2
+23.4
+13.3
+18.2
+20.9
+17.5
+19.6
+GQA [65]
+MotifsNet (backbone) [5]
+11.7
+15.4
+16.3
+14.5
+15.9
+6.8
+8.6
+9.4
+8.3
+9.0
+4.4
+6.8
+8.6
+6.6
+7.7
+GCL [17] (CVPR’22)
+-
+36.7
+38.1
+-
+37.4
+-
+17.3
+18.1
+-
+17.7
+-
+16.8
+18.8
+-
+17.8
+CFA [61] (ICCV’23)
+-
+31.7
+33.8
+-
+32.8
+-
+14.2
+15.2
+-
+14.7
+-
+11.6
+13.2
+-
+12.4
+EICR [59] (ICCV’23)
+-
+36.3
+38.0
+-
+37.2
+-
+17.2
+18.2
+-
+17.7
+-
+16.0
+18.0
+-
+17.0
+RcSGG (ours)
+30.3
+36.9
+38.5
+35.2
+37.7
+12.2
+16.7
+18.4
+15.8
+17.6
+11.3
+15.8
+17.6
+14.9
+16.7
+VCTree (backbone) [25]
+11.9
+14.3
+16.2
+14.1
+15.3
+6.8
+7.3
+7.8
+7.3
+7.6
+3.8
+6.1
+7.4
+5.7
+6.8
+GCL [17] (CVPR’22)
+-
+35.4
+36.7
+-
+36.1
+-
+17.3
+18.0
+-
+17.7
+-
+15.6
+17.8
+-
+16.7
+CFA [61] (ICCV’23)
+-
+33.4
+35.1
+-
+34.3
+-
+14.1
+15.0
+-
+14.6
+-
+10.8
+12.6
+-
+11.7
+EICR [59] (ICCV’23)
+-
+35.9
+37.4
+-
+36.7
+-
+17.8
+18.6
+-
+18.2
+-
+14.7
+16.3
+-
+15.5
+RcSGG (ours)
+32.1
+37.8
+40.2
+36.7
+39.0
+12.8
+18.2
+19.4
+16.8
+18.8
+11.9
+16.8
+18.3
+15.7
+17.6
+Transformer (backbone) [64]
+12.3
+15.2
+17.7
+15.1
+16.5
+7.3
+8.4
+9.6
+8.4
+9.0
+5.1
+6.6
+7.9
+6.5
+7.3
+CFA [61] (ICCV’23)
+-
+27.8
+29.4
+-
+28.6
+-
+16.2
+16.9
+-
+16.6
+-
+13.4
+15.3
+-
+14.4
+RcSGG (ours)
+31.6
+37.2
+39.3
+36.0
+38.3
+13.3
+18.1
+19.2
+16.9
+18.7
+11.4
+16.3
+17.4
+15.0
+16.9
+split in [20], i.e., 62k training images, 5k validation images, and
+26k test images.
+GQA [65] is a large-scale visual question answering dataset
+with images from the VG dataset and balanced question-answer
+pairs. Following [17], we selected the top-200 object classes and
+top-100 relationship classes, adhering to its split of 70% for
+training (including a 5k validation set) and 30% for testing.
+OI V6 [66] is a large dataset supporting image classification,
+object detection, and visual relationship tasks. Following the
+settings in [67], it includes 601 object categories and 30
+relationship categories, comprising 126K training images, 2K
+validation images, and 5K test images.
+PSG [68] is a panoptic SGG dataset designed to overcome
+the limitations of detection-based approaches in existing SGG
+datasets. Unlike VG150, PSG utilizes pixel-level annotations
+to achieve fine-grained object localization and reduce noise
+from object overlaps. PSG dataset comprises 49k images, 133
+object categories, and 56 relationship categories, supporting
+segmentation-based scene graph tasks.
+For all the datasets mentioned here, all experiments are
+conducted following [20] and most of its settings: 1) The detector
+in the framework is the Faster R-CNN [26] with the ResNeXt-
+101-FPN backbone [69], pre-trained on the VG training set and
+achieving 28.14 mAP on the VG test set. The detector is frozen
+during the training of the SGG relationship classifier. 2) Three
+popular SGG frameworks are taken including MotifsNet [5],
+VCTree [25], and Transformer [64]. For MotifsNet and VCTree,
+the batch size and initial learning rate are set to 12 and 0.01,
+respectively, while for Transformer, they are set to 16 and
+0.001. 3) For training epochs and learning rate adjustments, the
+maximum number of iterations for MotifsNet and VCTree is set
+to 50k, with learning rates decaying at the 30k-th and 45k-th
+iterations. For Transformer, the maximum number of iterations
+is set to 16k, with learning rates decaying at the 10k-th and 16k-th
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+11
+iterations. 4) The hyper-parameter settings in RcSGG are π = 3,
+K′ = 44, α = 0.2, and λ = 0.01. Detailed ablation studies for
+these parameters are presented in Section 4.3.
+Backbones and baselines. Experiments are conducted on three
+classical SGG frameworks: 1) MotifsNet [5], 2) VCTree [25],
+and 3) Transformer [64]. Baseline debiasing methods covering
+resampling methods (e.g. TransRwt [14]), reweighting methods
+(e.g. PPDL [16]), adjustment methods (e.g. RTPB [23]), and hybrid
+methods (e.g. NICE [22]).
+Evaluation modes and metrics. For the VG150 [7] and GQA [65],
+we use three standard evaluation modes from [5], [20], [25]: 1)
+Predicate Classification (PredCls), predicting relationships given
+object labels and bounding boxes. 2) Scene Graph Classification
+(SGCls), predicting both object labels and relationships given
+bounding boxes. 3) Scene Graph Detection (SGDet), predicting
+object labels, bounding boxes, and relationships. We employ
+three evaluation metrics: 1) Recall rate (R@K), measuring overall
+relationship recall; 2) Mean recall rate (mR@K), averaging recall
+across different relationship categories; 3) Mean of R@K and
+mR@K (MR@K), which calculates the average of R@K and
+mR@K. In these metrics, ”K” signifies the number of relationship
+predictions for an individual image, commonly set to 20, 50,
+or 100. Typically, biased SGG scores high on R@K but falls
+short on mR@K, largely due to its predilection for a few
+predominant categories, which occupy a substantial portion;
+however, debiased SGG shows the inverse trend [20], [22], [24],
+[61]. Thus, MR@K helps evaluate the model’s ability to balance
+between frequent and rare categories.
+For OI V6 [66], we report R@50 and mR@50, along with
+weighted mean AP of relationships (wmAPrel) and weighted
+mean AP of phrase. Following standard evaluation procedures,
+we also report scorewtd, whose computation is defined as:
+scorewtd = 0.2 × R@50 + 0.4 × wmAPrel + 0.4 × wmAPphr.
+4.2
+Main Results and Analysis
+This section shows quantitative and qualitative results. The
+quantitative results are categorized into quantitative results
+excluding the background relationships and quantitative results
+considering
+the
+background
+relationships.
+The
+former
+adopts
+a standard evaluation procedure, where outputs related to
+background relationships in the final predictions are masked,
+highlighting
+our
+method’s
+proficiency
+in
+addressing
+the
+head-tail bias. In contrast, the latter considers background
+relationships as a typical category, emphasizing our method’s
+capability to mitigate the fore-back bias.
+Quantitative results excluding the background relationships. We
+report the results via different metrics in Tables 1, 2, 3, and 4,
+respectively. The results show that:
+1) Across three popular SGG datasets, VG150 [7], GQA [65],
+and OI V6 [66], RcSGG achieves state-of-the-art performance
+on the most unbiased SGG metric mR@K, surpassing debiasing
+methods built on well-known two-stage SGG backbones, as
+reported in Table 1 and
+4. For VG150, using Transformer as
+the backbone, our method leads by 0.6% (FGPL-A [58]) to 7.6%
+(CFA [61]) on the mR@100 metric under the PredCls mode. For
+GQA, with MotifsNet as the backbone, the improvement ranges
+from 0.2% (EICR [59]) to 3. 2% (CFA [61]) in the SGCls mode
+with the same metric. For OI V6, our method outperforms others
+by 0.2% (HetSGG [55]) to 2.9% (BGNN [67]) on the mR@50
+metric. Moreover, compared to the recently popular one-stage
+SGG backbones, our method continues to achieve state-of-the-art
+performance. For instance, in the SGDet mode, RcSGG based on
+a Transformer backbone outperforms these one-stage approaches
+on
+sitting on
+standing on
+walking on
+laying on
+0
+20
+40
+60
+80
+100
+MotifsNet
+RcSGG (ours)
+Frequency of relationship
+Recall rate (R@100)
+0
+5
+10
+15
+20
+25
+30
+35
+40
+Frequency of relationship
+Fig. 7. Recall rate (R@100) for representative head and tail relationships,
+along with the frequency of these relationships.
+by 3.9% (CV-SGG [57]) to 10.9% (SSRCNN-SGG [54]) on the
+mR@100 metric. Due to partial data unavailability from some
+baseline methods, additional metrics AVG∆
+mR and AVG♢
+mR are
+introduced in Table 1, with RcSGG still maintaining the best
+performance. These results further enhance the effectiveness and
+robustness of our method for debiasing in SGG tasks.
+2)
+RcSGG
+maintains
+competitive
+performance
+on
+the
+category-agnostic traditional metric, R@K, as shown in Table 2.
+As discussed in [5], [20], [22], [25], mR@K and R@K often have
+an inverse relationship, due to the pursuit of mR@K inevitably
+impairing the performance of head relationships. Despite this,
+compared to other debiasing methods, RcSGG maintains a
+minimal decline in the R@K metric on the VG150 dataset. For
+instance, under the PredCls mode for the MotifsNet backbone,
+our method experienced only a 10.6% decrease, whereas baseline
+methods PPDL [16] and TransRwt [14] saw declines of 20.3%
+and 17.4%, respectively.
+3) RcSGG demonstrates a superior balance between head
+and tail relationships, effectively managing the limitations of
+both mR@K and R@K metrics, as evidenced by the new MR@K
+metric—averaging R@K and mR@K—detailed in Table 3. This
+metric confirms that RcSGG not only enhances the balance
+but also significantly outperforms baselines like MotifsNet,
+TransRwt, and PPDL. For example, for the baseline method
+MotifsNet, in PredCls mode, our method outperforms TransRwt
+[14] and PPDL [16] by 4.4% and 7.9%, respectively.
+4) RcSGG focuses on resampling foreground and background
+relationships, and Section 3.4.1 outlines how our method stands
+apart from typical reweighting and resampling techniques.
+Reweighting methods such as FGPL [15], PPDL [16], and GCL
+[17], and resampling techniques like TransRwt [14], NICE [22],
+and PSCV [60] are compared. Results show RcSGG significantly
+outperforms such approaches. We attribute this enhancement to
+RcSGG’s ability to diversify each batch with more relationships
+than the batch size and dynamically adjust category influence
+via reverse causality. In contrast, traditional reweighting and
+resampling are confined to manipulating relationships within
+fixed batch sizes, often limited by clustered scene relationships.
+Impact of background relationships on model performance. Existing
+SGG evaluation protocols often overlook outputs related to
+background relationships. Specifically, while model predictions
+generate a comprehensive vector that includes both background
+and foreground relationships, only the foreground relationships
+are retained for evaluation. This strategy aims to minimize
+the distorting effects of the numerically dominant background
+relationships on performance metrics. However, this evaluation
+practice can obscure a significant issue: models might overly
+rely on background relationships, potentially undermining the
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+12
+TABLE 2
+Quantitative results (R@K) of RcSGG and baseline methods on the MotifsNet, VCTree, and Transformer backbones. AVG∆
+R denotes the mean of R@20,
+R@50, and R@100, while AVG♢
+R represents the mean of R@50 and R@100.
+PredCls
+SGCls
+SGDet
+R@20
+R@50
+R@100
+AVG∆
+R
+AVG♢
+R
+R@20
+R@50
+R@100
+AVG∆
+R
+AVG♢
+R
+R@20
+R@50
+R@100
+AVG∆
+R
+AVG♢
+R
+VG150 [7]
+SSRCNN-SGG [54] (CVPR’22)
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+25.8
+32.7
+36.9
+31.8
+34.8
+HetSGG [55] (AAAI’23)
+−
+57.1
+59.4
+−
+58.3
+−
+37.6
+38.5
+−
+38.1
+−
+30.2
+34.5
+−
+32.4
+SQUAT [56] (CVPR’23)
+−
+55.7
+57.9
+−
+56.8
+−
+33.1
+34.4
+−
+33.8
+−
+24.5
+28.9
+−
+26.7
+CV-SGG [57] (CVPR’23)
+−
+58.2
+62.4
+−
+60.3
+−
+−
+−
+−
+−
+−
+27.8
+32.0
+−
+29.9
+PE-Net [43] (CVPR’23)
+−
+64.9
+67.2
+−
+66.1
+−
+39.4
+40.7
+−
+40.1
+−
+30.7
+35.2
+−
+33.0
+DSDI [50] (TPAMI’23)
+47.5
+54.8
+56.6
+53.0
+55.7
+30.0
+35.2
+36.3
+33.8
+35.8
+20.4
+27.2
+31.6
+26.4
+29.4
+MotifsNet (backbone) [5]
+59.5
+66.0
+67.9
+64.5
+67.0
+35.8
+39.1
+39.9
+38.3
+39.5
+25.1
+32.1
+36.9
+31.4
+34.5
+TransRwt [14] (ECCV’22)
+−
+48.6
+50.5
+−
+49.6
+−
+29.4
+30.2
+−
+29.8
+−
+23.5
+27.2
+−
+25.4
+PPDL [16] (CVPR’22)
+−
+47.2
+47.6
+−
+47.4
+−
+28.4
+29.3
+−
+28.9
+−
+21.2
+23.9
+−
+22.6
+NICE [22] (CVPR’22)
+−
+55.1
+57.2
+−
+56.2
+−
+33.1
+34.0
+−
+33.6
+−
+27.8
+31.8
+−
+29.8
+EICR [59] (ICCV’23)
+−
+55.3
+57.4
+−
+56.4
+−
+34.5
+35.4
+−
+35.0
+−
+27.9
+32.2
+−
+30.1
+PSCV [60] (arXiv’23)
+−
+−
+−
+−
+−
+−
+32.5
+33.6
+−
+30.1
+−
+−
+−
+−
+−
+CFA [61] (ICCV’23)
+−
+54.1
+56.6
+−
+55.4
+−
+34.9
+36.1
+−
+35.5
+−
+24.7
+31.8
+−
+29.6
+HiLo [62] (ICCV’23)
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+26.2
+30.3
+−
+28.3
+NICEST [63] (TPAMI’24)
+−
+59.1
+61.0
+−
+60.1
+−
+34.4
+35.2
+−
+34.8
+−
+28.0
+32.4
+−
+30.2
+RcSGG (ours)
+44.6
+54.3
+57.3
+52.1
+55.8
+26.4
+32.8
+33.1
+30.8
+33.0
+22.2
+24.8
+27.9
+25.0
+26.4
+VCTree (backbone) [25]
+59.8
+66.2
+68.1
+64.7
+67.2
+37.0
+40.5
+41.4
+39.6
+41.0
+24.7
+31.5
+36.2
+30.8
+33.9
+TransRwt [14] (ECCV’22)
+−
+48.0
+49.9
+−
+49.0
+−
+30.0
+30.9
+−
+30.5
+−
+23.6
+27.8
+−
+25.7
+PPDL [16] (CVPR’22)
+−
+47.6
+48
+−
+47.8
+−
+32.1
+33
+−
+32.6
+−
+20.1
+22.9
+−
+21.5
+NICE [22] (CVPR’22)
+−
+55.0
+56.9
+−
+56.0
+−
+37.8
+39.0
+−
+38.4
+−
+27.0
+30.8
+−
+28.9
+EICR [59] (ICCV’23)
+−
+56.0
+57.9
+−
+57.0
+−
+39.4
+40.5
+−
+40.0
+−
+26.0
+30.1
+−
+28.1
+PSCV [60] (arXiv’23)
+−
+−
+−
+−
+−
+−
+34.2
+35.6
+−
+34.9
+−
+−
+−
+−
+−
+CFA [61] (ICCV’23)
+−
+54.7
+57.2
+−
+56.1
+−
+42.4
+43.5
+−
+43.0
+−
+27.1
+31.2
+−
+29.2
+HiLo [62] (ICCV’23)
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+27.1
+29.8
+−
+28.5
+NICEST [63] (TPAMI’24)
+−
+59.1
+60.9
+−
+60.0
+−
+38.4
+39.4
+−
+38.9
+−
+29.0
+32.7
+−
+30.9
+RcSGG (ours)
+43.3
+51.2
+56.8
+50.4
+54.0
+25.7
+31.1
+32.6
+29.8
+31.9
+21.6
+23.1
+26.2
+23.6
+24.7
+Transformer (backbone) [64]
+58.5
+65.0
+66.7
+63.4
+66.0
+35.6
+38.9
+39.8
+38.1
+39.4
+24.0
+30.3
+33.3
+29.2
+31.8
+TransRwt [14] (ECCV’22)
+−
+49.0
+50.8
+−
+49.9
+−
+29.6
+30.5
+−
+30.1
+−
+23.1
+27.1
+−
+25.1
+EICR [59] (ICCV’23)
+−
+52.8
+54.7
+−
+53.8
+−
+31.4
+32.4
+−
+31.9
+−
+23.7
+27.7
+−
+25.7
+CFA [61] (ICCV’23)
+−
+59.2
+61.5
+−
+60.4
+−
+36.3
+37.3
+−
+36.8
+−
+27.7
+32.1
+−
+29.9
+HiLo [62] (ICCV’23)
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+25.6
+27.9
+−
+26.8
+RcSGG (ours)
+42.7
+52.5
+56.6
+50.6
+54.6
+24.7
+28.9
+31.5
+28.4
+30.2
+21.3
+24.8
+27.4
+24.5
+26.1
+TABLE 3
+Quantitative results (MR@K) of RcSGG and baseline methods on the MotifsNet, VCTree, and Transformer backbones. MR@K∆denotes the mean of AVG∆
+mR
+and AVG∆
+R , while MR@K♢represents the mean of AVG♢
+mR and AVG♢
+R .
+PredCls
+SGCls
+SGDet
+AVG∆
+mR
+AVG♢
+mR
+AVG∆
+R
+AVG♢
+R
+MR@K∆
+MR@K♢
+AVG∆
+mR
+AVG♢
+mR
+AVG∆
+R
+AVG♢
+R
+MR@K∆
+MR@K♢
+AVG∆
+mR
+AVG♢
+mR
+AVG∆
+R
+AVG♢
+R
+MR@K∆
+MR@K♢
+VG150 [7]
+SSRCNN-SGG [54] (CVPR’22)
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+8.2
+9.2
+31.8
+34.8
+20.0
+22.0
+HetSGG [55] (AAAI’23)
+−
+33.4
+−
+58.3
+−
+45.9
+−
+16.8
+−
+38.1
+−
+27.5
+−
+12.5
+−
+32.4
+−
+22.5
+SQUAT [56] (CVPR’23)
+−
+32.2
+−
+56.8
+−
+44.5
+−
+18.2
+−
+33.8
+−
+26.0
+−
+15.3
+−
+26.7
+−
+21.0
+CV-SGG [57] (CVPR’23)
+−
+34.4
+−
+60.3
+−
+47.4
+−
+−
+−
+−
+−
+−
+−
+15.8
+−
+29.9
+−
+22.9
+PE-Net [43] (CVPR’23)
+−
+32.7
+−
+66.1
+−
+49.4
+−
+18.4
+−
+40.1
+−
+29.3
+−
+13.5
+−
+33.0
+−
+23.3
+DSDI [50] (TPAMI’23)
+32.5
+34.6
+53.0
+55.7
+42.8
+45.2
+19.5
+20.9
+33.8
+35.8
+26.7
+28.4
+10.0
+11.2
+26.4
+29.4
+18.2
+20.3
+MotifsNet (backbone) [5]
+14.8
+16.2
+64.5
+67.0
+39.7
+41.6
+8.6
+9.3
+38.3
+39.5
+23.5
+24.4
+7.0
+7.9
+31.4
+34.5
+19.2
+21.2
+TransRwt [14] (ECCV’22)
+−
+37.5
+−
+49.6
+−
+43.6
+−
+22.2
+−
+29.8
+−
+26.0
+−
+16.9
+−
+25.4
+−
+21.2
+PPDL [16] (CVPR’22)
+−
+32.8
+−
+47.4
+−
+40.1
+−
+17.9
+−
+28.9
+−
+23.4
+−
+12.5
+−
+22.6
+−
+17.6
+NICE [22] (CVPR’22)
+−
+31.1
+−
+56.2
+−
+43.7
+−
+17.3
+−
+33.6
+−
+25.5
+−
+13.3
+−
+29.8
+−
+21.6
+EICR [59] (ICCV’23)
+−
+36.0
+−
+56.4
+−
+46.2
+−
+21.3
+−
+35.0
+−
+28.2
+−
+16.9
+−
+30.1
+−
+23.5
+PSCV [60] (arXiv’23)
+32.2
+34.2
+−
+−
+−
+−
+19.9
+21.4
+−
+30.1
+−
+25.8
+10.1
+12.0
+−
+−
+−
+−
+CFA [61] (ICCV’23)
+−
+37.0
+−
+55.4
+−
+46.2
+−
+17.7
+−
+35.5
+−
+26.6
+−
+14.4
+−
+29.6
+−
+22.0
+HiLo [62] (ICCV’23)
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+16.2
+−
+28.3
+−
+22.3
+NICEST [63] (TPAMI’24)
+−
+31.8
+−
+60.1
+−
+46.0
+−
+16.1
+−
+34.8
+−
+25.5
+−
+11.4
+−
+30.2
+−
+20.8
+RcSGG (ours)
+37.6
+40.1
+52.1
+55.8
+44.9
+48.0
+22.4
+23.7
+30.8
+33.0
+26.6
+28.4
+16.7
+18.4
+25.0
+26.4
+20.9
+22.4
+VCTree (backbone) [25]
+14.8
+16.0
+64.7
+67.2
+39.8
+41.6
+7.3
+7.8
+39.6
+41.0
+23.5
+24.4
+6.4
+7.2
+30.8
+33.9
+18.6
+20.6
+TransRwt [14] (ECCV’22)
+−
+38.4
+−
+49.0
+−
+43.7
+−
+20.9
+−
+30.5
+−
+25.7
+−
+13.5
+−
+25.7
+−
+19.6
+PPDL [16] (CVPR’22)
+−
+33.6
+−
+47.8
+−
+40.7
+−
+22.1
+−
+32.6
+−
+27.4
+−
+12.3
+−
+21.5
+−
+16.9
+NICE [22] (CVPR’22)
+−
+31.9
+−
+56.0
+−
+44.0
+−
+20.6
+−
+38.4
+−
+29.5
+−
+13.0
+−
+28.9
+−
+21.0
+EICR [59] (ICCV’23)
+−
+36.8
+−
+57.0
+−
+46.9
+−
+26.8
+−
+40.0
+−
+33.4
+−
+16.4
+−
+28.1
+−
+22.3
+PSCV [60] (arXiv’23)
+34.1
+36.0
+−
+−
+−
+−
+25.0
+26.5
+−
+34.9
+−
+30.7
+9.9
+11.6
+−
+−
+−
+−
+CFA [61] (ICCV’23)
+−
+35.6
+−
+56.1
+−
+45.9
+−
+20.0
+−
+43.0
+−
+31.5
+−
+14.3
+−
+29.2
+−
+21.8
+HiLo [62] (ICCV’23)
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+14.1
+−
+28.5
+−
+21.3
+NICEST [63] (TPAMI’24)
+−
+31.8
+−
+60.0
+−
+45.9
+−
+19.5
+−
+38.9
+−
+29.2
+−
+11.1
+−
+30.9
+−
+21.0
+RcSGG (ours)
+38.3
+40.7
+50.4
+54.0
+44.4
+47.4
+27.1
+28.5
+29.8
+31.9
+28.5
+30.2
+16.8
+18.9
+23.6
+24.7
+20.2
+21.8
+Transformer (backbone) [64]
+15.3
+16.8
+63.4
+66.0
+39.4
+41.4
+9.2
+9.9
+38.1
+39.4
+23.7
+24.7
+7.1
+8.1
+29.2
+31.8
+18.2
+20.0
+TransRwt [14] (ECCV’22)
+−
+37.5
+−
+49.9
+−
+43.7
+−
+22.2
+−
+30.1
+−
+26.2
+−
+16.9
+−
+25.1
+−
+21.0
+EICR [59] (ICCV’23)
+−
+38.0
+−
+53.8
+−
+45.9
+−
+22.0
+−
+31.9
+−
+27.0
+−
+18.5
+−
+25.7
+−
+22.1
+CFA [61] (ICCV’23)
+−
+31.9
+−
+60.4
+−
+46.2
+−
+16.5
+−
+36.8
+−
+26.7
+−
+13.5
+−
+29.9
+−
+21.7
+HiLo [62] (ICCV’23)
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+−
+16.1
+−
+26.8
+−
+21.5
+RcSGG (ours)
+37.8
+40.5
+50.6
+54.6
+44.2
+47.6
+22.2
+23.4
+28.4
+30.2
+25.3
+26.8
+17.5
+19.6
+24.5
+26.1
+21.0
+22.9
+TABLE 4
+Quantitative results of RcSGG and baseline methods on OI V6 dataset.
+Models
+mR@50
+R@50
+wmAP
+scorewtd
+rel
+phr
+BGNN [67] (CVPR’21)
+40.5
+75.0
+33.5
+34.2
+42.1
+PCL [70] (TIP’22)
+41.6
+74.8
+34.7
+35.0
+42.8
+RU-Net [71] (CVPR’22)
+-
+76.9
+35.4
+34.9
+43.5
+PE-NET [43] (CVPR’23)
+-
+76.5
+36.6
+37.4
+44.9
+SSRCNN-SGG [54] (CVPR’22)
+42.8
+76.7
+41.5
+43.6
+49.4
+FGPL-A [58] (TPAMI’23)
+-
+73.4
+35.9
+36.8
+43.8
+HetSGG [55] (AAAI’23)
+43.2
+74.8
+33.5
+34.5
+42.2
+SQUAT [56] (CVPR’23)
+-
+75.8
+34.9
+35.9
+43.5
+RcSGG (ours)
+43.4
+77.1
+39.7
+42.8
+48.4
+learning of foreground relationships. To uncover the potential
+negative influence of background relationships on SGG model
+performance, we performed an additional evaluation that
+includes these outputs, as shown in Table 5.
+Table 5 demonstrates a significant drop in SGG model
+performance
+when
+background
+relationship
+outputs
+are
+included,
+confirming
+their
+disruptive
+influence
+on
+model
+learning.
+For
+example,
+in
+the
+PredCls
+evaluation
+mode,
+MotifsNet†’s mR@100 decreased from 16.8% in the standard
+evaluation to 4.3%, and Transformer†’s dropped from 17.5% to
+4.6%. This indicates that the performance of existing models
+under standard evaluation protocols is actually contingent on
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+13
+TABLE 5
+Results considering the background relationships. For differentiation, MotifsNet†, VCTree†, and Transformer† denote the model’s final predictions that take
+into account the output of background relationships.
+PredCls
+R@20
+R@50
+R@100
+AVG∆
+mR
+AVG♢
+mR
+mR@20
+mR@50
+mR@100
+AVG∆
+mR
+AVG♢
+mR
+MR@K∆
+MR@K♢
+MotifsNet† (backbone) [5]
+5.4
+10.7
+18.4
+8.1
+11.5
+0.9
+2.1
+4.3
+1.5
+2.4
+4.8
+7.0
+RcSGG (ours)
+7.4
+12.6
+21.5
+10.0
+13.8
+5.0
+8.8
+14.9
+6.9
+9.6
+8.5
+11.7
+VCTree† (backbone) [25]
+5.2
+9.8
+18.1
+7.5
+11.0
+1.1
+2.4
+4.7
+1.8
+2.7
+4.7
+6.9
+RcSGG (ours)
+6.8
+10.3
+19.8
+8.6
+12.3
+5.7
+9.3
+15.7
+7.5
+10.2
+8.1
+11.3
+Transformer† (backbone) [64]
+5.5
+11.4
+19.2
+8.5
+12.0
+0.9
+2.2
+4.6
+1.6
+2.6
+5.1
+7.3
+RcSGG (ours)
+6.7
+11.7
+20.3
+9.2
+12.9
+4.8
+8.4
+14.4
+6.6
+9.2
+7.9
+11.1
+ 
+pant
+shoe
+girl
+board
+on
+wearing
+watching
+on
+hand
+hair
+of
+MotifsNet
+wheel
+has
+pant
+shoe
+girl
+board
+sitting 
+on
+wearing
+watching
+of
+hand
+hair
+of
+RcSGG
+wheel
+has
+pillow
+cat 2
+laptop
+table
+on
+on
+near
+on
+book
+desk
+on
+MotifsNet
+pillow
+cat 2
+laptop
+table
+ sitting on
+on
+behind
+watching
+on
+book
+desk
+on
+RcSGG
+bowl
+on
+MotifsNet
+glass
+cup
+plate
+on
+onon
+table
+man 1
+girl
+chair 2 
+laptop 2
+near
+on
+chair 1
+laptop 1
+man 2
+has
+sitting on
+sitting on
+bowl
+on
+RcSGG
+glass
+cup
+plate
+on
+onon
+table
+man 1
+girl
+chair 2 
+laptop 2
+in front 
+of
+sitting 
+on
+chair 1
+laptop 1
+man 2
+holding
+sitting on
+sitting on
+hair 1
+shirt 1 
+has
+has
+phone 1
+MotifsNet
+man 1
+man 2
+hair 2
+shirt 2 
+phone 2
+has
+has
+wearing
+wearing
+near
+hair 1
+shirt 1 
+has
+holding
+phone 1
+RcSGG
+man 1
+man 2
+hair 2
+shirt 2 
+phone 2
+has
+holding
+wearing
+wearing
+near
+Fig. 8. Qualitative results of our method and baseline approach (MotifsNet [5]). Blue and red highlight consistent and inconsistent predictions, respectively.
+the exclusion of background relationships. In contrast, our
+method significantly enhances the model’s ability to learn
+foreground relationships through interventions in the feature
+space. Even under more stringent evaluation conditions that
+include background relationships, our method maintains a
+considerable advantage, such as surpassing VCTree† by 11.0%
+on mR@100, highlighting the necessity to mitigate the impact of
+background relationships in SGG model training.
+Incorporating
+background
+relationship
+outputs,
+our
+experimental findings highlight the inherent limitations of
+current
+SGG
+evaluation
+protocols.
+This
+underscores
+the
+motivation for our approach, which addresses the typical
+oversight of background relationships in existing models.
+These models might unknowingly over-rely on background
+relationships, thereby obscuring the presence of fore-back bias.
+Our method mitigates this bias through strategic interventions
+in the feature space, enhancing model performance under
+more realistic evaluation conditions. This not only confirms
+the significance of fore-back bias but also demonstrates the
+robustness of our approach in addressing this challenge.
+Analyzing the Trade-off between R@K and mR@K. Tables 1, 2,
+and
+3 illustrate that RcSGG significantly improves mR@K
+across
+various
+datasets
+and
+frameworks,
+showcasing
+its
+strong debiasing capability. However, this improvement is
+accompanied by a decline in R@K compared to baseline
+methods. This phenomenon has been observed in many existing
+debiasing studies, as they inherently shift focus from high-
+frequency head relationships to low-frequency tail relationships,
+a trade-off designed to address the long-tailed distribution
+of relationships in SGG datasets. To better understand this
+trade-off, we conduct a detailed comparison of the recall rates
+(R@100) for several representative head and tail relationships,
+as shown in Figure 7. From Figure 7, we observe that the
+baseline method (MotifsNet) achieves higher recall for the head
+relationship ”on.” This high recall is partially due to dataset
+annotation practices, where annotators often simplify nuanced
+relationships such as ”sitting on” or ”laying on” into the coarse-
+grained relationship ”on.” This introduces noise into the dataset
+and inflates the prominence of ”on.” Consequently, models like
+MotifsNet, trained to optimize R@K, disproportionately favor
+such coarse-grained, high-frequency relationships.
+In
+contrast,
+RcSGG
+demonstrates
+significantly
+higher
+recall on fine-grained tail relationships, such as ”sitting on,”
+”standing on,” ”walking on,” and ”laying on,” despite their
+low frequencies. This improvement arises from RcSGG’s ARE
+and MIS, which redistribute the model’s attention from coarse-
+grained, dominant relationships to nuanced, underrepresented
+ones. By refining the feature space and mitigating the influence
+of spurious correlations, RcSGG enables more semantically
+accurate predictions for tail relationships, enhancing mR@K at
+the cost of R@K.
+Qualitative results. We show certain qualitative results in
+Figure 8, which demonstrate that:
+1)
+Our
+method
+can
+predict
+more
+informative
+tail
+relationships, such as <cat, watching, laptop> vs. <cat, near,
+laptop>, <cat, sitting on, table> vs. <cat, on, table>, and <man
+1, holding, phone 1> vs. <man 1, has, phone 1>. We attribute
+this to RcSGG’s proactively allowing more tail relationships to
+supervise model training (see Equation (7)), thus reducing the
+model’s bias towards head relationships.
+2) Our method is capable of predicting relationships that are
+typically overlooked, such as <pillow, behind, laptop>. In the
+baseline methods, the prediction for this relationship surpasses
+the recall threshold set for all relationships, and as a result, it can
+be considered neglected. This misclassification often arises from
+the model’s strong response to the background relationship,
+which tends to average out its response to the foreground
+relationships. Thus, we argue that this improvement stems
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+14
+TABLE 6
+The impact of Parameter π.
+PredCls
+R/mR@20
+R/mR@50
+R/mR@100
+π=1.0
+50.7 / 6.8
+60.8 / 10.2
+64.9 / 12.7
+π=1.5
+51.3 / 6.9
+60.9 / 10.0
+65.0 / 12.4
+π=2.0
+60.5 / 14.0
+66.7 / 17.9
+68.1 / 19.1
+π=2.5
+60.7 / 14.0
+66.8 / 17.7
+68.3 / 19.0
+π=3.0
+61.0 / 14.2
+66.9 / 18.5
+68.4 / 19.6
+π=3.5
+61.1 / 14.6
+66.8 / 18.1
+68.4 / 19.4
+TABLE 7
+The impact of Parameter K′. The ”%” denotes the proportion of instances
+from the selected K′ categories in the total number of relationships.
+PredCls
+R/mR@20
+R/mR@50
+R/mR@100
+K′=31 (5.0%)
+46.7 / 19.3
+59.3 / 26.7
+61.4 / 29.5
+K′=39 (10.0%)
+45.9 / 25.2
+58.1 / 33.8
+60.2 / 37.4
+K′=42 (15.2%)
+45.7 / 25.4
+57.7 / 34.1
+59.6 / 37.7
+K′=44 (20.8%)
+45.7 / 25.7
+57.6 / 33.9
+59.9 / 37.8
+K′=45 (32.1%)
+48.6 / 23.8
+60.1 / 32.7
+63.1 / 35.8
+K′=46 (39.2%)
+48.9 / 22.4
+60.7 / 32.1
+63.8 / 34.2
+from removing a large number of background relationships
+during training (see Equation (8)), thereby reducing the model’s
+bias towards background relationships. We also argue that the
+enhancements in the above two observations share a common
+origin: RcSGG’s reverse causality estimation eliminates spurious
+correlations from X to Y , thus reducing the two typical biases,
+head-tail bias and fore-back bias, presented in Section 1.
+3) Our method effectively mitigates the influence of frequent
+head relationships on less frequent relationships within the
+same scene. For example, in Figure 8, the baseline method
+predicts the relationship for <girl, chair2> as <girl, on, chair2>,
+influenced by the numerous ”on” relationships in the scene, such
+as <bowl, on, table>, <cup, on, table>, <plate, on, table>, and
+<glass, on, table>. These frequent ”on” relationships dominate
+the feature space, causing their features to cluster and bias
+the model’s prediction. In contrast, RcSGG mitigates this issue
+by refining the feature space through ARE. ARE dynamically
+re-samples less frequent relationships, ensuring their features
+remain distinguishable. Consequently, the refined feature space
+prevents the <girl, chair2> pair from being erroneously drawn
+toward the ”on” cluster and allows for the correct prediction
+of the nuanced relationship <girl, sitting on, chair2>. This
+improvement highlights RcSGG’s capacity to overcome head-tail
+bias and predict fine-grained relationships accurately.
+4.3
+Hyper-parameters and Ablations
+Ablate on hyper-parameters. Our method involves four hyper-
+parameters: π, K′, α, and λ. λ is solely for controlling the order of
+magnitude of sampling, determined by the approximate number
+of K′ relationship categories in the query set Q, and is set to 0.01
+in this paper. π, K′, and α are critical hyper-parameters affecting
+RcSGG performance. We conducted extensive ablation studies in
+Table 6, Table 7, Table 8, with the following observations:
+1) Table 6 shows that when π = 3, i.e. the ratio of background
+to foreground relationships is 3:1, the model achieves optimal
+performance. This indicates that the large number of background
+relationships due to sparse SGG annotations weakens the
+model’s foreground relationship recognition ability, which is
+mitigated by removing a certain proportion of background
+relationships. To substantiate this, we visualized the output
+logits of our approach and a baseline method in Figure 9.
+The results demonstrate that background relationship logits
+TABLE 8
+The impact of Parameter α.
+PredCls
+R/mR@20
+R/mR@50
+R/mR@100
+α=1.0
+45.9 / 25.7
+56.8 / 34.2
+60.2 / 38.1
+α=0.9
+45.9 / 25.6
+57.4 / 34.5
+59.8 / 38.2
+α=0.8
+46.3 / 25.3
+57.1 / 34.6
+59.6 / 38.4
+α=0.3
+44.7 / 32.9
+54.1 / 37.4
+57.2 / 41.0
+α=0.2
+44.6 / 32.6
+54.3 / 38.8
+57.3 / 41.4
+α=0.1
+44.3 / 32.5
+54.8 / 39.1
+57.6 / 41.2
+0
+10
+20
+30
+40
+50
+-8
+-4
+0
+4
+8
+Average output logits
+0: background relationship,  1-50:  foreground relationships
+ MotifsNet  
+ RcSGG  
+ Zero line 
+Fig. 9. Average output logits.
+in the baseline method overwhelmingly dominate, weakening
+the model’s response to foreground relationships (almost all
+negative). In contrast, our proposed approach significantly
+improves this unhealthy logit distribution, enhancing the
+model’s
+response
+and
+recognition
+ability
+for
+foreground
+relationships. Such results further indicate that fore-back bias
+is a fundamental source of bias in SGG models, and that
+addressing only the head-tail bias is inadequate for completely
+eliminating model biases.
+2) Table 7 indicates that the model achieves optimal
+performance when K′ = 44, i.e. the number of categories in
+Q is 44. Interestingly, increasing K′ further results in decline
+in model performance, e.g. K′ = 44 vs. K′ = 45. We posit
+that this phenomenon occurs because, despite the selection
+of an additional category, there is an 11.3% increase in the
+proportion of relationship quantities, subsequently instigating
+new imbalance issues within the query set Q.
+3)
+Table
+8
+reveals
+that
+the
+model
+achieves
+optimal
+performance when α = 0.2. In Equation (6), α controls the
+bias degree of sampling distribution; specifically, the larger α
+is, the more biased the sampling is toward high-loss categories,
+and vice versa. An appropriate α balances classification loss
+and sampling distribution, avoiding excessive imbalance in
+sampling results (e.g. α = 1).
+Note that due to computational resource limitations, we
+adopted a one-by-one parameter selection approach, with the
+order in Table 6 - 8 representing the parameter tuning order.
+Table 6 is set to remove background relationships proportionally
+without interfering with foreground relationships. Table 7 is set
+to π = 3, α = 1. Table 8 is set to π = 3, K′ = 44. To facilitate
+future generalization, we offer the following recommendations
+for hyperparameter selection: (1) For π, we recommend a value
+of 3.0 (3:1 background-to-foreground ratio), which ensures
+sufficient
+context
+from
+background
+relationships
+without
+overwhelming the model’s focus on foreground relationships.
+(2) For K′, we suggest choosing a value such that the selected
+relationship instances account for approximately 20% of the total
+instances, striking a balance between mitigating the long-tail
+distribution and preserving a diverse set of relationships. (3)
+For α, a small value such as 0.2 is preferred, as it effectively
+emphasizes high-loss categories while maintaining diversity in
+the sampling distribution to avoid overfitting.
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+15
+LSC
+MES
+MS
+RcSGG 
+0
+5
+10
+15
+20
+25
+30
+35
+40
+Mean recall rate
+mR@20
+mR@50
+mR@100
+Fig.
+10.
+Compared
+with
+classical
+uncertainty-driven
+active
+learning
+techniques, LSC, MES, and MS correspond to Least Confidence Sampling,
+Maximum Entropy Sampling, and Margin Sampling, respectively.
+TABLE 9
+Ablation of ξbg
+σ , ξfg
+σ , and MIS. σ is rnd. K equals 44 with ξfg
+σ
+and 0 without
+it, respectively.
+PredCls
+ξbg
+σ
+ξfg
+σ
+MIS
+R/mR@20
+R/mR@50
+R/mR@100
+✗
+✗
+✗
+59.5 / 12.2
+66.0 / 15.5
+67.9 / 16.8
+✓
+✗
+✗
+61.0 / 14.2
+66.9 / 18.5
+68.4 / 19.6
+✗
+✓
+✗
+47.1 / 19.8
+58.1 / 27.6
+61.3 / 31.7
+✗
+✓
+✓
+48.8 / 17.9
+59.3 / 25.5
+62.4 / 27.4
+✓
+✓
+✓
+44.6 / 32.6
+54.3 / 38.8
+57.3 / 41.4
+Ablate of core components. RcSGG includes three key designs:
+Intervention on background relationships (denoted as ξbg
+σ
+for
+brevity), interventions on foreground relationships (denoted as
+ξfg
+σ ), and MIS. We investigated the contributions of these designs
+by controlling their hyper-parameters, with results presented
+in Table 9. The experiment demonstrates that each key design
+in RcSGG contributes to performance improvement. ξbg
+σ
+can
+simultaneously enhance both R@K and mR@K, demonstrating
+that interventions in background relationships can improve the
+recognition performance of foreground relationships, including
+both head and tail relationships. This improvement is attributed
+to our method’s emphasis on learning features specific to
+foreground relationships. ξfg
+σ
+slightly sacrifices R@K while
+achieving a significant improvement in mR@K, indicating the
+necessity and helpfulness of approximately balanced prospect
+relationship within each batch, which is also emphasized
+in our Theorem 3. Lastly, MIS consistently helps improve
+mR@K, suggesting that, even for the same relationship category,
+enhancing sampling informativeness by focusing on object-level
+long-tail distribution benefits the SGG task.
+Comparison
+with
+active
+learning
+techniques.
+The
+core
+component, ARE, within RcSGG, is inspired by active learning.
+Active learning primarily evaluates and selects high-value
+unlabeled data for annotation to minimize labeling costs, as
+described in references [34], [35], [36], [37]. In contrast, ARE
+focuses on optimizing the feature space by sampling relationship
+features based on query conditions, with each category sampled
+independently and feature annotations remaining clear. While
+their goals and methods vary, both ARE and active learning
+share the same learning paradigm, model-to-data. Once ARE’s
+query conditions are set, traditional active learning techniques
+like uncertainty sampling could replace MIS. To achieve this,
+one simply needs to replace MIS with ALU in Equation (7):
+rk+
+tb
+= ξALU (Qk, enk
+tb), where ALU symbolizes the uncertainty
+sampling method in active learning, such as Least Confidence
+Sampling [72], Maximum Entropy Sampling [73], and Margin
+TABLE 10
+Quantitative results of RcSGG and baseline methods on PSG dataset.
+SGDet
+R@20 / 50 / 100
+mR@20 / 50 / 100
+PSGFormer [68] (ECCV’22)
+18.0/19.6/20.1
+14.8/17.0/17.6
+HiLo [62] (ICCV’23)
+34.1/40.7/43.0
+23.7/30.3/33.1
+MotifsNet (backbone) [5]
+20.0/21.7/22.0
+9.1/9.6/9.7
+ADTrans [75] (AAAI’24)
+17.1/18.6/19.0
+17.1/18.0/18.5
+RcSGG (ours)
+19.4/20.3/20.7
+18.6/19.2/19.3
+VCTree (backbone) [25]
+20.6/22.1/22.5
+9.7/10.2/10.2
+ADTrans [75] (AAAI’24)
+17.9/19.5/19.9
+18.0/18.9/19.0
+RcSGG (ours)
+20.7/21.3/21.4
+18.8/19.4/20.1
+Transformer (backbone) [64]
+20.7/21.3/21.4
+10.1/10.3/10.6
+RcSGG (ours)
+21.3/22.5/22.8
+18.9/19.4/20.3
+Sampling [74]. The outcomes of this substitution are presented
+in Figure 10. Upon replacing MIS with ALU, we observe
+a noticeable degradation in model performance. We argue
+that this decline stems from the inherent data bias issues of
+uncertainty-based active learning methods. Specifically, these
+methods tend to oversample underrepresented categories, an
+issue extensively discussed in the literature [34], [35], [36],
+[37]. Given the significant object-pair imbalance in scene
+graph generation tasks (see Figure 6), this exacerbates the data
+skewness introduced by ALU. However, our proposed method
+MIS effectively circumvents such biases by maximizing the
+information of the sampling results, taking into account the
+distribution of object pairs during the sampling process.
+Evaluation on panoptic scene graph generation dataset. Recently,
+[68] introduced the Panoptic Scene Graph Generation (PSG)
+dataset. Unlike previous datasets like VG150, PSG supports
+segmentation-based SGG tasks, utilizing pixel-level annotations
+to locate objects. To further assess the robustness of our proposed
+method, we followed the PSG dataset splitting as outlined in [68]
+and utilized three baseline frameworks: MotifsNet, VCTree, and
+Transformer. The experimental parameters remained consistent
+with those detailed in Section 4.1, and the results are displayed
+in Table 10. Table 10 shows that: 1) Our method demonstrates
+strong debiasing capabilities on the PSG dataset, with increases
+of 9.6%, 9.9%, and 9.7% on the mR@100 metric across the
+typical SGG frameworks MotifsNet [5], VCTree [25], and
+Transformer [64], respectively; 2) Our method exhibits only a
+minor decline on the R@K metric, specifically decreasing by
+1.3%, 1.1%, and 1.4% across these three typical SGG frameworks,
+respectively. This further demonstrates that our approach does
+not sacrifice the performance of head relationship category to
+achieve unbiased predictions; 3) Compared to other debiasing
+approaches, our method remains competitive, surpassing recent
+works PSGFormer [68] and ADTrans [75] on the mR@K metric.
+Although our method underperforms HiLo on the PSG dataset,
+it significantly surpasses HiLo on the VG150 dataset (see Table 1).
+Crucially, HiLo optimizes the model framework, whereas our
+debiasing approach is model-agnostic and can complement any
+existing framework. Therefore, integrating RcSGG with the HiLo
+could potentially improve performance further. Additionally,
+while RcSGG was originally tailored for detection-based SGG
+datasets and showed strong generalization on segmentation-
+based datasets, adapting it specifically for the PSG dataset could
+further boost its effectiveness.
+Evaluation within end-to-end SGG framework. This paper
+addresses the issue of spurious correlations in two-stage SGG
+frameworks, which induce two typical biases: head-tail bias
+and fore-back bias. To mitigate these issues, we introduce
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+16
+TABLE 11
+Quantitative results of RcSGG with one-stage SGG framework on VG150
+dataset.
+SGDet
+mR@20/50/100
+AVG∆
+mR
+AVG♢
+mR
+SSR-CNN [76] (CVPR’22)
+6.1/8.4/10.0
+8.2
+9.2
+RcSGG (ours)
+12.2/17.9/19.3
+16.5
+18.6
+EGTR (backbone) [77] (CVPR’24)
+5.5/7.9/10.1
+7.8
+9.0
+RcSGG (ours)
+12.5/18.3/19.8
+16.9
+19.1
+TABLE 12
+Model inference time of our proposed RcSGG and baseline frameworks on
+VG150 dataset. The time reported here is s/img per device.
+PredCls
+mR@20/50/100
+testing
+training
+MotifsNet (backbone) [5]
+12.2/15.5/16.8
+0.11825
+0.11943
+RcSGG (ours)
+32.6/38.8/41.4
+0.11792
+0.12522
+VCTree (backbone) [25]
+12.4/15.4/16.6
+0.15410
+0.15526
+RcSGG (ours)
+33.7/38.9/42.4
+0.15273
+0.16347
+Transformer (backbone) [64]
+12.4/16.0/17.5
+0.18456
+0.18522
+RcSGG (ours)
+32.4/39.6/41.3
+0.18498
+0.19570
+RcSGG, restructuring the causal chain into a reverse causal
+structure to eliminate spurious correlations. Our approach, ARE,
+optimizes relationship feature spaces for unbiased predictions.
+To assess the generalizability of RcSGG, we have extended its
+application to the end-to-end SGG paradigm, which combines
+object detection and relationship classification in a unified
+framework. Although end-to-end frameworks eliminate the
+explicit separation between object detection and relationship
+classification, they still implicitly construct relationship feature
+spaces during their inference processes. This allows RcSGG
+to optimize these spaces effectively. Experimental results in
+Table 11 demonstrate that integrating RcSGG into end-to-end
+frameworks improves the performance of unbiased metrics.
+For example, applying RcSGG to SSR-CNN [78] and EGTR
+[77] led to substantial gains in the unbiased metric AVG♢
+mR,
+achieving improvements of 9.4% and 10.1%, respectively. These
+results validate the generalization capability of RcSGG across
+different SGG paradigms. While end-to-end frameworks do not
+explicitly exhibit the spurious correlations addressed in this
+paper, they inherit biased feature spaces from the underlying
+datasets. RcSGG effectively mitigates these biases, highlighting
+its robustness and applicability beyond the two-stage paradigm.
+Efficiency
+Analysis.
+This
+section
+evaluates
+RcSGG’s
+computational efficiency by analyzing training and inference
+times, assessing the feasibility of integrating ARE and MIS into
+SGG frameworks (Table 12). The evaluation results show RcSGG
+increases training time by about 5% over baseline methods,
+but
+this
+modest
+overhead
+leads
+to
+significant
+debiasing
+performance gains. We consider this trade-off justified given
+the substantial improvement in unbiased predictions. Despite
+the additional computational steps introduced by ARE and
+MIS during training, our method maintains high efficiency
+for several reasons. First, the query set Q is efficiently stored
+as a byproduct during the initial training epoch, incurring
+no extra computational cost. Second, we limit the size of the
+query set Q to approximately 20% of the total relationship
+features, significantly reducing the sampling overhead. Finally,
+to enhance efficiency further, we optimize Maximum Mutual
+Information Sampling into Maximum Information Sampling,
+simplifying the process while preserving its effectiveness. These
+design choices ensure that the additional computational cost
+remains minimal, even as RcSGG performs sophisticated feature
+refinements to mitigate spurious correlations.
+Unlike the training phase, the testing phase of RcSGG incurs
+no additional computational overhead. During testing, ARE is
+not applied, and the process follows the standard SGG flow
+(X →R →Y ). The classifier operates within the refined
+parameter space F e
+R, which was optimized during training to
+eliminate spurious correlations. Table 12 demonstrates that the
+inference time per image for RcSGG is nearly identical to that of
+the baselines. Minor variations observed during testing are likely
+due to system noise or hardware-related fluctuations, rather than
+inherent differences in the computational requirements of the
+methods. This aligns with the theoretical expectation that RcSGG
+adds no additional steps to the inference process.
+4.4
+Discussion and Future Work
+As shown in Tables 1 and 2, our method achieves state-of-
+the-art results in terms of mR@K. However, there is a trade-
+off with R@K compared to baseline SGG frameworks. We
+argue this can be primarily attributed to two reasons: 1) By
+intervening in the relationship feature space, our method boosts
+the influence of tail categories on model training, preventing the
+model from predominantly converging to head categories, which
+inevitably impacts the performance of head relationships. 2) The
+SGG datasets contain noisy annotations, typically labeling fine-
+grained tail relationships as coarse-grained head relationships
+and including semantically ambiguous categories.
+Due to space constraints, a thorough analysis of these points
+is provided in Appendix F. Importantly, the presence of noise in
+SGG datasets offers crucial insights for our future work, such as
+reprocessing dataset annotations; a preliminary outlook on this
+is also discussed in Appendix F.
+5
+CONCLUSION
+In this paper, we analyze how the decoupled two-stage SGG
+framework leads to spurious correlation issues, subsequently
+inducing at least two observable biases: head-tail bias and fore-
+back bias. To address these issues, we reconstruct the causal
+chain structure X
+→R →Y
+of the SGG model into a
+reverse causal structure X →R ←Y . By estimating the
+reverse causality, R ←Y , our restructured model mitigates
+spurious correlations, thereby eradicating the induced model
+biases. Furthermore, given the dual imbalance challenges in
+the SGG task, we propose a Maximum Information Sampling
+technique to enhance reverse causality estimation. Our method
+achieves state-of-the-art performance on the primary metric for
+debiased scene graphs, specifically the mean recall rate mR@K,
+while remaining competitive in recall rate R@K. This indicates
+that our method achieves a better trade-off, allowing for refined
+predictions in tail relationships without overly compromising
+the performance of head classifications.
+As a preliminary exploration for future work, in this
+paper, we analyze the semantic confusions and coarse-grained
+annotations in the SGG task and discuss potential solutions. We
+believe that addressing these aspects is crucial for achieving a
+deep understanding of scenes.
+REFERENCES
+[1]
+J. Johnson, R. Krishna, M. Stark, L.-J. Li, D. Shamma, M. Bernstein, and
+L. Fei-Fei, “Image retrieval using scene graphs,” in Proc. IEEE Conf.
+Comput. Vis. Pattern Recognit., 2015, pp. 3668–3678.
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+17
+[2]
+X. Chang, P. Ren, P. Xu, Z. Li, X. Chen, and A. Hauptmann, “A
+comprehensive survey of scene graphs: Generation and application,”
+IEEE Trans. Pattern Anal. Mach. Intell., vol. 45, no. 1, pp. 1–26, 2023.
+[3]
+T. Wang, J. Huang, H. Zhang, and Q. Sun, “Visual commonsense r-cnn,”
+in Proc. IEEE Conf. Comput. Vis. Pattern Recognit., 2020, pp. 10 760–10 770.
+[4]
+G. Chen, J. Li, and W. Wang, “Scene graph generation with role-playing
+large language models,” Int. Conf. Neural Inf. Process. Syst., 2024.
+[5]
+R. Zellers, M. Yatskar, S. Thomson, and Y. Choi, “Neural motifs: Scene
+graph parsing with global context,” in Proc. IEEE Conf. Comput. Vis.
+Pattern Recognit., 2018, pp. 5831–5840.
+[6]
+J. Yang, J. Lu, S. Lee, D. Batra, and D. Parikh, “Graph r-cnn for scene
+graph generation,” in Proc. Eur. Conf. Comput. Vis., 2018, pp. 670–685.
+[7]
+D. Xu, Y. Zhu, C. B. Choy, and L. Fei-Fei, “Scene graph generation
+by iterative message passing,” in Proc. IEEE Conf. Comput. Vis. Pattern
+Recognit., 2017, pp. 5410–5419.
+[8]
+V. Ramanathan, C. Li, J. Deng, W. Han, Z. Li, K. Gu, Y. Song, S. Bengio,
+C. Rosenberg, and L. Fei-Fei, “Learning semantic relationships for better
+action retrieval in images,” in Proc. IEEE Conf. Comput. Vis. Pattern
+Recognit., 2015, pp. 1100–1109.
+[9]
+W. Norcliffe-Brown, S. Vafeias, and S. Parisot, “Learning conditioned
+graph structures for interpretable visual question answering,” in Proc.
+32nd Int. Conf. Neural Inf. Process. Syst., vol. 31, 2018.
+[10] J. Shi, H. Zhang, and J. Li, “Explainable and explicit visual reasoning
+over scene graphs,” in Proc. IEEE Conf. Comput. Vis. Pattern Recognit.,
+2019, pp. 8376–8384.
+[11] X. Yang, K. Tang, H. Zhang, and J. Cai, “Auto-encoding scene graphs
+for image captioning,” in Proc. IEEE Conf. Comput. Vis. Pattern Recognit.,
+2019, pp. 10 685–10 694.
+[12] J. Gu, S. Joty, J. Cai, H. Zhao, X. Yang, and G. Wang, “Unpaired image
+captioning via scene graph alignments,” in Proc. IEEE/CVF Int. Conf.
+Comput. Vis., 2019, pp. 10 323–10 332.
+[13] S. Khandelwal, M. Suhail, and L. Sigal, “Segmentation-grounded scene
+graph generation,” in Proc. IEEE/CVF Int. Conf. Comput. Vis., 2021, pp.
+15 879–15 889.
+[14] A. Zhang, Y. Yao, Q. Chen, W. Ji, Z. Liu, M. Sun, and T.-S. Chua, “Fine-
+grained scene graph generation with data transfer,” in Proc. Eur. Conf.
+Comput. Vis., 2022.
+[15] X. Lyu, L. Gao, Y. Guo, Z. Zhao, H. Huang, H. T. Shen, and J. Song,
+“Fine-grained predicates learning for scene graph generation,” in Proc.
+IEEE Conf. Comput. Vis. Pattern Recognit., 2022, pp. 19 467–19 475.
+[16] W. Li, H. Zhang, Q. Bai, G. Zhao, N. Jiang, and X. Yuan, “PPDL:
+Predicate probability distribution based loss for unbiased scene graph
+generation,” in Proc. IEEE Conf. Comput. Vis. Pattern Recognit., 2022, pp.
+19 447–19 456.
+[17] X. Dong, T. Gan, X. Song, J. Wu, Y. Cheng, and L. Nie, “Stacked hybrid-
+attention and group collaborative learning for unbiased scene graph
+generation,” in Proc. IEEE Conf. Comput. Vis. Pattern Recognit., 2022, pp.
+19 427–19 436.
+[18] M. Suhail, A. Mittal, B. Siddiquie, C. Broaddus, J. Eledath, G. Medioni,
+and L. Sigal, “Energy-based learning for scene graph generation,” in
+Proc. IEEE Conf. Comput. Vis. Pattern Recognit., 2021, pp. 13 936–13 945.
+[19] M.-J. Chiou, H. Ding, H. Yan, C. Wang, R. Zimmermann, and J. Feng,
+“Recovering the unbiased scene graphs from the biased ones,” in Proc.
+29th ACM Int. Conf. Multi., 2021, pp. 1581–1590.
+[20] K. Tang, Y. Niu, J. Huang, J. Shi, and H. Zhang, “Unbiased scene graph
+generation from biased training,” in Proc. IEEE Conf. Comput. Vis. Pattern
+Recognit., 2020, pp. 3716–3725.
+[21] Y.
+Deng,
+Y.
+Li,
+Y.
+Zhang,
+X.
+Xiang,
+J.
+Wang,
+J.
+Chen,
+and
+J. Ma, “Hierarchical memory learning for fine-grained scene graph
+generation,” in Proc. Eur. Conf. Comput. Vis., 2022.
+[22] L. Li, L. Chen, Y. Huang, Z. Zhang, S. Zhang, and J. Xiao, “The devil is
+in the labels: Noisy label correction for robust scene graph generation,”
+in Proc. IEEE Conf. Comput. Vis. Pattern Recognit., 2022, pp. 18 869–18 878.
+[23] C. Chen, Y. Zhan, B. Yu, L. Liu, Y. Luo, and B. Du, “Resistance training
+using prior bias: toward unbiased scene graph generation,” in Proc.
+AAAI Conf. Artif. Intell., 2022.
+[24] Y. Guo, L. Gao, X. Wang, Y. Hu, X. Xu, X. Lu, H. T. Shen, and
+J. Song, “From general to specific: Informative scene graph generation
+via balance adjustment,” in Proc. IEEE/CVF Int. Conf. Comput. Vis., 2021,
+pp. 16 383–16 392.
+[25] K. Tang, H. Zhang, B. Wu, W. Luo, and W. Liu, “Learning to compose
+dynamic tree structures for visual contexts,” in Proc. IEEE Conf. Comput.
+Vis. Pattern Recognit., 2019, pp. 6619–6628.
+[26] S. Ren, K. He, R. Girshick, and J. Sun, “Faster R-CNN: Towards real-time
+object detection with region proposal networks,” IEEE Trans. Pattern
+Anal. Mach. Intell., vol. 39, no. 6, pp. 1137–1149, 2017.
+[27] Pearl, Judea, “Causality,” Cambridge university press, 2009.
+[28] R. Christiansen, N. Pfister, M. E. Jakobsen, N. Gnecco, and J. Peters, “A
+causal framework for distribution generalization,” IEEE Trans. Pattern
+Anal. Mach. Intell., vol. 44, no. 10, pp. 6614–6630, 2022.
+[29] J. Pearl, “Causal diagrams for empirical research,” Biometrika, vol. 82,
+no. 4, pp. 669–688, 1995.
+[30] J. Pearl et al., “Models, reasoning and inference,” Cambridge, UK:
+CambridgeUniversityPress, vol. 19, no. 2, 2000.
+[31] Y. Luo, J. Peng, and J. Ma, “When causal inference meets deep learning,”
+Nat. Mach. Intell., vol. 2, no. 8, pp. 426–427, 2020.
+[32] B. Sch¨olkopf, F. Locatello, S. Bauer, N. R. Ke, N. Kalchbrenner, A. Goyal,
+and Y. Bengio, “Toward causal representation learning,” Proc. of the
+IEEE, vol. 109, no. 5, pp. 612–634, 2021.
+[33] D.
+Plecko
+and
+E.
+Bareinboim,
+“Causal
+fairness
+analysis,”
+arXiv:2207.11385, 2022.
+[34] B. Xie, L. Yuan, S. Li, C. H. Liu, and X. Cheng, “Towards fewer
+annotations: Active learning via region impurity and prediction
+uncertainty for domain adaptive semantic segmentation,” in Proc. IEEE
+Conf. Comput. Vis. Pattern Recognit., 2022, pp. 8068–8078.
+[35] O. Ben-Eliezer, M. Hopkins, C. Yang, and H. Yu, “Active learning
+polynomial threshold functions,” Int. Conf. Neural Inf. Process. Syst.,
+2022.
+[36] K. Konyushkova, R. Sznitman, and P. Fua, “Learning active learning
+from data,” Int. Conf. Neural Inf. Process. Syst., vol. 30, 2017.
+[37] S. Sun, S. Zhi, J. Heikkil¨a, and L. Liu, “Evidential uncertainty and
+diversity guided active learning for scene graph generation,” in Proc.
+Int. Conf. Learn. Represent., 2023.
+[38] A. Krizhevsky, I. Sutskever, and G. E. Hinton, “Imagenet classification
+with deep convolutional neural networks,” in Int. Conf. Neural Inf.
+Process. Syst., vol. 25, 2012.
+[39] K. Simonyan and A. Zisserman, “Very deep convolutional networks for
+large-scale image recognition,” in Proc. Int. Conf. Learn. Represent., 2014.
+[40] R. Krishna, Y. Zhu, O. Groth, J. Johnson, K. Hata, J. Kravitz, S. Chen,
+Y. Kalantidis, L.-J. Li, D. A. Shamma et al., “Visual genome: Connecting
+language and vision using crowdsourced dense image annotations,”
+Int. J. Comput. Vis., vol. 123, no. 1, pp. 32–73, 2017.
+[41] A. Desai, T.-Y. Wu, S. Tripathi, and N. Vasconcelos, “Learning of visual
+relations: The devil is in the tails,” in Proc. IEEE/CVF Int. Conf. Comput.
+Vis., 2021, pp. 15 404–15 413.
+[42] S. Chen, Y. Du, P. Mettes, and C. G. Snoek, “Multi-label meta
+weighting for long-tailed dynamic scene graph generation,” in Proc.
+ACM International Conference on Multimedia Retrieval, 2023, pp. 39–47.
+[43] C. Zheng, X. Lyu, L. Gao, B. Dai, and J. Song, “Prototype-based
+embedding network for scene graph generation,” in Proc. IEEE Conf.
+Comput. Vis. Pattern Recognit., 2023, pp. 22 783–22 792.
+[44] C. Zheng, L. Gao, X. Lyu, P. Zeng, A. El Saddik, and H. T. Shen, “Dual-
+branch hybrid learning network for unbiased scene graph generation,”
+IEEE Trans. Circuits Syst. Video Technol., 2023.
+[45] G. Sudhakaran, D. S. Dhami, K. Kersting, and S. Roth, “Vision relation
+transformer for unbiased scene graph generation,” in Proc. IEEE/CVF
+Int. Conf. Comput. Vis., 2023, pp. 21 882–21 893.
+[46] Q. Yu, J. Li, Y. Wu, S. Tang, W. Ji, and Y. Zhuang, “Visually-prompted
+language model for fine-grained scene graph generation in an open
+world,” in Proc. IEEE/CVF Int. Conf. Comput. Vis., 2023, pp. 21 560–
+21 571.
+[47] G. Chen, L. Li, Y. Luo, and J. Xiao, “Addressing predicate overlap in
+scene graph generation with semantic granularity controller,” in Proc.
+IEEE Int. Conf. Multimedia Expo.
+IEEE, 2023, pp. 78–83.
+[48] X. Wang, M. Saxon, J. Li, H. Zhang, K. Zhang, and W. Y. Wang, “Causal
+balancing for domain generalization,” Proc. Int. Conf. Learn. Represent.,
+2023.
+[49] S. Fan, X. Wang, Y. Mo, C. Shi, and J. Tang, “Debiasing graph neural
+networks via learning disentangled causal substructure,” Int. Conf.
+Neural Inf. Process. Syst., 2022.
+[50] H. Zhou, J. Zhang, T. Luo, Y. Yang, and J. Lei, “Debiased scene graph
+generation for dual imbalance learning,” IEEE Trans. Pattern Anal. Mach.
+Intell., vol. 45, no. 4, pp. 4274–4288, 2023.
+[51] S. Sun, S. Zhi, Q. Liao, J. Heikkil¨a, and L. Liu, “Unbiased scene graph
+generation via two-stage causal modeling,” IEEE Trans. Pattern Anal.
+Mach. Intell., 2023.
+[52] Y. Lu, Y.-M. Cheung, and Y. Y. Tang, “Bayes imbalance impact index: A
+measure of class imbalanced data set for classification problem,” IEEE
+Trans Neural Netw Learn Syst., vol. 31, no. 9, pp. 3525–3539, 2019.
+[53] Y. Zhan, J. Yu, T. Yu, and D. Tao, “On exploring undetermined
+relationships for visual relationship detection,” in Proc. IEEE Conf.
+Comput. Vis. Pattern Recognit., 2019, pp. 5128–5137.
+[54] Y. Teng and L. Wang, “Structured sparse r-cnn for direct scene graph
+generation,” in Proc. IEEE Conf. Comput. Vis. Pattern Recognit., 2022, pp.
+19 437–19 446.
+[55] K. Yoon, K. Kim, J. Moon, and C. Park, “Unbiased heterogeneous
+scene graph generation with relation-aware message passing neural
+network,” in Proc. AAAI Conf. Artif. Intell., vol. 37, no. 3, 2023, pp. 3285–
+3294.
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+18
+[56] D. Jung, S. Kim, W. H. Kim, and M. Cho, “Devil’s on the edges: Selective
+quad attention for scene graph generation,” in Proc. IEEE Conf. Comput.
+Vis. Pattern Recognit., 2023, pp. 18 664–18 674.
+[57] T. Jin, F. Guo, Q. Meng, S. Zhu, X. Xi, W. Wang, Z. Mu, and
+W. Song, “Fast contextual scene graph generation with unbiased context
+augmentation,” in Proc. IEEE Conf. Comput. Vis. Pattern Recognit., 2023,
+pp. 6302–6311.
+[58] X. Lyu, L. Gao, P. Zeng, H. T. Shen, and J. Song, “Adaptive fine-grained
+predicates learning for scene graph generation,” IEEE Trans. Pattern
+Anal. Mach. Intell., 2023.
+[59] Y. Min, A. Wu, and C. Deng, “Environment-invariant curriculum
+relation learning for fine-grained scene graph generation,” in Proc.
+IEEE/CVF Int. Conf. Comput. Vis., 2023, pp. 13 296–13 307.
+[60] L. Zhou, J. Hu, Y. Zhou, T. L. Lam, and Y. Xu, “Peer learning for
+unbiased scene graph generation,” arXiv:2301.00146, 2023.
+[61] L. Li, G. Chen, J. Xiao, Y. Yang, C. Wang, and L. Chen, “Compositional
+feature augmentation for unbiased scene graph generation,” in Proc.
+IEEE/CVF Int. Conf. Comput. Vis., 2023, pp. 21 685–21 695.
+[62] Z. Zhou, M. Shi, and H. Caesar, “Hilo: Exploiting high low frequency
+relations for unbiased panoptic scene graph generation,” in Proc.
+IEEE/CVF Int. Conf. Comput. Vis., 2023, pp. 21 637–21 648.
+[63] L. Li, L. Chen, H. Shi, H. Zhang, Y. Yang, W. Liu, and J. Xiao, “Nicest:
+Noisy label correction and training for robust scene graph generation,”
+arXiv:2207.13316, 2022.
+[64] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N. Gomez,
+Ł. Kaiser, and I. Polosukhin, “Attention is all you need,” in Int. Conf.
+Neural Inf. Process. Syst., vol. 30, 2017.
+[65] D. A. Hudson and C. D. Manning, “Gqa: A new dataset for real-world
+visual reasoning and compositional question answering,” in Proc. IEEE
+Conf. Comput. Vis. Pattern Recognit., 2019, pp. 6700–6709.
+[66] A. Kuznetsova, H. Rom, N. Alldrin, J. Uijlings, I. Krasin, J. Pont-Tuset,
+S. Kamali, S. Popov, M. Malloci, A. Kolesnikov et al., “The open images
+dataset v4: Unified image classification, object detection, and visual
+relationship detection at scale,” Int. J. Comput. Vis., vol. 128, no. 7, pp.
+1956–1981, 2020.
+[67] R. Li, S. Zhang, B. Wan, and X. He, “Bipartite graph network with
+adaptive message passing for unbiased scene graph generation,” in roc.
+IEEE Conf. Comput. Vis. Pattern Recognit., 2021, pp. 11 109–11 119.
+[68] J. Yang, Y. Z. Ang, Z. Guo, K. Zhou, W. Zhang, and Z. Liu, “Panoptic
+scene graph generation,” in Proc. Eur. Conf. Comput. Vis., 2022, pp. 178–
+196.
+[69] K. He, X. Zhang, S. Ren, and J. Sun, “Deep residual learning for image
+recognition,” in Proc. IEEE Conf. Comput. Vis. Pattern Recognit., 2016, pp.
+770–778.
+[70] L. Tao, L. Mi, N. Li, X. Cheng, Y. Hu, and Z. Chen, “Predicate correlation
+learning for scene graph generation,” IEEE Trans. Image Process., vol. 31,
+pp. 4173–4185, 2022.
+[71] X. Lin, C. Ding, J. Zhang, Y. Zhan, and D. Tao, “Ru-net: Regularized
+unrolling network for scene graph generation,” in Proc. IEEE Conf.
+Comput. Vis. Pattern Recognit., 2022, pp. 19 457–19 466.
+[72] Y. Shen, H. Yun, Z. C. Lipton, Y. Kronrod, and A. Anandkumar,
+“Deep active learning for named entity recognition,” arXiv preprint
+arXiv:1707.05928, 2017.
+[73] W. Luo, A. Schwing, and R. Urtasun, “Latent structured active
+learning,” in Int. Conf. Neural Inf. Process. Syst., vol. 26, 2013.
+[74] M.-F. Balcan, A. Broder, and T. Zhang, “Margin based active learning,”
+in International Conference on Computational Learning Theory.
+Springer,
+2007, pp. 35–50.
+[75] L. Li, W. Ji, Y. Wu, M. Li, Y. Qin, L. Wei, and R. Zimmermann, “Panoptic
+scene graph generation with semantics-prototype learning,” in Proc.
+AAAI Conf. Artif. Intell., vol. 38, no. 4, 2024, pp. 3145–3153.
+[76] Y. Teng and L. Wang, “Structured sparse r-cnn for direct scene graph
+generation,” in Proc. IEEE Conf. Comput. Vis. Pattern Recognit., 2022, pp.
+19 437–19 446.
+[77] J. Im, J. Nam, N. Park, H. Lee, and S. Park, “Egtr: Extracting graph from
+transformer for scene graph generation,” in Proc. IEEE Conf. Comput.
+Vis. Pattern Recognit., 2024, pp. 24 229–24 238.
+[78] K. Kim, K. Yoon, Y. In, J. Moon, D. Kim, and C. Park, “Adaptive self-
+training framework for fine-grained scene graph generation,” in Proc.
+Int. Conf. Learn. Represent., 2020, pp. 1–25.
+[79] A. K. Menon, S. Jayasumana, A. S. Rawat, H. Jain, A. Veit, and S. Kumar,
+“Long-tail learning via logit adjustment,” in Proc. Int. Conf. Learn.
+Represent., 2020, pp. 1–27.
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+19
+APPENDIX FILE TO ‘A REVERSE CAUSAL FRAMEWORK
+TO
+MITIGATE
+SPURIOUS
+CORRELATIONS
+FOR
+DEBIASING SCENE GRAPH GENERATION’
+This Appendix provides detailed theoretical proofs for the
+assumptions and theorems presented in the main paper.
+Additionally, further analysis and discussions on future work
+are included to offer a more comprehensive understanding of
+the topics covered. Unless otherwise noted, the notations and
+symbols used in this Appendix are consistent with those in the
+main paper, ensuring continuity and clarity in the mathematical
+discourse.
+APPENDIX A: PROOF OF SPURIOUS CORRELATIONS
+BETWEEN X AND Y IN SGG TASK
+In this section, we provide the detailed mathematical proof
+that demonstrates the existence of spurious correlations between
+X and Y
+in the two-stage Scene Graph Generation (SGG)
+framework [5], [14], [15], [21], [22], [25], [45], [60], [62].
+Specifically, we assume that the aggregated relationship
+features at the image level result from an unobserved confounder
+Z, with X = a1Z + ϵ1 and Y = a2Z + ϵ2, where a1 and a2
+are constants, and ϵ1 and ϵ2 represent random noise terms. The
+Pearson correlation coefficient between X and Y is given by:
+ρ(X, Y ) =
+Cov(X, Y )
+p
+Var(X) × Var(Y ),
+(15)
+where
+Cov(X, Y ) = E[(a1Z + ϵ1)(a2Z + ϵ2)] −E[a1Z + ϵ1]E[a2Z + ϵ2]
+= a1a2E[Z2] + a1E[Zϵ2] + a2E[ϵ1Z]+
+E[ϵ1ϵ2] −a1a2E[Z]2
+= a1a2E[Z2] −a1a2E[Z]2.
+(16)
+We, therefore, have:
+ρ(X, Y ) =
+a1a2E[Z2] −a1a2E[Z]2
+p
+(a12E[Z2] + Var(ϵ1))(a22E[Z2] + Var(ϵ2)). (17)
+For the SGG task, we observe a strong co-occurrence of
+relationships at the image level, as illustrated in Figure 3 (b) in
+the main paper. For instance, the probability of ”growing on” co-
+occurring with ”mounted on” is much higher than with ”flying on”
+in a scene. Therefore, E[Z2] ̸= E[Z]2, leading to ρ(X, Y ) ̸= 0.
+Yet, fc expects independent relationship features. Hence, we
+argue that spurious correlations exist between X and Y .
+APPENDIX
+B:
+MATHEMATICAL
+FOUNDATIONS
+OF
+ACTIVE REVERSE ESTIMATION (ARE)
+These section clarify how the effective parameter space F eR,
+Spurious Correlation Error (SCE), Overlapping Error (OE), and
+their interplay enable the Bayesian optimal classifier f ∗
+c
+to
+mitigate spurious correlations. The effective parameter space F eR
+is defined as:
+F eR = {fc : |SCE(fc) −OE(fc)| ≤δ},
+(18)
+where SCE(fc) quantifies the errors caused by spurious
+correlations in the parameter space, OE(fc) measures the
+overlap between spurious correlations and residual classification
+errors, and δ is a threshold that balances spurious correlation
+mitigation with model flexibility. By constraining the difference
+between SCE and OE, F eR ensures that the classifier focuses
+on causal relationships while reducing the influence of spurious
+correlations. The Spurious Correlation Error is calculated as:
+SCE(fc) =
+X
+k∈K
+Z
+P(Y = k|X)
+× [1 −P( ˆY = k|Y = k, X)]P(X)dX,
+(19)
+where P(Y = k|X) represents the true label probability given
+input X, and P( ˆY = k|Y = k, X) is the model’s predicted
+probability conditioned on the true label and input. This
+metric evaluates the discrepancies between true and predicted
+distributions under the influence of X.
+The Overlapping Error measures the intersection of spurious
+correlations and causal signals:
+OE(fc) =
+X
+k∈K
+ZZ
+P(Y = k|R, X)
+× [1 −P( ˆY = k|Y = k, R, X)]P(R, X)dRdX.
+(20)
+where P(Y = k|R, X) denotes the conditional probability given
+relationship features R and input X, and P( ˆY = k|Y = k, R, X)
+is the predicted probability conditioned on R, X, and the
+true labels. Minimizing OE ensures that the parameter space
+prioritizes causal signals over spurious correlations.
+To achieve the Bayesian optimal classifier f ∗
+c , the effective
+parameter space F eR must be optimized to minimize the residual
+classification error (RCE):
+f ∗
+c = argminfc∈Ff
+R RCE(fc),
+(21)
+This optimization aligns the model’s focus with causal patterns,
+mitigating the adverse effects of spurious correlations.
+Active
+Reverse
+Estimation
+(ARE)
+is
+proposed
+to
+operationalize
+this
+theoretical
+framework.
+ARE
+estimates
+the reverse causality R ←Y by designing query conditions and
+actively sampling high-information relationship features. This
+ensures that the classifier fc operates within F eR, minimizing
+the impact of spurious correlations while enhancing the model’s
+generalizability. Through ARE, the effective parameter space is
+aligned with causality, ultimately enabling robust and unbiased
+learning in SGG tasks.
+APPENDIX C: PROOF OF ASSUMPTIONS 1 AND 2
+This section provides the detailed proofs of Assumptions 1 and
+2, which form the theoretical basis of our analysis in the main
+paper.
+Assumption 1 (Spurious correlations in a single batch). For
+any relationship feature rp
+tb in batch Btb, its outcome is influenced by
+another feature rq
+tb in the same batch. Formally, Y (rp
+tb) ̸= Y (rp
+tb∪rq
+tb),
+where Y (·) represents the prediction of the first instance in the given
+feature combination.
+Assumption 2 (No spurious correlations across batches). For
+any relationship feature rp
+tb in batch Btb, its outcome is unaffected
+by any feature rq
+mn from a different batch Bmn. Formally, Y (rp
+tb) =
+Y (rp
+tb ∪rq
+mn), where b ̸= m.
+Proof of Assumptions 1. We assume that the conditional
+probability output of the model is:
+Y (X; θ) = softmax(WX + β),
+(22)
+where W and β are the model’s weights and bias, respectively.
+Given that SGG is a classification task, we typically supervise the
+model’s training with cross-entropy loss:
+Lfc(Btb; θ) = −
+1
+|Btb|
+X
+(X,Y )∈Btb
+log
+e(w⊤X+b)
+PK
+k=1 e(w⊤X+b) ,
+(23)
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+20
+where |Btb| is the size of batch Btb. The update of model
+parameters depends on the value of the loss function L; thus,
+for the claim Y (rp
+tb) ̸= Y (rp
+tb ∪rq
+tb) in Assumption 1, we only
+need to prove Lfc(Btb; θ) ̸= Lfc(Btb\rq
+tb; θ). Btb\rq
+tb signifies
+the removal of the q-th relationship category from batch Btb.
+Intuitively, assume rtb is a head relationship with multiple
+instances in Btb; removing it would naturally enhance the
+learning of other categories, particularly tail categories. Even
+if rtb has only a few instances in Btb, Lfc(Btb\rq
+tb) would
+still change, thereby influencing parameter updates. Based on
+Equation (23), we have:
+Lfc(Btb\rq
+tb; θ) = −
+1
+|Btb| −|rq
+tb|
+X
+(X,Y )∈Btb
+(log
+e(w⊤X+β)
+PK
+k=1 e(w⊤X+β)
+−log
+e(w⊤rq
+tb+β)
+PK
+k=1 e(w⊤rq
+tb+β) ).
+(24)
+where |rq
+tb| denotes the number of the q-th relationship category
+in batch Btb. Regarding Equation (24), we see that it excludes
+components related to rq
+tb
+from the loss function of the
+entire batch Btb, altering the total sum of the loss function.
+Additionally, it is important to note that, compared to Equation
+(23), the denominator changes from |Btb| to |Btb|−|rq
+tb|, affecting
+the average value of the loss. Therefore, the values of Lfc(Btb; θ)
+and Lfc(Btb\rq
+tb; θ) cannot be the same unless rq
+tb completely
+offsets the exclusion terms, which is impractical as it would
+imply that rq
+tb is an infinitesimally small quantity. Thus, we
+arrive at the proof of Assumption 1.
+Proof of Assumptions 2. Since the loss function for each
+batch is calculated independently, for Btb, we have Lfc(Btb; θ),
+as seen in Equation (23); for Bmn, we have:
+Lfc(Bmn; θ) = −
+1
+|Bmn|
+X
+(X,Y )∈Bmn
+log
+e(w⊤X+β)
+PK
+k=1 e(w⊤X+β) ,
+(25)
+Gradient updates for Btb and Bmn are conducted separately,
+and the update rules ensure that data within each batch only
+affects its own parameter updates. Thus, the update of Btb does
+not impact the loss calculation and parameter update for Bmn,
+and vice versa. This leads us to the proof of Assumption 2.
+APPENDIX D: PROOF OF THEOREM 1
+This section provides the detailed proof for Theorem 1, which
+states that the model fc trained on a category-balanced dataset D
+is a Bayesian optimal classifier [48], [79], unaffected by spurious
+correlations.
+Theorem 1 (Bayesian optimal classifier induced by epoch
+balance). The model fc trained on D is a Bayesian optimal classifier
+f ∗
+c , i.e. argmaxy∈[K] fc(r) = argmaxy∈[K] f ∗
+c (r), if the following
+two conditions hold: 1) ND = NB, 2) |rm| = |rn| (m ∈[K], n ∈
+[K], m ̸= n), where rm is the feature of m-th relationship class in D.
+Proof of Theorem 1. Given that ND = NB, the loss L for
+each epoch is:
+Lfc(D; θ) = −
+2
+ND(ND + 1)
+ND
+X
+i=1
+Ni
+X
+j=1
+ˆY (rtb) log(Y (rtb)).
+(26)
+Wherein, ˆY (rtb) is the ground truth label for the j-th relationship
+feature in image xi. Then, given that |Rim| = |Rin|, we have:
+E(rk, ˆY (yk))∼D[Lfc(D; θ)] = 1
+K
+K
+X
+k=1
+E(r, ˆY (yk)=k)∼D[−log fc(rk)],
+(27)
+where rk
+represents the relationship features of the k-th
+relationship category in D, with ˆY (yk) and fc(rk) denoting its
+label and predicted probability, respectively. Under ideal training
+condition
+§, it is easy to deduce that ∀ϵ > 0, ∃N such that
+∀epoch > N,
+|Lfc(D; θ) −min
+fc E ˆY (yk)|r[−log fc(rk)]| < ϵ.
+(28)
+Note
+that
+minfc E ˆY (yk)|r[−log fc(rk)]
+minimizes
+the
+true
+expected loss, thus corresponding to the loss of the Bayesian
+optimal classifier f ∗
+c . As a result, Theorem 1 can be achieved.
+APPENDIX E: PROOF OF THEOREM 3
+Here we provide a detailed proof to demonstrate the validity of
+Theorem 3. Theorem 3 extends the idea presented in Theorem
+2 by addressing the scenario where batch balance is only
+approximate rather than exact. This is a more realistic condition,
+as achieving perfect batch balance is often impractical due to the
+inherent distributional imbalances in real-world datasets.
+Theorem
+3
+(Bayesian
+optimal
+classifier
+induced
+by
+approximate batch balance). The model fc trained on D is a Bayesian
+optimal classifier, i.e. argmaxy∈[K] fc(r) = argmaxy∈[K] f ∗
+c (r),
+if the following two conditions hold: 1) ND/NB ∈{2, 3, 4 · · · }, 2)
+|rbm| ≈|rbn| (b ∈[ND/NB], m ∈[K], n ∈[K], m ̸= n).
+In the case of approximate batch balance, i.e., |rim| ≈|rin|,
+we posit the existence of an upper limit δ such that:
+|∇θLfc(Bi; θ) −∇θLf ∗
+c (Bi; θ)| ≤δ.
+(29)
+Throughout
+multiple
+batch
+training,
+these
+deviations
+accumulate. However, since they are bounded, the model’s
+updates still approximately align in the direction of f ∗
+c .
+Considering the accumulated error after n iterations:
+n
+X
+i=1
+|∇θLf ic(Bi; θ) −∇θLf ∗
+c (Bi; θ)| ≤nδ.
+(30)
+It can be observed that as n increases, fc tends to converge
+infinitely close to f ∗
+c ; therefore, fc is a Bayesian optimal classifier
+in such case.
+APPENDIX F: DETAILED DISCUSSION AND FUTURE
+WORK
+As depicted in Table 1 and 2 in the main text, our method
+achieves state-of-the-art results in terms of mR@K. However,
+compared to the baseline SGG frameworks, there is a sacrifice in
+R@K. We argue this can be primarily attributed to two reasons:
+1) Enhanced
+tail
+relationships. By intervening in the
+relationship feature space, our method enhances the impact of
+tail categories on model training, thereby preventing the model
+from predominantly converging to head categories. Given this,
+we are not surprised by a decline in the model’s performance for
+a handful of head categories. Considering that these categories
+collectively represent nearly 50% of the total amount, even
+minor perturbations in these relationships can have a significant
+influence on the recall rate.
+2) Semantic confusion. Some incorrect predictions arise
+from semantic confusion. For example, predicting <man, wears,
+shirt> as <man, wearing, shirt>. While this prediction is
+§. Ideal training condition refers to the optimizer used for training that can
+guide the model in reaching the global optimum. Unless specifically stated
+otherwise, all assumptions and theorems in this paper are based on this
+condition.
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE
+21
+Fig. 11. The statistics of our method’s wrong predictions on the test set. In
+the visualization, the red relationships signify the actual labels, while the blue
+ones represent the predictions. For example, the first bar indicates that our
+method predicted <man, in, shirt> as <man, wearing, shirt>.
+marked as incorrect, it is important to note that having wears”
+and wearing” as separate labels might be questionable since
+both could represent the same relationship feature. The choice
+between them could merely reflect annotator preference. This
+observation highlights a limitation of our method: it does not
+explicitly account for such synonymous labels, which may lead
+to mismatches with the original annotations. However, we argue
+that this issue stems primarily from the dataset itself rather
+than being an inherent flaw of our approach. Addressing this
+will require a more refined dataset annotation strategy in future
+work.
+3) Annotation granularity. Our method demonstrates a
+strong ability to address noisy labels by predicting fine-grained
+tail relationships with higher information content. For instance,
+it tends to predict <man, sitting on, bench> instead of the coarser
+<man, on, bench>. This behavior directly mitigates the common
+noise issue in SGG datasets, as highlighted in [5], [22], where
+tail relationships with greater semantic specificity are often
+annotated as coarse-grained head relationships. By intervening
+in the relationship feature space, our method counteracts
+this
+tendency,
+effectively
+redistributing
+model
+attention
+towards more detailed and semantically rich relationships.
+This ability to predict fine-grained relationships reflects our
+method’s robustness against annotation noise, as it prioritizes
+semantically accurate predictions over strict adherence to
+potentially ambiguous or imprecise annotations. Although this
+approach may lead to a decrease in R@K performance due
+to mismatched labels, it significantly enhances the model’s
+capacity to capture nuanced relationships, as evidenced by the
+higher mR@K performance.
+Inspired
+by
+the
+experiments
+presented
+in
+Figure
+11,
+our future endeavors will emphasize addressing the noise
+in
+the
+SGG
+dataset,
+particularly
+semantic
+confusion
+and
+ambiguous labels. For semantic confusion, we believe that label
+consolidation or multi-label prediction could serve as potential
+solutions. For ambiguous labels, constructing a hierarchical label
+representation appears promising. For instance, treating laying
+on, standing on, sitting on, and walking on as sub-labels of on.
+Moreover, the presence of noisy labels in the SGG dataset
+causes R@K and mR@K to exhibit an inversely proportional
+relationship. However, as detailed in Section 4.2 of the main
+text, by intervening in the background relationships and
+incorporating their associated outputs into evaluation, our
+approach outperforms the baseline for both R@K and mR@K.
+This improvement across dual metrics is indeed encouraging,
+and it provides valuable insights for our subsequent research
+endeavors.

@@ -1,0 +1,1156 @@
+1 
+ 
+ 
+PRISM-0: A Predicate-Rich Scene Graph 
+Generation Framework for Zero-Shot 
+Open-Vocabulary Tasks 
+Abdelrahman Elskhawy1,2*†, Mengze Li1,2*†, Nassir Navab1 and Benjamin Busam1 
+1*Technical University of Munich (TUM), Munich, Germany. 
+2Carl Zeiss Meditec AG, Munich, Germany. 
+ 
+*Corresponding author(s). E-mail(s): a.elskhawy@tum.de; mengzelibitkth@gmail.com; 
+Contributing authors: nassir.navab@tum.de; b.busam@tum.de; 
+†Equal Contribution 
+ 
+Abstract 
+In Scene Graph Generation (SGG), structured representations are extracted from visual inputs as 
+object nodes and connecting predicates, enabling image-based reasoning for diverse downstream 
+tasks. While fully supervised SGG has improved steadily, it suffers from training bias due to limited 
+curated data and long-tail predicate distributions, leading to poor predicate diversity and degraded 
+downstream performance. We present PRISM-0, a zero-shot open-vocabulary SGG framework that 
+leverages foundation models in a bottom-up pipeline to capture a broad spectrum of predicates. 
+Detected object pairs are filtered, described via a Vision-Language Model (VLM), and processed 
+by a Large Language Model (LLM) to generate fine- and coarse-grained predicates, which are then 
+validated by a Visual Question Answering (VQA) model. PRISM-0’s modular, dataset-independent 
+design enriches existing SGG datasets such as Visual Genome and produces diverse, unbiased graphs. 
+While operating entirely in a zero-shot setting, PRISM-0 achieves performance on par with state-of- 
+the-art weakly-supervised models on SGG benchmarks and even state-of-the-art supervised methods 
+in tasks such as Sentence-to-Graph Retrieval. 
+Keywords: Semantic Scene Understanding, Scene Graph Generation, Debiasing, Open-Vocabulary 
+Learning, Zero-shot. 
+ 
+ 
+1 Introduction 
+Scene Graph (SG) represents visual relations in 
+images as graphs, where nodes denote objects and 
+edges represent pairwise relations, enabling rich 
+visual understanding for tasks such as image cap- 
+tioning Zhong et al. (2020); Yang et al. (2023) 
+and VQA Lei et al. (2023). Large-scale datasets 
+like Visual Genome (VG) Krishna et al. (2017) 
+ 
+have driven progress in supervised SGG, provid- 
+ing extensive annotated images and serving as 
+the de facto benchmark. However, VG suffers 
+from annotation bias: the top 50 predicates dom- 
+inate most samples, while specific predicates are 
+severely underrepresented Yu et al. (2023). This 
+long-tail distribution, coupled with sparse graphs, 
+under-represents the semantic richness needed for 
+downstream reasoning. 
+2 
+ 
+Ours 
+VG GT 
+of 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+GT of VG 
+ 
+PRISM-0 
+ 
+ 
+Fig. 1 Predicate Distribution for VG Labels vs. 
+PRISM-0. Top: Predicate embedding visualization shows 
+VG labels (orange) clustered around few predicates (e.g., 
+“of”, depicted as ٨), while PRISM-0 predicates (blue) pop- 
+ulate the space more uniformly. Bottom: In an example 
+image (middle), VG labels (left) are factually correct but 
+miss semantic context, whereas PRISM-0 (right) captures 
+both semantic and factual scene details. 
+ 
+ 
+As shown in Fig. 1 (top), our analysis of 
+7k VG images using PhraseBERT Wang et al. 
+(2021) embeddings reveals that, despite accurate 
+object detection, GT scene graphs in VG often 
+contain trivial relations (e.g., ”leg of dog”) that 
+overlook higher-level semantics such as ”dog chas- 
+ing frisbee” or ”man playing with dog”. Training 
+on such annotations leads supervised SGG mod- 
+els to produce factually correct but semantically 
+uninformative graphs during inference. 
+In this paper, we present PRISM-0, an 
+efficient, modular, and scalable zero-shot open- 
+vocabulary scene graph generation framework 
+(Fig. 2), that leverages pre-trained VLMs and 
+LLMs. While VLMs excel at captioning, they 
+often lack the nuanced linguistic details needed for 
+fine-grained predicate categorization. LLMs, on 
+the other hand, encode rich relational knowledge 
+from large-scale text corpora. PRISM-0 combines 
+these strengths by prompting a VLM to gener- 
+ate descriptive captions for detected object pairs 
+and parsing them with an LLM to produce both 
+fine- and coarse-grained predicates, capturing a 
+broad predicate spectrum through a bottom-up 
+approach. 
+Unlike prior top-down methods Yu et al. 
+(2023); Li et al. (2024) that depend on captions 
+or ground-truth annotations, PRISM-0 directly 
+constructs scene graphs from images, mitigating 
+label bias and enabling novel, semantically mean- 
+ingful predicates. To capture relationships missed 
+in full-image captioning, we segment images into 
+patches of varying sizes, allowing the VLM to 
+focus on specific regions and extract more detailed 
+relations. Our approach considers all object pairs, 
+even those without overlapping bounding boxes, 
+to capture critical non-overlapping interactions 
+(e.g., ”person talking to another person”, ”person 
+watching TV”) that define scene context. 
+To control computational cost in dense scenes, 
+PRISM-0 employs filtering mechanisms to remove 
+irrelevant or implausible relations. The Geo- 
+metric Filter combines depth information with 
+bounding boxes to estimate 3D object centers 
+and discards spatially distant pairs. A final Val- 
+idation Module further refines triplets based 
+on semantic and spatial relevance in the image. 
+We exemplify some PRISM-0 predictions together 
+with the reference image and the VG annotation 
+in Fig. 3. 
+Our main contributions are: 
+• We introduce PRISM-0, a modular, zero-shot 
+open-vocabulary SGG framework that inte- 
+grates VLMs and LLMs to generate fine- and 
+coarse-grained predicates, benefiting from con- 
+tinual advances in foundation models. 
+• A bottom-up design that considers all object 
+pairs including non-overlapping ones, combined 
+with semantic and geometric filters to remove 
+semantically or spatially implausible relations. 
+• A strategy to mitigate long-tail predicate bias 
+and enhance label diversity by leveraging VLM 
+captioning capabilities and LLM relational 
+knowledge, with controllable predicate granu- 
+larity. 
+• A novel diversity metric for relation predic- 
+tions and extensive experiments on bench- 
+marks, downstream tasks, and user studies 
+demonstrating PRISM-0’s ability to produce 
+diverse, unbiased, and semantically meaningful 
+scene graphs. 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+“of“ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+3 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+Fig. 2 Overview of the PRISM-0 framework. The pipeline begins with node prediction and extraction of scene 
+geometry from the image (top left). Pairwise captions are generated using a VLM and scene graph parsing is done with an 
+LLM. The proposed geometry refines the relational pairs before triplet extraction. Finally, an uncertainty-based validation 
+module evaluates the semantics and spatial relationship of the predictions, and provide ranking for relations to prioritize 
+most plausible predictions. 
+2 Related Work 
+Zero-Shot SGG: A common way to bypass the 
+bias in dataset annotations is to leverage founda- 
+tion models at inference time. ELEGANT Zhao 
+and Xu (2023) uses an LLM to propose relations 
+for salient object pairs, while ConceptGraphs Gu 
+et al. (2023) combines geometric cues with a 
+VLM to produce open-vocabulary 3D graphs. 
+These require no training but often emphasize 
+spatial predicates and assume overlapping bound- 
+ing boxes. CLIP-based visual relation detection 
+methods Li et al. (2023); Chen et al. (2024) can 
+predict relations in a zero-shot manner but do 
+not perform a full SGG pipeline. CAPSGG Huang 
+et al. (2025) introduces a capsule-based frame- 
+work for zero-shot SGG, but unlike our approach, 
+it is trained on the dataset and generalizes to novel 
+subject-predicate-object combinations within a 
+closed predicate vocabulary. 
+Weakly-Supervised SGG: Caption-guided 
+approaches replace dense triplet labels with 
+pseudo-relations parsed from datasets like MS- 
+COCO or VG. CaCao Yu et al. (2023) prompts 
+a language model to refine these captions, while 
+LLM4SGG Kim et al. (2024) uses GPT-4 to 
+extract triplets for detector training. PGSG Li 
+et al. (2024) fine-tunes a vision–language model to 
+generate textual graphs later parsed into triplets. 
+Although these methods reduce annotation costs, 
+ 
+their pseudo-labels inherit long-tail bias and lim- 
+ited predicate diversity from the source captions. 
+In contrast, we adopt a bottom-up approach that 
+directly obtains fine-grained captions from a VLM 
+by iteratively focusing on each object pair. Some 
+weakly supervised works Li et al. (2024); He et al. 
+(2022) also report zero-shot results, but their set- 
+ting differs by testing on both seen and unseen 
+predicates from training. 
+Unbiased SGG: Fully supervised SGG inher- 
+its the long-tail bias of dataset annotations, moti- 
+vating debiasing techniques. NICE Li et al. (2022) 
+corrects noisy predicate tags before training, while 
+DRM Li et al. (2024) uses a dual-granularity 
+design to transfer knowledge from frequent to rare 
+predicates, achieving state-of-the-art mean-recall. 
+We include DRM as our main supervised baseline 
+due to its predicate-rich output. However, even 
+advanced debiasing methods remain constrained 
+by annotation sparsity and long-tailed distribu- 
+tion eventually embedding dataset bias into the 
+trained models. 
+3 Methodology 
+3.1 Problem Formulation and 
+Method Overview 
+SGG aims to construct a structured graph G = 
+(V, E) representing an image I ∈ RH×W , where 
+ 
+ 
+wearing 
+ 
+ 
+ 
+pole 
+shirt
+Jacket
+shoe 
+Next to 
+car 
+graph 
+G1 = (V1,E1) 
+Given the image, describe {Obj1} and 
+{Obj2} and the potential relation 
+between them 
+bike 
+tree 
+parked on 
+has 
+ 
+ 
+ 
+G = (V,E) 
+street 
+ 
+tire 
+ 
+Input RGB Image 
+Nodes V0 
+ 
+Two men talking to each 
+other 
+Node 
+ 
+ 
+ 
+Scene Graph 
+ (LLM) 
+G2 = (V2,E2) 
+ 
+ 
+ 
+Clock mounted on a pole 
+Depth 
+ 
+Image Crops 
+Caption 
+ 
+Module 
+ Module 
+clock 
+….. 
+4 
+ 
+i=1 
+i=1 
+2 ` i 
+j 2 
+V = {vi}N , each associated with a bounding box 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+Fig. 3 Qualitative Examples of Scene Graphs: Input 
+image (middle), Visual Genome’s GT (left), and our pre- 
+dicted graph (right). 
+ 
+nodes V = {vi}N  denote objects and directed 
+bi ∈ R4 and an object label oi ∈ O, forming the 
+basis for subsequent relation inference in the SGG 
+pipeline. 
+ 
+3.3 Depth Estimation and 
+Geometry Filter 
+Traditional SGG pipelines often select candidate 
+object pairs based on overlapping bounding boxes, 
+but this overlooks key non-overlapping interac- 
+tions (e.g., ”Man, talking to, Man” in Fig. 2). 
+Enumerating all possible pairs would capture such 
+cases but is computationally prohibitive in dense 
+edges E = {eij} ⊆ V × V encode pairwise rela- 
+scenes, especially in our framework, which inte- 
+grates multiple foundation models. 
+tions. Each object vi has a label oi ∈ O from 
+the set of object classes O and a bounding box 
+bi ∈ R4 specifying its spatial extent. A relation 
+e¯ij = (vi, vj, rij) links objects vi and vj via a 
+predicate rij ∈ R from the set of relation classes 
+R. The task is to jointly predict object labels 
+and relations to capture both semantic and spa- 
+tial interactions, producing a set of triplets T = 
+{tk}K 
+that form the final scene graph. 
+To address this, we introduce a depth esti- 
+mation module and a geometry filter (GF) that 
+leverage both 2D spatial layout and estimated 
+3D proximity. Given an input image I and its 
+depth map D, GF computes the 3D center of 
+each bounding box using its 2D coordinates and 
+median depth. For each object pair (oi, oj), the 
+relative 2D and 3D distances are combined to 
+Our proposed framework (Fig. 2) follows a 
+bottom-up paradigm to generate G directly from 
+I, without relying on captions or other ground- 
+determine spatial relevance. A pair is retained 
+only if it satisfies: 
+truth annotations. It comprises three main com- 
+ponents: (1) node prediction, (2) caption genera- 
+tion, and (3) triplet extraction, plus two auxiliary 
+λ1 
+(x/y) 
+` ˛¸ x 
+2D component 
++λ 
+d − d 
+ 
+˛¸ 
+x 
+3D component 
+< τ, 
+(1) 
+modules: a geometry filter (GF) and a relation 
+validation stage. 
+The pipeline begins with object detection, pro- 
+ducing nodes vi with bounding boxes bi and labels 
+oi. For each object pair (vi, vj), cropped regions 
+Iij and prompts pi are processed by the caption- 
+ing module C to generate relationship descriptions 
+ci, which an LLM parses into candidate triplets 
+ti. To reduce computation, the geometry filter GF 
+combines 2D bounding boxes with median depth 
+estimates to compute 3D centers and removes 
+pairs exceeding a spatial threshold. A final rela- 
+tion validation stage uses a VLM to check each ti 
+with the image, retaining only the most plausible 
+and contextually relevant relations. 
+ 
+3.2 Node Prediction Module 
+The node prediction module detects objects in an 
+input image I, providing both spatial and cat- 
+egorical information. It outputs a set of nodes 
+where x is the distance between 2D bounding 
+box centers, y is the image diagonal length, and 
+di, dj are normalized median depths for oi and oj. 
+The weights λ1, λ2 balance the contributions of 
+2D and 3D components, and τ > 0 is the spatial 
+relevance threshold. 
+By filtering pairs using both planar distance 
+and depth-based proximity, GF removes spatially 
+implausible relations before captioning, reducing 
+computational load while preserving relational 
+accuracy. This ensures the framework focuses 
+on spatially coherent, contextually relevant inter- 
+actions, improving efficiency without sacrificing 
+important scene semantics. 
+ 
+3.4 Caption Generation Module 
+The Caption Generation Module C produces 
+fine-grained relational descriptions for detected 
+object pairs. Given m detected objects V  = 
+k=1 
+5 
+ 
+{v1, v2, . . . , vm}, we iterate over all unique pairs 
+(vi, vj). 
+While VLMs such as Up-Down Anderson et al. 
+(2018) and BLIP Li et al. (2022) excel at holis- 
+tic image captioning, they often overlook localized 
+object-object interactions crucial for SGG. To 
+direct attention to a specific pair, we generate 
+localized image crops containing both objects and 
+highlight them with distinct bounding box colors 
+(red for obj1, yellow for obj2), following Shtedrit- 
+ski et al. (2023). We further guide the VLM 
+using a structured language prompt. The VLM 
+then processes each annotated crop, producing 
+captions rich in semantic detail and relational 
+context. These captions, containing both explicit 
+and implicit relational cues, are passed to the 
+Triplet Extraction Module for predicate iden- 
+tification. By visually cueing object pairs and 
+linguistically steering the VLM, C ensures rela- 
+tional descriptions are contextually precise and 
+well-aligned with the objects’ spatial and semantic 
+relationships. 
+3.5 Triplet Extraction Module 
+Once object categories are detected, relational 
+triplets are extracted efficiently using a LLM. We 
+adopt a two-step prompting strategy to leverage 
+the LLM’s rich linguistic and contextual under- 
+standing. 
+Initially, the LLM paraphrases the pairwise 
+captions to clarify ambiguous or imprecise expres- 
+sions. For example, given a caption like ”two 
+men engaged in a conversation” (Fig. 2), directly 
+extracting a triplet may produce vague outputs 
+such as ”[two men, talking, each other]”. Using 
+Chain of Thought (CoT) prompting Wei et al. 
+(2022), the LLM reformulates this into a clearer 
+description: ”a man is talking to a man”. This 
+explicit paraphrase then enables precise extrac- 
+tion of the triplet ”[man, talking to, man]”. 
+This two-step process improves the accuracy 
+and clarity of relational triplet extraction, ensur- 
+ing the generated triplets faithfully represent core 
+visual interactions. 
+3.6 Relation Validation Module 
+To ensure the extracted triplets are both seman- 
+tically and spatially consistent with the image, 
+we propose an uncertainty-driven ranking module 
+for relation verification. Unlike generic image-text 
+alignment metrics such as CLIP-Score Radford 
+et al. (2021), which often struggle with nuanced 
+relationships Zhai et al. (2023), this module 
+directly queries a VLM using a VQA approach. 
+For each candidate relation triplet, we con- 
+struct a binary query to the VLM regarding the 
+presence of the relation in the image. The model 
+outputs probabilities for the responses “yes” and 
+“no,” where the normalized “yes” probability is 
+interpreted as the confidence that the relation 
+exists, and the corresponding “no” probability 
+reflects the likelihood of its absence. 
+Repeating this for all candidate triplets, we 
+rank relations by their confidence scores. Retain- 
+ing low-confidence relations yields a more compre- 
+hensive scene graph, while discarding them results 
+in a more precise graph emphasizing dominant 
+relations. 
+ 
+4 Experiments 
+4.1 Experiments Configuration 
+Datasets. For SGG evaluation, we perform Pred- 
+icate Classification on the VG test split Krishna 
+et al. (2017), and use the generations to conduct a 
+user study for subjective quality assessment. For 
+Sentence-to-Graph Retrieval, following Tang et al. 
+(2020), we use the 51k-image overlap between 
+Visual Genome and MS-COCO Caption Lin et al. 
+(2014), split into 35k/1k/5k train/val/test, and 
+evaluate on gallery sizes of 1k and 5k as in the 
+original setup. 
+Implementation Details / Foundation 
+Models. For node prediction, we use Florence-2 
+(large-ft) Xiao et al. (2024) with SDPA Vaswani 
+(2017) attention and no post-processing. Depth 
+estimation is performed using Depth-Anything- 
+V2 (base) Yang et al. (2024) for its fast and 
+accurate inference. The geometry filter parame- 
+ters are set to λ1 = 0.5, λ2 = 1, and τ = 
+0.45. 
+For caption generation, we adopt LLaVA- 
+OneVision Li et al. (2024) with batch size 15, 
+maximum output of 50 tokens, and beam size 
+1. Triplet extraction module leverages LLaMA 
+3.2 (3B) AI (2024), using batch size 16 and 
+a 256-token limit to process large caption sub- 
+sets efficiently. For DBSCAN clustering we use 
+eps_final = 0.241 and min_samples = 5. 
+6 
+ 
+4.2 Qualitative Evaluation 
+We qualitatively evaluate PRISM-0 by compar- 
+ing generated SGs against GT annotations. A 
+user study with 75 participants from diverse back- 
+grounds was conducted, where each participant 
+assessed 40 randomly selected images with corre- 
+sponding SGs. Participants were shown a refer- 
+ence image accompanied by two SGs, PRISM-0 
+predictions and VG GT. Evaluations covered five 
+criteria: overall perception (Overall Situation), 
+node accuracy (Object Names), scene complete- 
+ness, relational precision (Relation Correctness), 
+and relational recall (if the main relations are 
+captured by the SG). 
+As shown in Fig. 4, PRISM-0 consistently out- 
+performs VG annotations across all metrics, with 
+notable gains in semantic scene relations (com- 
+pleteness, situation, and main relation capture). 
+ 
+ 
+Scene Completeness 
+1.0 
+Object 
+Names 
+align open-vocabulary predictions with the closed- 
+set evaluation, we use an LLM to map synonyms 
+and reduce vocabulary mismatch. Moreover, we 
+use the confidence-based validation module to 
+rank triplets, to align the evaluation standard 
+top@K recall. Unlike prior open-vocabulary meth- 
+ods Li et al. (2024); He et al. (2022) that train on 
+base predicates and test on base + novel, PRISM- 
+0 is fully open-vocabulary, treating all predicates 
+as unseen, which complicates direct comparison 
+since baselines benefit from supervised exposure 
+to frequent predicates Li et al. (2024). 
+Table 1 reports Recall@K (R@K) and mean 
+Recall@K (mR@K). While our Recall@50/100 
+slightly trails CaCao and PGSG, PRISM-0 sur- 
+passes all baselines on mR@50/100. This gap 
+partly arises because PRISM-0 proposes more 
+specific predicates (tail predicates) (e.g., person- 
+riding-bike vs. VG’s annotation person-on-bike), 
+causing false negatives under closed-set evalua- 
+tion metrics using biased annotations of VG as 
+the ground-truth. Our goal is not to optimize 
+closed-set benchmarks but to produce seman- 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+Relation 
+Correctness 
+0.6 
+ 
+0.2 
+ 
+ 
+ 
+Overall 
+Situation 
+ 
+ 
+ 
+ 
+ 
+Capture of 
+Main Relations 
+ 
+ 
+Ours 
+VG 
+Similar 
+tically richer, more diverse SGs. These results 
+underscore how existing metrics undervalue fully 
+open-vocabulary approaches. 
+ 
+Table 1 Predicate Classification (PredCls) on 
+VG. w: weak supervision on VG base-predicate split, 
+evaluated on base + novel. zs: zero-shot, no exposure 
+to VG predicates. 
+Fig. 4 Subjective Quality of Generated SGs. Left: 
+Average normalized user ratings along five aspects for 
+PRISM-0 predictions and VG annotation. Right: Prefer- 
+ence distribution on overall quality of the SG; blue indicates 
+PRISM-0 predictions are preferred, and orange indicates 
+that VG annotations are preferred. The gray segment rep- 
+resents the percentage of users who found both methods 
+equally descriptive. 
+ 
+Statistical Analysis. A paired sample t-test 
+confirmed significant improvements in all five cat- 
+egories (p < 0.05), aligning with the qualitative 
+feedback and underscoring the robustness of our 
+approach. 
+ 
+4.3 Performance on Standard 
+Benchmark: Predicate 
+Classification (PredCls) 
+Beyond qualitative evaluation, we benchmark 
+PRISM-0 on the standard VG PredCls task. To 
+ 
+4.4 Diversity of Predicted Relations 
+Since standard metrics utilize a biased annotation 
+set as the ground-truth, the unbiased predictions 
+may be underrated. We therefore also evaluate 
+the semantic diversity of the predicted relations. 
+A robust zero-shot SGG method should produce 
+a wide range of predicates and triplets rather 
+than repeatedly predicting common ones. To mea- 
+sure this, we embed each predicted relation triplet 
+ 
+ 
+Model 
+Training 
+mR@50/100 
+R@50/100 
+CaCao 
+w 
+10.3/12.6 
+- 
+SVRP 
+w 
+8.3/10.8 
+33.5/35.9 
+PGSG 
+w 
+10.8/13.9 
+26.9/33.9 
+PRISM-0 
+zs 
+12.04/14.98 
+22.58/25.11 
+7 
+ 
+Table 2 Relation Diversity Analysis. Higher APD 
+and cluster count indicate broader embedding coverage; 
+higher silhouette score reflects better cluster separation. 
+ 
+Model 
+APD 
+DBSCAN 
+# clusters  Noise (%)  Silhouette 
+ 
+ 
+common predicates but poor performance on rare 
+ones. To quantify this, we analyze the correla- 
+tion between predicate frequency and per-class 
+recall on the VG PredCls test set and show 
+results in Table 3. For each predicate, we compute 
+its frequency and the model’s recall, then mea- 
+DRM w/o 
+DKT 
+0.76 
+52 
+23.3 
+0.038 
+sure their dependency using distance correlation 
+(dCor), where dCor = 0 indicates independence. 
+DRM 
+0.78 
+75 
+30.6 
+0.231 
+PGSG 
+0.80 
+54 
+16.2 
+0.128 
+PRISM-0 
+0.77 
+62 
+29.8 
+0.225 
+Statistical significance is assessed via permutation 
+testing to compute a p-value. 
+The 
+correlation 
+into a vector space using the pre-trained lan- 
+guage model SentenceBert Reimers and Gurevych 
+(2019) and apply two diversity metrics: 
+(i) Average Pairwise Distance (APD): the 
+average cosine distance between all pairs of rela- 
+tion embeddings in the test set. Higher APD 
+analysis reveals a stark 
+contrast between our 
+method and traditional 
+SGG 
+models. 
+Fully 
+supervised 
+methods 
+like DRM, even with 
+debiasing, show strong 
+correlation 
+(dCor 
+> 
+0.5, p < 0.01), indi- 
+Table 3 Correlation: 
+per-class recall vs. 
+frequency 
+ 
+Model 
+dCor 
+p-value
+DRM 
+0.65 
+0.001 
+PGSG 
+0.47 
+0.007 
+PRISM-0 
+0.18 
+0.95 
+ 
+indicates greater semantic variety. 
+(ii) DBSCAN Clustering: we cluster pred- 
+icate embeddings using DBSCAN and count the 
+number of clusters. More clusters indicate broader 
+coverage across distinct semantic relation groups. 
+DBSCAN parameters are chosen to group very 
+similar phrases together, estimating unique rela- 
+tion categories. We use eps_final = 0.241 and 
+min_samples = 5. 
+For a fair comparison, we also map our open- 
+vocabulary relation predictions to the closed set 
+before the diversity measurement. 
+Results in Table 2 compare PRISM-0 with 
+PGSG Li et al. (2024), DRM Li et al. (2024), and 
+DRM’s raw outputs without debiasing (DKT). 
+DRM without DKT shows the lowest seman- 
+tic spread and fewest clusters, reflecting a 
+bias towards head predicates. Its near-zero sil- 
+houette score indicates prediction collapse into 
+a dense embedding region. Despite no predi- 
+cate training or explicit debiasing, our zero- 
+shot pipeline matches other unbiased methods, 
+delivering diverse relation predictions, enabling 
+predicate-rich zero-shot SGG. 
+4.5 How does dataset bias affect the 
+results? 
+Our approach aims to mitigate bias toward fre- 
+quent predicates that conventional supervised 
+SGG models overfit to, yielding high recall on 
+cating heavy dependence on predicate frequency 
+and poor performance on rare predicates. Open- 
+vocabulary methods that rely on VG supervision 
+such as PGSG also exhibit moderate correla- 
+tions. In contrast, PRISM-0 achieves a much 
+lower dCor, demonstrating minimal bias from 
+VG’s long-tailed distribution. This suggests that 
+a data-unbiased, fully open-vocabulary approach 
+can inherently avoid frequency bias, unlike prior 
+complex debiasing techniques. 
+ 
+4.6 Sentence-to-Graph Retrieval 
+(S2GR) 
+We validate PRISM-0’s effectiveness by applying 
+it to the downstream tasks of Sentence-to-Graph 
+Retrieval (S2GR). Traditional SGG benchmarks 
+such as PredCls are unsuitable for evaluating our 
+zero-shot framework, as we explicitly avoid relying 
+on Visual Genome (VG) annotations to overcome 
+their bias and limited predicate diversity. 
+S2GR Tang et al. (2020) evaluates graph-level 
+coherence by parsing human captions into text 
+graphs, which serve as queries to retrieve scene 
+graphs (SGs) representing images with similar 
+visual concepts. This method uses only SGs as 
+image representations, ignoring visual features. 
+The query text-SGs are parsed from MS-COCO 
+captions Lin et al. (2014). 
+Following Tang et al. (2020), we report mean- 
+Recall@20/100 (R@20/100) and median rank 
+8 
+ 
+Table 4 Performance comparison of Sentence-to-Graph 
+Retrieval. ZS refers to the approach being fully zero-shot. 
+ 
+1000 
+5000 
+ 
+Model ZS R@20 R@100 Med R@20 R@100 Med 
+clutter and inaccurate relations. Removing this fil- 
+ter significantly degrades S2GR results (Table 5) 
+and increases computational load on the VLM and 
+LLM, slowing inference (Table 6). 
+ 
+ 
+ 
+(a) 
+(b) 
+ 
+ 
+ 
+(Med) on gallery sizes of 1K and 5K. We compare 
+PRISM-0 against the Motif-based TDE (MTDE) 
+Tang et al. (2020) and the recent supervised SGG 
+methods: CaCao Yu et al. (2023), LLM4SGG Kim 
+et al. (2024), and PGSG Li et al. (2024). 
+Table 4 shows that PRISM-0 outperforms 
+Fig. 5 Applying Geometric Filter (a) shows an RGB 
+image with detected objects including one person in the 
+background (top left) and the predicted initial scene graph, 
+including some trivial relations such as ’person in front 
+of person’. (b) is the corresponding depth map with the 
+filtered scene graph, where the relation between two people 
+has been removed due to distance. 
+ 
+Large Language 
+MTDE, which struggles with predicate diversity, 
+as well as PGSG and CaCao despite their training 
+on MS-COCO captions. PRISM-0 ranks second 
+to LLM4SGG which utilizes MS-COCO GT cap- 
+tions to generate weak labels, which are later used 
+to train a fully supervised SGG model. This pro- 
+cess results in their output being closely aligned 
+with queries originally parsed from GT captions, 
+yielding a higher retrieval accuracy. 
+Model.    Replacing 
+the 
+3B   llama  3.2 
+model 
+with   its   1B 
+variant  reduces per- 
+formance (Table   5), 
+indicating that LLM 
+size impacts relation 
+extraction   accuracy 
+and paraphrasing quality. 
+ 
+Table 6 Ablation on 
+per image inference 
+time. 
+Model 
+Avg. time (sec) 
+w/o GF 
+ 
+90.0 
+w/ GF 
+67.5 
+ 
+ 
+ 
+4.7 Ablation Study 
+We assess the impact of key framework com- 
+ponents on scene graph quality via Sentence-to- 
+Graph Retrieval (S2GR), and report results in 
+Table 5. 
+ 
+Table 5 Ablation study for framework 
+components. Evaluated on downstream task S2GR 
+with a gallery size of 1000 images. 
+ 
+Model Change 
+R@20 
+R@100 
+Med 
+w/o Geometric Filter 
+29.8 
+61.1 
+239 
+LLM (3B −→ 1B) 
+50.8 
+72.4 
+126 
+Ours (Full Pipeline) 
+56.9 
+80.2 
+71 
+ 
+ 
+ 
+Geometric Filter. Fig. 5 demonstrates how 
+the geometric filter prunes irrelevant edges, retain- 
+ing only meaningful relations. This improves 
+downstream retrieval performance by reducing 
+VG Bounding Boxes. Using VG’s GT 
+bounding boxes instead of our node prediction 
+module yields comparable performance, confirm- 
+ing that our detection results are on par with the 
+GT annotations. 
+ 
+5 Limitations & Conclusion 
+While PRISM-0 demonstrates strong zero-shot 
+performance in generating rich and comprehen- 
+sive scene graphs, its effectiveness depends heavily 
+on the accuracy of the node prediction mod- 
+ule, making it vulnerable when object detection 
+fails. Moreover, despite the use of filters such 
+as the Geometric Filter and Validation Mod- 
+ule, complex or ambiguous object relationships 
+remain challenging. The bottom-up paradigm and 
+the reliance on large-scale pre-trained models 
+also introduces computational overhead, limiting 
+applicability in real-time or resource-constrained 
+settings. Nonetheless, PRISM-0’s modular design, 
+leveraging state-of-the-art Vision-Language and 
+Large Language Models, addresses limitations 
+person 
+ 
+riding 
+ 
+motorcycle 
+ 
+person 
+ 
+riding 
+ 
+motorcycle 
+ 
+MTDE C 
+17.0 
+53.6 
+91 
+5.2 
+18.9 
+425 
+PGSG C 
+48.4 
+75.3 
+97 
+27.1 
+54.3 
+313 
+CaCao C 
+52.0 
+77.3 
+85 
+33.4 
+60.9 
+322 
+LLM4SGGC 
+56.9 
+82.9 
+64 
+34.0 
+64.8 
+211 
+Ours  ✓ 
+56.9 
+80.2 
+71 
+32.6 
+64.0 
+223 
+9 
+ 
+of existing SGG datasets by mitigating sparse 
+annotations avoiding dataset bias. PRISM-0 
+achieves improved performance on downstream 
+tasks demanding high relational diversity, even in 
+a fully zero-shot setting. 
+Data Availability. The work uses the open- 
+sourced dataset Visual Genome, available at: 
+https://homes.cs.washington.edu/ ranjay/visu- 
+algenome/index.html. 
+Code Availability.  Not applicable 
+ 
+Declarations 
+• Funding Not applicable 
+• Competing interests The authors have no 
+competing interests to declare that are relevant 
+to the content of this article. 
+• Consent for publication Not applicable 
+If any of the sections are not relevant to your 
+manuscript, please include the heading and write 
+‘Not applicable’ for that section. 
+ 
+References 
+Anderson, P., He, X., Buehler, C., Teney, D., 
+Johnson, M., Gould, S., Zhang, L.: Bottom-up 
+and top-down attention for image captioning 
+and visual question answering. In: CVPR, pp. 
+6077–6086 (2018) 
+AI, M.: LLaMA 3.2: Connect 2024 – Vision 
+at the Edge for Mobile Devices. Accessed: 
+2024-11-14 (2024). https://ai.meta.com/blog/ 
+llama-3-2-connect-2024-vision-edge-mobile-devices/ 
+ 
+Chen, G., Li, J., Wang, W.: Scene graph gener- 
+ation with role-playing large language models. 
+NIPS 37, 132238–132266 (2024) 
+Gu, Q., Kuwajerwala, A., Morin, S., Jatavallab- 
+hula, K.M., Sen, B., Agarwal, A., Rivera, C., 
+Paul, W., Ellis, K., Chellappa, R., et al.: Con- 
+ceptgraphs: Open-vocabulary 3d scene graphs 
+for perception and planning. arXiv preprint 
+arXiv:2309.16650 (2023) 
+He, T., Gao, L., Song, J., Li, Y.-F.: Towards 
+open-vocabulary scene graph generation with 
+prompt-based finetuning. In: ECCV, pp. 56–73 
+(2022). Springer 
+Huang, W., JI, Y., Zhu, G., Ying, L., Liu, C.: Nav- 
+igating the unseen: Zero-shot scene graph gen- 
+eration via capsule-based equivariant features. 
+In: CVPR, pp. 29448–29457 (2025) 
+Kim, K., Yoon, K., Jeon, J., In, Y., Moon, J., Kim, 
+D., Park, C.: Llm4sgg: Large language models 
+for weakly supervised scene graph generation. 
+In: CVPR, pp. 28306–28316 (2024) 
+Krishna, R., Zhu, Y., Groth, O., Johnson, J., 
+Hata, K., Kravitz, J., Chen, S., Kalantidis, Y., 
+Li, L.-J., Shamma, D.A., et al.: Visual genome: 
+Connecting language and vision using crowd- 
+sourced dense image annotations. IJCV 123, 
+32–73 (2017) 
+Li, L., Chen, L., Huang, Y., Zhang, Z., Zhang, S., 
+Xiao, J.: The devil is in the labels: Noisy label 
+correction for robust scene graph generation. In: 
+CVPR, pp. 18869–18878 (2022) 
+Lei, S.W., Gao, D., Wu, J.Z., Wang, Y., Liu, W., 
+Zhang, M., Shou, M.Z.: Symbolic replay: Scene 
+graph as prompt for continual learning on vqa 
+task. In: AAAI, vol. 37, pp. 1250–1259 (2023) 
+Li, J., Li, D., Xiong, C., Hoi, S.: Blip: Bootstrap- 
+ping language-image pre-training for unified 
+vision-language understanding and generation. 
+In: ICML, pp. 12888–12900 (2022). PMLR 
+Lin, T.-Y., Maire, M., Belongie, S., Hays, J., Per- 
+ona, P., Ramanan, D., Dollár, P., Zitnick, C.L.: 
+Microsoft coco: Common objects in context. In: 
+ECCV, pp. 740–755 (2014). Springer 
+Li, J., Wang, Y., Guo, X., Yang, R., Li, W.: Lever- 
+aging predicate and triplet learning for scene 
+graph generation. In: CVPR, pp. 28369–28379 
+(2024) 
+Li, L., Xiao, J., Chen, G., Shao, J., Zhuang, Y., 
+Chen, L.: Zero-shot visual relation detection 
+via composite visual cues from large language 
+models. NIPS 36, 50105–50116 (2023) 
+Li, B., Zhang, Y., Guo, D., Zhang, R., Li, F., 
+Zhang, H., Zhang, K., Li, Y., Liu, Z., Li, 
+10 
+ 
+C.: Llava-onevision: Easy visual task transfer. 
+arXiv preprint arXiv:2408.03326 (2024) 
+Li, R., Zhang, S., Lin, D., Chen, K., He, X.: 
+From pixels to graphs: Open-vocabulary scene 
+graph generation with vision-language models. 
+In: CVPR, pp. 28076–28086 (2024) 
+Reimers, N., Gurevych, I.: Sentence-bert: Sen- 
+tence embeddings using siamese bert-networks. 
+arXiv preprint arXiv:1908.10084 (2019) 
+Radford, A., Kim, J.W., Hallacy, C., Ramesh, A., 
+Goh, G., Agarwal, S., Sastry, G., Askell, A., 
+Mishkin, P., Clark, J., et al.: Learning trans- 
+ferable visual models from natural language 
+supervision. In: ICML, pp. 8748–8763 (2021). 
+PMLR 
+Shtedritski, A., Rupprecht, C., Vedaldi, A.: What 
+does clip know about a red circle? visual 
+prompt engineering for vlms. In: ICCV, pp. 
+11987–11997 (2023) 
+Tang, K., Niu, Y., Huang, J., Shi, J., Zhang, H.: 
+Unbiased scene graph generation from biased 
+training. In: CVPR (2020) 
+Vaswani, A.: Attention is all you need. NIPS 
+(2017) 
+Wang, S., Thompson, L., Iyyer, M.: Phrase-bert: 
+Improved phrase embeddings from bert with 
+an application to corpus exploration. arXiv 
+preprint arXiv:2109.06304 (2021) 
+Wei, J., Wang, X., Schuurmans, D., Bosma, M., 
+Xia, F., Chi, E., Le, Q.V., Zhou, D., et al.: 
+Chain-of-thought prompting elicits reasoning in 
+large language models. NIPS 35, 24824–24837 
+(2022) 
+Xiao, B., Wu, H., Xu, W., Dai, X., Hu, H., Lu, 
+Y., Zeng, M., Liu, C., Yuan, L.: Florence-2: 
+Advancing a unified representation for a vari- 
+ety of vision tasks. In: CVPR, pp. 4818–4829 
+(2024) 
+Yang, L., Kang, B., Huang, Z., Zhao, Z., Xu, X., 
+Feng, J., Zhao, H.: Depth anything v2. arXiv 
+preprint arXiv:2406.09414 (2024) 
+Yu, Q., Li, J., Wu, Y., Tang, S., Ji, W., Zhuang, 
+Y.: Visually-prompted language model for fine- 
+grained scene graph generation in an open 
+world. arXiv preprint arXiv:2303.13233 (2023) 
+Yang, X., Peng, J., Wang, Z., Xu, H., Ye, Q., Li, 
+C., Huang, S., Huang, F., Li, Z., Zhang, Y.: 
+Transforming visual scene graphs to image cap- 
+tions. arXiv preprint arXiv:2305.02177 (2023) 
+Zhai, X., Mustafa, B., Kolesnikov, A., Beyer, L.: 
+Sigmoid loss for language image pre-training. 
+In: ICCV, pp. 11975–11986 (2023) 
+Zhong, Y., Wang, L., Chen, J., Yu, D., Li, 
+Y.: Comprehensive image captioning via scene 
+graph decomposition. In: ECCV 2020, pp. 
+211–229 (2020). Springer 
+Zhao, S., Xu, H.: Less is more: Toward zero- 
+shot local scene graph generation via founda- 
+tion models. arXiv preprint arXiv:2310.01356 
+(2023) 

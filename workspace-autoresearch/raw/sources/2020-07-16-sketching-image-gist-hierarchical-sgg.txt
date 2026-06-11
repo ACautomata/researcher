@@ -1,0 +1,2580 @@
+Sketching Image Gist: Human-Mimetic
+Hierarchical Scene Graph Generation
+Wenbin Wang1,2[0000−0002−4394−0145], Ruiping Wang1,2[0000−0003−1830−2595],
+Shiguang Shan1,2[0000−0002−8348−392X], and Xilin Chen1,2[0000−0003−3024−4404]
+1 Key Laboratory of Intelligent Information Processing of Chinese Academy of
+Sciences (CAS), Institute of Computing Technology, CAS, Beijing, 100190, China
+2 University of Chinese Academy of Sciences, Beijing, 100049, China
+wenbin.wang@vipl.ict.ac.cn, {wangruiping, sgshan, xlchen}@ict.ac.cn
+Abstract. Scene graph aims to faithfully reveal humans’ perception of
+image content. When humans analyze a scene, they usually prefer to de-
+scribe image gist ﬁrst, namely major objects and key relations in a scene
+graph. This humans’ inherent perceptive habit implies that there exists a
+hierarchical structure about humans’ preference during the scene parsing
+procedure. Therefore, we argue that a desirable scene graph should be
+also hierarchically constructed, and introduce a new scheme for model-
+ing scene graph. Concretely, a scene is represented by a human-mimetic
+Hierarchical Entity Tree (HET) consisting of a series of image regions.
+To generate a scene graph based on HET, we parse HET with a Hybrid
+Long Short-Term Memory (Hybrid-LSTM) which speciﬁcally encodes
+hierarchy and siblings context to capture the structured information em-
+bedded in HET. To further prioritize key relations in the scene graph, we
+devise a Relation Ranking Module (RRM) to dynamically adjust their
+rankings by learning to capture humans’ subjective perceptive habits
+from objective entity saliency and size. Experiments indicate that our
+method not only achieves state-of-the-art performances for scene graph
+generation, but also is expert in mining image-speciﬁc relations which
+play a great role in serving downstream tasks.
+Keywords: Image Gist, Key Relation, Hierarchical Entity Tree, Hybrid-
+LSTM, Relation Ranking Module
+1
+Introduction
+In an eﬀort to thoroughly understand a scene, scene graph generation (SGG)
+[10,44] in which objects and pairwise relations should be detected, has been on
+the way to bridge the gap between low-level recognition and high-level cognition,
+and contributes to tasks like image captioning [42,25,46], VQA [1,38], and visual
+reasoning [33]. While previous works [44,17,45,16,52,29,38,41,51,55] have pushed
+this area forward, the generated scene graph may be still far from perfect, e.g.,
+they seldom consider whether the detected relations are what humans want to
+convey from the image or not. As a symbolic representation of an image, the
+scene graph is expected to record the image content as complete as possible.
+arXiv:2007.08760v1  [cs.CV]  17 Jul 2020
+2
+W. Wang et al.
+Ground truth captions for image A:
+(1) Two people on bicycles riding next to a building. 
+(2) Two people on bikes crossing an intersection.
+(3) Two people riding bicycles and a man walking on 
+the sidewalk.
+Ground truth captions for image B:
+(1) Two cops riding on horses next to tall buildings. 
+(2) Two people riding horses through a city.
+(3) Two people ridehorses through a city square.
+building
+window
+helmet
+head
+woman
+bike
+on
+riding
+has
+on
+wearing
+building
+window
+on
+helmet_2
+head
+woman
+has
+on
+wearing
+man
+helmet_1
+wearing
+building
+window
+helmet_2
+woman bike_2
+on
+riding
+man_1 bike_1
+street
+man_2
+helmet_1
+riding
+line
+on
+on
+on
+on
+bag_2
+bag_1
+on
+on
+head
+on
+building
+window
+helmet_2
+woman horse_2
+riding
+man
+horse_1
+street
+helmet_1
+riding
+on
+on
+on
+on
+head
+on
+building
+window
+helmet_2
+woman bike_2
+man_1 bike_1
+street
+man_2
+helmet_1
+line
+bag_2
+bag_1
+ROOT
+head
+(a) Scene graph for image A from existing methods.  
+(b) Scene graph for image B from existing methods.  
+(e) Image A and its sub-regions form a hierarchy.
+(c) Scene graph for image A based on hierarchy.  
+(d) Scene graph for image B based on hierarchy.  
+(f) Hierarchical structure of image A.
+A
+B
+(i)
+(ii)
+(iii)
+Fig. 1: Scene graphs from existing methods shown in (a) and (b) fail in sketching
+the image gist. The hierarchical structure about humans’ perception preference
+is shown in (f), where the bottom left highlighted branch stands for the hierarchy
+in (e). The scene graphs in (c) and (d) based on hierarchical structure better
+capture the gist. Relations in (a) and (b), and purple arrows in (c) and (d), are
+top-5 relations, while gray ones in (c) and (d) are secondary.
+More importantly, a scene graph is not just for being admired, but for support-
+ing downstream tasks, such as image captioning, where a description is supposed
+to depict the major event in the image, or the namely image gist. This char-
+acteristic is also one of the humans’ inherent habits when they parse a scene.
+Therefore, an urgently needed feature of SGG is to assess the relation importance
+and prioritize the relations which form the major events that humans intend to
+preferentially convey, i.e., key relations. This is seldom considered by existing
+methods. What’s worse, the universal phenomenon of unbalanced distribution
+of relationship triplets in mainstream datasets exacerbates the problem that the
+major event cannot be found out. Let’s study the quality of top relations pre-
+dicted by existing state-of-the-art methods (e.g., [51]) and check whether they
+are “key” or not. In Figure 1(a)(b), two scene graphs shown with top-5 relations
+for image A and B are mostly the same although major events in A and B are
+quite diﬀerent. In other words, existing methods are deﬁcient in mining image-
+speciﬁc relations, but biased towards trivial or self-evident ones (e.g., ⟨woman,
+has, head⟩can be obtained from commonsense without observing the image),
+which fail in conveying image gist (colored parts in ground truth captions in
+Figure 1), and barely contribute to downstream tasks.
+Any pair of objects in a scene can be considered relevant, at least in terms of
+their spatial conﬁgurations. Faced with such a massive amount of relations, how
+do humans choose relations to describe the images? Given picture (ii) in Figure
+1(e), a zoom-in sub-region of picture (i), humans will describe it with ⟨woman,
+riding, bike⟩, since woman and bike belong to the same perceptive level and
+their interaction forms the major event in (ii). When it comes to picture (iii), the
+answers would be ⟨woman, wearing, helmet⟩and ⟨bag, on, woman⟩, where helmet
+and bag are ﬁner details of woman and belong to an inferior perceptive level.
+It suggests that there naturally exists a hierarchical structure about humans’
+perception preference, as shown in Figure 1(f).
+Inspired by observations above, we argue that a desirable scene graph should
+be hierarchically constructed. Speciﬁcally, we represent the image with a human-
+Sketching Image Gist
+3
+mimetic Hierarchical Entity Tree (HET) where each node is a detected object
+and each one can be decomposed into a set of ﬁner objects attached to it. To
+generate the scene graph based on HET, we devise Hybrid Long Short-Term
+Memory (Hybrid-LSTM) to encode both hierarchy and siblings context [51,38]
+and capture the structured information embedded in HET, considering that im-
+portant related pairs are more likely to be seen either inside a certain perceptive
+level or between two adjacent perceptive levels. We further intend to evaluate the
+performances of diﬀerent models on key relation prediction but the annotations
+of key relations are not directly available from existing datasets. Therefore, we
+extend Visual Genome (VG) [13] to VG-KR dataset which contains indicative
+annotations of key relations by drawing support from caption annotations in
+MSCOCO [21]. We devise a Relation Ranking Module to adjust the rankings of
+relations. It captures humans’ subjective perceptive habits from objective entity
+saliency and size, and achieves ultimate performances on mining key relations.1
+2
+Related Works
+Scene graph generation (SGG) and Visual Relationship Detection
+(VRD), are the two most common tasks aiming at extracting interaction be-
+tween two objects. In the ﬁeld of VRD, various studies [24,3,15,52,49,28,53,48,54]
+mainly focus on detecting each relation triplet independently rather than de-
+scribe the structure of the scene. The concept of scene graph is ﬁrstly proposed
+in [10] for image retrieval. Xu et al. [44] deﬁne SGG task and creatively devise
+message passing mechanism for scene graph inference. A series of succeeding
+works struggle to design various approaches to improve the graph representa-
+tion. Li et al. [17] induce image captions and object information to jointly ad-
+dress multitasks. [51,38,41,22] draw support from useful context construction.
+Yang et al. [45] propose Graph-RCNN to embed the structured information.
+Qi et al. [29] employ a self-attention module to embed a weighted graph rep-
+resentation. Zhang et al. [55] propose contrastive losses to resolve the related
+pair conﬁguration ambiguity. Zareian et al. [50] creatvely treat the SGG as an
+edge role assignment problem. Recently, some methods try to borrow advantages
+from using knowledge [2,5] or causal eﬀect [37] to diversify the predicted rela-
+tions. Liang et al. [19] prune the dominant and easy-to-predict relations in VG
+to alleviate the annihilation problem of rare but meaningful relations.
+Structured Scene Parsing, has been paid much attention in pursuit of higher-
+level scene understanding. [35,32,20,6,57,47] construct various hierarchical struc-
+tures for their speciﬁc tasks. Unlike existing SGG studies that indiscriminately
+detect relations no matter whether they are concerned by humans or not, our
+work introduces the idea of hierarchical structure into SGG task, and try to give
+priority to detect key relations, then the trivial ones for completeness.
+Saliency vs. Image Gist. An extremely rich set of studies [14,39,23,40,8,56]
+focus on analyzing where humans gaze and ﬁnd visually salient objects (high
+1 Source code and dataset are available at http://vipl.ict.ac.cn/resources/codes or
+https://github.com/Kenneth−Wong/het−eccv20.git.
+4
+W. Wang et al.
+contrast of luminance, hue, and saturation, center position [9,12,43], etc.). It’s
+notable that the visually salient objects are related but not equal to objects
+involved in image gist. He et al. [7] explore gaze data and ﬁnd that only 48% of
+ﬁxated objects are referred in humans’ descriptions about the image, while 95%
+of objects referred in descriptions are ﬁxated. It suggests that objects referred
+in a description (i.e., objects that humans think important and should form the
+major events / image gist) are almost visually salient and reveal where humans
+gaze, but what humans ﬁxate (i.e., visually salient objects) are not always what
+they want to convey. We provide some examples in the Appendix to help to
+understand this ﬁnding. Naturally, we need to emphasize that the levels in our
+HET reﬂect the perception priority level rather than the object saliency. Besides,
+this ﬁnding supports us to obtain the indicative annotations of key relations with
+the help of image caption annotations.
+3
+Proposed Approach
+3.1
+Overview
+The scene graph G = {O, R} of an image I contains a set of entities O =
+{oi}N
+i=1 and their pairwise relations R = {rk}M
+k=1. Each rk is a triplet ⟨oi, pij, oj⟩
+where pij ∈P and P is the set of all predicates. As illustrated in Figure 2, our
+approach can be summarized into four steps. (i) We apply Faster R-CNN [30]
+with VGG16 [34] backbone to detect all the entity proposals and each of them
+possesses its bounding box bi ∈R4, 4,096-dimensional visual feature vi, and the
+class probability vector qi from the softmax output. (ii) In Section 3.2, HET
+is constructed by organizing the detected entities according to their perceptive
+levels. (iii) In Section 3.3, we design the Hybrid-LSTM network to parse HET,
+which ﬁrstly encodes the structured context then decodes it for graph inference.
+(iv) In Section 3.4, we improve the scene graph generated in (iii) with our devised
+RRM which further adjusts the rankings of relations and shifts the graph focus
+to the relations between entities that are close to top perceptive levels of HET.
+3.2
+HET Construction
+We aim to construct a hierarchical structure whose top-down levels are accord
+with the perceptive levels of humans’ inherent scene parsing hierarchy. From a
+massive number of observations, it can be found that entities with larger sizes
+are relatively more likely to form the major events in a scene (this will be proved
+eﬀective through experiments). Therefore, we arrange larger entities as close to
+the root of HET as possible. Each entity can be decomposed into ﬁner entities
+that make up the inferior level.
+Concretely, HET is a multi-branch tree T with a virtual root o0 standing
+for the whole image. All the entities are sorted in descending order according to
+their sizes and we get an orderly sequence {oi1, oi2, . . . , oiN }. For each entity oin,
+Sketching Image Gist
+5
+𝒗"#
+𝑾(&) 𝒈"#
+jean
+hair
+man
+glass
+wearing
+jacket
+wearing
+person
+umbrella
+holding
+man
+luggage
+street
+person_1
+umbrella
+holding
+person_2
+walking on
+walking on
+carrying
+Relation Ranking Module
+Object Detection
+Visual 𝒗"
+Semantic 𝒛"
+𝒙,
+𝒙-
+𝒙.
+𝑓"#
+ℛ
+𝑓"#
+ℛ
+{𝑓"
+ℛ}
+{𝑓"
+𝒪}
+HET and Hybrid-LSTM
+ℱ
+(a)
+(b)
+(c)
+(d)
+ℱ𝒮
+𝒓,
+𝒓-
+SG (top-5)
+SG (top-5)
+Fig. 2: An overview of our method. An object detector is ﬁrstly applied to give
+support to HET construction. Then Hybrid-LSTM is leveraged to parse HET,
+and speciﬁcally contains 4 processes, (a) entity context encoding, (b) relation
+context encoding, (c) entity context decoding, and (d) relation context decoding.
+Finally, RRM predicts a ranking score for each triplet which further prioritizes
+the key relations in the scene graph.
+we consider entities with larger size, {oim}, 1 ≤m < n, and calculate the ratio
+Pnm = I (oin, oim)
+A(oin)
+,
+(1)
+where A(·) denotes the size of the entity and I(·, ·) is the intersection area of two
+entities. If Pnm is larger than threshold T, oim will be a candidate parent node
+of oin since oim contains most part of oin. If there is no candidate, the parent
+node of oin is set as o0. If there are more than one, we further determine the
+parent with two alternative strategies:
+Area-ﬁrst Strategy (AFS). Considering that entity with a larger size has a
+higher probability to contain more details or components, the candidate with
+the largest size is selected to be a parent node.
+Intersection-ﬁrst Strategy (IFS). We compute ratio
+Qnm = I (oin, oim)
+A(oim)
+.
+(2)
+A larger Qnm means that oin is relatively more important to oim than to other
+candidates. Therefore, oim where m = arg maxk Qnk is chosen as parent of oin.
+3.3
+Structured Context Encoding and Scene Graph Generation
+The interpretability of HET implies that important relations are more likely to
+be seen between entities either inside a certain level or from two adjacent levels.
+Therefore, both hierarchical connection [38] and sibling association [51] are useful
+for context modeling. Our Hybrid-LSTM encoder is proposed, which consists of
+a bidirectional multi-branch TreeLSTM [36] (Bi-TreeLSTM) for encoding the
+hierarchy context, and a bidirectional chain LSTM [4] (Bi-LSTM) for encoding
+the siblings context. We use two identical Hybrid-LSTM encoders to encode two
+6
+W. Wang et al.
+types of context for each entity, one is entity context which helps predict the
+information of entity itself, and the other is relation context which plays a role
+in inferring the relation when interacting with other potential relevant entities.
+For brevity we only provide a detailed introduction of entity context encoding
+(Figure 2(a)). Speciﬁcally, the input feature xi of each node oi is concatenation of
+visual feature vi and weighted sum of semantic embedding vectors, zi = W (1)
+e
+qi,
+where W (1)
+e
+is word embedding matrix initialized from GloVe [27]. For the root
+node o0, v0 is obtained with the whole-image bounding box, while z0 is initialized
+randomly.
+The hierarchy context (blue arrows in Figure 2(a)) is encoded as:
+C = BiTreeLSTM({xi}N
+i=0),
+(3)
+where C = {ci}N
+i=0 and each ci =
+h−→
+hT
+i ;
+←−
+hT
+i
+i
+is the concatenation of the top-down
+and bottom-up hidden states of Bi-TreeLSTM:
+−→
+hT
+i = TreeLSTM
+
+xi,
+−→
+hT
+p
+
+,
+(4a)
+←−
+hT
+i = TreeLSTM
+
+xi,
+←−
+hT
+j
+j ∈C(i)
+
+,
+(4b)
+where C(·) denotes the set of children nodes while subscript p denotes the parent
+of node i.
+The siblings context (red arrows in Figure 2(a)) is encoded within each set
+of children nodes which share the same parent:
+S = BiLSTM({xi}N
+i=0),
+(5)
+where S = {si}N
+i=0 and each si =
+h−→
+hL
+i ;
+←−
+hL
+i
+i
+is concatenation of forward and
+backward hidden states of Bi-LSTM:
+−→
+hL
+i = LSTM
+
+xi,
+−→
+hL
+l
+
+,
+←−
+hL
+i = LSTM
+
+xi,
+←−
+hL
+r
+
+,
+(6)
+where l and r stand for left and right sibling which share the same parent with
+i. We further concatenate hierarchy and siblings context to obtain the entity
+context, f O
+i
+= [ci; si]. Missing branches or siblings are padded with zero vectors.
+The relation context is encoded (Figure 2(b)) in the same way as entity
+context except that the input of each node is replaced by {f O
+i }N
+i=0 . Another
+Hybrid-LSTM encoder is applied to get the relation context {f R
+i }N
+i=0.
+To generate a scene graph, we should decode the context to obtain entity
+and relation information. In HET, a child node strongly depends on its parent,
+i.e., information of parent node is helpful for prediction of child node. Therefore,
+to predict entity information, we decode entity context in a top-down manner
+following Eq. (4a) as shown in Figure 2(c). For node oi, the input xi in Eq. (4a)
+is replaced with [f O
+i ; W (2)
+e
+qp], where W (2)
+e
+is word embedding matrix and qp
+is the predicted class probability vector of the parent of oi. The output hidden
+Sketching Image Gist
+7
+state is fed into a softmax classiﬁer and bounding box regressor to predict en-
+tity information of oi. To predict the predicate pij between oi and oj, we feed
+f R
+ij = [f R
+i ; f R
+j ] to an MLP classiﬁer (Figure 2(d)). As a result, a scene graph
+is generated, and for each triplet containing subject oi, object oj and predicate
+pij, we obtain their scalar scores si, sj, and sij.
+3.4
+Relation Ranking Module
+So far, we obtain the hierarchical scene graph based on HET. As we collect
+the key relation annotations (Section 4.1), we intend to further maximize the
+performance on mining key relations with supervised information, and explore
+the advantages brought by HET. Consequently, we design a Relation Ranking
+Module (RRM) to prioritize key relations. As analyzed in Related Works, re-
+gions of humans’ interest can be tracked under the guidance of visual saliency
+although they do not always form the major events that humans want to con-
+vey. Besides, the size, which guides HET construction, not only is an important
+reference for estimating the perceptive level of entities, but also is found helpful
+to rectify some misleadings in humans’ subjective assessment on the importance
+of relations (see the Appendix). Therefore, we propose to learn to capture hu-
+mans’ subjective assessment on the importance of relations under the guidance
+of visual saliency and entity size information.
+We ﬁrstly employ DSS [8] to predict the pixel-wise saliency map (SM) S for
+each image. To eﬀectively collect entity size information, we propose a pixel-wise
+area map (AM) A. Given the image I and its detected N entities {oi}N
+i=1 with
+bounding boxes {bi}N
+i=1 (specially o0 and b0 for the whole image), the value axy
+of each position (x, y) on A is deﬁned as the minimum normalized size of entities
+which cover (x, y):
+axy =
+
+
+
+
+
+min
+(
+A(oi)
+A(o0)
+i ∈X
+)
+, if X ̸= ∅
+0, otherwise,
+(7)
+where X = {i|(x, y) ∈bi, 0 < i ≤N}. The sizes of both S and A are the same as
+that of input image I. We apply adaptive average pooling (AAP(·)) to smooth
+and down-sample these two maps to align with the shape of conv5 feature map
+F from Faster-RCNN, and obtain the attention embedded feature map FS:
+FS = F ⊙(AAP(S) + AAP(A)),
+(8)
+where ⊙is the Hadamard product.
+We predict a score for each triplet to adjust their rankings. The input contains
+visual representation for a triplet, vij ∈R4096, which is obtained by RoI Pooling
+on FS. Besides, the geometric information is also an auxiliary cue for estimating
+the importance. For a triplet containing subject box bi and object box bj, the
+geometric feature gij is deﬁned as a 6-dimensional vector following [11]:
+gij =
+"
+xj −xi
+√wihi
+,yj −yi
+√wihi
+,
+r
+wjhj
+wihi
+,wi
+hi
+,wj
+hj
+,bi ∩bj
+bi ∪bj
+#
+,
+(9)
+8
+W. Wang et al.
+which is projected to a 256-dimensional vector and concatenated with vij, re-
+sulting in the ﬁnal representation for a relation rij = [vij; W (g)gij] where
+W (g) ∈R256×6 is projection matrix. Then we use a bi-directional LSTM to
+encode global context among all the triplets so that ranking score of each triplet
+can be reasonably adjusted considering scores of other triplets. Concretely, the
+ranking score tij for a pair (oi, oj) is achieved as:
+{hR
+ij} = BiLSTM ({rij}) ,
+(10)
+tij = W (r)
+2
+ReLU(W (r)
+1
+hR
+ij).
+(11)
+W (r)
+1
+and W (r)
+2
+are weights of two fully connected layers. The ranking score is
+fused with classiﬁcation scores so that both the conﬁdences of three components
+of a triplet and ranking priority are considered, resulting in the ﬁnal ranking
+conﬁdence φij = si · sj · sij · tij, which is used for re-ranking the relations.
+3.5
+Loss Function
+We adopt the cross-entropy loss for optimizing Hybrid-LSTM networks. Let e′
+and l′ denote the predicted label of entity and predicate respectively, e and l
+denote the ground truth labels. The loss is deﬁned as:
+LCE = Lentity + Lrelation = −1
+Z1
+X
+i
+e′
+i log(ei) −1
+Z2
+X
+i
+X
+j̸=i
+l′
+ij log(lij).
+(12)
+When the RRM is applied, the ﬁnal loss function is the sum of LCE and
+ranking loss L(K, N), which is used to maximize the margin between the ranking
+conﬁdences of key relations and those of secondary ones:
+LF inal = LCE + L(K, N) = LCE + 1
+Z3
+X
+r∈K,r′∈N
+max(0, γ −φr + φr′),
+(13)
+where γ denotes margin parameter, K and N stand for the set of key and sec-
+ondary relations, r and r′ are relations sampled from K and N with ranking
+conﬁdences φr and φr′. Z1, Z2, and Z3 are normalization factors.
+4
+Experimental Evaluation
+4.1
+Dataset, Evaluation and Settings
+VRD [24], is the benchmarking dataset for visual relationship detection task,
+which contains 4,000/1,000 training/test images and covers 100 object categories
+and 70 predicate categories.
+Visual Genome (VG), is a large-scale dataset with rich annotations of objects,
+attributes, dense captions and pairwise relationships, containing 75,651/32,422
+training/test images. We adopt the most widely used version of VG, namely
+VG150 [44], which covers 150 object categories and 50 predicate categories.
+VG200 and VG-KR. We intend to collect the indicative annotations of key
+relations based on VG. Inspired by the ﬁnding illustrated in Related Works,
+Sketching Image Gist
+9
+1. A man walking along the beach while holding a surfboard.
+2. A man on a beach holding a surfboard.
+3. A man holding a colorful surfboard going towards the beach.
+[man, wearing, pant], [leaf, on, surfboard], [sand, on, surfboard], 
+[water, behind, wave], [head, of, man], 
+[man, holding, surfboard],  [man, on, beach]
+1. A person riding a bike with a dog in a basket.
+2. A person and a dog on a bike.
+3. A man riding a bicycle with a dog in a basket on the back.
+[basket, on, bike], [car, near, building], [tree, near, car],
+[man, holding, bag], 
+[dog, in, basket], [dog, on, bike], [man, riding, bike]
+Fig. 3: Examples in VG-KR dataset. Each image is shown with 3 captions and
+ground truth relations. Purple triplets are key ones while others are secondary.
+we associate the relation triplets referred in caption annotations in MSCOCO
+[21] with those from VG. We give several examples in Figure 3. The details of
+our processing and more statistics are provided in the Appendix.
+Evaluation, Settings, and Implementation Details. For conventional SGG
+following triplet-match rule (only if three components of a triplet match the
+ground truth will it be a correct one), we adopt three universal protocols [44]:
+PREDCLS, SGCLS, and SGGEN. All protocols use Recall@K (R@K=20, 50,
+100) as a metric. When evaluating key relation prediction, there are some varia-
+tions. First, we only evaluate with PREDCLS and SGCLS protocols to eliminate
+the interference of errors from object detector, and add a tuple-match rule (only
+the subject and object are required to match the ground truth) to investigate the
+ability to ﬁnd proper pairs. Second, we introduce a new metric, Key Relation
+Recall (kR@K), which computes recall rate on key relations. As the number
+of key relations is usually less than 5 (see the Appendix), the K in kR@K is
+set to 1 and 5. When evaluating on VRD, we use RELDET and PHRDET [49],
+and report R@50 and R@100 at 1, 10, and 70 predicates per related pair. The
+details about the hyperparameters settings and implementation are provided in
+the Appendix.
+Table 1: Results table (%) on VG150 and VG200. The results of the full version
+of our method are highlighted.
+SGGEN
+SGCLS
+PREDCLS
+R@
+20
+50
+100
+20
+50
+100
+20
+50
+100
+VG150
+VRD [24]
+-
+0.3
+0.5
+-
+11.8 14.1
+-
+27.9 35.0
+IMP [44]
+-
+3.4
+4.2
+-
+21.7 24.4
+-
+44.8 53.0
+IMP† [44,51]
+14.6 20.7 24.5 31.7 34.6 35.4 52.7 59.3 61.3
+Graph-RCNN [45]
+-
+11.4 13.7
+-
+29.6 31.6
+-
+54.2 59.1
+MemNet [41]
+7.7
+11.4 13.9 23.3 27.8 29.5 42.1 53.2 57.9
+MOTIFS [51]
+21.4 27.2 30.3 32.9 35.8 36.5 58.5 65.2 67.1
+KERN [2]
+-
+27.1 29.8
+-
+36.7 37.4
+-
+65.8 67.6
+VCTree-SL [38]
+21.7 27.7 31.1 35.0 37.9 38.6 59.8 66.2 67.9
+HetH-AFS
+21.2 27.1 30.5 33.7 36.6 37.3 58.1 64.7 66.6
+HetH w/o chain
+21.5 27.4 30.7 32.9 35.9 36.7 57.5 64.5 66.5
+HetH
+21.6 27.5 30.9 33.8 36.6 37.3 59.8 66.3 68.1
+VG200
+MOTIFS [51]
+15.2 19.9 22.8 24.5 26.7 27.4 52.5 59.0 61.0
+VCTree-SL [38]
+14.7 19.5 22.5 24.2 26.5 27.1 51.9 58.4 60.3
+HetH
+15.7 20.4 23.4 25.0 27.2 27.8 53.6 60.1 61.8
+10
+W. Wang et al.
+Table 2: Results table (%) of key relation prediction on VG-KR.
+Triplet Match
+Tuple Match
+SGCLS
+PREDCLS
+SGCLS
+PREDCLS
+kR@
+1
+5
+1
+5
+1
+5
+1
+5
+VCTree-SL
+5.7
+14.2
+11.4
+30.2
+8.4
+22.2
+16.1
+46.4
+MOTIFS
+5.9
+14.5
+11.3
+30.0
+8.5
+21.8
+16.0
+46.2
+HetH
+6.1
+15.1
+11.6
+30.4
+8.6
+22.7
+16.4
+47.1
+MOTIFS-RRM
+8.6
+16.4
+16.7
+33.8
+13.8
+26.3
+27.9
+57.1
+HetH-RRM
+9.2
+17.1
+17.5
+35.0
+14.6
+27.3
+28.9
+59.1
+RRM-Base
+8.4
+16.8
+16.2
+33.7
+13.4
+26.8
+26.6
+57.2
+RRM-SM
+9.0
+16.9
+17.2
+34.5
+14.3
+27.1
+28.6
+58.7
+RRM-AM
+8.9
+16.9
+16.9
+34.4
+14.1
+27.0
+28.1
+58.2
+Table 3: Results table (%) on VRD.
+RELDET
+PHRDET
+k=1
+k=10
+k=70
+k=1
+k=10
+k=70
+R@
+50
+100
+50
+100
+50
+100
+50
+100
+50
+100
+50
+100
+ViP [15]
+17.32
+20.01
+-
+-
+-
+-
+22.78
+27.91
+-
+-
+-
+-
+VRL [18]
+18.19
+20.79
+-
+-
+-
+-
+21.37
+22.60
+-
+-
+-
+-
+KL-Dist [49]
+19.17
+21.34
+22.56
+29.89
+22.68
+31.89
+23.14
+24.03
+26.47
+29.76
+26.32
+29.43
+Zoom-Net [48]
+18.92
+21.41
+-
+-
+21.37
+27.30
+24.82
+28.09
+-
+-
+29.05
+37.34
+RelDN-L0 [55]
+24.30
+27.91
+26.67
+32.55
+26.67
+32.55
+31.09
+36.42
+33.29
+41.25
+33.29
+41.25
+RelDN [55]
+25.29
+28.62
+28.15
+33.91
+28.15
+33.91
+31.34
+36.42
+34.45
+42.12
+34.45
+42.12
+HetH
+22.42
+24.88
+26.88
+31.69
+26.88
+31.81
+30.69
+35.59
+35.47
+42.94
+35.47
+43.05
+4.2
+Ablation Studies
+Ablation studies are separated into two sections. The ﬁrst part is to explore
+some variants of HET construction. We conduct these experiments on VG150.
+The complete version of our model is HetH, which is conﬁgured with IFS and
+Hybrid-LSTM. The second part is an investigation into the usage of SM and
+AM in RRM. Experiments are carried out on VG-KR. The complete version is
+HetH-RRM, whose implementation follows Eq. (8).
+Ablation study on HET construction.
+We ﬁrstly compare AFS and
+IFS for determining the parent node. Then we investigate the eﬀectiveness of the
+chain LSTM encoder in Hybrid-LSTM. The ablative models mentioned above
+are shown in Table 1 as HetH-AFS (i.e.replace IFS by AFS), and HetH w/o
+chain. We observe that using IFS together with Hybrid-LSTM encoder has
+the best performances, which indicates that HET would be more reasonable
+using IFS. It’s noteworthy that if the Bi-TreeLSTM encoder is abandoned, the
+Hybrid-LSTM encoder would almost degenerate to MOTIFS. Therefore, through
+comparisons between HetH and MOTIFS, HetH and HetH w/o chain, it implies
+that both hierarchy and siblings context should be encoded in HET.
+Ablation study on RRM. In order to explore the eﬀectiveness of saliency
+and size, we ablate HetH-RRM with the following baselines: (1) RRM-Base:
+vij is extracted from F rather than FS, (2) RRM-SM: only S is used, and (3)
+Sketching Image Gist
+11
+ROOT
+umbrella_1
+fence_1
+ground_1
+lady_1
+arm_1
+shoe_1
+head_1
+boot_1
+hand_1
+shoe_2
+A woman holding an
+umbrella in her hand.
+(b) Saliency map
+(c) Area map
+(d) HET
+(e) Scene graph with top-5 relations, and generated captions 
+umbrella_1
+fence_1
+head_1
+lady_1
+arm_1
+hand_1
+shoe_2
+shoe_1
+ground_1
+A woman in a red coat 
+stands next to a tree.
+(a) Detected objects 
+umbrella_1
+fence_1
+ground_1
+lady_1
+arm_1
+shoe_1
+head_1
+boot_1
+hand_1
+shoe_2
+holding
+wearing
+wearing 2
+3
+4
+umbrella_1
+fence_1
+ground_1
+lady_1
+arm_1
+shoe_1
+head_1
+boot_1
+hand_1
+shoe_2
+holding
+over
+in front of
+on
+behind
+1
+2
+3
+4
+5
+HetH
+HetH-RRM
+Fig. 4: Qualitative Results of HetH and HetH-RRM. In (e), the pink entities are
+involved in top-5 relations, and the purple arrows are key relations matched with
+ground truth. The purple numeric tags next to the relations are the rankings,
+and “1” means that the relation gets the highest score.
+RRM-AM: only A is used. Results in Table 2 suggest that both saliency and
+size information indeed contributes to discovering key relations, and the eﬀect of
+saliency is slightly better than that of the size. The hybrid version achieves the
+highest performances. From the following qualitative analysis, we can see that
+with the guidance of saliency and rectiﬁcation eﬀect of size, RRM further shifts
+the model’s attention to key relations signiﬁcantly.
+4.3
+Comparisons with State-of-the-Arts
+For scene graph generation, we compare our HetH with the following state-of-
+the-art methods: VRD [24] and KERN [2] use knowledge from language or
+statistical correlations. IMP [44], Graph-RCNN [45], MemNet [41], MO-
+TIFS [51] and VCTree-SL [38] mainly devise various message passing meth-
+ods for improving graph representations. For key relation prediction, we mainly
+evaluate two latest works, MOTIFS and VCTree-SL on VG-KR. Besides, we
+further incorporate RRM to MOTIFS, namely MOTIFS-RRM, to explore the
+transferability of RRM. Results are shown in Table 1 and 2. We give statistical
+signiﬁcance of the results in the Appendix.
+Quantitative Analysis. In Table 1, when evaluated on VG150, HetH dom-
+inantly surpasses most methods. Compared to MOTIFS and VCTree-SL, HetH
+using multi-branch tree structure outperforms MOTIFS and yields comparable
+recall rate with VCTree-SL which uses a binary tree structure. It indicates that
+hierarchical structure is superior to plain one in terms of modeling context. We
+observe that HetH achieves better performances compared to VCTree-SL under
+PREDCLS protocol, while there exists a slight gap under SGCLS and SGGEN
+protocols. This is mainly because our tree structure is generated with artiﬁ-
+cial rules and some incorrect subtrees inevitably emerge due to occlusion in 2D
+images, while VCTree-SL dynamically adjusts its structure in pursuit of higher
+performances. Under SGCLS and SGGEN protocols in which object information
+is fragmentary, it is diﬃcult for HetH to rectify the context encoded from wrong
+structures. However, we argue that our interpretable and natural multi-branch
+tree structure is also adaptive to the situation when there is an increment of
+object and relation categories but fewer data. It can be seen from evaluation
+results on VG200 that the HetH outperforms MOTIFS by 0.67 mean points
+12
+W. Wang et al.
+and VCTree-SL by 1.1 mean points. On the contrary, in this case, the data are
+insuﬃcient for dynamic structure optimization.
+As SGG task is highly related to VRD task, we apply HetH on VRD and the
+comparison results are shown in Table 3. Both the HetH and RelDN [55] use pre-
+trained weights on MSCOCO, while only [48] states that they use ImageNet pre-
+trained weights and others remain unknown. It’s shown that our method yields
+competitive results and even surpasses state-of-the-arts under some metrics.
+When it comes to key relation prediction, we directly evaluate HetH, MO-
+TIFS, and VCTree-SL on VG-KR. As shown in Table 2, HetH substantially
+performs better than other two competitors, suggesting that the structure of
+HET provides hints for judging the importance of relations, and parsing the
+structured information in HET indeed capture humans’ perceptive habits.
+In pursuit of ultimate performances on mining key relations, we jointly op-
+timize the HetH with RRM under the supervision of key relation annotations
+in VG-KR. From Table 2, both HetH-RRM and MOTIFS-RRM achieve signif-
+icant gains, and HetH-RRM is better than MOTIFS-RRM, which proves the
+superiority of HetH again, and shows excellent transferability of RRM.
+Qualitative Analysis. We visualize intermediate results in Figure 4(a-d).
+HET is well constructed and close to human’s analyzing process. In the area
+map, regions of arm, hand, and foot get small weights because of their small
+sizes. Actually, relations like ⟨lady, has, arm⟩are indeed trivial. As a result,
+RRM suppresses these relations. More cases are provided in the Appendix.
+(2, 2)
+(2, 3)
+(3, 3)
+depth
+25
+30
+35
+40
+45
+50
+distribution (%)
+method
+HetH
+RRM-base
+HetH-RRM
+(a)
+(2, 2)
+(2, 3)
+(3, 3)
+others
+depth
+0.03
+0.04
+0.05
+0.06
+0.07
+ranking confidence
+sampling
+1st sampling
+2nd sampling
+3rd sampling
+4th sampling
+5th sampling
+(b)
+Fig. 5: (a) Depth distribution of top-5 pre-
+dicted relations. (b) The ranking conﬁdence of
+relations from diﬀerent depths obtained from
+RRM-base. Sampling is repeated ﬁve times.
+Strtg.
+Metric
+HetH-RRM
+EP
+kR@1
+17.5
+kR@5
+35.0
+speed
+0.22
+SP
+kR@1
+15.8
+kR@5
+31.2
+speed
+0.18
+Fig. 6: Comparison between EP
+and SP. The inference speed
+(seconds/image)
+is
+evaluated
+with a single TITAN Xp GPU).
+4.4
+Analyses about HET
+We conduct additional experiments to validate whether HET has a potential
+to reveal humans’ perceptive habits. As shown in Figure 5(a), we compare the
+depth distribution of top-5 predicted relations (represented by tuple (doi, doj)
+consisting of the depths of two entities, and the depth of root is deﬁned as 1.)
+of HetH, RRM-base and HetH-RRM. After applying RRM, there is a signiﬁcant
+Sketching Image Gist
+13
+man_1
+sky_1
+woman_1
+sand_1
+leg_2
+ear_1 ear_2
+leg_1
+water_1
+mountain_1 tree_1
+elephant_1
+man_2
+trunk_1
+grass_1
+short_1
+foot_1
+boot_2
+boot_1
+shirt_1
+in
+in
+in
+in
+near
+man_1
+sky_1
+woman_1
+sand_1
+leg_2
+ear_1 ear_2
+leg_1
+water_1
+mountain_1 tree_1
+elephant_1
+man_2
+trunk_1
+grass_1
+short_1
+foot_1
+boot_2
+boot_1
+shirt_1
+in
+in
+in
+near
+in
+near
+behind
+man_1
+sky_1
+woman_1
+sand_1
+leg_2
+ear_1 ear_2
+leg_1
+water_1
+mountain_1 tree_1
+elephant_1
+man_2
+trunk_1
+grass_1
+short_1
+foot_1
+boot_2
+boot_1
+shirt_1
+in
+in
+in
+in
+near
+near
+behind
+on
+on
+wearing
+man_1
+sky_1
+woman_1
+sand_1
+leg_2
+ear_1
+ear_2
+leg_1
+water_1
+mountain_1
+tree_1
+elephant_1
+man_2
+trunk_1
+grass_1
+short_1
+foot_1
+boot_2
+boot_1
+shirt_1
+has
+in
+has
+man_1
+sky_1
+woman_1
+sand_1
+leg_2
+ear_1
+ear_2
+leg_1
+water_1
+mountain_1
+tree_1
+elephant_1
+man_2
+trunk_1
+grass_1
+short_1
+foot_1
+boot_2
+boot_1
+shirt_1
+has
+in
+has
+has
+has
+has
+man_1
+sky_1
+woman_1
+sand_1
+leg_2
+ear_1
+ear_2
+leg_1
+water_1
+mountain_1
+tree_1
+elephant_1
+man_2
+trunk_1
+grass_1
+short_1
+foot_1
+boot_2
+boot_1
+shirt_1
+has
+in
+has
+has
+has
+has
+near
+on
+near
+in
+has
+NR=5
+NR=10
+NR=15
+Fig. 7: As the quota of top relations (NR) increases, scene graphs dynamically en-
+large. The newly involved entities and relations are shown in a new color. Results
+in ﬁrst row and second row are from HetH-RRM and MOTIFS respectively.
+increment on the ratio of depth tuples (2, 2) and (2, 3), and a drop on (3, 3).
+This phenomenon is also observed in Figure 4(e). Previous experiments have
+proved that RRM obviously upgrades the rankings of key relations. In other
+words, relations which are closer to the root of HET are regarded as key ones
+by RRM. We also analyze the ranking conﬁdence (φ) of relations from diﬀerent
+depths with the RRM-base model (to eliminate the confounding eﬀect caused
+by AAP information). We sample 10,000 predicted relation triplets from each
+depth ﬁve times. In Figure 5(b), the ranking conﬁdence decreases as the depth
+increases. Therefore, diﬀerent levels of HET indeed indicate diﬀerent perceptive
+importance of relations. This characteristic makes it possible to reasonably ad-
+just the scale of a scene graph. As shown in the ﬁrst row in Figure 7, hierarchical
+scene graph from our HetH-RRM enlarges in a top-down manner as the quota
+of top relations increases, while the ordinary scene graph in the second row en-
+larges itself aimlessly. If we want to limit the scale of a scene graph but keep its
+ability to sketch image gist as far as possible, it is feasible for our hierarchical
+scene graph since we just need to cut oﬀsome secondary branches of HET, but
+is diﬃcult to realize in an ordinary scene graph.
+Besides, diﬀerent from traditional Exhausted Prediction (EP, predict re-
+lation for every pair of entities) during inference stage, we adopt a novel Struc-
+tured Prediction (SP) strategy, in which we only predict relations between
+parent and children nodes, and any two sibling nodes that share the same par-
+ent. In Figure 6, we compare the performances and inference speed between
+EP and SP for HetH-RRM. Despite the slight gap in terms of performances,
+the interpretability of connections in HET makes SP feasible to take a further
+step towards eﬃcient inference, getting rid of the O(N 2) complexity [16] of EP.
+Further researches need to be conducted to balance performance and eﬃciency.
+5
+Experiments on Image Captioning
+Do key relations really make sense? We conduct experiments on one of the
+downstream tasks of SGG, i.e., image captioning, to verify it. 2
+Experiments are conducted on VG-KR since it has caption annotations from
+MSCOCO. To generate captions, we select diﬀerent numbers of predicted top
+2 We brieﬂy introduce here and details are provided in Appendix.
+14
+W. Wang et al.
+Table 4: Results of image captioning on VG-KR.
+Num. Model
+B@1 B@2 B@3 B@4 ROUGE-L CIDEr SPICE Avg. Growth
+all
+GCN-LSTM 72.0 54.7 40.5 30.0
+52.9
+91.1
+18.1
+20
+HetH-Freq
+73.1 55.7 41.0 30.1
+53.5
+94.0
+18.8
+HetH
+74.9 58.4 43.9 32.8
+54.9
+101.7
+19.8
+0.06
+HetH-RRM
+75.0 58.2 43.7 32.7
+55.1
+102.2
+19.9
+5
+HetH-Freq
+70.7 53.2 38.6 28.0
+51.7
+84.4
+17.2
+HetH
+72.5 55.4 41.2 30.5
+53.1
+92.6
+18.5
+1.57
+HetH-RRM
+73.7 56.7 42.3 31.5
+54.0
+97.5
+19.1
+2
+HetH-Freq
+68.1 50.8 36.8 26.5
+50.2
+76.5
+15.5
+HetH
+70.8 53.4 39.2 28.7
+51.8
+86.4
+17.6
+2.10
+HetH-RRM
+72.3 55.2 41.0 30.4
+53.1
+92.2
+18.4
+relations and feed them into the LSTM backend following [46]. We reimplement
+the complete GCN-LSTM [46] model and evaluate it on VG-KR since it’s one of
+the state-of-the-art methods and is most related to us. As shown in Table 4, our
+simple frequency baseline, HetH-Freq (the rankings of relations are accord with
+their frequency in training data), with 20 top relations input, outperforms GCN-
+LSTM because GCN-LSTM conducts graph convolution using relations as edges,
+which is not as eﬀective as our method in terms of making full use of relation
+information. After applying RRM, there is consistent performance improvement
+on overall metrics. This improvement is more and more signiﬁcant as the number
+of input top relations reduces. It’s reasonable since the impact of RRM centers
+at top relations. It suggests that our model provides more essential content with
+as few relations as possible, which contributes to eﬃciency improvement. The
+captions presented in Figure 4(e) shows that key relations are more helpful for
+generating a description that highly ﬁts the major events in an image.
+6
+Conclusion
+We propose a new scene graph modeling formulation and make an attempt to
+push the study of SGG towards the target of practicability and rationalization.
+We generate a human-mimetic hierarchical scene graph inspired by humans’
+scene parsing procedure, and further prioritize the key relations as far as possi-
+ble. Based on HET, a hierarchcal scene graph is generated with the assistance
+of our Hybrid-LSTM. Moreover, RRM is devised to recall more key relations.
+Experiments show outstanding performances of our method on traditional scene
+graph generation and key relation prediction tasks. Besides, experiments on im-
+age captioning prove that key relations are not just for appreciating, but indeed
+play a crucial role in higher-level downstream tasks.
+Sketching Image Gist
+15
+A
+Detailed Explanation about Motivation
+As illustrated in the main paper, it’s notable that the visually salient objects are
+related but not completely equal to objects involved in image gist. According to
+ﬁndings in [7], objects referred in a description (i.e., objects that humans think
+important and should form the major events/image gist) are almost visually
+salient and reveal where humans gaze, but what humans ﬁxate (i.e., visually
+salient objects) are not always what they want to convey at ﬁrst. In Figure 8,
+we provide some examples to show that this is a common phenomenon. E.g.,
+the red clothes, the Spring Festival couplets, and the black doors of the washing
+machines (mentioned from left to right), are visually salient due to their high
+contrast to the context or center position. However, some of them do not form
+the major events. For example, in the 2nd image, the ﬁrst glance description
+would be “There stands a house on the side of the road”. Then humans may be
+interested in the eyecatching Spring Festival couplets.
+Besides, we are inspired by these observations. There naturally exists a hier-
+archical structure about humans’ perception preference. Objects with relatively
+large size which fulﬁll the scene generally form the major events. It supports us
+to construct HET with the method introduced in the main paper. We aim at
+constructing HET whose levels reﬂect the perception priority level rather than
+the object saliency. The experiments show that our method for constructing
+HET has achieved this goal.
+Fig. 8: Visually salient objects do not always form the major events in the images
+and are not always what humans want to convey at ﬁrst from the images. The
+yellow points in each image denote some visually salient objects. The saliency
+maps in the second row are obtained from [8].
+16
+W. Wang et al.
+HetH/HetH-RRM
+GCN-LSTM
+𝒘"
+𝒘"#$
+lstm
+Mean Pooling
+𝒓
+lstm
+Attention
+𝒓"
+ℎ", 𝑐"
+Input: region features
+Input: relationship features
+Scene graph
+Our sentence decoder
+Fig. 9: Our implementation of GCN-LSTM, and the the implementation scheme
+of our sentence decoder.
+B
+Implemention Details for Image Captioning
+As the source codes of GCN-LSTM [46] have not been released by the submission
+deadline, we re-implement it. In its original version, a simple two-layer MLP
+classiﬁer is applied to predict the pairwise relationship, which acts as the frontend
+scene graph detector. For a fair comparison, we replace this detector with our
+HetH. To transform our HetH/HetH-RRM for image captioning task, we add a
+sentence decoder which is modiﬁed from LSTM backend of GCN-LSTM. The
+GCN-LSTM model conducts graph convolution on the scene graph and injects
+all relation-aware region-level features into a two-layer LSTM with attention
+mechanism. Diﬀerent from GCN-LSTM, we intend to inject the relation features
+rather than region-level features, considering that the relationships which convey
+the events in the image are more helpful for description generation. In Figure
+9, we show a brief diagram to illustrate our implementation of GCN-LSTM,
+and demonstrate the implementation scheme of our sentence decoder for image
+captioning.
+Speciﬁcally, we obtain a set of visual relationship representations {f R
+m}M
+m=1
+(f R
+m ∈RD
+f , Df = 4, 096) after relation context decoding (see Figure 2(d) in the
+main paper). We concatenate them with the word embeddings of their subjects,
+objects, and predicates, denoted by ws
+m ∈RDw, wo
+m ∈RDw, and wp
+m ∈RDw
+(Dw = 300), and obtain {rm}M
+m=1 (rm ∈RDr, Dr = 4, 996):
+rm =
+
+f R
+m; ws
+m; wo
+m; wp
+m
+
+.
+(14)
+The sentence decoder is a two-layer LSTM. It’s noted that two layers in this
+decoder share one hidden state h ∈RDh and cell state c ∈RDh. At each time step
+t, the ﬁrst layer collects the maximum contextual information by concatenating
+the input word embedding wt ∈RDw and the mean-pooled visual relationship
+feature ¯r =
+1
+M
+M
+P
+m=1
+rm. The updating procedure is as
+h1
+t, c1
+t = f1 ([wt; ¯r])|h2
+t−1,c2
+t−1,
+(15)
+where f1 is the updating function within the ﬁrst-layer unit, |h2
+t−1, c2
+t−1 denotes
+that the internal hidden state and cell state is the ones that updated by the
+Sketching Image Gist
+17
+second-layer unit from the previous timestep. Then we compute a normalized
+attention distribution over all the relationship features
+at,m = Wa
+
+tanh
+ Wfrm + Whh1
+t
+
+, λt = softmax(at),
+(16)
+where at,m is the m-th element of at, Wa ∈R1×Da, Wf ∈RDa×Dr, Wh ∈
+RDa×Dh are transformation matrices. Speciﬁcally, both the dimension of the
+hidden layer Da for measuring the attention distribution and the dimension of
+the hidden layer Dh in LSTM are set as 512. λt ∈RM denotes the normalized
+attention distribution whose m-th element λt,m is the attention weight of rm.
+The attended relationship feature is computed as rt =
+M
+P
+m=1
+λt,mrm. Then the
+updating procedure of the second-layer unit is
+h2
+t, c2
+t = f2 (rt)|h1
+t ,c1
+t ,
+(17)
+where f2 is the updating function within the second-layer unit. h2
+t is used to
+predict the next word through a softmax layer.
+Table 5: Statistics of VG200, VG-KR, and VG150.
+Dataset Images Images with
+Relations
+Object
+Categories
+Predicate
+Categories
+Object
+Instances
+Relation
+Instances
+Key Relation
+Instances
+Images with Key
+Relation Instances
+VG200
+51,498
+46,562
+200
+80
+619,119
+442,425
+101,312
+26,992
+VG-KR 26,992
+26,992
+200
+80
+360,306
+250,755
+VG150
+108,073
+89,169
+150
+50
+1,145,398
+622,705
+-
+-
+C
+VG-KR Dataset Construction, Statistics, and
+Experimental Implementation Details
+C.1
+VG-KR Dataset
+We demonstrate the procedure of constructing VG-KR dataset and diﬀerent im-
+age sets involved in this procedure in Figure 10. Concretely, 51,498 images in VG
+come from MSCOCO, which form the image set VGC. We conduct three-stage
+processing on VGC. (1) Stanford Scene Graph Parser [31] is used to extract re-
+lation triplets from captions. They make up the set of key relations, denoted by
+RK. (2) We next cleanse the raw annotations of VGC similar to [44], keep the
+most frequent 150 object categories and 50 predicates, and add another most
+frequent 50 object categories and 30 predicates in RK, in order to keep as many
+key relations as possible for the following third step. After dropping images with-
+out relations in VGC, we get a new subset VG200 (i.e. 200 object categories)
+which contains 46,562 images. (3) Finally, we associate RK with relation triplets
+18
+W. Wang et al.
+VG
+MSCOCO
+VGC
+VG200
+𝒦ℛ
+VG-KR
+step (1)
+step (2)
+step (3)
+(b) Global perspective.
+(a) The procedure of constructing VG-KR dataset.
+A
+B
+C
+D
+E
+Fig. 10: The procedure of VG-KR dataset construction. The color block shown
+in the top right of each dataset in (a) demonstrates its components. (b) gives
+a global perspective of these color blocks. Images in MSCOCO consist of four
+parts, A, C, D, and E. Images in VG consist of B, C, D, and E. Images in VGC
+consist of C, D, and E. E denotes images ﬁltered in step (2) which do not contain
+any relation. D denotes images ﬁltered in step (3) which do not contain any key
+relation.
+in VG200 by associating their subject and object WordNet synsets [26] respec-
+tively. After ﬁltering out the images without key relations in VG200, here comes
+VG-KR which contains 26,992 images. For both VG200 and VG-KR, we split
+the training and test set by 7:3 ratio, leading to 32,510/14,052 training/test
+images in VG200, and 18,720/8,272 training/test images in VG-KR.
+We show more detailed statistics and compare with VG150 in Table 5. We
+can see that VG200 and VG-KR have more categories, as well as object and
+relation instances per image compared to VG150. Moreover, VG-KR contains
+indicative annotations of key relations.
+In Figure 11, we show the distribution of images that contain diﬀerent num-
+bers of key relations. More than 90% of images contain less than 5 key relations.
+It’s reasonable because the key relations are obtained by matching the annotated
+relations with those extracted from captions. The number of relation triplets in
+captions generally is not very large. After all, a good caption is only requested
+to describe the major contents instead of the less important details.
+Given each predicate, we explore the distribution of its role, i.e., whether it
+belongs to a key relation or not. The result is shown in Figure 12. The predicates
+with large probability to be key ones, such as throwing, brushing, and sniﬃng,
+are usually verbs containing rich semantics. They are image-speciﬁc and when
+we see these predicates, a scene can be roughly imagined. While predicates like
+belonging to, of, and behind, which carry little information, are less likely to make
+up the key relations.
+Sketching Image Gist
+19
+Fig. 11: Distribution of images that contain diﬀerent numbers of key relations.
+C.2
+Settings and Implementation Details
+The dimension of hidden states and cells in both Hybrid-LSTM and RRM is
+512. The sizes of W (r)
+1
+and W (r)
+2
+in Eq.(11) in the main paper are 256×512 and
+1×256 respectively. The GloVe embedding vectors we use are of 200 dimensions.
+When training on the VG dataset, we follow previous works [51,38] to extract
+the ﬁrst 5,000 images of the training split and treat them as the validation split.
+The results reported on VG150, VG200, and VG-KR are obtained by ﬁrstly
+selecting the best model on validation split and then evaluating it on test split.
+As for the experiments on VRD, we report the results of the last epoch evaluated
+on test split without model selection (The hyperparameters settings are the same
+as those of experiments on VG).
+We pre-train object detectors on VRD, VG150, and VG200 respectively and
+freeze the learned parameters. To train the whole model end-to-end, we use an
+SGD optimizer with a learning rate of 0.001 and the batch size is 10. When
+computing the ranking loss for RRM, we randomly sample 512 pairs of key
+triplets and secondary triplets. The margin γ is empirically set to 0.5. All the
+existing methods evaluated on our VG200 or VG-KR datasets are retrained.
+The threshold T for determining a parent node actually has direct inﬂuence
+on the shape of HET. We investigate the performance curve together with the
+tree depth and width variation trend. As shown in Figure 13, as T varies from
+0.1 to 0.9, the “tall thin” tree becomes a “short fat” tree, and the performance
+is improved. Thus we set T to 0.9.
+As T becomes larger, the condition that a node can be a parent node, i.e.,
+Pnm > T (Eq.(1) in the main paper), is more and more diﬃcult to be satisﬁed.
+20
+W. Wang et al.
+throwing
+brushing
+sniffing
+perched on
+swinging
+swimming
+riding
+catching
+sleeping
+petting
+working on
+playing
+using
+flying in
+drinking
+feeding
+kicking
+surfing
+cutting
+eating
+grazing
+says
+floating on
+looking at
+walking in
+laying on
+holding
+pushing
+sitting on
+running
+carrying
+lying on
+hitting
+reading
+driving
+full of
+standing on
+pulling
+waiting for
+at
+skiing on
+watching
+walking on
+resting on
+facing
+touching
+in
+made of
+parked on
+across
+with
+and
+against
+mounted on
+above
+on
+between
+to
+painted on
+over
+in front of
+covered in
+under
+near
+for
+outside
+hanging from
+attached to
+has
+part of
+from
+wears
+on back of
+wearing
+along
+behind
+of
+growing on
+covering
+belonging to
+0.0
+0.2
+0.4
+0.6
+0.8
+1.0
+Fig. 12: Distribution of the roles of a given predicate. The red bars stand for the
+probability of being key relations while the blue bars denote the probability of
+being the secondary ones.
+Thus, our algorithm for constructing HET tends to set the root as the parent of
+a node, which results in a “shorter” and “fatter” tree.
+A small T would lead to considerable wrong hierarchical connections. It’s
+noted that the hierarchical connections in our HET have much stronger seman-
+tics than the associations of siblings. Therefore, a large T eliminates wrong
+hierarchical connections as far as possible. Although it means that more entities
+are set as the child of the root and inappropriate siblings associations increase,
+proper hierarchical connections still plays a positive role in context encoding.
+Table 6: The results of multiple runs of HetH and the statistical signiﬁcance.
+These results are obtained under the PREDCLS protocol.
+#RUN
+R@20
+R@50
+R@100
+1
+33.46
+36.59
+37.00
+2
+33.53
+36.64
+37.04
+3
+33.93
+36.65
+37.07
+µ ± σ
+33.64±0.21
+36.63±0.03
+37.04±0.03
+Sketching Image Gist
+21
+Fig. 13: Eﬀect of threshold T when constructing HET. AD and AW denote av-
+erage depth and average width respectively. The red curve stands for the kR@1
+performance of HET-RRM, evaluated under PREDCLS protocol with triplet-
+match rule.
+D
+Robustness Analyses
+We make multiple runs on the HetH under the PREDCLS protocol. The results
+and statistical signiﬁcance are shown in Table 6.
+E
+Exploration on VG-KR
+We develop the Relation Ranking Module (RRM) to prioritize key relations. We
+intend to capture humans’ subjective assessment on the importance of relations
+with some objective indicators. As analyzed in Section A, visually salient objects
+engage humans’ gaze and have the potential to form major events. Therefore,
+visual saliency can be one of the useful indicators. However, it’s easy to lead to
+misunderstandings when only visual saliency is considered.
+To better describe the importance of relation, we borrow the traditional
+“saliency” concept, and put forward a brand-new concept, cognitive saliency,
+which tries to estimate the importance of a relation from humans’ perspective
+as the sensation of importance of relation is very subjective. Considering the
+measurement of cognitive saliency of a relation triplet, we employ its times be-
+ing referred within the ﬁve captions of each image, which can be directly obtained
+during the construction of our VG-KR dataset. However, this measurement of
+22
+W. Wang et al.
+1.2
+1.3
+1.4
+1.5
+1.6
+1.7
+1.8
+1.9
+2
+0
+0.5
+1
+1.5
+2
+2.5
+CS
+IDC
+sal@0.1
+sal@0.3
+sal@0.5
+sal@0.7
+sal@0.9
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+1
+1.1
+0
+1
+2
+3
+4
+5
+6
+IDC
+CS
+sal@0.1
+sal@0.3
+sal@0.5
+sal@0.7
+sal@0.9
+(boat in water)
+10%
+(plane in sky)
+9%
+(wave in ocean)
+7%
+(kite in sky)
+7%
+(airplane in sky)
+6%
+(person on beach)
+6%
+(wave in water)
+6%
+(man on surfboard)
+6%
+(boat on water)
+6%
+(train on tracks)
+5%
+(food on plate)
+4%
+(plate on 
+table)
+4%
+(train on 
+track)
+4%
+(car on road)
+4%
+(line on road)
+4%
+(man in water)
+4%
+(person sitting on 
+bleachers)
+4%
+(plane on runway)
+3%
+(letter on sign)
+12%
+(hand of man)
+10%
+(food on plate)
+10%
+(edge of bus)
+7%
+(clock on tower)
+6%
+(man on 
+motorcycle)
+6%
+(man wearing shirt)
+6%
+(food in bowl)
+5%
+(man riding horse)
+5%
+(meat on 
+plate)
+4%
+(pizza on 
+plate)
+4%
+(man wearing 
+tie)
+4%
+(woman holding 
+bananas)
+4%
+(sign on door)
+4%
+(elephant has 
+trunk)
+3%
+(photo on 
+refrigerator)
+3%
+(man on horse)
+3%
+(man on surfboard)
+3%
+Fig. 14: Curve charts and pie charts for the indicator which is the sum of subject
+and object visual saliency values. In the curve charts, diﬀerent curves are drawn
+under diﬀerent thresholds Ts. Top left: CS - IDC chart. Top right: IDC - CS
+chart. Bottom left: Component analysis for relations which have small IDC
+values. Bottom right: Component analysis for relations which have large IDC
+values.
+cognitive saliency is not computable. (i.e., it is grading from humans, but can-
+not be directly used in computational models.) If we want to make use of the
+cognitive saliency, we need to ﬁnd a computable indicator for it. The indicator
+should be proportional to cognitive saliency, which means that as the cognitive
+saliency goes up, the same trend should be observed on the indicator, and vice
+versa.
+Intuitively, the ﬁrst possible indicator is the visual saliency of subject and
+object in a relation triplet. Speciﬁcally, we set the indicator Φ as the sum of
+saliency values of subject osub and object oobj:
+Ssub = |{p|p ∈bsub ∧Sp > Ts}|
+|{p|p ∈bsub}|
+,
+(18)
+Sobj = |{p|p ∈bobj ∧Sp > Ts}|
+|{p|p ∈bobj}|
+,
+(19)
+Φ = Ssub + Sobj,
+(20)
+where p denotes pixels, bsub and bobj are bounding boxes of subject and object,
+Sp is the saliency value of pixel p, Ssub and Sobj are saliency values of subject
+and object, Ts is a given threshold. | · | computes the number of elements in a
+Sketching Image Gist
+23
+1.3
+1.4
+1.5
+1.6
+1.7
+1.8
+1.9
+2
+0
+0.5
+1
+1.5
+2
+2.5
+3
+3.5
+CS
+IDC
+0.1
+0.3
+0.5
+0.7
+0.9
+1
+1.1
+1.2
+1.3
+1.4
+1.5
+1.6
+1.7
+0
+1
+2
+3
+4
+5
+6
+IDC
+CS
+0.1
+0.3
+0.5
+0.7
+0.9
+sal@0.1
+sal@0.1
+sal@0.3
+sal@0.5
+sal@0.7
+sal@0.9
+sal@0.3
+sal@0.5
+sal@0.7
+sal@0.9
+Fig. 15: Curve charts for the indicator which is the sum of subject and object
+visual saliency values and normalized areas. Diﬀerent curves are drawn under
+diﬀerent thresholds Ts. Left: CS - IDC chart. Right: IDC - CS chart.
+set. The pixel-wise saliency is computed by one of the state-of-the-art saliency
+detectors [8].
+To draw the Cognitive Saliency (CS, Y-axis) - Indicator (IDC, X-axis) curve
+chart, we randomly sampled 50,000 key relations from VG-KR with grading from
+1 to 5 as their CS values. As IDC values (i.e., Φ in Eq. (20)) are continuous,
+we sort all the sampled IDC values in ascending order, and divide them into
+50 intervals [δk, δk+1], 0 ≤k ≤50, where δ0 = IDCmin and δ50 = IDCmax. In
+each interval, we draw a point with the mean of the sampled IDC values as X-
+axis coordinate and the mean of sampled CS values as Y-axis coordinate. When
+it comes to IDC (Y-axis) - CS (X-axis) curve chart, the sampled relations are
+grouped by CS values. We compute the mean of IDC values for each group as
+Y-axis coordinates. These two charts are shown in Figure 14. In each chart, we
+draw curves under diﬀerent settings of Ts, denoted by sal@Ts. From the IDC - CS
+chart at the top right of Figure 14, IDC is proportional to CS. However, the CS -
+IDC chart at the top left of Figure 14 shows that CS is not strictly proportional
+to IDC, which means that although the computed visual saliency of an object
+is large, the relations involved in this object are not so important. What results
+in this phenomenon? We further extract the relations with relatively small IDC
+values and large IDC values respectively and analyze the ratio of each type of
+triplet. Concretely, we ﬁnd the quartering points λ1 < λ2 < λ3 of IDC values,
+and all the triplets whose IDC values are smaller than λ1 or larger than λ3 are
+picked out, namely the set Ψ and Ω. The component analysis results of the set Ψ
+and Ωare shown at the bottom of Figure 14, where the most frequent 18 types
+of triplets are demonstrated. From the bottom left pie chart, lots of triplets
+with low IDC and low CS values generally are relations between relatively small
+objects and the large background entities. However, there are some exceptions,
+e.g., ⟨man, on, surfboard⟩, and ⟨train, on, tracks⟩. It’s reasonable and we should
+explore the detailed image contents if we want to further analyze the association
+between their IDC and CS values. What we should pay attention to is the bottom
+24
+W. Wang et al.
+right pie chart, where we observe that most triplets in Ωare relations between
+an independent object and its components, such as ⟨hand, of, man⟩and ⟨edge,
+of, bus⟩. Actually, these relations are indeed not so image-speciﬁc and carry
+little information. Humans generally overlook them. However, if the saliency of
+an object is large, saliency of its component will be large, too. It explains the
+phenomenon when IDC keeps increasing, the CS decreases instead.
+In order to further rectify the indicator above, we consider the size of subject
+and object out of the thinking that the sizes of components or details of a certain
+entity is relatively small, which can balance the large saliency value. Therefore,
+we add the normalized size of subject and object into the indicator:
+Φ′ = Ssub + Sobj + A(osub)
+A(oI) + A(oobj)
+A(oI) ,
+(21)
+where A(·) denotes the size function, and oI denotes the whole image. Similarly,
+we draw the IDC - CS and CS - IDC charts in Figure 15. It is shown that this
+improved indicator is a feasible one, as the CS is strictly proportional to IDC,
+and vice versa.
+The exploration above inspires us that an indicator which contains both the
+visual saliency and size of an object may be useful for ﬁnding key relations.
+Therefore, our devised RRM learns to capture humans’ subjective assessment
+on the importance of relations under the guidance of visual saliency and entity
+size information.
+F
+Additional Qualitative Results
+We demonstrate more qualitative results in Figure 16. From all of these exam-
+ples, it can be seen that our RRM tends to describe relations between entities
+which are close to the root of HET. These relations describe the global contents
+and usually are what humans pay the most attention to. As a result, the captions
+generated from top relations better cover the essential contents. For example,
+in Figure 16(a), as the top-2 relations from HetH model contain ⟨woman, wear-
+ing, boot 1/boot 2⟩, the generated caption cannot capture the essential content
+that the woman is holding an umbrella. On the contrary, top-2 relations from
+HetH-RRM successfully capture this information. In some cases, we observe that
+although top-2 relations do not contain the essential content, the generated cap-
+tion can still capture it, e.g., the caption from HetH in Figure 16(b). It is mainly
+because the region of man 1 contains part of the region of motorcycle 1, which
+provides visual cues for inferring the content that a man is riding a motorcycle.
+Sketching Image Gist
+25
+ROOT
+umbrella_1
+fence_1
+woman_1
+boot_1
+pant_1
+window_1
+tree_1
+hair_1
+street_1
+building_1 sidewalk_1
+bus_1
+bench_1
+sign_1
+light_1
+boot_2
+umbrella_1
+fence_1
+woman_1
+boot_1
+pant_1
+window_1
+tree_1
+hair_1
+street_1
+building_1 sidewalk_1
+bus_1
+bench_1
+sign_1
+light_1
+boot_2
+holding
+on
+on
+near
+on
+1
+2
+3
+4
+5
+umbrella_1
+fence_1
+woman_1
+boot_1
+pant_1
+window_1
+tree_1
+hair_1
+street_1
+building_1 sidewalk_1
+bus_1
+bench_1
+sign_1
+light_1
+boot_2
+holding 3
+A woman is walking on a city street.
+A woman walking down a street holding an umbrella.
+(a)
+ROOT
+sky_1
+building_1
+road_1
+railing_1
+bike_1
+shirt_1
+leg_1
+number_1
+pole_1
+man_2
+man_1
+line_1
+arm_1
+engine_1 head_1
+glove_1
+sky_1
+building_1
+road_1
+railing_1
+bike_1
+shirt_1
+leg_1
+number_1
+pole_1
+man_2
+man_1
+line_1
+arm_1
+engine_1 head_1
+glove_1
+helmet_1 hand_1
+helmet_1 hand_1
+sky_1
+building_1
+road_1
+railing_1
+bike_1
+shirt_1
+leg_1
+number_1
+pole_1
+man_2
+man_1
+line_1
+arm_1
+engine_1 head_1
+glove_1
+helmet_1 hand_1
+on
+on
+on
+on
+on
+on
+on
+on
+wearing
+1
+2
+3
+4
+1
+2
+3
+4
+5
+A man riding a motorcycle on a city street.
+A man riding a motorcycle down the street.
+(b)
+26
+W. Wang et al.
+ROOT
+boat_1
+building_1
+man_1
+shirt_1
+hat_1
+sky_1
+woman_1
+hair_1
+boat_2 boat_3
+building_2 building_3 building_4 building_5 building_6
+boat_1
+building_1
+man_1
+shirt_1
+hat_1
+sky_1
+woman_1
+hair_1
+boat_2 boat_3
+building_2 building_3 building_4 building_5 building_6
+boat_1
+building_1
+man_1
+shirt_1
+hat_1
+sky_1
+woman_1
+hair_1
+boat_2 boat_3
+building_2 building_3 building_4 building_5 building_6
+1
+2
+3
+4
+1
+2
+3
+4
+in
+on
+wearing
+wearing
+has
+on
+in
+in
+wearing
+wearing
+A man and a woman are in a boat.
+A man sitting on top of a boat in the water.
+(c)
+ROOT
+couch_1
+dog_1
+pillow_1
+pillow_2
+ball_1
+tail_1
+head_1
+hair_1
+ear_1
+ear_3
+paw_1
+paw_2
+mouth_1
+ear_2
+couch_1
+dog_1
+pillow_1
+pillow_2
+ball_1
+tail_1
+head_1
+hair_1
+ear_1
+ear_3
+paw_1
+paw_2
+mouth_1
+ear_2
+couch_1
+dog_1
+pillow_1
+pillow_2
+ball_1
+tail_1
+head_1
+hair_1
+ear_1
+ear_3
+paw_1
+paw_2
+mouth_1
+ear_2
+on
+has
+has
+has
+has
+has
+has
+has
+on
+on
+1
+2
+3
+4
+5
+1
+2
+3
+4
+5
+A dog is laying on a couch with a remote.
+A dog laying on the floor next to a laptop.
+(d)
+Fig. 16: From top left to bottom right are: bounding boxes of all objects, saliency
+maps, area maps, mixed maps, bounding boxes of objects involved in top-5 re-
+lations from HetH, HET structure, bounding boxes of objects involved in top-
+5 relations from HetH-RRM model, hierarchical scene graphs from HetH and
+HetH-RRM model, generated captions using top-2 relations from HetH and
+HetH-RRM respectively. The purple arrows in scene graphs are key relations
+matched with ground truth. The purple numeric tags next to the relations are
+the rankings, and “1” means that the relation gets the highest score.
+Sketching Image Gist
+27
+References
+1. Antol, S., Agrawal, A., Lu, J., Mitchell, M., Batra, D., Lawrence Zitnick, C., Parikh,
+D.: Vqa: Visual question answering. In: Proceedings of the IEEE International
+Conference on Computer Vision (ICCV). pp. 2425–2433 (2015) 1
+2. Chen, T., Yu, W., Chen, R., Lin, L.: Knowledge-embedded routing network for
+scene graph generation. In: Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition (CVPR). pp. 6163–6171 (2019) 3, 9, 11
+3. Dai, B., Zhang, Y., Lin, D.: Detecting visual relationships with deep relational
+networks. In: Proceedings of the IEEE Conference on Computer Vision and Pattern
+Recognition (CVPR). pp. 3298–3308 (2017) 3
+4. Graves, A., Schmidhuber, J.: Framewise phoneme classiﬁcation with bidirectional
+lstm and other neural network architectures. Neural Networks 18(5-6), 602–610
+(2005) 5
+5. Gu, J., Zhao, H., Lin, Z., Li, S., Cai, J., Ling, M.: Scene graph generation with
+external knowledge and image reconstruction. In: Proceedings of the IEEE Confer-
+ence on Computer Vision and Pattern Recognition (CVPR). pp. 1969–1978 (2019)
+3
+6. Han, F., Zhu, S.C.: Bottom-up/top-down image parsing with attribute grammar.
+IEEE Transactions on Pattern Analysis and Machine Intelligence (TPAMI) 31(1),
+59–73 (2008) 3
+7. He, S., Tavakoli, H.R., Borji, A., Pugeault, N.: Human attention in image caption-
+ing: Dataset and analysis. In: Proceedings of the IEEE International Conference
+on Computer Vision (ICCV). pp. 8529–8538 (2019) 4, 15
+8. Hou, Q., Cheng, M.M., Hu, X., Borji, A., Tu, Z., Torr, P.: Deeply supervised salient
+object detection with short connections. In: Proceedings of the IEEE Conference
+on Computer Vision and Pattern Recognition (CVPR). pp. 3203–3212 (2017) 3,
+7, 15, 23
+9. Itti, L., Koch, C., Niebur, E.: A model of saliency-based visual attention for rapid
+scene analysis. IEEE Transactions on Pattern Analysis and Machine Intelligence
+(TPAMI) (11), 1254–1259 (1998) 4
+10. Johnson, J., Krishna, R., Stark, M., Li, L.J., Shamma, D., Bernstein, M., Fei-Fei,
+L.: Image retrieval using scene graphs. In: Proceedings of the IEEE conference on
+Computer Vision and Pattern Recognition (CVPR). pp. 3668–3678 (2015) 1, 3
+11. Kim, D.J., Choi, J., Oh, T.H., Kweon, I.S.: Dense relational captioning: Triple-
+stream networks for relationship-based captioning. In: Proceedings of the IEEE
+Conference on Computer Vision and Pattern Recognition (CVPR). pp. 6271–6280
+(2019) 7
+12. Klein, D.A., Frintrop, S.: Center-surround divergence of feature statistics for salient
+object detection. In: Proceedings of the IEEE International Conference on Com-
+puter Vision (ICCV). pp. 2214–2219 (2011) 4
+13. Krishna, R., Zhu, Y., Groth, O., Johnson, J., Hata, K., Kravitz, J., Chen, S.,
+Kalantidis, Y., Li, L.J., Shamma, D.A., Bernstein, M.S., Fei-Fei, L.: Visual genome:
+Connecting language and vision using crowdsourced dense image annotations. In-
+ternational Journal of Computer Vision (IJCV) 123(1), 32–73 (2017) 3
+14. Li, G., Yu, Y.: Visual saliency based on multiscale deep features. In: Proceedings
+of the IEEE Conference on Computer Vision and Pattern Recognition (CVPR).
+pp. 5455–5463 (2015) 3
+15. Li, Y., Ouyang, W., Wang, X., Tang, X.: Vip-cnn: Visual phrase guided convolu-
+tional neural network. In: Proceedings of the IEEE Conference on Computer Vision
+and Pattern Recognition (CVPR). pp. 7244–7253 (2017) 3, 10
+28
+W. Wang et al.
+16. Li, Y., Ouyang, W., Zhou, B., Shi, J., Zhang, C., Wang, X.: Factorizable net: an
+eﬃcient subgraph-based framework for scene graph generation. In: Proceedings
+of European Conference on Computer Vision (ECCV). vol. 11205, pp. 346–363.
+Springer (2018) 1, 13
+17. Li, Y., Ouyang, W., Zhou, B., Wang, K., Wang, X.: Scene graph generation from
+objects, phrases and region captions. In: Proceedings of the IEEE International
+Conference on Computer Vision (ICCV). pp. 1261–1270 (2017) 1, 3
+18. Liang, X., Lee, L., Xing, E.P.: Deep variation-structured reinforcement learning for
+visual relationship and attribute detection. In: Proceedings of the IEEE Conference
+on Computer Vision and Pattern Recognition (CVPR). pp. 4408–4417 (2017) 10
+19. Liang, Y., Bai, Y., Zhang, W., Qian, X., Zhu, L., Mei, T.: Vrr-vg: Refocusing
+visually-relevant relationships. In: Proceedings of the IEEE International Confer-
+ence on Computer Vision (ICCV). pp. 10403–10412 (2019) 3
+20. Lin, L., Wang, G., Zhang, R., Zhang, R., Liang, X., Zuo, W.: Deep structured
+scene parsing by learning with image descriptions. In: Proceedings of the IEEE
+Conference on Computer Vision and Pattern Recognition (CVPR). pp. 2276–2284
+(2016) 3
+21. Lin, T.Y., Maire, M., Belongie, S., Hays, J., Perona, P., Ramanan, D., Doll´ar,
+P., Zitnick, C.L.: Microsoft coco: Common objects in context. In: Proceedings
+of European Conference on Computer Vision (ECCV). vol. 8693, pp. 740–755.
+Springer (2014) 3, 9
+22. Lin, X., Ding, C., Zeng, J., Tao, D.: Gps-net: Graph property sensing network
+for scene graph generation. In: Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition (CVPR). pp. 3746–3755 (2020) 3
+23. Liu, N., Han, J., Yang, M.H.: Picanet: Learning pixel-wise contextual attention for
+saliency detection. In: Proceedings of the IEEE Conference on Computer Vision
+and Pattern Recognition (CVPR). pp. 3089–3098 (2018) 3
+24. Lu, C., Krishna, R., Bernstein, M., Fei-Fei, L.: Visual relationship detection with
+language priors. In: Proceedings of European Conference on Computer Vision
+(ECCV). vol. 9905, pp. 852–869. Springer (2016) 3, 8, 9, 11
+25. Lu, J., Yang, J., Batra, D., Parikh, D.: Neural baby talk. In: Proceedings of the
+IEEE Conference on Computer Vision and Pattern Recognition (CVPR). pp. 7219–
+7228 (2018) 1
+26. Miller, G.A.: Wordnet: A lexical database for english. Communication of the ACM
+38(11), 39–41 (1992) 18
+27. Pennington, J., Socher, R., Manning, C.: Glove: Global vectors for word represen-
+tation. In: Proceedings of the 2014 Conference on Empirical Methods in Natural
+Language Processing (EMNLP). pp. 1532–1543 (2014) 6
+28. Peyre, J., Laptev, I., Schmid, C., Sivic, J.: Weakly-supervised learning of visual re-
+lations. In: Proceedings of the IEEE International Conference on Computer Vision
+(ICCV). pp. 5179–5188 (2017) 3
+29. Qi, M., Li, W., Yang, Z., Wang, Y., Luo, J.: Attentive relational networks for map-
+ping images to scene graphs. In: Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition (CVPR). pp. 3957–3966 (2019) 1, 3
+30. Ren, S., He, K., Girshick, R., Sun, J.: Faster r-cnn: Towards real-time object detec-
+tion with region proposal networks. In: Advances in Neural Information Processing
+Systems (NIPS). pp. 91–99 (2015) 4
+31. Schuster, S., Krishna, R., Chang, A., Fei-Fei, L., Manning, C.D.: Generating seman-
+tically precise scene graphs from textual descriptions for improved image retrieval.
+In: Proceedings of the Fourth Workshop on Vision and Language. pp. 70–80 (2015)
+17
+Sketching Image Gist
+29
+32. Sharma, A., Tuzel, O., Jacobs, D.W.: Deep hierarchical parsing for semantic seg-
+mentation. In: Proceedings of the IEEE Conference on Computer Vision and Pat-
+tern Recognition (CVPR). pp. 530–538 (2015) 3
+33. Shi, J., Zhang, H., Li, J.: Explainable and explicit visual reasoning over scene
+graphs. In: Proceedings of the IEEE Conference on Computer Vision and Pattern
+Recognition (CVPR). pp. 8376–8384 (2019) 1
+34. Simonyan, K., Zisserman, A.: Very deep convolutional networks for large-scale
+image recognition. arXiv preprint arXiv:1409.1556 (2014) 4
+35. Socher, R., Lin, C.C., Manning, C., Ng, A.Y.: Parsing natural scenes and natural
+language with recursive neural networks. In: Proceedings of the 28th International
+Conference on Machine Learning (ICML-11). pp. 129–136 (2011) 3
+36. Tai, K.S., Socher, R., Manning, C.D.: Improved semantic representations from tree-
+structured long short-term memory networks. In: Proceedings of the 53rd Annual
+Meeting of the Association for Computational Linguistics and the 7th International
+Joint Conference on Natural Language Processing (Volume 1: Long Papers). pp.
+1556–1566 (2015) 5
+37. Tang, K., Niu, Y., Huang, J., Shi, J., Zhang, H.: Unbiased scene graph generation
+from biased training. In: Proceedings of the IEEE Conference on Computer Vision
+and Pattern Recognition (CVPR). pp. 3716–3725 (2020) 3
+38. Tang, K., Zhang, H., Wu, B., Luo, W., Liu, W.: Learning to compose dynamic
+tree structures for visual contexts. In: Proceedings of the IEEE Conference on
+Computer Vision and Pattern Recognition (CVPR). pp. 6619–6628 (2019) 1, 3, 5,
+9, 11, 19
+39. Wang, L., Lu, H., Ruan, X., Yang, M.H.: Deep networks for saliency detection
+via local estimation and global search. In: Proceedings of the IEEE Conference on
+Computer Vision and Pattern Recognition (CVPR). pp. 3183–3192 (2015) 3
+40. Wang, T., Borji, A., Zhang, L., Zhang, P., Lu, H.: A stagewise reﬁnement model
+for detecting salient objects in images. In: Proceedings of the IEEE International
+Conference on Computer Vision (ICCV). pp. 4019–4028 (2017) 3
+41. Wang, W., Wang, R., Shan, S., Chen, X.: Exploring context and visual pattern of
+relationship for scene graph generation. In: Proceedings of the IEEE Conference
+on Computer Vision and Pattern Recognition (CVPR). pp. 8188–8197 (2019) 1,
+3, 9, 11
+42. Wu, Q., Shen, C., Wang, P., Dick, A., van den Hengel, A.: Image captioning and
+visual question answering based on attributes and external knowledge. IEEE Trans-
+actions on Pattern Analysis and Machine Intelligence (TPAMI) 40(6), 1367–1381
+(2018) 1
+43. Xie, Y., Lu, H., Yang, M.H.: Bayesian saliency via low and mid level cues. IEEE
+Transactions on Image Processing (TIP) 22(5), 1689–1698 (2012) 4
+44. Xu, D., Zhu, Y., Choy, C.B., Fei-Fei, L.: Scene graph generation by iterative mes-
+sage passing. In: Proceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition (CVPR). pp. 5410–5419 (2017) 1, 3, 8, 9, 11, 17
+45. Yang, J., Lu, J., Lee, S., Batra, D., Parikh, D.: Graph r-cnn for scene graph gener-
+ation. In: Proceedings of European Conference on Computer Vision (ECCV). vol.
+11205, pp. 690–706. Springer (2018) 1, 3, 9, 11
+46. Yao, T., Pan, Y., Li, Y., Mei, T.: Exploring visual relationship for image captioning.
+In: Proceedings of European Conference on Computer Vision (ECCV). vol. 11218,
+pp. 711–727. Springer (2018) 1, 14, 16
+47. Yao, T., Pan, Y., Li, Y., Mei, T.: Hierarchy parsing for image captioning. In:
+Proceedings of the IEEE International Conference on Computer Vision (ICCV).
+pp. 2621–2629 (2019) 3
+30
+W. Wang et al.
+48. Yin, G., Sheng, L., Liu, B., Yu, N., Wang, X., Shao, J., Loy, C.C.: Zoom-net:
+Mining deep feature interactions for visual relationship recognition. In: Proceedings
+of European Conference on Computer Vision (ECCV). vol. 11207, pp. 330–347.
+Springer (2018) 3, 10, 12
+49. Yu, R., Li, A., Morariu, V.I., Davis, L.S.: Visual relationship detection with in-
+ternal and external linguistic knowledge distillation. In: Proceedings of the IEEE
+International Conference on Computer Vision (ICCV). pp. 1974–1982 (2017) 3, 9,
+10
+50. Zareian, A., Karaman, S., Chang, S.F.: Weakly supervised visual semantic pars-
+ing. In: Proceedings of the IEEE Conference on Computer Vision and Pattern
+Recognition (CVPR). pp. 3736–3745 (2020) 3
+51. Zellers, R., Yatskar, M., Thomson, S., Choi, Y.: Neural motifs: Scene graph parsing
+with global context. In: Proceedings of the IEEE Conference on Computer Vision
+and Pattern Recognition (CVPR). pp. 5831–5840 (2018) 1, 2, 3, 5, 9, 11, 19
+52. Zhang, H., Kyaw, Z., Chang, S.F., Chua, T.S.: Visual translation embedding net-
+work for visual relation detection. In: Proceedings of the IEEE Conference on
+Computer Vision and Pattern Recognition (CVPR). pp. 5532–5540 (2017) 1, 3
+53. Zhang, H., Kyaw, Z., Yu, J., Chang, S.F.: Ppr-fcn: Weakly supervised visual rela-
+tion detection via parallel pairwise r-fcn. In: Proceedings of the IEEE International
+Conference on Computer Vision (ICCV). pp. 4233–4241 (2017) 3
+54. Zhang, J., Kalantidis, Y., Rohrbach, M., Paluri, M., Elgammal, A., Elhoseiny,
+M.: Large-scale visual relationship understanding. In: Proceedings of the AAAI
+Conference on Artiﬁcial Intelligence (AAAI). vol. 33, pp. 9185–9194 (2019) 3
+55. Zhang, J., Shih, K.J., Elgammal, A., Tao, A., Catanzaro, B.: Graphical contrastive
+losses for scene graph parsing. In: Proceedings of the IEEE Conference on Com-
+puter Vision and Pattern Recognition (CVPR). pp. 11535–11543 (2019) 1, 3, 10,
+12
+56. Zhang, L., Zhang, J., Lin, Z., Lu, H., He, Y.: Capsal: Leveraging captioning to boost
+semantics for salient object detection. In: Proceedings of the IEEE Conference on
+Computer Vision and Pattern Recognition (CVPR). pp. 6024–6033 (2019) 3
+57. Zhu, L., Chen, Y., Lin, Y., Lin, C., Yuille, A.: Recursive segmentation and recog-
+nition templates for image parsing. IEEE Transactions on Pattern Analysis and
+Machine Intelligence (TPAMI) 34(2), 359–371 (2011) 3

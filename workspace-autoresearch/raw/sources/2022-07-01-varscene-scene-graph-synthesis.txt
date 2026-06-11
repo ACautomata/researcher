@@ -1,0 +1,2516 @@
+VARSCENE: A Deep Generative Model for Realistic Scene Graph Synthesis
+Tathagat Verma 1 Abir De 1 Yateesh Agrawal 1 Vishwa Vinay 2 Soumen Chakrabarti 1
+Abstract
+Scene graphs are powerful abstractions that cap-
+ture relationships between objects in images by
+modeling objects as nodes and relationships as
+edges. Generation of realistic novel scene graphs
+has applications like scene synthesis and data aug-
+mentation for supervised learning. Existing graph
+generative models are predominantly targeted to-
+ward molecular graphs, leveraging the limited vo-
+cabulary of atoms and bonds and also the well-
+deﬁned semantics of chemical compounds. In
+contrast, scene graphs have much larger object
+and relation vocabularies, and their semantics are
+latent. To address this challenge, we propose
+VARSCENE, a variational autoencoder for scene
+graphs, which is optimized for the maximum
+mean discrepancy (MMD) between the ground
+truth scene graph distribution and distribution of
+the generated scene graphs. VARSCENE views
+a scene graph as a collection of star graphs and
+encodes it into a latent representation of the under-
+lying stars. The decoder generates scene graphs
+by learning to sample the component stars and
+edges between them. Our experiments show that
+our method is able to mimic the underlying scene
+graph generative process more accurately than
+several state-of-the-art baselines.
+1. Introduction
+Scene graphs (Johnson et al., 2015; 2018; Chang et al.,
+2021) have emerged as a popular data structure to represent
+images. The nodes in these graphs represent objects and
+their attributes, and edges capture relationships between
+them. They are a succinct and human-consumable summary
+of the content within the image. Their popularity is par-
+tially derived from the availability of rich datasets (Lu et al.,
+2016; Krishna et al., 2016) that contain ground-truth scene
+1Department of Computer Science and Engineering, Indian
+Institute of Technology Bombay, Mumbai, India 2Adobe Research,
+India. Correspondence to: Abir De <abir@cse.iitb.ac.in>.
+Proceedings of the 39 th International Conference on Machine
+Learning, Baltimore, Maryland, USA, PMLR 162, 2022. Copy-
+right 2022 by the author(s).
+graphs associated with images. Extracting scene graphs
+from images continues to be a very active ﬁeld of research
+(Tang et al., 2020b; Yang et al., 2018; Gu et al., 2019). The
+success of scene graphs can be seen in the range of visual
+understanding tasks that utilize them: retrieval (Schroeder &
+Tripathi, 2020; Wang et al., 2020; Maheshwari et al., 2021),
+editing (Dhamo et al., 2020), question answering (Teney
+et al., 2017) and captioning (Milewski et al., 2020).
+While there has been progress in the ﬁeld of image gener-
+ation, the end goal of achieving rich, diverse and complex
+scenes is far from satisfactory (Casanova et al., 2020; Li
+et al., 2019). In the current paper, we propose the novel task
+of scene graph generation as a stepping stone to scene syn-
+thesis. Here, our goal is to learn to synthesize scene graphs
+based on a set of training examples of scene graphs. Our
+work is relevant to the theme of generating new and complex
+scenes, where scene graphs are often used as a means for
+conditioning image synthesis (Johnson et al., 2018). We
+decouple the generation of scene semantics (sets of objects
+and how they relate to each other) from its visual manifes-
+tation, and focus speciﬁcally on the ﬁrst part in the current
+paper. Where required, we will use existing methods to
+convert our synthesized scene graphs to images (Johnson
+et al., 2018; Tseng et al., 2020).
+Driven by the success at text and image synthesis, there
+is much recent interest in deep generative models for
+graphs, e.g., GraphVAE (Simonovsky & Komodakis, 2018),
+GraphRNN (You et al., 2018), NeVAE (Samanta et al.,
+2019), MolGAN (De Cao & Kipf, 2018), GRAN (Liao
+et al., 2019), etc. However, most of them are tailored to
+molecule discovery and cannot be effectively used to gen-
+erate scene graphs, as we demonstrate in our experiments.
+Very recently, Garg et al. (2021) proposed an unconditional
+scene graph generator, which, however, is not optimized to
+capture the underlying data distribution.
+1.1. Present Work
+We propose VARSCENE, a novel variational autoencoder,
+speciﬁcally designed for scene graph generation. (We use
+graph ‘generation’ and ‘synthesis’ interchangeably.) In con-
+trast to prior VAE-based graph generative models which
+maximize Evidence Lower Bound (ELBO) for model train-
+ing, VARSCENE is optimized to generate graphs having
+minimum distribution discrepancy with the ground truth
+VarScene: A Deep Generative Model for Realistic Scene Graph Synthesis
+(training) graph distribution, while using its generative ca-
+pacity to introduce plausible variations. We thus obtain
+a model from which we can sample graphs representing
+realistic scenes. Moreover, due to the encoder-decoder ar-
+chitecture, our approach facilitates conditional scene graph
+generation, which would otherwise not be possible.
+Generating scene graphs with meaningful semantics is a
+challenging task. Designing simplistic masking functions,
+as for molecular graphs, does not work in this context, since
+the notion of underlying semantics is far more complex than
+in molecules. Responding to this challenge, VARSCENE
+views a scene graph as a collection of stars, where a star is
+comprised of a ‘hub’ node with its incident edges (‘spokes’).
+Our encoder embeds the graph into a collection of latent
+representation vectors based on its component stars. At
+the other end, unlike most existing generative models (You
+et al., 2018; Samanta et al., 2019; De Cao & Kipf, 2018),
+our decoder does not expand the graph by generating a node
+or an edge at a time, but instead by sampling stars. Specif-
+ically, it ﬁrst samples stars from a trainable distribution in
+a sequential manner, and then connects these stars to gen-
+erate semantically meaningful scene graphs. Such a model
+allows us to generate novel scene graphs while retaining
+the semantic correlations between the different components
+of a scene. In contrast to generative models for molecular
+graphs, which work with few node and edge labels, VAR-
+SCENE is able to generate (and be trained on) scene graphs
+consisting of a large number of node and edge labels.
+In theory, the variational autoencoder described above
+should be able to learn the underlying data distribution,
+given sufﬁcient training data. However, due to the use of an
+approximate posterior and lower bound of the true objective,
+it may not show optimal performance in practice. In re-
+sponse, we further re-train the decoder to directly minimize
+the maximum mean discrepancy (MMD) between the distri-
+butions of generated and ground truth scene graphs. Such
+a construction allows our method to effectively trade-off
+between the underlying MMD and the ﬁdelity to the prior
+decoder model previously obtained using ELBO maximiza-
+tion.
+We evaluate VARSCENE on three real world datasets. Our
+experiments show that VARSCENE is able to mimic the
+underlying distribution of scene graphs more accurately
+than several baselines1.
+2. Related Work
+Our work is related to graph generative models and scene
+graph extraction from images.
+1Our code is accessible at https://cse.iitb.ac.in/
+˜abir/codes/varscene.zip
+2.1. Graph Generative Models
+Driven by the success of text and image generative mod-
+els, there is much recent interest in deep generative mod-
+els for graphs, primarily designed for molecule discov-
+ery, e.g., GraphVAE (Simonovsky & Komodakis, 2018),
+GraphRNN (You et al., 2018), NeVAE (Samanta et al.,
+2019), MolGAN (De Cao & Kipf, 2018), GRAN (Liao et al.,
+2019), etc. However, the edge labels in molecular graphs
+are restricted by the types of bonds present in chemical
+compounds, which does not exceed 10. On the other hand,
+the node labels correspond to the unique elements, which
+is typically <15 in the ZINC (Sterling & Irwin, 2015) and
+QM9 (Blum & Reymond, 2009; Rupp et al., 2012) datasets.
+In contrast, the distinct number of node and edge labels
+in scene graph datasets are signiﬁcantly higher than those
+in molecular graphs. E.g., Visual Genome (Krishna et al.,
+2016) has 75, 729 unique node labels and 40, 480 unique
+edge labels. Even the smaller Visual Relationship Detection
+dataset (Lu et al., 2016) has 100 unique node labels and 70
+unique edge labels. Apart from the smaller number of node
+and edge labels, molecules and protein compounds follow
+well-deﬁned graph semantics, e.g., valency rules of atoms,
+non-existence of strained bridges and rings, and occurrence
+of speciﬁc motifs in molecules. These place constraints on
+the set of plausible graphs, which can be exploited by gen-
+erative models for molecular graphs. Codifying knowledge
+about the visual world to aid the training process may not
+be straightforward in the context of scene graphs.
+2.2. Scene Graph Extraction from Images
+A graph where the nodes represent objects with edges be-
+ing relationships between them encapsulates the semantic
+content of an image in a succinct manner. We refer to the
+task of constructing such a graph from the visual modal-
+ity as scene graph extraction (although it is sometimes
+called ‘generation’, which can be confusing). Literature
+associated with this (essentially inference) task is vast (Xu
+et al., 2017; Yang et al., 2018; Li et al., 2018a; Tang et al.,
+2020b), with alternatives characterized by the modeling ap-
+proaches — e.g., do they use conditional random ﬁelds or
+recurrent/convolutional network variations, are the models
+trained in an adversarial manner, and so on. Most of these
+models’ inputs are derived from the current image alone
+— these would be visual features computed from regions
+of interest that help detect the object type or identify the
+relationship between previously identiﬁed objects (Li et al.,
+2017; Dai et al., 2017; Zhang et al., 2017; Klawonn & Heim,
+2018). More recently, inference methods aided by external
+knowledge have been developed. This knowledge can take
+the form of word embeddings (Lu et al., 2016) and knowl-
+edge graphs (Zareian et al., 2020). The task considered in
+the current paper is that of scene graph synthesis, where we
+do not have access to the image modality. In the absence
+VarScene: A Deep Generative Model for Realistic Scene Graph Synthesis
+of this visual information, toward synthesizing realistic and
+plausible scene graphs, we mirror the existing practice of
+utilizing information from the linguistic domain in the form
+of word embeddings of the objects and relationship names.
+2.3. Image Generation from Scene Graphs
+While there has been progress in the ﬁeld of image gener-
+ation, the end goal of achieving rich, diverse and complex
+scenes of high quality still needs work (Caesar et al., 2018).
+In the current paper, we propose that an existing collection
+of scene graphs can be utilized to train a generative model
+of such graphs. Sampling from such a model provides us
+with the semantic content for a novel scene. The sampled
+graph can then be used as input into a conditional image
+generation model (Johnson et al., 2018; Ashual & Wolf,
+2019; Tseng et al., 2020). Conditional image generation
+models that operate on other input modalities also exist.
+For example, textual phrases (Xu et al., 2018; Tan et al.,
+2019), semantic segmentation masks (Tang et al., 2020a),
+and object positions and layouts (Sun & Wu).
+3. Preliminaries
+3.1. Notation and Deﬁnitions
+Scene Graphs, Objects, Relations. Given a collection of
+directed scene graphs {G = (V, E)} along with the set of
+objects T and the set of relations R, we denote tu as the
+object represented by the node u ∈V and re as the rela-
+tion represented by the edge e ∈E. For example, if the
+node pair (u, v) in the scene graph contains the semantic
+content: “car →moving on →road”, then we use
+tu = car, tv = road and re = moving on. We denote
+tu and re as the feature vectors for node u and edge e re-
+spectively. Such feature vectors may be obtained by various
+means, depending on the application. Here we use BERT
+embeddings of the names of the object tu and the relation
+re. Finally, we deﬁne nbr(u) as the neighbors of node u.
+Star and Neighbor-Stars. Given a graph G and a node u,
+the star s rooted at u is represented by a pair consisting of
+the node feature vector tu and the multiset of features of
+edges incident on u. I.e., the representation of s is s :=
+⟨tu,
+
+r(u,v) | v ∈nbr(u)
+	
+⟩. We denote u as root(s). Here,
+the star consists of only one node, i.e., the central node,
+characterized by the underlying object and the associated
+open-ended edges characterized by the relations. Thus, the
+identity of u, or the identity or type of its neighbors are not
+included in the representation of s. Only the object type of u
+and the types of incident edges matter. Therefore, it is quite
+possible that two stars having different root node IDs have
+identical representation, i.e., s = s′ but root(s) ̸= root(s′).
+Given a dataset of graphs D, we denote the set of stars in
+its “star vocabulary” as S(D) = {s | s ⊂G, G ∈D}.
+Given a star s in graph G, we deﬁne its neighbor-stars N(s)
+as those stars whose roots are connected to the root of s via
+an edge. We also deﬁne γ(s, s′) as the relation type re of
+the edge e that connects root(s) and root(s′). Formally,
+N(s) =
+
+(s′, γ(s, s′)) | (root(s), root(s′)) ∈E(G)
+for some G ∈D
+	
+.
+Thus, N(s) contains pairs of stars s and relation re, where
+s and s′ are connected via the edge e. When clear from
+context, we will drop the edge type and write “s ∈N(s)”
+instead of “s, γ ∈N(s)”.
+Maximum Mean Discrepancy (MMD). We will use
+MMD to compute the discrepancy between the distribution
+of the generated graphs and the corresponding true graph
+distribution (Goyal et al., 2020; You et al., 2018). We deﬁne
+MMD between distributions P and Q as:
+MMD2(P, Q) = EG1,G2∼P k(G1, G2)
++ EG′
+1,G′
+2∼Q k(G′
+1, G′
+2) −2EG∼P,G∼Q k(G, G′)
+(1)
+Here, k(G, G′) is the kernel induced by a suitable RKHS.
+We have samples D and D′ drawn from p1 and p2 respec-
+tively. Thus, an unbiased estimator of MMD, denoted as
+\
+MMD(D, D′), is given by
+
+1
+ |D|
+2
+
+X
+G1,G2∈D
+k(G1, G2) +
+1
+ |D′|
+2
+
+X
+G′
+1,G′
+2∈D′
+k(G′
+1, G′
+2)
+−
+2
+|D||D′|
+X
+G∈D,G′∈D′
+k(G, G′)
+1/2
+(2)
+In practice, we use the RBF kernel on suitably chosen repre-
+sentation vectors ν(G) and ν(G′) of the graphs, i.e.,
+k(G, G′) = exp(−||ν(G) −ν(G′)||2
+2/2).
+(3)
+3.2. Overview of Graph Variational Autoencoder
+Graph VAEs are trainable generative models involving an
+observable graph G and its latent representations2 Z, to-
+gether with three distributions: (i) a prior distribution p0(Z)
+over the latent code Z, (ii) the encoder q(Z | G) which em-
+beds the observed graphs G into (a distribution over) the
+latent code z, and (iii) the decoder p(G | Z) which samples
+observable graphs G based on the latent representation Z.
+Computation of the log-likelihood of observables under a
+VAE model requires marginalization over the distribution
+of Z, which is usually intractable. Therefore, the evidence
+lower bound (ELBO) on the log-likelihood is typically max-
+imized:
+X
+G∈D
+h
+EZ∼q(.|G)
+
+log p(G|Z)
+
++ KL
+ q(Z|G)||p0(Z)
+i
+(4)
+The encoder q(Z | G) is intended to approximate the true
+posterior of Z. Therefore, the quality of the encoder, and
+thus, the tightness of the lower bound, depends on the ex-
+2Z is usually a set of latent codes associated with embedding
+vectors of nodes, edges or substructures.
+VarScene: A Deep Generative Model for Realistic Scene Graph Synthesis
+pressivity of q. Typically, it is modeled using a universal
+distribution approximator, parameterized on G.
+4. VARSCENE Model
+In this section, we develop VARSCENE in full detail, for-
+mulating the underlying MMD optimization problem and
+presenting its different components and design decisions.
+4.1. Overview
+Our goal is to design a variational autoencoder that is able to
+synthesize realistic scene graphs in both unconditional set-
+tings (given a corpus of real scene graphs), and conditional
+settings (given a corpus and also a speciﬁc scene graph as
+a starting point). While we want the synthetic graphs to
+exhibit stochastic variation beyond training graphs, we want
+the distribution of various graph properties to remain close
+to those measured on the training sample. The cornerstone
+of our approach is to build the decoder that minimizes the
+MMD between these two distributions, rather than only
+maximizing the ELBO (4).
+Given a hypothesis class P, we wish to learn a generative
+distribution pMMD(G) ∈P which minimizes MMD between
+the distribution of real scene graphs and the distribution of
+the generated graphs. However, training such a generative
+model without any inductive bias is unlikely to succeed.
+To tackle this problem, we ﬁrst train a base variational au-
+toencoder (p0, q, p) on the training scene graphs. While the
+trained decoder p is not optimized for minimum MMD, it
+provides an approximate generative model to start with. We
+next use this trained decoder p to guide the training of our
+MMD optimized generative model pMMD. To this end, we
+design an optimization problem around pMMD which keeps
+it close to the pre-trained decoder p, while also minimizing
+MMD with respect to the training data. Finally, we develop
+a gradient based algorithm to search for pMMD.
+4.2. Design of MMD-Optimized Decoder pMMD
+Learning pMMD Given the True Generator ptrue. If we
+are given the true generator ptrue, then, in principle, we can
+directly estimate a generative distribution pMMD ∈P over
+scene graphs, which minimizes MMD between pMMD and
+the true distribution:
+minimize
+pMMD∈P
+MMD(ptrue, pMMD).
+(5)
+The above setup faces two bottlenecks: (i) It does not have
+access to the true distribution ptrue. It can only use the ob-
+served scene graphs present in the training dataset. (ii) Spec-
+ifying P without any prior knowledge about the generative
+process is difﬁcult in practice.
+Learning pMMD Given Observed Graphs. Responding to
+the above challenges, we approximate (5) through several
+intermediate steps. First, we use the observed scene graphs
+to estimate \
+MMD, as we cannot access the true graph dis-
+tribution ptrue. Speciﬁcally, given D, a set of observed scene
+graphs, we replace the objective in the optimization (5) with
+its sample estimate deﬁned in Eq. (2) as follows:
+minimize
+pMMD∈P
+ED′∼
+iid pMMD(·) \
+MMD(D, D′)
+(6)
+However, absence of any prior knowledge of the underlying
+generative process P makes it difﬁcult to search for pMMD.
+Now, suppose that we have a trained VAE model (p0, qbφ, pbθ)
+modeled by neural networks with estimated parameters ˆφ
+and ˆθ, where the encoder qbφ(· | G) embeds the graph into
+a latent representation Z, the decoder pbθ(· | Z) generates a
+graph G conditioned on Z and p0 is a prior distribution on
+Z. We can use this trained model to guide the training of
+pMMD, where we use the same neural network pbθ to param-
+eterize pMMD ≈pMMD
+θ
+with a new parameter vector θ. To
+this end, given a trained VAE model (p0, qbφ, pbθ) we learn
+pθ which minimizes the required MMD, while penalizing
+its KL divergence with respect to the trained decoder pbθ,
+i.e., we solve:
+minimize
+θ∈Θ
+EZ
+
+E
+D(Z) ∼
+iid pMMD
+θ
+(· | Z)
+\
+MMD
+
+D, D(Z)
+
++ ρ KL
+
+pMMD
+θ
+(· | Z)
+pbθ(· | Z)
+
+,
+(7)
+where D(Z) is a set of generated graphs by pMMD
+θ
+condi-
+tioned on the latent representations Z. Here, pbθ and pMMD
+θ
+share the same parameterized class of generative models
+P(Θ). In the outer expectation, Z can be drawn from the
+prior distribution p0 for unconditional graph generation or
+from the trained encoder qφ for conditional graph genera-
+tion. Moreover, ρ > 0 is a tunable coefﬁcient for the KL
+regularizer which allows us to trade off between minimizing
+MMD and the ﬁdelity of pMMD to the original decoder p.
+Such a KL divergence based regularization allows pMMD
+θ
+to
+generate plausible scene graphs with meaningful semantics.
+Apart from VAEs, such regularization using KL divergence
+with respect to a prior distribution has also been used in re-
+inforcement learning (Todorov, 2009), social welfare based
+control (Tabibian et al., 2020), property oriented molecule
+generation (Samanta et al., 2019), etc. However, our key
+goal here is MMD optimization for scene graph generation,
+where we must steer the property of the entire set of gen-
+erated graphs, whereas the above tasks are concerned with
+property of one instance, e.g., generating molecule with
+a desired property, re-ranking tweets for misinformation
+mitigation, etc.
+Computation of \
+MMD(D, {G}). As suggested by Eq. (2)
+and (3) , computation of \
+MMD(D, {G}) requires us to fea-
+turize G into ν(G). Graph kernels (Vishwanathan et al.,
+2010) provide some guidance to our choice of ν, but judg-
+ing whether a synthetic graph is “close to natural” requires
+the comparison of a diverse bouquet of graph properties,
+VarScene: A Deep Generative Model for Realistic Scene Graph Synthesis
+covering complex interactions between topology, node and
+edge labels. Because our unit of graph generation is a star,
+we will focus, for the most part, on a deﬁnition of ν(G) in
+terms of the number of different stars present in the graph.
+(For evaluation, though, we will include other important
+properties.) We gather the universe of stars S(D) present in
+the dataset D, deﬁned as
+νs(G) = # occurrences of s in G
+(8)
+and then compute ν(G) =
+
+νs(G) : s ∈S(D)
+
+, which is
+then used to compute the required MMD using Eq. (3).
+Gradient Computation for Solving (7). We solve opti-
+mization (7) using a gradient descent algorithm on the ﬁnite
+sample estimate of the underlying objective, i.e.,
+Cθ({G}) = EZ
+
+\
+MMD(D, D(Z))+
+ρ
+|D(Z)|
+X
+G∈D(Z)
+log pMMD
+θ
+(G | Z)
+pbθ(G | Z)
+
+.
+(9)
+Computing the gradient of such a quantity may seem difﬁ-
+cult, since the samples {G} are drawn from the distribution
+itself which is being trained. To circumvent this problem,
+we use the log-derivative trick (Williams, 1992) to estimate
+the gradient ∇θCθ({G}) as follows:
+∇θ
+
+X
+G∈D(Z)
+\
+MMD(D, D(Z)) log pMMD
+θ
+(G | Z)
++
+ρ
+|D(Z)|
+X
+G∈D(Z)
+1
+2 log2 pMMD
+θ
+(G | Z)
+pbθ(G | Z)
++ log pMMD
+θ
+(G | Z)
+
+,
+(10)
+The term within the above gradient can be viewed as a
+pseudo loss function which can be easily coded in any ML
+library to solve the optimization in Eq. (7).
+4.3. Neural Architecture of VARSCENE
+In this section, we present the neural architecture of the
+various components of VARSCENE, beginning with a brief
+outline.
+Outline.
+VARSCENE consists of a base variational au-
+toencoder (p0, qθ, pθ) and the ﬁnal generative distribu-
+tion pMMD
+θ
+.
+The encoder qθ(·) views a graph as a
+set of stars {s0, s1, . . . }, where we call the star s0 to
+be the pivot star.
+Then, we consider various stars
+{si | DISTANCE(root(s0), root(si)) = ∆} lying at a given
+number of hops ∆from the pivot star s0, and obtain an
+aggregated representation vector z∆over these stars. Thus,
+our encoder qφ encodes the stars into the corresponding
+latent representations Z = {z0, . . . , z∆max}, where ∆max
+is the maximum distance of any star from the pivot s0. The
+corresponding decoder pbθ(·) generates stars in a sequen-
+tial manner by sampling from a softmax distribution con-
+ditioned on the latent representations Z. Given a set of
+training graphs along with their object and relation types,
+i.e., D = {G} along with the object types {T} and the re-
+lation types {R}, VARSCENE ﬁrst learns the encoder qφ(·)
+and decoder pθ(·) by maximizing ELBO (evidence lower
+bound) of the likelihood function. More speciﬁcally, VAR-
+SCENE consists of four components:
+1. Prior: p0(Z) with ∆max ∼Poisson(λ)
+2. Encoder: qφ(Z | G, T = {tu} , R = {re})
+3. Base decoder: pθ({si} , {γij} |Z)
+4. MMD-optimized decoder: pMMD
+θ
+({si} , {γij} |Z)
+where, Z = {z0, ..., z∆max} is the set of star representations
+at different distances and γij = γ(si, sj). Figure 1 gives an
+overview of our encoder decoder architecture.
+Encoder qφ. Given a graph G = (V, E) along with the
+object types T = {tu} associated with the nodes and the
+relation types R = {re}, the encoder qφ aims to character-
+ize the scene graphs as a collection of star graphs {si} and
+represent the graph as a collection of embeddings of these
+stars, i.e., Z = {z∆| 0 ≤∆≤∆max}. Such an approach
+is likely to preserve the spatial semantics of the visual con-
+tent in a scene graph more effectively than existing graph
+generative models (Samanta et al., 2019; De Cao & Kipf,
+2018; Li et al., 2018b) which represent a graph as a collec-
+tion of node embeddings. In VARSCENE, we compute the
+graph representation Z in two steps. First, we compute the
+node and edge embeddings using a graph neural network
+(GNN) and then combine these to compute star embeddings.
+Node and Edge Embeddings. Given a graph G and the
+object types T = {tu} and R = {re}, we compute the
+representations of the nodes xu and edges xe using a GNN
+proposed by Gilmer et al. (2017). More speciﬁcally, we start
+with the initial node representation xu(0) which transforms
+the feature vector tu of the object type associated with node
+u using a neural network F 0
+φ.
+xu(0) = F 0
+φ(tu)
+(11)
+Then, given a depth limit K, we aggregate structural in-
+formation from k = 1, ..., K hops from each node into an
+embedding vector in a recursive manner. Formally:
+x(u,v)(k−1) = F edge
+φ
+ xu(k−1), xv(k−1), r(u,v)
+
+(12)
+xu(k−1) = F agg
+φ
+  
+x(u,v)(k−1) | v∈nbr(u)
+	 
+(13)
+xu(k) = F node
+φ
+ xu(k −1), xu(k −1)
+
+.
+(14)
+Here, F edge
+φ
+and F node
+φ
+are modeled as universal approxima-
+tor neural networks; and, F agg
+φ
+is a symmetric aggregator.
+Star Embedding. Given S as the set of stars in G, we repre-
+sent each star s ∈S with depth-K embeddings:
+hs = F S
+φ (xroot(s),
+
+x(root(s),v) | v ∈nbr(root(s))
+	
+)
+(15)
+Next, we generate the latent representations ζs from a nor-
+mal distribution, which parameterizes the mean and the
+variance using neural networks µφ and σφ, i.e.,
+ζs ∼NORMAL(µφ(hs), σ2
+φ(hs)).
+(16)
+VarScene: A Deep Generative Model for Realistic Scene Graph Synthesis
+{z∆|∆= 0, 1, 2}
+Decompose
+KYxpnLygcHQhJvAIp3S1M=">AB+nicbVBNS8NAEN3Ur1q/Uj16CRb
+BU0lE0WPRi8cK9gPaUDbSbt0swm7E7XE/hQvHhTx6i/x5r9x2+agrQ
+8GHu/NMDMvSATX6LrfVmFldW19o7hZ2tre2d2zy/tNHaeKQYPFIlbtgG
+oQXEIDOQpoJwpoFAhoBaPrqd+6B6V5LO9wnIAf0YHkIWcUjdSzy12ER
+9Qsw9jRSJWe9OyKW3VncJaJl5MKyVHv2V/dfszSCQyQbXueG6CfkYV
+ciZgUuqmGhLKRnQAHUMljUD72ez0iXNslL4TxsqURGem/p7IaKT1OAp
+MZ0RxqBe9qfif10kxvPQzLpMUQbL5ojAVjvlzmoPT5woYirEhlClubn
+XYkCrK0KRVMiF4iy8vk+Zp1TuvurdnldpVHkeRHJIjckI8ckFq5IbUSY
+Mw8kCeySt5s56sF+vd+pi3Fqx85oD8gfX5A/07lHg=</latexit>to stars
+E+UzHobh6e6CANV5s=">ACD3icbVDJSgNBEO2JW4zbqEcvjUHxIGFGFD0GBfE
+YwSyQxNDTqSRNeha6a8QwzB948Ve8eFDEq1dv/o2d5RATHxS8fq+KrnpeJIVGx/
+mxMguLS8sr2dXc2vrG5pa9vVPRYaw4lHkoQ1XzmAYpAijQAm1SAHzPQlVr3819
+KsPoLQIgzscRND0WTcQHcEZGqlH163kbUEym9T5z0mE49GwiPmEC7C2nasvNO
+wRmBzhN3QvJkglL/m60Qx7ECXTOu60TYTJhCwSWkuUasIWK8z7pQNzRgPuh
+mMronpQdGadNOqEwFSEfq9ETCfK0Hvmc6fY9PesNxf+8eoydi2YigihGCPj4o0
+4sKYZ0GA5tCwUc5cAQxpUwu1LeY4pxNBHmTAju7MnzpHJScM8Kzu1pvng5iSNL
+9sg+OSIuOSdFckNKpEw4eSIv5I28W8/Wq/VhfY5bM9ZkZpf8gfX1CxKCnLU=</l
+atexit>
+F 0
+φ, F edge
+φ
+F agg
+φ
+, F node
+φ
+F S
+φ
+h
+h
+h
+XBpS2F7DVSE=">AB7nicdVDLSgMxFM34rPVdekmWARXQ6a1r13RjcsK9gHtUDJpg1NMkOSEc
+rQj3DjQhG3fo87/8ZMW0FD1w4nHMv94TxJxpg9CHs7a+sbm1ndvJ7+7tHxwWjo47OkoUoW0S8U
+j1AqwpZ5K2DTOc9mJFsQg47QbT68zv3lOlWSTvzCymvsBjyUJGsLFSdxCLIJ3Mh4UiclG10igjiN
+wK8mqNhiUIVevlEvQsyVAEK7SGhfBKCKJoNIQjrXueyg2foqVYTeX6QaBpjMsVj2rdUYkG1ny
+7OncNzq4xgGClb0sCF+n0ixULrmQhsp8Bmon97mfiX109MWPdTJuPEUEmWi8KEQxPB7Hc4YoSw2
+eWYKYvRWSCVaYGJtQ3obw9Sn8n3RKrldx0e1lsXm1iMHTsEZuAeqIEmuAEt0AYETMEDeALPT
+uw8Oi/O67J1zVnNnIAfcN4+AQYfkAg=</latexit>h
+⇣
+⇣
+⇣
+⇣
+⇣• ⇠Normal
+!
+µφ(h•), σ2
+φ(h•)
+"
+∆= 1
+∆= 2
+F z
+φ
+Pivot star s0
+{xu|u 2 V }
+ha1_base64="UCvt5
+ybES/q1V8pH6xPNfyE
+OkA=">AB6HicbVBN
+S8NAEJ34WetX1aOXxSJ
+4Kokoeix60GML9gPaU
+DbSbt2swm7G6GE/gI
+vHhTx6k/y5r9x2+agr
+Q8GHu/NMDMvSATXxnW/
+nZXVtfWNzcJWcXtnd2
++/dHDY1HGqGDZYLGLV
+DqhGwSU2DcC24lCGg
+UCW8Hoduq3nlBpHsHM
+07Qj+hA8pAzaqxUv+u
+Vym7FnYEsEy8nZchR6
+5W+uv2YpRFKwTVuO
+5ifEzqgxnAifFbqoxoW
+xEB9ixVNItZ/NDp2Q
+U6v0SRgrW9KQmfp7Iq
+OR1uMosJ0RNUO96E3F
+/7xOasJrP+MySQ1KNl8
+UpoKYmEy/Jn2ukBkxt
+oQyxe2thA2poszYbIo
+2BG/x5WXSPK94lxW3f
+lGu3uRxFOAYTuAMPLiC
+KtxDRrAOEZXuHNeX
+RenHfnY964uQzR/AH
+zucPnUeMzw=</late
+xit>G
+s1
+s2
+s3
+s0
+ITviQRceZUylr1As8j9EcbpceA=">AB+nicbVBNSwMx
+EM36WevXVo9egkXwVHZF0WPRi8cK9gPapWTbBuaTZkt
+lrW/hQvHhTx6i/x5r8xbfegrQ8GHu/NMDMvTAQ34Hnfzs
+rq2vrGZmGruL2zu7fvlg4aRqWasjpVQulWSAwTXLI6cBC
+slWhG4lCwZji8mfrNEdOGK3kP4QFMelLHnFKwEpdt9QB
+9ghZjY8UYANET7pu2at4M+Bl4uekjHLUu5Xp6doGjMJV
+Bj2r6XQJARDZwKNil2UsMSQoekz9qWShIzE2Sz0yf4xC
+o9HCltSwKeqb8nMhIbM45D2xkTGJhFbyr+57VTiK6CjMs
+kBSbpfFGUCgwKT3PAPa4ZBTG2hFDN7a2YDogmFGxaRuC
+v/jyMmcVfyLind3Xq5e53EU0BE6RqfIR5eoim5RDdUR
+Q/oGb2iN+fJeXHenY9564qTzxyiP3A+fwDVRpRe</late
+xit>Pivot star
+e64="gTJTNvMyf7d6HIQ2SYvG0d0i4kc
+=">AB63icbVBNSwMxEJ3Ur1q/qh69BI
+vgqeyKoseiF48V7Ae0S8m2TY0yS5JVih
+L/4IXD4p49Q9589+YbvegrQ8GHu/NMDM
+vTAQ31vO+UWltfWNzq7xd2dnd2z+oHh61
+TZxqylo0FrHuhsQwRVrW4F6yaERkK1
+gknd3O/8S04bF6tNOEBZKMFI84JTaX+
+lwNqjWv7uXAq8QvSA0KNAfVr/4wpqlkyl
+JBjOn5XmKDjGjLqWCzSj81LCF0Qkas56g
+ikpkgy2+d4TOnDHEUa1fK4lz9PZERacx
+Uhq5TEjs2y95c/M/rpTa6CTKuktQyReL
+olRgG+P543jINaNWTB0hVHN3K6Zjogm1L
+p6KC8FfnmVtC/q/lXde7isNW6LOMpwA
+qdwDj5cQwPuoQktoDCGZ3iFNyTRC3pH4
+vWEipmjuEP0OcPJCOTQ=</latexit>t 2{
+{
+{
+{
+r 2
+(a) Neural architecture of VARSCENE encoder
+{
+{
+S(D) =
+z0 z1 z2
+[
+[
+Z =
+p✓(·|Z)
+NXrJkb/fYnRNCyE+wsVDE1l9k579xk1yhiQ8GHu/NMDMvSqWw6PvfXmFldW19o7hZ2tre2d0r7x8Wp0ZxhtMS21aEbVcCsUbKFDyVmo4TSLJm9HwZuo3n7ixQqsHKU8TGhfiVgwik676Dulit+1Z+BLJMgJxXIUe+Wvzo9zbKEK2SWtsO/BTDMTUomOSTUiezPKVsSPu8
+7aiCbfheHbqhJw4pUdibVwpJDP198SYJtaOksh1JhQHdtGbiv957Qzjq3AsVJohV2y+KM4kQU2mf5OeMJyhHDlCmRHuVsIG1FCGLp2SCyFYfHmZPJ5Vg4uqf3deqV3ncRThCI7hFAK4hBrcQh0awKAPz/AKb570Xrx372PeWvDymUP4A+/zB2A7jds=</latexit>!
+TZtrQTGZIMkoZ+h9uXCji1n9x59+YaWehrQcCh3Pu5Z4cPxZcG8f5RkvLK6tr64WN4ubW9s5uaW+/qaNEUdagkYhU2yeaCS5Zw3AjWDtWjIS+YC1/dJ35rUemNI/kvRnHzAvJQPKAU2Ks9NANiRlSItLbSUWf9Eplp+pMgReJm5My5Kj3Sl/dfkSTkElDBdG64zqx8VKiDKeC
+TYrdRLOY0BEZsI6lkoRMe+k09QfW6WPg0jZJw2eqr83UhJqPQ59O5ml1PNeJv7ndRITXHopl3FimKSzQ0EisIlwVgHuc8WoEWNLCFXcZsV0SBShxhZVtCW4819eJM3Tqntede7OyrWrvI4CHMIRVMCFC6jBDdShARQUPMrvKEn9ILe0cdsdAnlOwfwB+jzByu0ko=</lat
+exit>N(s)
+p✓(·, γ(s, ·) =
+|G∆,z
+)
+p✓(·, γ(s, ·) =
+|G∆,z
+)
+ 
+AB/HicbVDLSsNAFJ3UV62vaJdugkVwVRJRdFl047KCfUATymRy0w6dzISZiVBC/RU3LhRx64e482+ctFlo64
+GBwzn3cs+cMGVUadf9tipr6xubW9Xt2s7u3v6BfXjUVSKTBDpEMCH7IVbAKIeOpBP5WAk5BL5zcFn7vEaS
+igj/oaQpBgkecxpRgbaShXfcTrMcSWO4zwJHSYlYb2g236c7hrBKvJA1Uoj20v/xIkCwBrgnDSg08N9VBjqW
+mhMGs5mcKUkwmeAQDQzlOQAX5PzMOTVK5MRCmse1M1d/b+Q4UWqahGayiKqWvUL8zxtkOr4OcsrTAMni0Nx
+xhwtnKIJ6ISiGZTQzCR1GR1yBhLTLTpqyjBW/7yKumeN73Lpnt/0WjdlHVU0TE6QWfIQ1eohe5QG3UQVP0
+jF7Rm/VkvVjv1sditGKVO3X0B9bnDwUYlQA=</latexit> 
+luVFc4oxH71N2HtDo=">AB/HicbVDLSsNAFJ3UV62vaJdugkVwVRJRd
+Fl047KCfUATymRy0w6dzISZiVBC/RU3LhRx64e482+ctFlo64GBwzn3cs+c
+MGVUadf9tipr6xubW9Xt2s7u3v6BfXjUVSKTBDpEMCH7IVbAKIeOpBP5W
+Ak5BL5zcFn7vEaSigj/oaQpBgkecxpRgbaShXfcTrMcSWO4zwJHSYlYb2g
+236c7hrBKvJA1Uoj20v/xIkCwBrgnDSg08N9VBjqWmhMGs5mcKUkwmeAQDQ
+zlOQAX5PzMOTVK5MRCmse1M1d/b+Q4UWqahGayiKqWvUL8zxtkOr4OcsrT
+AMni0NxhwtnKIJ6ISiGZTQzCR1GR1yBhLTLTpqyjBW/7yKumeN73Lpnt/
+0WjdlHVU0TE6QWfIQ1eohe5QG3UQVP0jF7Rm/VkvVjv1sditGKVO3X0B9b
+nDwUYlQA=</latexit> 
+OepMhs7PLTK8alvyHFw+KePVfvPk3Th4HTSxoKq6e4KEikMu63k1taXldy68XNja3tneKu3t1E6eaQ43HMtbNgBmQkENBUpoJhpYFEhoBIOrsd94AG1ErO5wmIAfsZ4SoeAMrXTfRnjC7BaZpiNqOsWSW3YnoIvEm5ESmaHaKX61uzFPI1DIJTOm5bkJ+hnTKLiEUaGd
+GkgYH7AetCxVLALjZ5OrR/TIKl0axtqWQjpRf09kLDJmGAW2M2LYN/PeWPzPa6UYXviZUEmKoPh0UZhKijEdR0C7QgNHObSEcS3srZT3mWYcbVAFG4I3/IiqZ+UvbOye3NaqlzO4siTA3JIjolHzkmFXJMqRFONHkmr+TNeXRenHfnY9qac2Yz+QPnM8fZjyScA=</lat
+exit>Star s
+N(s)
+Star s
+∆= 2
+G∆
+s0
+s
+s0
+s0
+Pivot star
+(b) Neural architecture of VARSCENE decoder
+Figure 1. Encoder (Panel (a)): Node colors represent object types; edge colors represent relation labels. Stars are deﬁned by hub node
+type and relation labels but not neighbor node types. Given a graph G = (V, E) along with its object types {t} and relation types {r},
+we ﬁrst decompose it into the set of stars {s0, s1, s2, s3} where s0 is a pivot star. Next, we feed the graph into a graph neural network
+(F 0
+φ, F edge
+φ
+, F node
+φ
+, F agg
+φ ) to derive node embeddings xu. These node embeddings along with the stars are fed into a neural module F S
+φ
+to compute star embeddings {hs}, which are used to generate the latent random codes {ζs}. Finally, they are aggregated based on
+the distance from pivot star s0, providing embeddings {z∆}. Decoder (Panel (b)): The base decoder pθ and pMMD
+θ
+follow same neural
+architecture. Given latent codes Z = {z∆|∆= 0, 1, . . .}, the decoder ﬁrst samples the pivot star s0. Then it keeps adding stars at
+increasing distance ∆from s0. Given a snapshot G∆, the decoder pθ draws a new star s′ which is going to be connected with an existing
+star s at distance ∆. In this case, s′ can be drawn either from the neighbor stars N(s) (ﬁrst term in Eq. (19); the star s′ in this ﬁgure,
+connected on the edge →) or an already existing star (second term in Eq. (19); the star s0 in this ﬁgure, connected on the edge →).
+In theory, ζs encodes the information about the substruc-
+tures up to K hops away from s and thus the collection of
+the representations {ζs} should be able to accurately charac-
+terize the graph. However, this may not be true in practice,
+as it does not explicitly specify the relative positions of the
+stars. To ameliorate this limitation, we ﬁrst randomly draw
+the pivot star s0 from set of all stars S and compute the dis-
+tances {∆s} of all stars s ∈S from s0. Next, we aggregate
+{ζs | ∆s = ∆} into a latent vector z∆as follows:
+z∆= F z
+φ({ζs | ∆s = ∆}) for 0 ≤∆≤∆max
+(17)
+where ∆max is the maximum possible distance from s0 to
+any star s ∈S. Finally, we represent the graph as Z =
+{z0, ..., z∆max}.
+Decoders pθ and pMMD
+θ
+. The decoders pθ and pMMD
+θ
+share
+the same neural network structure. They take the latent rep-
+resentations Z = {z0, ..., z∆max} as input and generate a
+new graph G. To do so, they incrementally draw new stars sj
+from a database of stars S(D) and connect them with previ-
+ously sampled stars si, i ≤j −1. The decoders ﬁrst sample
+a star s0 and set ∆= 0. Then, at the step ∆≥1, they se-
+lect the stars {si | DISTANCE(root(s0), root(si)) = ∆−1}
+having distance ∆−1 from s0 and connect one of them
+with another star sj using one of the open edges e, i.e.,
+γ(si, sj) = re. In this context, sj is either drawn from the
+database of stars S(D) or chosen from one of the existing
+stars in the graph.
+To connect a new star sj at an open edge e of a star si
+lying at a distance ∆from s0, our decoders ﬁrst featurize
+all the potential stars s := ⟨tu,
+
+r(u,v) | v ∈nbr(u)
+	
+⟩as
+s = [tu, P
+v r(u,v)]; then represent the pair [s, z∆] using a
+logit; and ﬁnally, feeds the logit into a softmax distribution.
+This softmax distribution is used to sample the new star s′.
+Formally, given the snapshot of the scene graph G∆at step
+∆, we have:
+pθ(G | Z) = pθ ({si} , {γ(si, sj)} | Z)
+=
+∆max
+Y
+∆=1
+Y
+γ(si,sj):∆si=∆
+pθ(sj, γ(si, sj) | G∆, Z)
+(18)
+where, ∆si = DISTANCE(root(s0), root(si)). Moreover,
+we model pθ(sj, γ(si, sj) = r | G∆, Z) as,
+MASK(si, sj, r)Jsj ̸∈G∆K exp(Mθ(sj, z∆))
+P
+s∈S(D)\G∆MASK(si, s, r) exp(Mθ(s, z∆))
++
+MASK(si, sj, r)Jsj ∈G∆K
+|{s : MASK(si, s, r) = 1, s ∈G∆}|.
+(19)
+Here, Mθ is a neural network and the masking function
+MASK aims to ensure that generated scene graphs are se-
+mantically meaningful. Speciﬁcally, MASK(s, s′, r) = 1
+encodes that s′ is connected to s via the relation r in at least
+one scene graph in the dataset D, i.e., MASK(s, s′, r) =
+J(s′, r) ∈N(s)K. The ﬁrst term computes the probability
+when sj is not present in G∆and is drawn from S(D). The
+second term computes the probability when sj is already
+present in G∆.
+Prior Distribution p0.
+p0(z0, .., z∆max) is modeled
+using a Normal distribution, i.e., p0(z0, .., z∆max)
+=
+NORMAL(0, I∆max). Finally, we maximize ELBO(qφ, pθ)
+VarScene: A Deep Generative Model for Realistic Scene Graph Synthesis
+Dataset
+|D|
+Folds
+E[|V |] E[|E|]
+|T|
+|R|
+Visual Genome
+110000 81:9:9
+3.23
+2.31 16943 8411
+Small-sized Visual Genome
+124854 55:12:32 5.31
+4.87
+150
+50
+Visual Relationship Detection 7721 74:12:12 4.29
+3.78
+100
+70
+Table 1. Dataset statistics where Folds = |Dtr| : |Ddev| : |Dtest|.
+deﬁned in Eq. (4) with respect to φ and θ to obtain bφ and bθ.
+5. Experiments
+In this section, we provide a comprehensive evaluation of
+VARSCENE, addressing the following research questions:
+RQ1: How does VARSCENE compare against state-of-the-
+art graph generators in terms of its ability to capture the
+true graph distribution? RQ2: Does the MMD-optimized
+decoder pMMD
+θ
+provide any performance gain as compared to
+the the base decoder pθ? RQ3: How does the quality of the
+images created from scene graphs generated by VARSCENE
+compare against the quality of images created via state-of-
+the-art graph generators? RQ4: What do the generated
+scene graphs look like? Does the variational code space en-
+sure smooth transitions between scene graphs? Appendix D
+contains additional experiments.
+5.1. Experimental setup
+Datasets.
+We use three datasets: (i) Visual Genome
+(VG) (Krishna et al., 2016), (ii) Small-sized Visual Genome
+(SVG) (Xu et al., 2017) and (iii) Visual Relationship De-
+tection (VRD) (Lu et al., 2016). Visual Genome has a total
+of 16493 object categories and 8411 relationship categories.
+VARSCENE can deal with the large object and relationship
+vocabularies, but recent papers also report results on SVG,
+a dataset derived from VG by reducing the number of ob-
+ject and relationship categories to 150 and 50 respectively.
+This reduction is achieved by combining related labels and
+removing poor-quality labels (Xu et al., 2017; Garg et al.,
+2021).
+For the SVG dataset, we start with pre-processed graphs that
+were provided with the code of (Garg et al., 2021), that we
+obtained from the authors. For VG and VRD datasets, we
+construct graphs directly from the json formatted scene
+graphs. We took each graph from all three dataset, and split
+them into weakly connected components, i.e., sub-graphs
+where each node is reachable from every other node when
+considering the edges to be undirected.
+For the VG dataset, the total number of graphs after splitting
+exceeded ∼800K. Due to the large number of graphs, we
+sampled 90K train graphs at random, and a further 10K
+validation graphs and 10K test graphs. For the SVG dataset,
+train-test split was provided in (Garg et al., 2021), hence we
+used the same set of test graphs and the validation set was
+obtained by sampling graphs from the train set at random.
+For the VRD dataset, train-test graphs were provided, but
+the number of graphs was small. We therefore sampled
+graphs from the train and test sets to create the validation
+graphs. Table 1 summarizes details about these datasets.
+State-of-the-art Competitors. We compare VARSCENE
+against several competitive graph generative methods: two
+generative models which were developed for molecule syn-
+thesis, viz., (1) DeepGMG (Li et al., 2018b), (2) Mol-
+GAN (De Cao & Kipf, 2018); two domain-agnostic graph
+generative models, viz., (3) GraphRNN (You et al., 2018),
+(4) GraphGen (Goyal et al., 2020), and one graph genera-
+tive model speciﬁcally aimed at synthesizing scene graphs,
+similar to our setup, i.e., (5) SceneGen (Garg et al., 2021).
+Training, Validation and Testing. Given a dataset of scene
+graphs D, we split them in training (Dtr), validation (Ddev)
+and test (Dtest) folds, where the exact size of these folds
+|D•| varies across datasets due to their varying sizes (see
+Table 1). We ﬁrst train the encoder qφ and the base decoder
+pθ using the training set Dtr and then train the MMD opti-
+mized decoder pMMD
+θ
+using the validation set Ddev. Finally,
+pMMD
+θ
+is evaluated using Dtest.
+Evaluation Metrics. We evaluate the quality of a genera-
+tive model by measuring the similarity between the graphs
+generated by the trained model and the graphs in the test
+set. However, unlike normed-distance in Euclidean feature
+space, a single similarity measure cannot capture the sim-
+ilarity between two graphs in terms of all the properties.
+Hence, we resort to several similarity metrics.
+Star-Sim: The star distribution similarity is measured in
+terms of the cosine similarity between the distributions
+of the stars present in the test and generated graphs, i.e.,
+cos
+ EG′∼pMMD
+θ
+ν(G′), EG∼Dtestν(G)
+
+with ν(G) = [νs(G)]
+where νs(G) is the number of occurrences of star s in G, as
+deﬁned in Eq. (8).
+Edge-Sim: It
+is
+measured
+in
+terms
+of
+the
+co-
+sine
+similarity
+between
+the
+distributions
+of
+the
+edge
+bigrams
+of
+the
+form
+of
+the
+tuple
+eb = ⟨r(•,u), tu, r(u,•)⟩across the test and generated graphs,
+i.e., cos
+ EG′∼pMMD
+θ
+ν(G′), EG∼Dtestν(G)
+
+where ν(G) =
+[νeb(G)], νeb(G) = # occurrences of edge bigram eb in G.
+Node-Sim: It is measured in terms of the cosine similar-
+ity between the distributions of the node bigrams of the
+form of the tuple nb = ⟨tu, r(u,v), tv⟩across the test and
+generated graphs, i.e., cos
+ EG′∼pMMD
+θ
+ν(G′), EG∼Dtestν(G)
+
+where ν(G) = [νnb(G)], νnb(G) being the number of occur-
+rences of node bigram nb in G.
+SP-K: Shortest path kernel (Vishwanathan et al., 2010).
+WL-K: Weisfeiler-Lehman kernel (Vishwanathan et al.,
+2010).
+NSPD-K: Neighborhood pairwise distance graph ker-
+nel (Costa & De Grave, 2010).
+In all kernel-based metrics, we compute the similarity as
+EG′∼pMMD
+θ
+,G∼Dtest K(G′, G). Note that most of these mea-
+VarScene: A Deep Generative Model for Realistic Scene Graph Synthesis
+Model
+Star-Sim
+Edge-sim
+Node-sim
+SP-K
+WL-K
+NSPD-K
+Visual Genome (VG)
+DeepGMG
+0.69
+0.46
+0.15
+0.01
+0.09
+0.01
+MolGAN
+0.00
+0.00
+0.00
+0.00
+0.04
+0.01
+GraphGen
+0.66
+0.37
+0.11
+0.00
+0.03
+0.01
+GraphRNN
+0.63
+0.00
+0.03
+0.00
+0.03
+0.01
+SceneGen
+0.73
+0.50
+0.32
+0.02
+0.08
+0.01
+VARSCENEunc
+0.59
+0.45
+0.40
+0.22
+0.11
+0.01
+VARSCENEcond
+0.86
+0.52
+0.62
+0.08
+0.07
+0.01
+Small-sized Visual Genome (SVG)
+DeepGMG
+0.80
+0.64
+0.49
+0.10
+0.35
+0.05
+MolGAN
+0.00
+0.00
+0.00
+0.04
+0.40
+0.08
+GraphGen
+0.52
+0.64
+0.37
+0.05
+0.21
+0.04
+GraphRNN
+0.25
+0.07
+0.09
+0.38
+0.59
+0.07
+SceneGen
+0.86
+0.88
+0.93
+0.68
+0.54
+0.06
+VARSCENEunc
+0.92
+0.70
+0.83
+1.00
+0.65
+0.06
+VARSCENEcond
+0.91
+0.69
+0.81
+0.96
+0.64
+0.06
+Visual Relationship Detection (VRD)
+DeepGMG
+0.74
+0.73
+0.60
+0.99
+1.41
+0.20
+MolGAN
+0.00
+0.00
+0.00
+0.01
+0.97
+0.21
+GraphGen
+0.64
+0.75
+0.64
+0.31
+0.79
+0.17
+GraphRNN
+0.54
+0.29
+0.71
+0.21
+0.76
+0.18
+SceneGen
+0.81
+0.94
+0.95
+0.60
+1.12
+0.21
+VARSCENEunc
+0.91
+0.93
+0.94
+1.03
+1.56
+0.23
+VARSCENEcond
+0.91
+0.93
+0.93
+1.45
+1.92
+0.22
+Table 2. Performance of different graph generative models which
+include two variants of our model, i.e., VARSCENEunc (uncondi-
+tional generation, Z ∼p0(·)), VARSCENEcond (conditional gener-
+ation, Z ∼qφ(· | G)), and the baselines, viz., DeepGMG (Li et al.,
+2018b), MolGAN (De Cao & Kipf, 2018), GraphGen (Goyal et al.,
+2020), GraphRNN (You et al., 2018), SceneGen (Garg et al., 2021),
+measured in terms of cosine similarity between stars (Star-Sim),
+edge bigrams (Edge-Sim), node bigram (Node-Sim), Shortest path
+kernel (SP-K) (Vishwanathan et al., 2010), Weisfeiler Lehman Ker-
+nel (WL-K) (Vishwanathan et al., 2010), Neighborhood Subgraph
+Pairwise Distance Kernel (NSPD-K) (Costa & De Grave, 2010).
+In all cases, the encoder qφ and the base decoder pθ were trained
+using the training set Dtr and the MMD optimized decoder was
+obtained using the validation set Ddev. In all cases, the weight of
+the KL divergence term in Eq. (7) was set as ρ = 1000. Numbers
+in bold (underline) indicate the (second) best performer.
+sure the similarity in terms of structures as well as object
+and relation types. In particular, SP-Kernel and WL-Kernel
+take object types into account and ignore relationship types,
+whereas NSPD-Kernel incorporates both object and rela-
+tionship types.
+5.2. Results
+Comparison with Baseline Graph Generators. We ﬁrst
+address research question RQ1 by comparing VARSCENE
+against baselines, in terms of the metrics deﬁned above. We
+present results for two variants of VARSCENE, viz., uncon-
+ditional generative model VARSCENEunc where Z ∼p0(·)
+and conditional generative model VARSCENEcond where
+Z ∼qφ(· | G) with G ∈Dtr, Table 2 summarizes the re-
+sults. We make the following observations.
+(1) VARSCENE outperforms all the competitors in terms
+of Star-Sim, SP-Kernel and WL-Kernel with a signiﬁcant
+VG
+SVG
+VRD
+Edge
+Node
+Edge
+Node
+Edge
+Node
+VARSCENEcond
+0.5268 0.6226 0.6964 0.8111 0.9372 0.9377
+SceneGen, NULL∈R 0.0890 0.1121 0.2661 0.8207 0.4598 0.8873
+Table 3. Performance measured in terms of Edge-Sim (‘Edge’)
+and Node-Sim (‘Node’) for VARSCENEcond and the variant of
+SceneGen where we introduce a new relation type NULL between
+an isolated node and any other node. Numbers in bold indicate
+the best performer. With this modiﬁcation, SceneGen shows rather
+poor performance compared to Table 2, where it is not penalized
+for isolated nodes. Real graphs in our data sets do not have isolated
+nodes.
+boost. There is no consistent winner between VARSCENEunc
+and VARSCENEcond. Since VARSCENEcond generates graphs
+which are structurally similar to the existing training graphs,
+one may expect that it is likely to mimic the underlying
+distribution more closely than VARSCENEunc. However,
+this need not always be the case, if there is a large empirical
+distribution shift between ﬁnite training and test folds. VAR-
+SCENEunc often captures such drift, as it does not look into
+the training graphs during new graph generation.
+(2) SceneGen outperforms the other baselines by a substan-
+tial margin in a majority of the cases. Since it is speciﬁcally
+aimed at scene graph generation, it is able to capture the
+underlying scene graph distribution more effectively than
+the baselines which are predominantly domain agnostic or
+designed for molecule synthesis.
+(3) Among the other baselines, DeepGMG shows good
+performance in terms of WL-Kernel or NSPD-Kernel across
+Visual Genome and Visual Relationship Detection datasets.
+Although it was primarily applied for molecule generation,
+its design choice is quite domain agnostic. The performance
+of MolGAN is extremely poor due to its design choices that
+are speciﬁcally aimed at molecule generation.
+(4) While VARSCENE outperforms SceneGen in terms of
+edge and node bigram similarity measures for the Visual
+Genome dataset, SceneGen appears to be the best performer
+for the two other datasets. However, this apparent superior
+performance of SceneGen may be misleading — careful in-
+vestigation revealed that SceneGen generates many isolated
+nodes whose divergence from the test distribution cannot be
+captured by bigram similarity.
+To shed light on the observation noted in item (4), we next
+introduce a dummy relation type NULL and assign this re-
+lation between any isolated node and every other node in a
+graph. Thus, the set of edge bigrams now include ⟨r, t, r′⟩
+where r and r′ may also assume the NULL type in addition
+to the existing legitimate relation types R. Similarly, the set
+of node bigrams now include ⟨t, r, t′⟩where r may assume
+the NULL type. Table 3 summarizes the effect of this aug-
+mented set of relation types, which shows that SceneGen
+actually performs not as well as VARSCENEcond.
+Effect of MMD-Optimized Decoder. Next, we address re-
+VarScene: A Deep Generative Model for Realistic Scene Graph Synthesis
+VG
+SVG
+VRD
+Star
+Edge
+Star
+Edge
+Star
+Edge
+pMMD
+θ
+0.8660
+0.5268
+0.9182
+0.6964
+0.9140
+0.9372
+pθ
+0.5867
+0.2588
+0.7120
+0.4195
+0.8988
+0.9339
+Table 4. Performance measured in terms of Star-Sim (‘Star’) and
+Edge-Sim (‘Edge’) for the scene graphs generated by the MMD
+optimized decoder pMMD
+θ
+and the base decoder pθ. Numbers in bold
+indicate the best performer. We observe that pMMD
+θ
+outperforms pθ.
+In all cases, we used conditional graph generation.
+Model
+FID (↓)
+IS (↑)
+Precision (↑)
+Recall (↑)
+DeepGMG
+9.8344
+4.3566
+0.9891
+0.9800
+MolGAN
+240.3760
+1.1707
+0.0137
+0.0986
+GraphGen
+13.2806
+4.2802
+0.9780
+0.9607
+GraphRNN
+18.8156
+4.6561
+0.9432
+0.9707
+SceneGen
+19.2634
+4.0283
+0.9230
+0.9513
+VARSCENEunc
+6.8591
+5.1505
+0.9894
+0.9872
+VARSCENEcond
+6.0195
+5.0211
+0.9894
+0.9874
+Table 5. Evaluation of various generative models by assessing the
+quality of the the images obtained from the corresponding scene
+graphs. Performance is measured in terms of Fr´echet Inception
+Distance (Heusel et al., 2017), Inception Score (Salimans et al.,
+2016) and Precision & Recall (Sajjadi et al., 2018). Numbers in
+bold (underline) show the best (second best) performer. ↓means
+smaller is better; ↑means larger is better.
+search question RQ2. Speciﬁcally, we compare the quality
+of the scene graphs generated by our MMD optimized de-
+coder pMMD
+θ
+with the base decoder pθ. Table 4 summarizes
+the results, which shows that our MMD-optimized decoder
+is able to mimic the true distribution of stars, as well as edge
+bi-grams, more accurately than the base decoder. Other
+metrics are reported in Appendix D.
+Image Quality. Thus far, we have assessed the quality of
+the generated graphs, rather than the images that might be
+generated from them. Here, we address research question
+RQ3 by evaluating the quality of the images correspond-
+ing to the synthesized scene graphs. Speciﬁcally, we use
+sg2im3, a scene graph to image generation system (John-
+son et al., 2018) that comes pre-trained on the Small-sized
+Visual Genome dataset. Similar to Garg et al. (2021), we
+evaluate the quality of the images using Fr´echet Inception
+Distance (Heusel et al., 2017), Inception Score (Salimans
+et al., 2016), Precision and Recall (Sajjadi et al., 2018).
+Both Inception Score (IS) and Fr´echet Inception Distance
+(FID) aim to provide proxies for qualitative human evalu-
+ation. They assess the images from two perspectives: (a)
+the quality of the images via the output of an image clas-
+siﬁcation model like InceptionV3 and (b) diversity across
+the set of the images. We formally deﬁne FID, IS, Precision
+and Recall in Appendix C. Table 5 summarizes the results
+for SVG, which shows that, (1) the images corresponding
+to the scene graphs provided by the variants of VARSCENE
+have substantially better quality than all other baselines;
+3https://github.com/google/sg2im
+G :
+Figure 2. Four scene graphs and the corresponding images, gener-
+ated using G ∼pMMD
+θ
+(• | Z), where Z ∼qφ(• | G ). Here, G is
+the graph used for conditioning, which is chosen from Small-sized
+Visual Genome dataset. The images corresponding to the scene
+graphs G′ are close to the image corresponding to G .
+(2) DeepGMG outperforms the other baselines in majority
+of the cases.
+Visualization of Generated Scene Graphs. Finally, we
+address research question RQ4, where we visualize the
+graphs G′ generated by conditioning on an existing graph
+G. Speciﬁcally, we draw G′ ∼pMMD
+θ
+(• | Z), where Z ∼
+qφ(• | G). Figure 2 provides some samples, which show
+that VARSCENE is able to generate graphs which provides
+similar images to the image corresponding to scene graph
+G used for conditioning.
+6. Conclusion
+We presented VARSCENE, a variational autoencoder tailored
+to synthesize scene graphs from a seed set of ‘gold’ graphs.
+VARSCENE uses a novel sampling vocabulary of stars an-
+notated with node and edge types from large vocabularies
+typical in image collections. It directly minimizes distribu-
+tional discrepancies for features observed in the reference
+set and in the generated graphs. These two strengths enable
+VARSCENE to outperform recent graph generators on three
+data sets. Our work opens up interesting avenues of future
+work. Our generative mechanism based on star agglomer-
+ation allows us to incorporate salient semantic structures
+from training scenes alone. Knowledge graphs represent-
+ing facts (such as WikiData) or common sense may provide
+valuable additional “realism prior” or “world bias” for better
+training with less supervision.
+VarScene: A Deep Generative Model for Realistic Scene Graph Synthesis
+References
+Ashual, O. and Wolf, L. Specifying object attributes and
+relations in interactive scene generation. In CVPR, pp.
+4561–4569, 2019.
+Blum, L. C. and Reymond, J.-L. 970 million druglike small
+molecules for virtual screening in the chemical universe
+database GDB-13. J. Am. Chem. Soc., 131:8732, 2009.
+Caesar, H., Uijlings, J., and Ferrari, V. Coco-stuff: Thing
+and stuff classes in context. In Proceedings of the IEEE
+conference on computer vision and pattern recognition,
+pp. 1209–1218, 2018.
+Casanova, A., Drozdzal, M., and Romero-Soriano, A. Gen-
+erating unseen complex scenes: are we there yet? arXiv
+preprint arXiv:2012.04027, 2020.
+Chang, X., Ren, P., Xu, P., Li, Z., Chen, X., and Haupt-
+mann, A. Scene graphs: A survey of generations and
+applications. arXiv preprint arXiv:2104.01111, 2021.
+Costa, F. and De Grave, K. Fast neighborhood subgraph
+pairwise distance kernel. In ICML, 2010.
+Dai, B., Zhang, Y., and Lin, D. Detecting visual relation-
+ships with deep relational networks. In Proceedings of the
+IEEE conference on computer vision and Pattern recog-
+nition, pp. 3076–3086, 2017.
+De Cao, N. and Kipf, T.
+Molgan: An implicit genera-
+tive model for small molecular graphs. arXiv preprint
+arXiv:1805.11973, 2018.
+Devlin, J., Chang, M.-W., Lee, K., and Toutanova, K. Bert:
+Pre-training of deep bidirectional transformers for lan-
+guage understanding. arXiv preprint arXiv:1810.04805,
+2018.
+Dhamo, H., Farshad, A., Laina, I., Navab, N., Hager, G. D.,
+Tombari, F., and Rupprecht, C. Semantic image manip-
+ulation using scene graphs. In CVPR, pp. 5213–5222,
+2020.
+Garg, S., Dhamo, H., Farshad, A., Musatian, S., Navab,
+N., and Tombari, F. Unconditional scene graph genera-
+tion. ICCV, 2021. URL https://arxiv.org/abs/
+2108.05884.
+Gilmer, J., Schoenholz, S. S., Riley, P. F., Vinyals, O., and
+Dahl, G. E. Neural message passing for quantum chem-
+istry. In International conference on machine learning,
+pp. 1263–1272. PMLR, 2017.
+Goyal, N., Jain, H. V., and Ranu, S. Graphgen: A scalable
+approach to domain-agnostic labeled graph generation.
+Proceedings of The Web Conference, Apr 2020. doi:
+10.1145/3366423.3380201.
+URL http://dx.doi.
+org/10.1145/3366423.3380201.
+Gu, J., Zhao, H., Lin, Z., Li, S., Cai, J., and Ling, M. Scene
+graph generation with external knowledge and image
+reconstruction. In CVPR, June 2019.
+Heusel, M., Ramsauer, H., Unterthiner, T., Nessler, B., and
+Hochreiter, S. Gans trained by a two time-scale update
+rule converge to a local nash equilibrium. arXiv preprint
+arXiv:1706.08500, 2017.
+Johnson, J., Krishna, R., Stark, M., Li, L.-J., Shamma,
+D. A., Bernstein, M. S., and Fei-Fei, L. Image retrieval
+using scene graphs. CVPR, pp. 3668–3678, 2015. URL
+http://hci.stanford.edu/publications/
+2015/scenegraphs/JohnsonCVPR2015.pdf.
+Johnson, J., Gupta, A., and Fei-Fei, L. Image generation
+from scene graphs. In CVPR, pp. 1219–1228, 2018.
+Klawonn, M. and Heim, E. Generating triples with adver-
+sarial networks for scene graph construction. In Proceed-
+ings of the AAAI Conference on Artiﬁcial Intelligence,
+volume 32, 2018.
+Krishna, R., Zhu, Y., Groth, O., Johnson, J., Hata, K.,
+Kravitz, J., Chen, S., Kalantidis, Y., Li, L.-J., Shamma,
+D. A., Bernstein, M., and Fei-Fei, L. Visual genome: Con-
+necting language and vision using crowdsourced dense
+image annotations.
+2016.
+URL https://arxiv.
+org/abs/1602.07332.
+Li, W., Zhang, P., Zhang, L., Huang, Q., He, X., Lyu, S.,
+and Gao, J. Object-driven text-to-image synthesis via
+adversarial training. In CVPR, June 2019.
+Li, Y., Ouyang, W., Zhou, B., Wang, K., and Wang, X.
+Scene graph generation from objects, phrases and region
+captions. In Proceedings of the IEEE international con-
+ference on computer vision, pp. 1261–1270, 2017.
+Li, Y., Ouyang, W., Zhou, B., Shi, J., Zhang, C., and Wang,
+X. Factorizable net: an efﬁcient subgraph-based frame-
+work for scene graph generation. In Proceedings of the
+European Conference on Computer Vision (ECCV), pp.
+335–351, 2018a.
+Li, Y., Vinyals, O., Dyer, C., Pascanu, R., and Battaglia,
+P. Learning deep generative models of graphs. arXiv
+preprint arXiv:1803.03324, 2018b.
+Liao, R., Li, Y., Song, Y., Wang, S., Nash, C., Hamilton,
+W. L., Duvenaud, D., Urtasun, R., and Zemel, R. S.
+Efﬁcient graph generation with graph recurrent atten-
+tion networks.
+CoRR, abs/1910.00760, 2019.
+URL
+http://arxiv.org/abs/1910.00760.
+Lu, C., Krishna, R., Bernstein, M., and Fei-Fei, L. Visual
+relationship detection with language priors. In ECCV,
+2016.
+VarScene: A Deep Generative Model for Realistic Scene Graph Synthesis
+Maheshwari, P., Chaudhry, R., and Vinay, V. Scene graph
+embeddings using relative similarity supervision. In Pro-
+ceedings of the AAAI Conference on Artiﬁcial Intelli-
+gence, volume 35, pp. 2328–2336, 2021.
+Milewski, V., Moens, M.-F., and Calixto, I. Are scene
+graphs good enough to improve image captioning? 2020.
+URL https://arxiv.org/abs/2009.12313.
+Rupp, M., Tkatchenko, A., M¨uller, K.-R., and von Lilien-
+feld, O. A. Fast and accurate modeling of molecular
+atomization energies with machine learning. Physical
+Review Letters, 108:058301, 2012.
+Sajjadi, M. S., Bachem, O., Lucic, M., Bousquet, O., and
+Gelly, S. Assessing generative models via precision and
+recall. NeurIPS, 2018. URL https://arxiv.org/
+abs/1806.00035.
+Salimans, T., Goodfellow, I., Zaremba, W., Cheung, V.,
+Radford, A., and Chen, X.
+Improved techniques for
+training gans. NeurIPS, 29:2234–2242, 2016.
+Samanta, B., DE, A., Jana, G., Chattaraj, P. K., Ganguly,
+N., and Rodriguez, M. G. Nevae: A deep generative
+model for molecular graphs. Proceedings of the AAAI
+Conference on Artiﬁcial Intelligence, 33(01):1110–1117,
+2019. doi: 10.1609/aaai.v33i01.33011110.
+Schroeder, B. and Tripathi, S. Structured query-based image
+retrieval using scene graphs. In CVPR Workshops, June
+2020.
+Simonovsky, M. and Komodakis, N. Graphvae: Towards
+generation of small graphs using variational autoencoders.
+CoRR, abs/1802.03480, 2018. URL http://arxiv.
+org/abs/1802.03480.
+Sterling, T. and Irwin, J. J. Zinc 15 – ligand discovery for
+everyone. Journal of Chemical Information and Mod-
+eling, 55(11):2324–2337, 2015. doi: 10.1021/acs.jcim.
+5b00559. URL https://doi.org/10.1021/acs.
+jcim.5b00559. PMID: 26479676.
+Sun, W. and Wu, T. Learning layout and style reconﬁgurable
+gans for controllable image synthesis. IEEE transactions
+on pattern analysis and machine intelligence.
+Tabibian, B., Gomez, V., De, A., Sch¨olkopf, B., and Ro-
+driguez, M. G. On the design of consequential ranking
+algorithms. In UAI, pp. 171–180. PMLR, 2020.
+Tan, F., Feng, S., and Ordonez, V. Text2scene: Generating
+compositional scenes from textual descriptions. In CVPR,
+pp. 6710–6719, 2019.
+Tang, H., Xu, D., Yan, Y., Torr, P. H., and Sebe, N. Local
+class-speciﬁc and global image-level generative adversar-
+ial networks for semantic-guided scene generation. In
+CVPR, pp. 7870–7879, 2020a.
+Tang, K., Niu, Y., Huang, J., Shi, J., and Zhang, H. Unbiased
+scene graph generation from biased training. In CVPR,
+pp. 3716–3725, 2020b.
+Teney, D., Liu, L., and van Den Hengel, A. Graph-structured
+representations for visual question answering. In CVPR,
+pp. 1–9, 2017.
+Todorov, E. Efﬁcient computation of optimal actions. Pro-
+ceedings of the national academy of sciences, 106(28):
+11478–11483, 2009.
+Tseng, H.-Y., Lee, H.-Y., Jiang, L., Yang, M.-H., and Yang,
+W. Retrievegan: Image synthesis via differentiable patch
+retrieval. In ECCV, pp. 242–257. Springer, 2020.
+Vishwanathan, S. V. N., Schraudolph, N. N., Kondor, R.,
+and Borgwardt, K. M. Graph kernels. Journal of Machine
+Learning Research, 11:1201–1242, 2010.
+Wang, S., Wang, R., Yao, Z., Shan, S., and Chen, X.
+Cross-modal scene graph matching for relationship-aware
+image-text retrieval. In Proceedings of the IEEE/CVF
+Winter Conference on Applications of Computer Vision,
+pp. 1508–1517, 2020.
+Williams, R. J. Simple statistical gradient-following algo-
+rithms for connectionist reinforcement learning. Machine
+learning, 8(3):229–256, 1992.
+Xu, D., Zhu, Y., Choy, C. B., and Fei-Fei, L. Scene graph
+generation by iterative message passing. In Proceedings
+of the IEEE Conference on Computer Vision and Pattern
+Recognition (CVPR), July 2017.
+Xu, T., Zhang, P., Huang, Q., Zhang, H., Gan, Z., Huang,
+X., and He, X. Attngan: Fine-grained text to image gener-
+ation with attentional generative adversarial networks. In
+Proceedings of the IEEE conference on computer vision
+and pattern recognition, pp. 1316–1324, 2018.
+Yang, J., Lu, J., Lee, S., Batra, D., and Parikh, D. Graph r-
+cnn for scene graph generation. In Proceedings of the Eu-
+ropean Conference on Computer Vision (ECCV), Septem-
+ber 2018.
+You, J., Ying, R., Ren, X., Hamilton, W. L., and Leskovec,
+J. Graphrnn: A deep generative model for graphs. CoRR,
+abs/1802.08773, 2018. URL http://arxiv.org/
+abs/1802.08773.
+Zareian, A., Karaman, S., and Chang, S.-F. Bridging knowl-
+edge graphs to generate scene graphs. In ECCV, 2020.
+Zhang, J., Elhoseiny, M., Cohen, S., Chang, W., and Elgam-
+mal, A. Relationship proposal networks. In CVPR, pp.
+5678–5686, 2017.
+VarScene: A Deep Generative Model for Realistic Scene Graph Synthesis
+VARSCENE: A Deep Generative Model for Realistic Scene Graph Synthesis
+(Supplementary Material)
+A. Broader Impact
+Generating realistic and complex scenes is a key task in image retrieval, image editing, question-answering, etc. In this
+work, we show that it is possible to sample such scene graphs from a distribution estimated from a set of real scene graphs,
+without explicitly inspecting training images. Any bias (e.g., gender, race) in the training scene graphs may propagate to the
+synthetic images produced by our system. Our model has sufﬁcient ﬂexibility to attempt to reduce or mitigate such bias.
+Speciﬁcally, one can replace the ﬁrst term quantifying MMD in our objective function in Eq. (7) with a suitable alternative
+which can mitigate the biases in the generated graphs.
+B. Additional Details of VARSCENE
+We provide more details about VARSCENE as follows.
+t and r. Given an object type t and relation type r, we use BERT embedding (Devlin et al., 2018) to obtain the corresponding
+representations t and r. Here, we used the code from https://huggingface.co/sentence-transformers/
+paraphrase-MiniLM-L6-v2 and thus have dimension(t) = dimension(r) = 384.
+Speciﬁcations of the Encoder. We summarize the components of the encoder as follows:
+1. The GNN module of qφ contains four networks: F 0
+φ, F edge
+φ
+, F agg
+φ
+and F node
+φ
+, which follow similar architecture as
+in (Gilmer et al., 2017). We summarize their architecture in details as follows:
+• F 0
+φ: It consists of a single layer neural network with linear activation function which outputs a 64 dimensional
+node features.
+• F edge
+φ
+: It is a single layer neural network with linear activation function. It takes the pair of node features and
+the corresponding relation type of the edge between them as input and then outputs and a 64 dimensional edge
+embedding vector.
+• F agg
+φ : It is a sum-pool aggregator.
+• F node
+φ
+: It is a GRU which sequentially takes xu(k −1) and xu(k −1) as input and outputs a 64 dimensional node
+embedding.
+2. F S
+φ is kept the same as F node
+φ
+. It is a GRU which is supplied only one element, the concatenation of xroot(s) and
+sum(
+
+x(root(s),v) | v ∈nbr(root(s))
+	
+). It outputs a 64 dimensional vector.
+3. µφ in Eq. (16) is a two layer neural network which consists of a 128 dimensional hidden layer, ReLU activations and
+outputs a 64 dimensional mean vector.
+4. σφ in Eq. (16) is a two layer neural network which consists of a 128 dimensional hidden layer, ReLU activations and
+outputs a 64x64 matrix.
+5. F z
+φ in Eq. (17) is a sum aggregator.
+Speciﬁcation of the Decoder. Here, Mθ in Eq. (19) is a two layer neural network which consists of a 32 dimensional
+hidden layer, ReLU activations and outputs a 16 dimensional mean vector.
+C. Details About Experiments
+C.1. Implementation Details of Baselines
+DeepGMG. We used the version released with the ofﬁcial PyTorch implementation of Goyal et al. (2020)4.
+MolGAN. We used an open-source PyTorch implementation (De Cao & Kipf, 2018)5.
+GraphRNN. We used the label adapted version released with the ofﬁcial PyTorch implementation of Goyal et al. (2020)6.
+GraphGen. We used the ofﬁcial PyTorch implementation (Goyal et al., 2020)7.
+SceneGen. We obtained the code from the authors (Garg et al., 2021).
+4https://github.com/idea-iitd/graphgen
+5https://github.com/yongqyu/MolGAN-pytorch
+6https://github.com/idea-iitd/graphgen
+7https://github.com/idea-iitd/graphgen
+VarScene: A Deep Generative Model for Realistic Scene Graph Synthesis
+We summarize the total number of parameters in our model and the baselines in Table 6, which shows that our model uses
+minimum number of parameters and still outperforms all the baselines. Moreover, note that, our number of parameters is
+independent of the dataset size, whereas the complexity of baseline models widely varies across most of the datasets.
+Parameter Count
+VG
+SVG
+VRD
+DeepGMG
+9,096,436
+653,771
+641,836
+MolGAN
+623,102,433 18,895,885 11,670,574
+GraphRNN
+19,561,966
+529,421
+510,150
+GraphGen
+25,056,650
+2,865,855
+2,781,760
+SceneGen
+277,012
+222,781
+228,019
+VARSCENE
+221,249
+221,249
+221,249
+Table 6. Number of parameters in each trainable model.
+C.2. Hyperparameters
+VARSCENE. For the base decoder (pθ), we trained the model for 1000 epochs. For the optimized decoder (pMMD
+θ
+), we again
+trained for 1000 epochs. The batch size |B| = 1024. For training pθ, the learning rate was kept as 10−4. For pMMD
+θ
+, the
+learning rate was kept as 10−3. Moreover, we used the Adam optimizer with a 10−5 weight decay factor.
+SceneGen. We trained their model for 300 epochs. The batch size was |B| = 64. A step learning rate scheduler was used for
+both nodes and edges, with initial learning rate 10−3, ﬁnal learning rate 10−4 and decay factor 0.95. The Adam optimizer
+was used for updates. These hyper-parameters were the default values.
+DeepGMG, GraphRNN, GraphGen. We trained the model for 10000 epochs. Batch size |B| = 2048. Initial learning rate
+was 0.003 and decayed by a factor of 0.3 after epochs 100, 200, 400 and 800. The Adam optimizer was used for parameter
+updates. These hyper-parameters were the default values.
+MolGAN. For VRD and SVG datasets, we trained the model for 12500 epochs. For the VG dataset, we trained the model
+for 800 epochs (since the model took a lot of time for training). Batch size |B| = 16. Learning rate was kept as 10−4. The
+Adam optimizer was used for parameter updates with β1 = 0.5, β2 = 0.999. These hyper-parameters were the default
+values.
+C.3. Infrastructure details
+We performed all experiments on an Intel Xeon server with 1 TB RAM running Ubuntu 18.04.5 LTS. Our code ran on any
+of a TITAN RTX GPU with 24 GB RAM and two TITAN X (Pascal) GPUs with 12 GB RAM each.
+C.4. Evaluation metrics for Image Synthesis
+Let Ir be a set of real images, and Ig be a set of images that were output by an image generation model. Metrics that
+compute the quality of the generated set typically use a feature representation xr and xg respectively for elements of these
+sets. Typically, the activation values of the penultimate layer of a pre-trained image classiﬁcation model, most often the
+Inception v3, is used for this purpose. Let Xg be the feature representation matrix for the set of generated images, and the
+corresponding matrix for real images is given by Xr. The metrics below utilize these feature representations in different
+ways, each of which assumes that Ig and Ir are of the same size.
+Fr´echet Inception Distance. (Heusel et al., 2017): The FID is a distance between two multivariate Gaussians each of
+which is represented by a mean and covariance matrix: (mr, Cr) and (mg, Cg). The FID is given by ∥mr −mg∥2
+2 +
+trace(Cr + Cg −2(Cr × Cg)0.5). In the context of evaluating the output of models that generate images, the summary
+statistics (m., C.) are computed over the feature representation matrices X. as deﬁned above.
+Inception Score. (Salimans et al., 2016): The IS compares the marginal class label distribution over a collection of real
+images to the conditional label distribution given a set of generated images. It is deﬁned as exp(EI∼Ig[KL(p(y|I)||p(y))]).
+I here represents an individual output of the image generation model. The vector y is taken to be the set of labels of an
+image classiﬁcation model, again typically taken to be the Inception v3 trained on ImageNet. The intuition is that a good
+image generation output will have p(y|I) with low entropy indicating the presence of recognisable objects. But at a set level,
+we would like a set of varied images, and this is captured by the KL term.
+Precision & Recall. (Sajjadi et al., 2018): The precision is given P(Xr, Xg) = Ex∼Xgf(x, Xr), and recall R(Xr, Xg) =
+Ex∼Xrf(x, Xg). The binary function f(x, X) returns if the sample x lies within the volume of the set X. In the current
+context, Recall represents the fraction of the real images that were generated. While Precision is the fraction of generated
+VarScene: A Deep Generative Model for Realistic Scene Graph Synthesis
+images that are similar to real images.
+D. Additional Experiments
+Effect of MMD-Optimized Method. Table 4 compared pMMD
+θ
+against pθ using Star-Sim and Edge-Sim measurements.
+Here, in Table 7, we present additional similarity and kernel measurements.
+Visual Genome (VG)
+Model
+Star-Sim Edge-Sim Node-Sim SP-Kernel WL-Kernel NSPD-Kernel
+pMMD
+θ
+0.8660
+0.5268
+0.6226
+0.0840
+0.0779
+0.0135
+pθ
+0.5867
+0.2588
+0.2212
+0.1183
+0.1105
+0.0143
+Visual Relationship Detection (VRD)
+pMMD
+θ
+0.9140
+0.9372
+0.9377
+1.4588
+1.9218
+0.2275
+pθ
+0.8988
+0.9339
+0.9306
+0.9426
+1.4560
+0.2156
+Small-sized Visual Genome (SVG)
+pMMD
+θ
+0.9182
+0.6964
+0.8111
+0.9621
+0.6417
+0.0633
+pθ
+0.7120
+0.4195
+0.5616
+1.9098
+0.6944
+0.0586
+Table 7. Performance for the scene graphs generated by the MMD optimized decoder pMMD
+θ
+and the base decoder pθ. Numbers in bold
+indicate the best performer. We observe that pMMD
+θ
+outperforms pθ in a majority of cases. In all cases, we used conditional graph generation.
+Effect of Optimizing Other Similarity Metrics. In Eq. (7), we focus on minimizing MMD between the generated and test
+scene graphs in terms of the RBF kernel (3). Here, we replace this MMD metric with negative of the six similarity measures
+used for evaluation, i.e., Star-Sim, Edge-Sim, Node-Sim, SP-Kernel, WL-Kernel and NSPD-Kernel. Tables 8–10 summarize
+the results for different datasets, and show that the superiority of our method is consistent across them.
+Visual Genome (VG)
+Model
+Star-Sim Edge-Sim Node-Sim SP-Kernel WL-Kernel NSPD-Kernel
+DeepGMG
+0.6996
+0.4668
+0.1579
+0.0137
+0.0994
+0.0144
+MolGAN
+0.0000
+0.0000
+0.0000
+0.0002
+0.0439
+0.0131
+GraphGen
+0.6696
+0.3760
+0.1145
+0.0037
+0.0378
+0.0126
+GraphRNN
+0.6352
+0.0000
+0.0332
+0.0003
+0.0339
+0.0121
+SceneGen
+0.7378
+0.5050
+0.3275
+0.0276
+0.0804
+0.0159
+VARSCENEunc
+0.5963
+0.4576
+0.4055
+0.2293
+0.1176
+0.0147
+VARSCENEcond
+0.8660
+0.5268
+0.6226
+0.0840
+0.0779
+0.0135
+VARSCENEunc (Edge)
+0.6999
+0.3892
+0.3640
+0.0789
+0.0806
+0.0132
+VARSCENEcond (Edge)
+0.5930
+0.1677
+0.2789
+0.1129
+0.0899
+0.0132
+VARSCENEunc (Node)
+0.7702
+0.5497
+0.4433
+0.0558
+0.0680
+0.0129
+VARSCENEcond (Node)
+0.7393
+0.3636
+0.3726
+0.0622
+0.0674
+0.0126
+VARSCENEunc (WL)
+0.7350
+0.4709
+0.4039
+0.0865
+0.0753
+0.0133
+VARSCENEcond (WL)
+0.6819
+0.4088
+0.3422
+0.0989
+0.0784
+0.0131
+VARSCENEunc (SP)
+0.6134
+0.4246
+0.3240
+0.1334
+0.0868
+0.0135
+VARSCENEcond (SP)
+0.5883
+0.3193
+0.2960
+0.1720
+0.0985
+0.0136
+VARSCENEunc (NSPD)
+0.6704
+0.4831
+0.3934
+0.1399
+0.0887
+0.0134
+VARSCENEcond (NSPD)
+0.5932
+0.3046
+0.3766
+0.3390
+0.1121
+0.0136
+VARSCENEunc (Node, Edge)
+0.7880
+0.6319
+0.5571
+0.0672
+0.0743
+0.0133
+VARSCENEcond (Node, Edge)
+0.7592
+0.3620
+0.4573
+0.0816
+0.0745
+0.0133
+VARSCENEunc (Star, Node, Edge)
+0.8013
+0.5094
+0.5711
+0.1065
+0.0887
+0.0145
+VARSCENEcond (Star, Node, Edge)
+0.6813
+0.2477
+0.4131
+0.1476
+0.0957
+0.0142
+VARSCENEunc (SP, Node, Edge)
+0.8066
+0.5606
+0.5476
+0.0647
+0.0746
+0.0135
+VARSCENEcond (SP, Node, Edge)
+0.7344
+0.3062
+0.4343
+0.0774
+0.0749
+0.0132
+Table 8. Performance of different graph generative models (analogous to Table 2) for different optimization objectives in the second stage
+of our learning for Visual Genome dataset. The metrics against VARSCENE , in parentheses, imply that in Eqn. (7) we replace \
+MMD
+with negative of these similarity metrics. Here VARSCENE (Metric) means that in Eq. 7 we replace \
+MMD with −Metric. Moreover,
+for last few rows, we maximize the sum of multiple similarities. For example, VARSCENE (Metric1, Metric2) indicates that in Eq. 7,
+we replace \
+MMD with −(Metric1 + Metric2). We write Star for Star-Sim, Edge for Edge-Sim, Node for Node-Sim, SP for SP-Kernel,
+WL for WL-Kernel and NSPD for NSPD-Kernel. Recall that VARSCENE as-it-is stands for optimizing the discrepancy between the star
+distributions of the generated and the test set.
+VarScene: A Deep Generative Model for Realistic Scene Graph Synthesis
+Small-sized Visual Genome (SVG)
+Model
+Star-Sim Edge-Sim Node-Sim SP-Kernel WL-Kernel NSPD-Kernel
+DeepGMG
+0.8097
+0.6401
+0.4961
+0.1092
+0.3589
+0.0538
+MolGAN
+0.0000
+0.0000
+0.0000
+0.0496
+0.4084
+0.0879
+GraphGen
+0.5223
+0.6461
+0.3713
+0.0545
+0.2117
+0.0432
+GraphRNN
+0.2590
+0.0775
+0.0920
+0.3833
+0.5991
+0.0705
+SceneGen
+0.8644
+0.8828
+0.9311
+0.6876
+0.5480
+0.0663
+VARSCENEunc
+0.9235
+0.7049
+0.8335
+1.0046
+0.6556
+0.0685
+VARSCENEcond
+0.9182
+0.6964
+0.8111
+0.9621
+0.6417
+0.0633
+VARSCENEunc (Edge)
+0.9400
+0.7451
+0.8620
+0.7177
+0.6100
+0.0673
+VARSCENEcond (Edge)
+0.9302
+0.7538
+0.8362
+0.7140
+0.6078
+0.0624
+VARSCENEunc (Node)
+0.9351
+0.7452
+0.8599
+0.7193
+0.6135
+0.0677
+VARSCENEcond (Node)
+0.9210
+0.7446
+0.8287
+0.6726
+0.6058
+0.0623
+VARSCENEunc (WL)
+0.9469
+0.7268
+0.8546
+0.9840
+0.6342
+0.0679
+VARSCENEcond (WL)
+0.9300
+0.7043
+0.8223
+0.9395
+0.6005
+0.0614
+VARSCENEunc (SP)
+0.9328
+0.7246
+0.8576
+0.8961
+0.6444
+0.0691
+VARSCENEcond (SP)
+0.9286
+0.7171
+0.8280
+0.8721
+0.6170
+0.0636
+VARSCENEunc (NSPD)
+0.9349
+0.7231
+0.8498
+0.8096
+0.6215
+0.0669
+VARSCENEcond (NSPD)
+0.9334
+0.7204
+0.8289
+0.8038
+0.6266
+0.0628
+VARSCENEunc (Node, Edge)
+0.9254
+0.6918
+0.8443
+0.9661
+0.6373
+0.0679
+VARSCENEcond (Node, Edge)
+0.9160
+0.7044
+0.8128
+0.7688
+0.5996
+0.0621
+VARSCENEunc (Star, Node, Edge)
+0.9308
+0.7039
+0.8346
+0.9234
+0.6397
+0.0679
+VARSCENEcond (Star, Node, Edge)
+0.9204
+0.7028
+0.8127
+0.8861
+0.6196
+0.0627
+VARSCENEunc (SP, Node, Edge)
+0.9394
+0.7322
+0.8577
+0.8346
+0.6329
+0.0684
+VARSCENEcond (SP, Node, Edge)
+0.9332
+0.7206
+0.8366
+0.8087
+0.6116
+0.0629
+Table 9. Performance of different graph generative models (analogous to Table 8) for different optimization objectives in the second stage
+of our learning for Small-sized Visual Genome dataset.
+Visual Relationship Detection (VRD)
+Model
+Star-Sim Edge-Sim Node-Sim SP-Kernel WL-Kernel NSPD-Kernel
+DeepGMG
+0.7459
+0.7338
+0.6035
+0.9977
+1.4125
+0.2038
+MolGAN
+0.0000
+0.0000
+0.0001
+0.0149
+0.9721
+0.2121
+GraphGen
+0.6478
+0.7586
+0.6431
+0.3184
+0.7964
+0.1770
+GraphRNN
+0.5455
+0.2941
+0.7163
+0.2125
+0.7639
+0.1888
+SceneGen
+0.8112
+0.9486
+0.9552
+0.6069
+1.1274
+0.2130
+VARSCENEunc
+0.9194
+0.9374
+0.9403
+1.0327
+1.5619
+0.2301
+VARSCENEcond
+0.9140
+0.9372
+0.9377
+1.4588
+1.9218
+0.2275
+VARSCENEunc (Edge)
+0.9216
+0.9290
+0.9363
+1.1150
+1.6175
+0.2349
+VARSCENEcond (Edge)
+0.9177
+0.9219
+0.9343
+1.4194
+1.9164
+0.2290
+VARSCENEunc (Node)
+0.9063
+0.9296
+0.9240
+1.0671
+1.5865
+0.2321
+VARSCENEcond (Node)
+0.9062
+0.9387
+0.9268
+1.2975
+1.7934
+0.2238
+VARSCENEunc (WL)
+0.8989
+0.9281
+0.9217
+1.1509
+1.6318
+0.2345
+VARSCENEcond (WL)
+0.8979
+0.9249
+0.9251
+1.4902
+1.9244
+0.2294
+VARSCENEunc (SP)
+0.9122
+0.9317
+0.9328
+1.1432
+1.6431
+0.2379
+VARSCENEcond (SP)
+0.9108
+0.9290
+0.9354
+1.5389
+1.9726
+0.2334
+VARSCENEunc (NSPD)
+0.8893
+0.9011
+0.9044
+1.0247
+1.5454
+0.2276
+VARSCENEcond (NSPD)
+0.8898
+0.8858
+0.9065
+1.2732
+1.7864
+0.2204
+VARSCENEunc (Node, Edge)
+0.8941
+0.9254
+0.9190
+1.1111
+1.6225
+0.2332
+VARSCENEcond (Node, Edge)
+0.9029
+0.9298
+0.9261
+1.4332
+1.8953
+0.2256
+VARSCENEunc (Star, Node, Edge)
+0.9223
+0.9324
+0.9425
+1.1342
+1.6316
+0.2357
+VARSCENEcond (Star, Node, Edge)
+0.9222
+0.9267
+0.9455
+1.4657
+1.9168
+0.2292
+VARSCENEunc (SP, Node, Edge)
+0.9103
+0.9248
+0.9364
+1.2269
+1.6996
+0.2398
+VARSCENEcond (SP, Node, Edge)
+0.9173
+0.9264
+0.9416
+1.5882
+2.0036
+0.2339
+Table 10. Performance of different graph generative models (analogous to Table 8) for different optimization objectives in the second
+stage of our learning for Visual Relationship Detection dataset.
+VarScene: A Deep Generative Model for Realistic Scene Graph Synthesis
+Visual Genome (VG)
+Model
+Star-Sim Edge-Sim Node-Sim SP-Kernel WL-Kernel NSPD-Kernel
+VARSCENEunc
+0.5963
+0.4576
+0.4055
+0.2293
+0.1176
+0.0147
+VARSCENEcond
+0.8660
+0.5268
+0.6226
+0.0840
+0.0779
+0.0135
+VARSCENEunc (Star)
+0.7779
+0.5289
+0.4732
+0.0863
+0.0794
+0.0134
+VARSCENEcond (Star)
+0.6589
+0.2630
+0.3659
+0.1204
+0.0869
+0.0133
+Small-sized Visual Genome (SVG)
+Model
+Star-Sim Edge-Sim Node-Sim SP-Kernel WL-Kernel NSPD-Kernel
+VARSCENEunc
+0.9235
+0.7049
+0.8335
+1.0046
+0.6556
+0.0685
+VARSCENEcond
+0.9182
+0.6964
+0.8111
+0.9621
+0.6417
+0.0633
+VARSCENEunc (Star)
+0.9339
+0.7339
+0.8505
+0.7679
+0.6104
+0.0667
+VARSCENEcond (Star)
+0.9235
+0.7307
+0.8322
+0.7654
+0.6153
+0.0622
+Visual Relationship Detection (VRD)
+Model
+Star-Sim Edge-Sim Node-Sim SP-Kernel WL-Kernel NSPD-Kernel
+VARSCENEunc
+0.9194
+0.9374
+0.9403
+1.0327
+1.5619
+0.2301
+VARSCENEcond
+0.9140
+0.9372
+0.9377
+1.4588
+1.9218
+0.2275
+VARSCENEunc (Star)
+0.9067
+0.9294
+0.9275
+1.0799
+1.5911
+0.2306
+VARSCENEcond (Star)
+0.9074
+0.9210
+0.9301
+1.4106
+1.8871
+0.2242
+Table 11. Performance provided by two variants of VARSCENE, viz., VARSCENE(RBF) which is the default variant having k as the RBF
+kernel as deﬁned in Eq. (3) and VARSCENE(Star-Sim) which uses k(G, G′) = cos(ν(G), ν(G′)). Numbers in bold indicate the best
+performer.
+Effect of Using RBF kernel. Recall that we use RBF kernel in Eq. (3) in our experiments. Here, we compare such an
+approach against using a simple cosine-similarity based kernel computation, that is, k(G, G′) = cos(ν(G), ν(G′)). Table 11
+summarizes the results, which shows that using RBF kernel provides the performance boost for most similarity metrics.
+Efﬁciency Analysis. Here, we analyze efﬁciency of different methods. Table 12 summarizes the results, which shows that
+training the base VAE model of VARSCENE is fastest on Visual Genome which is the largest dataset. For smaller datasets,
+i.e., Small-sized Visual Genome and Visual Relationship Detection, the training time is comparable with baselines. However,
+we note that training the MMD optimized decoder is slower in all datasets. The reason for more time in MMD optimization
+is that we need to sample a set of graphs (we sample 1000 graphs) at each iteration for computing \
+MMD in the objective as
+per Eqn. 9. For SVG and VRD datasets speciﬁcally, the graph generation process takes a higher amount of time. This is
+because its decoders sample stars beyond a limit (we set this limit as 50). In such cases, we sample graphs repeatedly until
+we get a valid graph or until we have repeated the procedure for a certain number of times (we set this limit as 20).
+VG
+SVG
+VRD
+DeepGMG
+2.0642
+3.6121
+2.5645
+MolGAN
+0.1274
+0.1128
+0.1414
+GraphRNN
+1.1582
+0.0530
+0.0435
+GraphGen
+0.0635
+0.0429
+0.0319
+SceneGen
+0.1945
+0.0650
+0.0510
+VARSCENE (pθ)
+0.0334
+0.0650
+0.4188
+VARSCENE (pMMD
+θ
+) 5.3866 22.1826 24.9556
+Table 12. Time (in seconds) for one iteration for a ﬁxed batch size |B| = 64.

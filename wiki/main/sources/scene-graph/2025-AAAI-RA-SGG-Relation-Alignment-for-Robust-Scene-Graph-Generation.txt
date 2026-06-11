@@ -1,0 +1,1309 @@
+RA-SGG: Retrieval-Augmented Scene Graph Generation Framework via
+Multi-Prototype Learning
+Kanghoon Yoon1, Kibum Kim1, Jaehyeong Jeon1, Yeonjun In1, Donghyun Kim2, Chanyoung
+Park1*
+1 Department of Industrial and Systems Engineering, Korea Advanced Institute of Science and Technology
+2 Department of Artificial Intelligence, Korea University
+{ykhoon08, kb.kim, wogud405, yeonjun.in, cy.park}@kaist.ac.kr, d kim@korea.ac.kr
+Abstract
+Scene Graph Generation (SGG) research has suffered from
+two fundamental challenges: the long-tailed predicate dis-
+tribution and semantic ambiguity between predicates. These
+challenges lead to a bias towards head predicates in SGG
+models, favoring dominant general predicates while over-
+looking fine-grained predicates. In this paper, we address the
+challenges of SGG by framing it as multi-label classifica-
+tion problem with partial annotation, where relevant labels
+of fine-grained predicates are missing. Under the new frame,
+we propose Retrieval-Augmented Scene Graph Generation
+(RA-SGG), which identifies potential instances to be multi-
+labeled and enriches the single-label with multi-labels that
+are semantically similar to the original label by retrieving
+relevant samples from our established memory bank. Based
+on augmented relations (i.e., discovered multi-labels), we ap-
+ply multi-prototype learning to train our SGG model. Sev-
+eral comprehensive experiments have demonstrated that RA-
+SGG outperforms state-of-the-art baselines by up to 3.6% on
+VG and 5.9% on GQA, particularly in terms of F@K, show-
+ing that RA-SGG effectively alleviates the issue of biased
+prediction caused by the long-tailed distribution and seman-
+tic ambiguity of predicates.
+1
+Introduction
+SGG is a pivotal task in scene understanding, aiming to de-
+tect objects and predict their relationships within an image.
+SGG models are adept at capturing rich visual information
+that encompass both object-level and relation-level informa-
+tion. This compositional representation of the scene graph is
+beneficial for various vision applications (Hildebrandt et al.
+2020; Schroeder and Tripathi 2020). However, existing SGG
+approaches have encountered two fundamental challenges:
+1) Long-tailed Problem: The predicate classes in bench-
+mark SGG datasets, e.g., Visual Genome, follow a severely
+skewed distribution, where certain predicates are heavily
+represented (head classes) while others are sparsely anno-
+tated (tail classes). This challenge arises from annotators’
+tendency to label general predicates such as “on” more fre-
+quently than fine-grained predicates such as “walking in.”
+Consequently, the predictions of SGG models trained on
+*Corresponding author
+Copyright © 2025, Association for the Advancement of Artificial
+Intelligence (www.aaai.org). All rights reserved.
+datasets with such a skewed distribution tend to be biased
+towards head predicates, resulting in scene graphs domi-
+nated by general predicates. However, these scene graphs
+lack nuanced descriptions provided by tail predicates, which
+offer detailed relationship information. 2) Semantic Ambi-
+guity: Another challenge stems from the ambiguous seman-
+tic boundaries between predicate classes. For a relation in-
+stance, predicates such as “on,” “walking on,” and “walk-
+ing in” may be hard-to-distinguish as these predicates share
+semantic meanings, and thus SGG models need to capture
+nuanced visual cues to distinguish between them. However,
+learning the detailed visual differences is challenging as the
+tail predicates, such as “walking in,” rarely appear in the
+dataset whose predicate class distribution is usually skewed.
+Addressing these challenges is crucial for generating infor-
+mative scene graphs with fine-grained predicates.
+Seminal works have focused on generating fine-grained
+scene graphs by alleviating the issues posed by these chal-
+lenges. Re-sampling, re-weighting, and various debiasing
+methods (Li et al. 2021; Lyu et al. 2022; Kaihua et al.
+2020; Kim et al. 2024b) are utilized to generate the fine-
+grained scene graphs. Most recently, (Li et al. 2022; Zhang
+et al. 2022; Yu et al. 2023) propose the data enhancement
+approaches by re-annotating the general predicates to fine-
+grained ones. However, this refinement process results in
+a trade-off, where comprehension of general predicates is
+diminished. Moreover, we find that fundamental challenges
+persist in the prior framework. Current SGG models rely on
+single-label classification, where predicates compete against
+each other during prediction, forcing the model to select
+just one predicate while suppressing others. This approach is
+problematic because it ignores the nuanced nature of natural
+language, where multiple predicates convey the same single
+relationship. Hence, we cast the single-label classification
+with multi-label classification with partial annotation prob-
+lem (Ben-Baruch et al. 2022). That is, we discover potential
+fine-grained predicates in the original training data and aug-
+ment semantically similar predicates for relationships.
+In this work, we propose a Retrieval-Augmented Scene
+Graph Generation (RA-SGG) framework that enhances
+single-label annotations to multi-labels with fine-grained
+predicates, addressing the challenges of the long-tailed pred-
+icate distribution and the semantic ambiguity. The core idea
+is to retrieve potential predicates that share semantics with
+The Thirty-Ninth AAAI Conference on Artificial Intelligence (AAAI-25)
+9562
+
+Visual Semantic Space
+nearest neighbor
+query relation embedding
+on
+on 
+(query)
+GT: < cat, on, table >
+on 
+(query)
+Query Relation
+Query Relation
+GT: < man, on, street >
+< cat, lying on, table >
+<cat, laying on, table>
+<man, walking in, street>
+<man, walking in, street>
+on-lying on
+Label Augmentation
+(a)
+(c)
+(b)
+Retrieved Relations
+Retrieved Relations
+on-walking in
+laying on
+walking in
+lying on
+Head
+Body
+Tail
+Overall
+ratio
+Figure 1: Illustration of the label augmentation of RA-SGG in SGG. (a) Examples of the query relation instances and their
+retrieved relation instances in the embedding space. “GT” denotes the ground truth. (b) The ratio of retrieved instances that
+have the same/different predicate as the query relation in the training data. (c) Fine-grained predicate label augmentation.
+the original predicate and use them as pseudo-labels for the
+relation, as shown in Figure 1. Our approach is motivated
+by observations in the visual semantic space. Using the pre-
+trained SGG model, PE-Net (Zheng et al. 2023), for nearest
+neighbor retrieval on training instances, we discovered that
+query relations and their retrieved instances often share se-
+mantic meanings despite having different predicate labels.
+For instance, a relation with the ground-truth predicate “on”
+retrieves different fine-grained predicates: {“lying on”, “lay-
+ing on”} for ⟨cat,on,table⟩or {“walking in”, “walking in”}
+for ⟨man, on, street⟩. Notably, this pattern persists across
+head, body, and tail predicate classes (Figure 1.b), suggest-
+ing that a relation instance that is currently annotated with a
+single predicate might actually co-reference multiple latent
+predicates with similar meanings.
+Building on these observations, RA-SGG aims to dis-
+cover latent predicates of a relation instance by retriev-
+ing semantically similar relation instances from a mem-
+ory bank. We introduce three key mechanisms: (1) Reliable
+Multi-Labeled Instance Selection: naively assigning pseudo-
+labels for all the relation instances would aggravate relia-
+bility. To obtain reliable pseudo-labels, we introduce a la-
+bel inconsistency score which measures the discrepancy be-
+tween the ground-truth predicate and its retrieved relation
+instances. (2) Unbiased Augmentation of Multi-Labels: we
+introduce the inverse propensity score-based sampling strat-
+egy to sample the less frequent (i.e., fine-grained) predicates
+among the retrieved relation instances. (3) Multi-Prototype
+Learning with Multiple Predicates: it ensures relation in-
+stance embeddings capture both original and discovered
+fine-grained predicate semantics. Our comprehensive exper-
+iments demonstrate that RA-SGG outperforms state-of-the-
+art SGG models, particularly in terms of F@K, which is a
+metric that emphasizes the ability to achieve high perfor-
+mance in fine-grained classes (i.e., tail classes) while min-
+imally sacrificing the performance of general classes (i.e.,
+head classes). Our contribution can be summarized as fol-
+lows:
+1. We highlight the problem of single-label classification in
+SGG and reformulate this in the light of multi-label clas-
+sification with partial annotation problem.
+2. We propose a novel retrieval-augmented SGG framework
+(RA-SGG), which simultaneously alleviates the long-
+tailed distribution and semantic ambiguity issues by dis-
+covering the latent predicates of a relation instance anno-
+tated with a single predicate.
+3. Our
+extensive
+studies
+demonstrate
+that
+RA-
+SGG achieves the state-of-art performance in terms
+of F@K, implying that RA-SGG effectively gener-
+ates fine-grained scene graphs without sacrificing the
+understanding of general predicates.
+2
+Related Works
+Scene Graph Generation
+SGG has garnered attention due to its capacity for dense un-
+derstanding of a scene, bridging two modalities: vision and
+language. Early works have focused on capturing the con-
+textual information within a scene using message-passing
+network and transformer architecture (Zellers et al. 2018;
+Yang et al. 2018; Li et al. 2021; Shit et al. 2022). Recent
+SGG studies have been centered on improving performance
+for fine-grained predicates (i.e., tail classes) to obtain infor-
+mative scene graphs. However, it is challenging to predict
+9563
+
+fine-grained predicates due to the fact that the predictions
+of SGG models easily collapse into general and trivial pred-
+icates, suffering from both the long-tailed distribution and
+semantic ambiguity issues. To address this, (Li et al. 2021;
+Lyu et al. 2022) focus training on tail predicate classes via
+resampling/reweighting, and (Kaihua et al. 2020; Dong et al.
+2022; Jeon et al. 2024) proposed debiasing methods to miti-
+gate the bias towards head classes. However, merely ampli-
+fying the weight of tail classes can lead to overfitting of SGG
+models to the limited number of tail instances (Zhai et al.
+2022), as these methods do not contribute to increasing vari-
+ations in the data for tail classes (S. Hasegawa and Umeda
+2022). As an alternative, approaches that enhance the train-
+ing data have emerged. Specifically, (Li et al. 2022) identi-
+fies noisy predicates in data by using a pre-trained model,
+and (Zhang et al. 2022) replaces general predicates with
+fine-grained ones or uses fine-grained predicates to fill in
+missing annotations in the training data. (Kim et al. 2024a)
+assigns pseudo-labels to the missing annotated instances.
+However, the data enhancement approaches eliminate
+general predicates from the dataset, leading to a significant
+performance drop on these general predicates. This strategy
+overlooks a comprehensive understanding of general predi-
+cates to instead obtain fine-grained scene graph. Moreover,
+we argue that adjusting data based on a single prediction
+of model is risky in the SGG nature, where the models are
+trained on the extremely long-tailed distribution. To resolve
+these issues, we addresses the SGG problem in the light
+of the multi-label classification problem for comprehensive
+understanding across all predicate classes. Moreover, RA-
+SGG does not rely on a single model prediction but con-
+siders the distribution of the retrieved relation instances to
+accurately assign predicates as a multi-label.
+Retrieval Augmented Generation
+Retrieval Augmented Generation (RAG) is a widespread ap-
+proach in natural language processing (NLP). RAG employs
+a non-parametric memory to supplement intrinsic knowl-
+edge of a language model by retrieving relevant passages
+from knowledge bases (Borgeaud et al. 2022; Guu et al.
+2020; Lewis et al. 2020). Similarly, in the realm of image
+synthesis, approaches like (Casanova et al. 2021; Blattmann
+et al. 2022) refer to examples of near neighbors to elevate
+the quality of generated images. Furthermore, RAG veri-
+fies the ability to handle rare examples within the training
+dataset. Re-Imagen (Chen et al. 2023) effectively generates
+the rare entities by referencing images with similar text de-
+scriptions. (Long et al. 2022) enhances the image classifi-
+cation performance on tail classes by drawing upon image
+features from a memory bank. In this work, we propose the
+retrieval-augmented scene graph generation framework to
+discover the latent multi-labels in the training dataset, which
+addresses the long-tailed problem in SGG.
+3
+Preliminaries
+Scene Graph Generation Task
+The SGG problem includes the detection of objects and the
+prediction on the classes of objects and their relationships.
+Formally, given an image, we aim at generating a scene
+graph G = ⟨si, pi, oi⟩N
+i=1, where N is the number of triplets
+in the image. si represents the subject, which includes the
+bounding box position and the object class, while oi repre-
+sents the object, which is similarly defined. pi represents the
+predicate between si and oi.
+Visual Semantic Embedding Space in SGG
+(Zheng et al. 2023) proposes a novel SGG learning strat-
+egy, which reduces the distance between the prototype and
+visual relation embedding in the visual semantic space.
+This paradigm helps a model to discern between hard-to-
+distinguish predicates by measuring the distance in the vi-
+sual semantic space.
+Formally, let vs ∈Rd and vo ∈Rd denote the visual
+semantic features of subject and object, respectively, which
+are extracted from both the visual feature and the word em-
+bedding of entity classes. We use up ∈Rd to denote the
+relation embedding extracted from the visual features of the
+union box, and tp ∈Rd′ to denote the word embedding
+of the predicate class. The core idea of prototype learning
+is to match the subject and object instances to the predi-
+cate instances by F(vs, vo) ≈Wptp + up, where F is
+a fusion layer (Zheng et al. 2023) and Wp ∈Rd×d′ is a
+feature transformation matrix. To implement this, PE-Net
+considers the language semantic of predicates as a proto-
+type (i.e., Wptp), and makes the relation embedding (i.e.,
+r = F(vs, vo) −up) close to its corresponding the predi-
+cate prototype. The prototype learning loss is defined as:
+Lproto = −log
+exp(⟨¯r, ¯cgt⟩)/γ
+PNp
+j=1 exp(⟨¯r, ¯cj⟩)/γ
+,
+(1)
+where
+¯r = Proj(r)and ¯cj = Proj(Wptp)
+where Np is the number of predicate categories, γ is a learn-
+able temperature hyperparameter and Proj is a 2-layer MLP
+shared across both the relation embedding r and the pro-
+totypes. ¯cgt denotes the class prototype of the ground truth
+predicates. This prototype-guided learning has demonstrated
+the effectiveness of producing discriminative relation em-
+beddings in the visual semantic space, compared to the con-
+ventional classifier-based SGG models. Hence, our proposed
+method, RA-SGG, utilizes the relation embeddings of the
+training instances learned from the above objective to in-
+stantiate the retrieval-augmented approache for SGG.
+4
+Retrieval Augmented SGG
+In this section, we introduce RA-SGG, a novel method
+that utilizes a retrieval process to discover and augment
+the latent and fine-grained predicates. We begin by formu-
+lating the SGG task as the multi-label classification with
+a partial (i.e., single) annotation problem, which aims to
+model the true unbiased predicate distribution based on
+the partially annotated samples. Subsequently, we explain
+how RA-SGG identifies relation instances that include po-
+tential multi-labels and augments the labels of these in-
+stances by assigning semantically similar predicates as ad-
+ditional pseudo-labels. Lastly, we outline the training proce-
+dure of RA-SGG, which employs a multi-prototype learn-
+9564
+
+<boy, on-riding, skateboard>
+Augmented Label
+Object 
+Detector
+Retrieval
+Module
+Pull prototype of original predicate
+Pull prototype of augmented predicate
+Relation Embedding
+Prototype Embedding
+Relation Memory Bank
+boy
+skateboard
+hat
+on
+on
+boy
+on
+riding
+skateboard
+hat
+riding
+GT
+Scene Graph 
+on
+riding
+behind
+. . .
+Multi-Label
+Discovery
+Reliable Multi-labeled 
+Instance Selection
+𝑑𝐩𝐠𝐭, ത𝐩𝒓𝒆𝒕
+> 𝝉
+“multi-labeled”
+𝑑𝐩𝐠𝐭, ത𝐩𝒓𝒆𝒕
+≤𝝉
+“single-labeled”
+“riding” ∼
+Retrieved relations
+Frequency of Predicates in Train Data
+“on”
+“riding”
+“standing on”
+Inverse propensity scored sampling
+(Discovered Label)
+Unbiased Augmentation
+of Multi-Labels
+Figure 2: RA-SGG first uses the relation embeddings for querying instances in the memory bank to retrieve visually and
+semantically similar instances. Then, it augments multi-labels by assigning pseudo-labels to potentially multi-labeled instances.
+ing strategy to effectively learn from the augmented relation
+labels. The pipeline of RA-SGG is illustrated in Figure 2.
+Multi-Label Classification with Partial Annotation
+Recall that existing SGG studies have relied on a single
+annotation for each relationship, overlooking the potential
+predicates that share similar semantic meanings. This over-
+sight limits the model’s ability to represent complex vi-
+sual scenes, particularly affecting the representation of less
+common or tail predicates due to insufficient data variation.
+Herein, we first formulate the SGG task with multi-labeled
+classification problem with partial annotation to exploit the
+latent fine-grained predicates.
+Let y∗∈{0, 1}Np denote the ground-truth label vector of
+a relation instance from an unbiased true distribution, which
+is an ideal distribution without any latent unobserved an-
+notations. y∗accommodates multi-labels including seman-
+tically relevant predicates, i.e., PNp
+i=1 yi ≥1. In a com-
+mon SGG setting, we deal with partially observed annota-
+tion with the observed label vector y ∈{0, 1}Np, where
+y is single-labeled or not labeled, i.e., PNp
+i=1 yi = 1 or
+PNp
+i=1 yi = 0. Our goal is to minimize the loss function
+L(y∗, ˆy) computed on the samples from the unbiased true
+distribution by utilizing observed predicate labels y, where
+ˆy is the probability predicted by an SGG model. However,
+since obtaining samples from the unbiased true distribution
+is not feasible, we approximate the loss using the available
+observed samples. Hence, we introduce the following in-
+verse propensity-scored loss:
+Lips = −
+Np
+X
+i=1
+P(yi = 1|y∗
+i = 1)−1
+|
+{z
+}
+inverse propensity score
+yi log ˆyi
+(2)
+where Lips is the weighted cross entropy with the inverse
+propensity for each predicate class, and the propensity score
+is the label frequency (Jain, Prabhu, and Varma 2016; Chiou
+et al. 2021), which is the fraction of observed predicates
+among entire predicates in the unbiased true distribution.
+For simplicity, we follow (Jain, Prabhu, and Varma 2016)
+and use the frequency of each predicate class in the training
+dataset as the propensity score. Note that optimizing Lips is
+approximately minimizing the loss using samples from the
+unbiased true distribution since Lips serves as an unbiased
+estimator of the loss function L(y∗, ˆy). However, directly
+minimizing the inverse propensity scored loss for SGG mod-
+els is still restricted as it does not increase the variation of
+data instances of tail predicate classes, which incurs over-
+fitting to a small number of tail predicates. Instead of opti-
+mizing the above Lips, we choose to augment a relation in-
+stance by sampling the predicate labels based on the inverse
+propensity score (Han et al. 2022), and assign the sampled
+predicate labels to the relation instance as pseudo-labels. We
+will discuss this in detail in Section 4.
+Retrieval-Augmented Scene Graph Generation
+We adopt a retrieval process to effectively train an SGG
+model based on the partially observed predicates. Specifi-
+cally, we discover and augment the latent and fine-grained
+predicates of a relation instance by referring to the predicates
+of the retrieved instances. The process begins by retrieving
+semantically similar samples from the memory bank. We
+then leverage the predicates associated with these retrieved
+samples to identify relation instances that could be labeled
+with multiple predicates and to augment our dataset with
+these multi-labels. Although our method can be integrated
+into any SGG model, this paper specifically showcases its
+application through PE-Net as the backbone.
+Relation Retrieval Module.
+The relation retrieval mod-
+ule finds semantically similar relation instances based on
+the relation embedding. Specifically, a frozen memory
+bank is established using a pre-trained SGG model prior
+to the training of RA-SGG. We store key-value pairs
+9565
+
+(k1, v1), ..., (kM, vM) in the memory bank, where the key
+is the relation embedding (r in Eqn. 1 for PE-Net), and the
+value is an associated one-hot vector representing the predi-
+cate class. Our approach limits memory storage upto 10 en-
+tries for each unique triplet, which only utilizes 8% of the
+training data. Note that the memory bank construction is ex-
+ecuted during the pre-processing phase, without imposing
+additional computational costs in the training phase of RA-
+SGG. During the training phase, RA-SGG produces the re-
+lation embedding r for each subject-object pair in the train-
+ing batch. The relation embeddings act as queries to retrieve
+K neighbor instances from the memory bank based on the
+cosine similarity. Among the retrieved instances, we exclude
+the first instance to avoid the trivial case of retrieving itself.
+Reliable Multi-Labeled Instance Selection. Since some
+relation instances contain only a single semantic mean-
+ing, naively assigning pseudo-labels to all relation instances
+would aggravate reliability. Given the K nearest neigh-
+bor instances {(rret
+1 , pret
+1 ), ..., (rret
+K, pret
+K)} of the query rela-
+tion, RA-SGG first identifies whether the query relation is a
+single-labeled instance with only one predicate, or a multi-
+labeled instance that, despite potentially qualifying for mul-
+tiple labels, currently has only one predicate. This selection
+is based on the label inconsistency between the ground-truth
+predicate of query relation pq and the averaged one-hot pred-
+icates of retrieved instances ¯pret =
+1
+K
+PK
+i=1 pret
+i . By com-
+puting the label inconsistency distance d(·, ·) for all query
+relation instances in the training batch, we obtain the Dsingle
+and Dmulti as follows:
+Dsingle ←{(si, pi, oi)|d(pq, ¯pret) < τ, ∀(si, pi, oi) ∈DTr} (3)
+Dmulti- ←{(si, pi, oi)|d(pq, ¯pret) ≥τ, ∀(si, pi, oi) ∈DTr}
+where τ is the threshold hyperparameter and d is the dis-
+tance metric. If the given ground-truth predicate of the query
+relation is significantly different from that of the nearest
+neighbor samples, i.e., large inconsistency, then the query
+relation is likely to co-reference additional potential predi-
+cate labels among the predicates of the neighbor samples.
+Unbiased Augmentation of Multi-Labels. Having iden-
+tified potential relation instances to be multi-labeled, we
+augment the fine-grained predicates by assigning specific
+multi-labels to the training instances within Dmulti. In this
+augmentation stage, we aim to obtain the augmented la-
+bels that follow the unbiased true distribution by adopting
+the inverse propensity score-based sampling. Specifically,
+we obtain the sampling weight w ∈RNp by aggregat-
+ing the inverse propensities of the retrieved predicates, i.e.,
+w = Softmax(PK
+k=1 sret
+k pret
+k ), where sret
+1 , ..., sret
+K ∈R are
+the inverse propensities of retrieved predicates, which are
+pre-computed as the inverse of the predicate frequency in
+the training dataset. For each triplet (si, pi, oi) in Dmulti, we
+augment the predicate labels using the sampling weight as:
+pi ←λipgt
+i + (1 −λi)paug
+i , where paug
+i
+∼Multinomial(w) (4)
+where λi ∼Beta(α, β) controls the degree of the mixing
+coefficient. Our augmentation strategy generates pseudo-
+labels, considering not only the overall semantic meaning of
+nearest neighbors but also the frequency of predicates. This
+approach effectively leverages partial annotations to create
+multi-labeled instances, which can address the long-tailed
+distribution problem and semantic ambiguity in SGG.
+Multi-Prototype Learning with Multiple Predicates
+With relation instances augmented with multiple predicate
+labels, we apply the multi-prototype learning strategy to
+train RA-SGG. For each relation instance, we minimize
+the distance between its relation embedding r and its cor-
+responding prototypes of the multi-labeled predicates (i.e.,
+¯cgt and ¯caug) as follows:
+Lmulti-proto = −λi log
+exp(⟨¯r, ¯cgt⟩)/γ
+PNp
+j=1 exp(⟨¯r, ¯cj⟩)/γ
+(5)
+−(1 −λi) log
+exp(⟨¯r, ¯caug⟩)/γ
+PNp
+j=1 exp(⟨¯r, ¯cj⟩)/γ
+where ¯r = Proj(r) is the relation embedding after the pro-
+jection layer is applied, ¯cgt denotes the corresponding class
+prototype of the ground truth predicates, ¯caug denotes the
+prototype of augmented predicates. It is important to note
+that while the multi-prototype learning loss calculation con-
+siders up to two predicate classes per relation instance, our
+predicate augmentation approach based on sampling allows
+for incorporating more than two predicates by altering the
+augmented predicate at each batch iteration. Multi-prototype
+learning ensures that the embedding of a relation instance
+not only incorporates the original semantic of its ground-
+truth predicate but also embraces the semantic of the discov-
+ered latent fine-grained predicates.
+To train RA-SGG, the final loss Lfinal is expressed as:
+Lfinal = Lmulti-proto + Lreg1 + Lreg2
+(6)
+where Lreg1 =
+qP
+i̸=j(¯c⊤
+i ¯cj)2 is the prototype similar-
+ity regularization (Zheng et al. 2023), which aims to mini-
+mize cosine similarities between all pairs of individual pro-
+totypes, and Lreg2 = max{γ′ −
+1
+Np
+P
+i̸=j ∥¯ci −¯cj∥2
+2, 0}
+is the prototype distance regularization (Zheng et al. 2023),
+which increases the euclidean distance between prototypes,
+respectively. These regularizations serve to prevent the col-
+lapse of prototypes with semantically similar predicates.
+Note that the retrieval process and multi-prototype learn-
+ing strategy are exclusively applied during the training
+phase. During the inference phase, we calculate the cosine
+similarity between each relation embedding and the set of
+prototypes. The predicate corresponding to the highest co-
+sine similarity is selected as the model’s prediction.
+5
+Experiments
+Experimental Settings
+Datasets and Implementation Details. Following the prior
+approaches (Dong et al. 2022; Li et al. 2023, 2021; Zellers
+et al. 2018; Zhang et al. 2022), we used the benchmark
+datasets, VG (Krishna et al. 2017) and GQA (Hudson and
+Manning 2019). VG split contains the most frequent 150
+object classes and 50 predicate classes. GQA is another vi-
+sion and language benchmark, which includes top-200 ob-
+ject classes and 100 predicate classes. For all baselines, we
+adopt ResNeXt-101-FPN (Xie et al. 2017) and Faster R-
+CNN (Ren et al. 2015) as the object detector. For RA-SGG,
+9566
+
+B
+Methods
+Predicate Classification
+Scene Graph Classification
+Scene Graph Detection
+R@50/100
+mR@50/100
+F@50/100
+R@50/100
+mR@50/100
+F@50/100
+R@50/100
+mR@50/100
+F@50/100
+KERN(Chen et al. 2019)CVPR’19
+65.8/67.6
+17.7/19.2
+27.9/29.9
+36.7/37.4
+9.4/10.0
+15.0/15.8
+27.1/29.8
+6.4/7.3
+10.4/11.7
+BGNN(Li et al. 2021)CVPR’21
+59.2/61.3
+30.4/32.9
+40.2/42.8
+37.4/38.5
+14.3/16.5
+20.7/23.1
+31.0/35.8
+10.7/12.6
+15.9/18.6
+DT2ACBS(Desai et al. 2021)ICCV’21
+23.3/25.6
+35.9/39.7
+28.3/31.1
+16.2/17.6
+24.8/27.5
+19.6/21.5
+15.0/16.3
+22.0/24.0
+17.8/19.4
+HL-Net(Lin et al. 2022)CVPR’22
+67.0/68.9
+- /22.8
+- /34.3
+42.6/43.5
+- /13.5
+- /20.6
+33.7/38.1
+- /9.2
+- /14.8
+HetSGG(Yoon et al. 2023)AAAI’23
+57.8/59.1
+31.6/33.5
+40.9/42.8
+37.6/38.7
+17.2/18.7
+23.6/25.2
+30.0/34.6
+12.2/14.4
+17.3/20.3
+Specific
+SQUAT(Jung et al. 2023)CVPR’23
+55.7/57.9
+30.9/33.4
+39.7/42.4
+33.1/34.4
+17.5/18.8
+22.9/24.3
+24.5/28.9
+14.1/16.5
+17.9/21.0
+Motif(Zellers et al. 2018)CVPR’18
+64.6/66.0
+15.2/16.2
+24.6/26.0
+38.0/38.9
+8.7/9.3
+14.2/15.0
+31.0/35.1
+6.7/7.7
+11.0/12.6
+TDE(Kaihua et al. 2020)CVPR’20
+46.2/51.4
+25.5/29.1
+32.9/37.2
+27.7/29.9
+13.1/14.9
+17.8/19.9
+16.9/20.3
+8.2/9.8
+11.0/13.2
+DLFE(Chiou et al. 2021)MM’21
+52.5/54.2
+26.9/28.8
+35.6/37.6
+32.3/33.1
+15.2/15.9
+20.7/21.5
+25.4/29.4
+11.7/13.8
+16.0/18.8
+NICE(Li et al. 2022)CVPR’22
+55.1/57.2
+29.9/32.3
+38.8/41.3
+33.1/34.0
+16.6/17.9
+22.1/23.5
+27.8/31.8
+12.2/14.4
+17.0/19.8
+GCL(Dong et al. 2022)CVPR’22
+42.7/44.4
+36.1/38.2
+39.1/41.1
+26.1/27.1
+20.8/21.8
+23.2/24.1
+18.4/22.0
+16.8/19.3
+17.6/20.6
+IETrans(Zhang et al. 2022)ECCV’22
+54.7/56.7
+30.9/33.6
+39.5/42.2
+32.5/33.4
+16.8/17.9
+22.2/23.3
+26.4/30.6
+12.4/14.9
+16.9/20.0
+CFA (Li et al. 2023)ICCV’23
+54.1/56.6
+35.7/38.2
+43.0/45.6
+34.9/36.1
+17.0/18.4
+22.9/24.4
+27.4/31.8
+13.2/15.5
+17.8/20.8
+Motif
+ST-SGG(Kim et al. 2024a)ICLR’24
+53.9/57.7
+28.1/31.5
+36.9/40.8
+33.4/34.9
+16.9/18.0
+22.4/23.8
+26.7/30.7
+11.6/14.2
+16.2/19.4
+PE-Net†(Zheng et al. 2023)CVPR’23
+64.9/67.2
+31.5/33.8
+42.4/45.0
+39.4/40.7
+17.8/18.9
+24.5/25.8
+30.7/35.2
+12.4/14.5
+17.7/20.4
+IETrans†(Zhang et al. 2022)ECCV’22
+49.3/51.8
+33.5/36.0
+39.9/42.5
+31.2/32.3
+18.3/19.4
+23.1/24.2
+24.2/28.4
+13.7/16.2
+17.5/20.6
+CFA†(Li et al. 2023)ICCV’23
+57.8/61.6
+30.0/33.2
+39.5/43.1
+36.2/37.1
+15.9/18.2
+22.1/24.4
+25.6/29.8
+14.4/17.1
+18.4/21.7
+PE-Net
+RA-SGG
+62.2/64.1
+36.2/39.1
+45.7/48.6
+38.2/39.1
+20.9/22.5
+27.0/28.6
+26.0/30.3
+14.4/17.1
+18.5/21.9
+Table 1: Performance (%) of state-of-the-art SGG models on Visual Genome (Krishna et al. 2017). F@K is the harmonic mean
+of mR@50/100 and R@50/100. † denotes the result produced by us using their official code.
+Models
+Predicate Classification
+Scene Graph Classification
+Scene Graph Detection
+R@50/100
+mR@50/100
+F@50/100
+R@50/100
+mR@50/100
+F@50/100
+R@50/100
+mR@50/100
+F@50/100
+VTransE(Zhang et al. 2017)CVPR’17
+55.7/57.9
+14.0/15.0
+22.4/23.8
+33.4/34.2
+8.1/8.7
+13.0/13.9
+27.2/30.7
+5.8/6.6
+9.6/10.9
+Motif(Zellers et al. 2018)CVPR’18
+65.3/66.8
+16.4/17.1
+26.2/27.2
+34.2/34.9
+8.2/8.6
+13.2/13.8
+28.9/33.1
+6.4/7.7
+10.5/12.5
+VCTree(Tang et al. 2019)ICCV’19
+63.8/65.7
+16.6/17.4
+26.4/27.5
+34.1/34.8
+7.9/8.3
+12.8/13.4
+28.3/31.9
+6.5/7.4
+10.6/12.0
+PE-Net† (Zheng et al. 2023)CVPR’23
+54.3/56.0
+26.2/27.1
+35.4/36.5
+26.2/27.0
+11.2/11.5
+15.7/16.1
+19.5/22.9
+10.3/11.9
+13.5/15.7
+PE-Net+RA-SGG
+48.3/50.1
+35.4/36.8
+40.9/42.4
+19.9/20.8
+16.4/17.2
+18.0/18.8
+16.3/19.0
+12.9/15.0
+14.4/16.8
+Table 2: Performance (%) of state-of-the-art SGG models on GQA (Hudson and Manning 2019)
+RA-SGG
+on
+behind
+on top of
+on the side of
+carrying
+covered by
+on the front of
+flying in
+crossing
+reflected in
+standing by
+full of
+standing near
+catching
+leaning against
+beneath
+driving down
+swimming in
+hang on
+…
+…
+…
+…
+…
+…
+…
+…
+…
+…
+…
+…
+…
+…
+…
+…
+…
+…
+pulled by
+…
+…
+waiting for
+Figure 3: Class-wise comparison of RA-SGG with PE-Net on GQA under PredCls. Predicates are sorted by the frequency.
+we set the threshold τ = 0.3 at the reliable multi-labeled in-
+stance selection, and choose the number of retrievals K by
+performing the grid search in {1, 3, 5, 10, 20}.
+Evaluation Protocol. We evaluate state-of-the-art models
+and RA-SGG on three conventional SGG tasks: (1) Predi-
+cate Classification (PredCls), (2) Scene Graph Classifica-
+tion (SGCls), and Scene Graph Detection (SGDet). Pred-
+Cls is the task that predicts the predicate classes given all
+ground-truth object bounding boxes and the object classes.
+SGCls aims at predicting the predicate classes given the
+ground-truth object bounding boxes. SGGen detects all en-
+tities and their pairwise predicates given an image.
+Metrics. We evaluate SGG models on the three metrics: (1)
+Recall@K (R@K) calculates the proportion of top-K pre-
+dicted triplets that are in ground truth. (2) Mean Recall@K
+(mR@K) calculates the average recall for each predicate
+class, which is designed to measure the performance of SGG
+models under the long-tailed predicate distribution. (3) Re-
+cent SGG studies suggest that there is a trade-off between
+R@K and mR@K (Kim et al. 2024a). Hence, recent works
+have focused on achieving the great F@K, where F@K cal-
+culates the harmonic average of R@K and mR@K.
+Comparisons with State-of-the-art Methods
+Results on Visual Genome. In Table 1, we compare RA-
+SGG applied to the PE-Net (Zheng et al. 2023) with
+state-of-the-art baselines. Based on the experimental result,
+we have summarized the following conclusions: 1) RA-
+SGG achieves state-of-the-art performance under con-
+ventional SGG tasks, particularly in terms of mR@K
+and F@K. Our method not only shows better performance
+than the cutting-edge SGG models, such as HetSGG (Yoon
+et al. 2023) and SQUAT (Jung et al. 2023) by up to 6.2%
+in terms of F@K, but also achieves greater R@K. Com-
+pared to the backbone model, PE-Net, we greatly improve
+the performance in terms of mR@K, while slightly decreas-
+ing R@K. These results imply that RA-SGG’s strategy that
+discovers the latent fine-grained predicates through the re-
+trieval is effective in enhancing the model’s generalization
+capability across all predicate categories without compro-
+9567
+
+Task
+Model
+R@50/100
+mR@50/100
+F@50/100
+PredCls
+Vanilla PE-Net
+64.9/67.2
+31.5/33.8
+42.4/45.0
+RA-SGG w/o select.
+64.4/66.4
+33.4/36.4
+44.0/47.0
+RA-SGG w/o IPSS
+64.6/66.7
+32.9/35.1
+43.6/46.0
+RA-SGG
+62.2/64.1
+36.2/39.1
+45.7/48.6
+SGCls
+Vanilla PE-Net
+39.4/40.7
+17.8/18.9
+24.5/25.8
+RA-SGG w/o select.
+38.5/39.4
+19.6/20.9
+26.0/27.3
+RA-SGG w/o IPSS
+38.6/39.5
+18.6/19.8
+25.1/26.3
+RA-SGG
+38.2/39.1
+20.9/22.5
+27.0/28.6
+Table 3: Ablation study of RA-SGG.
+Num. of retrievals (𝐾)
+mR @ 100 / F@100
+Data prop. for memory bank
+(a)
+(b)
+Figure 4: Sensitivity analysis on hyperparameters. The dot-
+ted line represents the result of PE-Net.
+mising the recognition of general predicates. 2) Discover-
+ing the latent multi-label is a more effective strategy than
+data enhancement/augmentation approaches in address-
+ing the challenges of SGG. RA-SGG outperforms IE-Trans
+and CFA with the PE-Net backbone in terms of all met-
+rics. We claim that it is attributed to the fact that while IE-
+Trans and CFA overlook the comprehensive understanding
+of general predicates to obtain the fine-grained predicates,
+our multi-label discovery effectively addresses both general
+and fine-grained predicates. This result indicates that the for-
+mulation of multi-label classification with partial annotation
+fundamentally addresses both the long-tailed problem and
+semantic ambiguity.
+Results on GQA. In Table 2, we observed that RA-
+SGG greatly improves mR@K and F@K compared to
+the strong baseline, PE-Net, showcasing the effectiveness
+of RA-SGG on a large dataset, which includes numerous
+predicate categories. Similarly, Figure 3 demonstrates RA-
+SGG’s ability to improve the recognition of fine-grained
+predicates, which PE-Net tends to overlook. These results
+imply that RA-SGG effectively discovers the latent fine-
+grained predicates even when using the dataset with numer-
+ous predicate categories.
+Ablation Studies
+Module Component Analysis. We conduct the ablation
+study of RA-SGG to evaluate the impact of each com-
+ponent. We ablate two components in RA-SGG. For RA-
+SGG w/o select., we skip the reliable multi-labeled in-
+stance selection, which determines whether a relation in-
+stance is single-labeled or multi-labeled. For RA-SGG w/o
+IPSS, we replace the inverse propensity score with a con-
+stant in the unbiased augmentation module. In Table 3, we
+obtained the following observations: 1) RA-SGG w/o se-
+lect. still shows better performance than PE-Net in terms
+of mR@K and F@K. That is, the strategy, which roughly
+assigns pseudo-labels for all relations based on retrieved in-
+stances, can enhance the performance on fine-grained pred-
+icates. We argue that it is attributed to the superiority of the
+retrieval-augmented approach, which discovers semantically
+similar predicates using the memory bank. 2) RA-SGG w/o
+IPSS decreases mR@K and F@K compared to RA-SGG.
+This implies that inverse propensity score-based sampling
+is important for boosting the performance on fine-grained
+predicates. 3) Combining all components allows for the best
+generalization capability of RA-SGG.
+Analysis on the Number of Retrievals. We analyze the
+effect of K ∈{1, 3, 5, 8, 10, 20} under PredCls task. In
+Figure 4.(a), we observe that RA-SGG consistently outper-
+forms PE-Net, indicating that utilizing even one near neigh-
+bor is helpful for enhancing the performance of PE-Net. RA-
+SGG achieves the best performance at K = 20, implying
+that referring more neighbors is helpful for enhancing the
+performance on fine-grained predicates.
+Analysis on the Size of Memory Bank. We anavlyze the
+impact of the memory bank size and vary the number of
+relation instances stored per unique triplet, testing with
+{1, 5, 10, 100} instances for each unique triplet. These quan-
+tities represent approximately {2%, 5%, 8%, 15%} of the
+entire training instances, respectively. In Figure 4.(b), we
+observed that RA-SGG generally outperforms the vanilla
+PE-Net, and attains the best performance when the memory
+bank comprises 8% of the training instances. This result sug-
+gests that leveraging a small portion of the training dataset
+can significantly improve the performance of SGG models.
+Moreover, the compact size of the memory bank not only
+enhances its efficiency but also contributes to the scalability
+of RA-SGG.
+Performance of Retrieval Strategy. As there are no ground
+truth retrieval labels, it is difficult to measure the accuracy
+of retrievals. Hence, we conducted a human evaluation of
+the retrieval process on 100 sampled instances, and obtained
+84.20% accuracy. This implies that our approach performs
+accurate retrieval and effectively augments the multi-labels.
+6
+Conclusion
+Although research on fine-grained SGG has garnered its
+attention, fundamental challenges still remain in the prior
+framework. They either suffer from capturing the fine-
+grained predicates due to the SGG nature, which encom-
+passes the long-tailed problem and semantic ambiguity, or
+overlook the general predicates by re-annotating the gen-
+eral predicates as fine-grained predicates. In this work, we
+first reformulate the SGG task as multi-label classification
+problem with partial annotation. To this end, we propose a
+novel RA-SGG, which enhances original labels to multi-
+labels through a retrieval process. RA-SGG effectively dis-
+covers latent fine-grained predicates in the training dataset,
+resulting in substantial improvements across overall predi-
+cates. Our works presents a new perspective in SGG research
+by considering the nature of natural language, where multi-
+ple predicates convey the same single relationship.
+9568
+
+Acknowledgements
+This work was supported by National Research Founda-
+tion of Korea(NRF) funded by Ministry of Science and ICT
+(NRF-2022M3J6A1063021, 10%, No. RS-2024-00341514,
+10%), Institute of Information & Communications Technol-
+ogy Planning & Evaluation(IITP) grant funded by the Ko-
+rea government(MSIT) (RS-2023-00216011, Development
+of artificial complex intelligence for conceptually under-
+standing and inferring like human, 79%) and (No. 2019-0-
+00079, Artificial Intelligence Graduate School Program, Ko-
+rea University, 1%).
+References
+Ben-Baruch, E.; Ridnik, T.; Friedman, I.; Ben-Cohen, A.;
+Zamir, N.; Noy, A.; and Zelnik-Manor, L. 2022. Multi-Label
+Classification With Partial Annotations Using Class-Aware
+Selective Loss. In Proceedings of the IEEE/CVF Confer-
+ence on Computer Vision and Pattern Recognition (CVPR),
+4764–4772.
+Blattmann, A.; Rombach, R.; Oktay, K.; M¨uller, J.; and Om-
+mer, B. 2022. Retrieval-Augmented Diffusion Models. In
+Koyejo, S.; Mohamed, S.; Agarwal, A.; Belgrave, D.; Cho,
+K.; and Oh, A., eds., Advances in Neural Information Pro-
+cessing Systems, volume 35, 15309–15324. Curran Asso-
+ciates, Inc.
+Borgeaud, S.; Mensch, A.; Hoffmann, J.; Cai, T.; Ruther-
+ford, E.; Millican, K.; Van Den Driessche, G. B.; Lespiau,
+J.-B.; Damoc, B.; Clark, A.; De Las Casas, D.; Guy, A.;
+Menick, J.; Ring, R.; Hennigan, T.; Huang, S.; Maggiore,
+L.; Jones, C.; Cassirer, A.; Brock, A.; Paganini, M.; Irving,
+G.; Vinyals, O.; Osindero, S.; Simonyan, K.; Rae, J.; Elsen,
+E.; and Sifre, L. 2022. Improving Language Models by Re-
+trieving from Trillions of Tokens. In Proceedings of the 39th
+International Conference on Machine Learning, volume 162
+of Proceedings of Machine Learning Research, 2206–2240.
+PMLR.
+Casanova, A.; Careil, M.; Verbeek, J.; Drozdzal, M.; and
+Romero-Soriano, A. 2021.
+Instance-Conditioned GAN.
+In Advances in Neural Information Processing Systems
+(NeurIPS).
+Chen, T.; Yu, W.; Chen, R.; and Lin, L. 2019. Knowledge-
+embedded routing network for scene graph generation. In
+Proceedings of the IEEE/CVF Conference on Computer Vi-
+sion and Pattern Recognition, 6163–6171.
+Chen, W.; Hu, H.; Saharia, C.; and Cohen, W. W. 2023. Re-
+Imagen: Retrieval-Augmented Text-to-Image Generator. In
+The Eleventh International Conference on Learning Repre-
+sentations.
+Chiou, M.-J.; Ding, H.; Yan, H.; Wang, C.; Zimmermann,
+R.; and Feng, J. 2021.
+Recovering the Unbiased Scene
+Graphs from the Biased Ones. In Proceedings of the 29th
+ACM International Conference on Multimedia, MM ’21,
+1581–1590. New York, NY, USA: Association for Comput-
+ing Machinery. ISBN 9781450386517.
+Desai, A.; Wu, T.-Y.; Tripathi, S.; and Vasconcelos, N. 2021.
+Learning of Visual Relations: The Devil Is in the Tails. In
+Proceedings of the IEEE/CVF International Conference on
+Computer Vision (ICCV), 15404–15413.
+Dong, X.; Gan, T.; Song, X.; Wu, J.; Cheng, Y.; and Nie, L.
+2022. Stacked Hybrid-Attention and Group Collaborative
+Learning for Unbiased Scene Graph Generation. In CVPR.
+Guu, K.; Lee, K.; Tung, Z.; Pasupat, P.; and Chang, M.-W.
+2020. REALM: retrieval-augmented language model pre-
+training. In Proceedings of the 37th International Confer-
+ence on Machine Learning, ICML’20. JMLR.org.
+Han, S.; Choi, E.; Lim, C.; Shim, H.; and Lee, J. 2022. Long-
+tail Mixup for Extreme Multi-label Classification. In Pro-
+ceedings of the 31st ACM International Conference on Infor-
+mation & Knowledge Management, CIKM ’22, 3998–4002.
+New York, NY, USA: Association for Computing Machin-
+ery. ISBN 9781450392365.
+Hildebrandt, M.; Li, H.; Koner, R.; Tresp, V.; and
+G¨unnemann, S. 2020. Scene Graph Reasoning for Visual
+Question Answering.
+Hudson, D. A.; and Manning, C. D. 2019.
+GQA: A
+New Dataset for Real-World Visual Reasoning and Com-
+positional Question Answering.
+In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR).
+Jain, H.; Prabhu, Y.; and Varma, M. 2016. Extreme Multi-
+label Loss Functions for Recommendation, Tagging, Rank-
+ing & Other Missing Label Applications.
+In Proceed-
+ings of the 22nd ACM SIGKDD International Conference
+on Knowledge Discovery and Data Mining, KDD ’16,
+935–944. New York, NY, USA: Association for Computing
+Machinery.
+Jeon, J.; Kim, K.; Yoon, K.; and Park, C. 2024.
+Seman-
+tic Diversity-Aware Prototype-Based Learning for Unbiased
+Scene Graph Generation. In Computer Vision – ECCV 2024.
+Springer Nature Switzerland.
+Jung, D.; Kim, S.; Kim, W. H.; and Cho, M. 2023. Devil’s on
+the Edges: Selective Quad Attention for Scene Graph Gen-
+eration.
+In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition (CVPR), 18664–
+18674.
+Kaihua, T.; Yulei, N.; Jianqiang, H.; Jiaxin, S.; and Han-
+wang, Z. 2020. Unbiased scene graph generation from bi-
+ased training. CVPR, 3716–3725.
+Kim, K.; Yoon, K.; In, Y.; Moon, J.; Kim, D.; and Park, C.
+2024a. Adaptive Self-training Framework for Fine-grained
+Scene Graph Generation. In The Twelfth International Con-
+ference on Learning Representations.
+Kim, K.; Yoon, K.; Jeon, J.; In, Y.; Moon, J.; Kim, D.; and
+Park, C. 2024b. LLM4SGG: Large Language Models for
+Weakly Supervised Scene Graph Generation. In Proceed-
+ings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), 28306–28316.
+Krishna, R.; Zhu, Y.; Groth, O.; Johnson, J.; Hata, K.;
+Kravitz, J.; Chen, S.; Kalantidis, Y.; Li, L.-J.; Shamma,
+D. A.; et al. 2017. Visual genome: Connecting language and
+vision using crowdsourced dense image annotations. Inter-
+national journal of computer vision, 123: 32–73.
+9569
+
+Lewis, P.; Perez, E.; Piktus, A.; Petroni, F.; Karpukhin, V.;
+Goyal, N.; K¨uttler, H.; Lewis, M.; Yih, W.-t.; Rockt¨aschel,
+T.; Riedel, S.; and Kiela, D. 2020. Retrieval-augmented gen-
+eration for knowledge-intensive NLP tasks. In Proceedings
+of the 34th International Conference on Neural Information
+Processing Systems, NIPS’20. Curran Associates Inc.
+Li, L.; Chen, G.; Xiao, J.; Yang, Y.; Wang, C.; and Chen,
+L. 2023.
+Compositional Feature Augmentation for Un-
+biased Scene Graph Generation.
+In Proceedings of the
+IEEE/CVF International Conference on Computer Vision
+(ICCV), 21685–21695.
+Li, L.; Chen, L.; Huang, Y.; Zhang, Z.; Zhang, S.; and Xiao,
+J. 2022.
+The devil is in the labels: Noisy label correc-
+tion for robust scene graph generation. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, 18869–18878.
+Li, R.; Zhang, S.; Wan, B.; and He, X. 2021. Bipartite graph
+network with adaptive message passing for unbiased scene
+graph generation. CVPR.
+Lin, X.; Ding, C.; Zhan, Y.; Li, Z.; and Tao, D. 2022. HL-
+Net: Heterophily Learning Network for Scene Graph Gen-
+eration.
+In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition (CVPR), 19476–
+19485.
+Long, A.; Yin, W.; Ajanthan, T.; Nguyen, V.; Purkait, P.;
+Garg, R.; Blair, A.; Shen, C.; and van den Hengel, A.
+2022. Retrieval Augmented Classification for Long-Tail Vi-
+sual Recognition. In Proceedings of the IEEE/CVF Confer-
+ence on Computer Vision and Pattern Recognition (CVPR),
+6959–6969.
+Lyu, X.; Gao, L.; Guo, Y.; Zhao, Z.; Huang, H.; Shen, H. T.;
+and Song, J. 2022. Fine-Grained Predicates Learning for
+Scene Graph Generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+(CVPR), 19467–19475.
+Ren, S.; He, K.; Girshick, R.; and Sun, J. 2015. Faster r-
+cnn: Towards real-time object detection with region proposal
+networks. NeurIPS.
+S. Hasegawa, A. N., M. Hiromoto; and Umeda, Y. 2022. Im-
+proving Predicate Representation in Scene Graph Genera-
+tion by Self-Supervised Learning. In 2023 IEEE/CVF Win-
+ter Conference on Applications of Computer Vision (WACV),
+Waikoloa, HI, USA, 2023, pp. 2739-2748.
+Schroeder, B.; and Tripathi, S. 2020. Structured query-based
+image retrieval using scene graphs. CVPR Workshops, 178–
+179.
+Shit, S.; Koner, R.; Wittmann, B.; Paetzold, J.; Ezhov, I.;
+Li, H.; Pan, J.; Sharifzadeh, S.; Kaissis, G.; Tresp, V.; and
+Menze, B. 2022. Relationformer: A Unified Framework for
+Image-to-Graph Generation. In ECCV’2022.
+Tang, K.; Zhang, H.; Wu, B.; Luo, W.; and Liu, W. 2019.
+Learning to compose dynamic tree structures for visual con-
+texts. In Proceedings of the IEEE/CVF conference on com-
+puter vision and pattern recognition, 6619–6628.
+Xie, S.; Girshick, R.; Doll´ar, P.; Tu, Z.; and He, K. 2017. Ag-
+gregated residual transformations for deep neural networks.
+Proceedings of the IEEE conference on computer vision and
+pattern recognition(CVPR), 1492–1500.
+Yang, J.; Lu, J.; Lee, S.; Batra, D.; and Parikh, D. 2018.
+Graph r-cnn for scene graph generation.
+ECCV, 128(7):
+670–685.
+Yoon, K.; Kim, K.; Moon, J.; and Park, C. 2023.
+Unbi-
+ased Heterogeneous Scene Graph Generation with Relation-
+aware Message Passing Neural Network. In The 37th AAAI
+Conference on Artificial Intelligence.
+Yu, Q.; Li, J.; Wu, Y.; Tang, S.; Ji, W.; and Zhuang, Y.
+2023. Visually-Prompted Language Model for Fine-Grained
+Scene Graph Generation in an Open World. In Proceedings
+of the IEEE/CVF International Conference on Computer Vi-
+sion (ICCV), 21560–21571.
+Zellers, R.; Yatskar, M.; Thomson, S.; and Choi, Y. 2018.
+Neural motifs: Scene graph parsing with global context. In
+Proceedings of the IEEE conference on computer vision and
+pattern recognition, 5831–5840.
+Zhai, R.; Dan, C.; Kolter, J. Z.; and Ravikumar, P. K. 2022.
+Understanding Overfitting in Reweighting Algorithms for
+Worst-group Performance.
+Zhang, A.; Yao, Y.; Chen, Q.; Ji, W.; Liu, Z.; Sun, M.; and
+Chua, T.-S. 2022.
+Fine-Grained Scene Graph Generation
+with Data Transfer. In ECCV.
+Zhang, H.; Kyaw, Z.; Chang, S.-F.; and Chua, T.-S. 2017.
+Visual translation embedding network for visual relation de-
+tection.
+In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition (CVPR).
+Zheng, C.; Lyu, X.; Gao, L.; Dai, B.; and Song, J. 2023.
+Prototype-Based Embedding Network for Scene Graph
+Generation. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition (CVPR).
+9570
+

@@ -107,13 +107,14 @@ def repair_container_permissions(container: str) -> None:
     script = r'''
 set -e
 : "${BENCH_MOUNT:=/home/node/.openclaw}"
-for agent_id in main autoresearch paper-review idea-generate reviewer; do
+for agent_id in main ingest curate extract critic design spec audit ideate judge; do
   mkdir -p "${BENCH_MOUNT}/agents/${agent_id}/sessions"
 done
 for path in \
   "${BENCH_MOUNT}/agents" \
   "${BENCH_MOUNT}/workspace" \
-  "${BENCH_MOUNT}"/workspace-* \
+  "${BENCH_MOUNT}/workspace"/* \
+  "${BENCH_MOUNT}/wiki" \
   "${BENCH_MOUNT}/logs" \
   "${BENCH_MOUNT}/qmd" \
   "${BENCH_MOUNT}/tasks"
@@ -171,14 +172,15 @@ def run_agent(container: str, agent_id: str, qa: dict, run_id: str,
             material = material.get("content") or Path(material["path"]).read_text(encoding="utf-8")
         prompt = f"{material}\n\n---\n\n{prompt}"
     # Use a never-reused key so every QA starts from an empty conversation.
-    # `--session-key` accepts the full agent-scoped key and creates a fresh
-    # session when the key has not been seen before.
+    # OpenClaw documents --session-key as the explicit session selector; there
+    # is no separate "new session" flag for `openclaw agent`, so freshness comes
+    # from making the key unique per QA attempt.
     session_key = f"agent:{agent_id}:bench-{run_id}-{qa['qa_id']}-{uuid.uuid4().hex}"
     # Propagate the LLM provider credentials into the container. Without
     # these the embedded openclaw agent cannot reach the model.
     cmd = [
         "docker", "exec", "-i",
-        "-e", "DEEPSEEK_API_KEY", "-e", "DEEPSEEK_BASE_URL",
+        "-e", "MINIMAX_API_KEY", "-e", "MINIMAX_BASE_URL",
         container, "openclaw", "agent",
         "--agent", agent_id, "--message", prompt, "--json", "--local",
         "--session-key", session_key,
@@ -372,87 +374,118 @@ def _strip_diagnostics(text: str) -> str:
     return "\n".join(cleaned_lines)
 
 
-def _find_payload_json(text: str) -> dict | None:
-    """Find a JSON object with 'payloads' key embedded in mixed text
-    (diagnostic lines may precede the JSON on stdout or stderr)."""
-    # 1) Try to parse the whole string as JSON.
-    try:
-        data = json.loads(text)
-        if isinstance(data, dict) and "payloads" in data:
-            return data
-    except Exception:
-        pass
-    # 2) Scan for a JSON block that contains a "payloads" key.
-    for m in re.finditer(r'\{[^{]*["\\]?payloads["\\]?', text):
-        start = m.start()
-        depth = 0
-        for j in range(start, len(text)):
-            ch = text[j]
-            if ch == "{":
-                depth += 1
-            elif ch == "}":
-                depth -= 1
-            if depth == 0:
-                try:
-                    data = json.loads(text[start : j + 1])
-                except Exception:
-                    pass
-                else:
-                    if isinstance(data, dict) and "payloads" in data:
-                        return data
-                break
-    return None
-
-
-def _extract_agent_json_text(stdout: str, stderr: str) -> str:
-    """Extract agent reply from `--json` output that may be mixed with
-    diagnostic lines on either stdout or stderr.
-
-    Returns the concatenated payloads[].text or an empty string.
-    """
-    for source in (stdout, stderr):
-        data = _find_payload_json(source)
-        if not data:
-            continue
-        for key in ("payloads",):
-            pl = data.get(key)
-            if isinstance(pl, list) and pl:
-                joined = "\n".join(
-                    p.get("text", "") for p in pl if isinstance(p, dict)
-                ).strip()
-                if joined:
-                    return joined
-        result = data.get("result")
-        if isinstance(result, dict):
-            pl = result.get("payloads")
-            if isinstance(pl, list) and pl:
-                joined = "\n".join(
-                    p.get("text", "") for p in pl if isinstance(p, dict)
-                ).strip()
-                if joined:
-                    return joined
-    return ""
-
-
 def _extract_agent_text(stdout: str, stderr: str) -> str:
     """Pick the agent's final text out of an `openclaw agent --json` reply.
 
-    1. Scan stdout, then stderr, for a JSON object with payloads[].text.
-    2. If JSON is found, return concatenated text (clean, no diagnostics).
-    3. Fall back to stripping known diagnostic noise from stdout / stderr.
-    4. If nothing usable remains, return a sentinel string.
+    Strategy:
+    1. Try to parse stdout as JSON. The docs document shape:
+         {"payloads": [{"text": "...", "mediaUrl": null}, ...], "meta": {...}}
+       We concatenate every payloads[].text (the agent may emit multiple
+       text parts) and return that.
+    2. If stdout is empty or unparsable as a whole, try to find a JSON
+       object embedded in stdout (some openclaw builds prepend diagnostic
+       lines like "- Canonicalized N orphaned session key(s) ..." to the
+       JSON payload, which makes json.loads(stdout) raise). The fallback
+       scans for the first '{' that starts a top-level object and
+       attempts to parse from there.
+    3. If stdout is empty or has no parseable JSON, fall back to stderr,
+       but run the diagnostic-stripping pass first -- when context-engine
+       plugin fails, openclaw writes ~2kB of `[context-engine] ... [diagnostic] ...`
+       noise to stderr and no real agent text appears.
+    4. If after stripping nothing usable remains, return a sentinel
+       "(no agent response — only diagnostic output)" so downstream
+       judges and the report get a clear signal instead of 2kB of noise.
     """
-    agent_text = _extract_agent_json_text(stdout, stderr)
-    if agent_text:
-        return agent_text
+    if stdout.strip():
+        data = _try_parse_json(stdout)
+        if data is not None:
+            extracted = _text_from_json(data)
+            if extracted is not None:
+                return extracted
+        # Whole stdout didn't parse -- try to find a JSON object embedded
+        # after diagnostic noise (some openclaw builds emit session
+        # canonicalization messages before the JSON payload).
+        embedded = _extract_embedded_json(stdout)
+        if embedded is not None:
+            extracted = _text_from_json(_try_parse_json(embedded))
+            if extracted is not None:
+                return extracted
+        # Last resort: return the cleaned noise text so the judge sees
+        # whatever non-JSON content was in stdout.
+        return _strip_diagnostics(stdout)
 
-    # Fallback: strip diagnostics from stdout then stderr.
-    for source in (stdout, stderr):
-        cleaned = _strip_diagnostics(source)
-        if cleaned.strip():
-            return cleaned
+    # Fallback: stderr.  Strip diagnostic noise and return what remains.
+    cleaned_stderr = _strip_diagnostics(stderr)
+    if not cleaned_stderr.strip():
+        return "(no agent response — only diagnostic output)"
+    return cleaned_stderr
 
-    return "(no agent response — only diagnostic output)"
+
+def _try_parse_json(text: str) -> object | None:
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
+def _extract_embedded_json(text: str) -> str | None:
+    """Find the first top-level JSON object embedded in text.
+
+    Scans for the first '{' that is the start of a balanced top-level
+    object (string-aware), then returns the substring from there. Used
+    to recover from openclaw builds that prepend non-JSON diagnostic
+    lines to the JSON payload.
+    """
+    for i, ch in enumerate(text):
+        if ch != "{":
+            continue
+        depth = 0
+        in_str = False
+        escape = False
+        for j in range(i, len(text)):
+            c = text[j]
+            if in_str:
+                if escape:
+                    escape = False
+                elif c == "\\":
+                    escape = True
+                elif c == '"':
+                    in_str = False
+            else:
+                if c == '"':
+                    in_str = True
+                elif c == "{":
+                    depth += 1
+                elif c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        candidate = text[i : j + 1]
+                        if _try_parse_json(candidate) is not None:
+                            return candidate
+                        break
+    return None
+
+
+def _text_from_json(data: object) -> str | None:
+    """Pull the concatenated payloads[].text out of an `openclaw agent --json` reply."""
+    if not isinstance(data, dict):
+        return None
+    payloads = data.get("payloads")
+    if isinstance(payloads, list) and payloads:
+        texts = [p.get("text", "") for p in payloads if isinstance(p, dict)]
+        joined = "\n".join(t for t in texts if t)
+        if joined.strip():
+            return joined
+    # Some embedded-fallback responses nest under "result.payloads".
+    result = data.get("result")
+    if isinstance(result, dict):
+        payloads = result.get("payloads")
+        if isinstance(payloads, list) and payloads:
+            texts = [p.get("text", "") for p in payloads if isinstance(p, dict)]
+            joined = "\n".join(t for t in texts if t)
+            if joined.strip():
+                return joined
+    return None
 
 
 def main(bench_name: str, agent_id: str | None = None) -> int:
@@ -524,13 +557,29 @@ def main(bench_name: str, agent_id: str | None = None) -> int:
                         f"stdout_bytes={len(raw.get('stdout', ''))} "
                         f"stderr_bytes={len(raw.get('stderr', ''))} "
                         f"agent_text_chars={len(answer or '')}")
-            # Surface the first 200 chars of the agent's reply so
-            # zero-score failures are easy to diagnose from CI logs.
+            # Print summary line to stderr for quick scanning in CI logs.
+            # Then emit the full agent answer inside a GitHub Actions log group
+            # so it's fully visible without truncation.  `::group::` / `::endgroup::`
+            # are rendered as collapsible sections by GitHub Actions.
             head = (answer or "").replace("\n", "\\n")[:200]
             print(f"  [{qa['qa_id']}] score={verdict.get('score', 0):.3f} "
                   f"pass={verdict.get('pass', False)} "
                   f"len(answer)={len(answer or '')} head={head!r}",
                   file=sys.stderr)
+            group_title = (f"QA {qa['qa_id']} — agent reply "
+                           f"(score={verdict.get('score', 0):.2f}, "
+                           f"pass={verdict.get('pass', False)}, "
+                           f"{len(answer or '')} chars)")
+            print(f"::group::{group_title}")
+            print(answer or "(no agent response)")
+            # When the agent CLI fails (non-zero exit), surface raw stderr
+            # so the CI logs show what went wrong instead of just the
+            # stripped sentinel.
+            if raw.get("returncode", 0) != 0 and raw.get("stderr", "").strip():
+                print("")
+                print("--- raw agent stderr (exit={}) ---".format(raw.get("returncode")))
+                print(raw["stderr"].strip()[:8000])
+            print("::endgroup::")
             result_entry = {
                 "qa_id": qa["qa_id"], "task_type": qa.get("task_type"),
                 "weight": qa.get("weight", 1.0),

@@ -1,0 +1,1317 @@
+
+--- Page 1 ---
+Salient Temporal Encoding for Dynamic Scene Graph Generation
+Zhihao Zhu
+Carnegie Mellon University
+704242527zzh@gmail.com
+Abstract
+Representing a dynamic scene using a structured spatial-
+temporal scene graph is a novel and particularly challeng-
+ing task. To tackle this task, it is crucial to learn the tempo-
+ral interactions between objects in addition to their spatial
+relations. Due to the lack of explicitly annotated temporal
+relations in current benchmark datasets, most of the exist-
+ing spatial-temporal scene graph generation methods build
+dense and abstract temporal connections among all ob-
+jects across frames. However, not all temporal connections
+are encoding meaningful temporal dynamics. We propose
+a novel spatial-temporal scene graph generation method
+that selectively builds temporal connections only between
+temporal-relevant objects pairs and represents the temporal
+relations as explicit edges in the scene graph. The resulting
+sparse and explicit temporal representation allows us to im-
+prove upon strong scene graph generation baselines by up
+to 4.4% in Scene Graph Detection. In addition, we show
+that our approach can be leveraged to improve downstream
+vision tasks. Particularly, applying our approach to action
+recognition, shows 0.6% gain in mAP in comparison to the
+state-of-the-art.
+1. Introduction
+A primary goal of computer vision is to have a detailed
+understanding of a visual scene comparable to what humans
+perceive. Recently, scene graph generation has emerged as
+a novel task in computer vision. In addition to correctly lo-
+cating and recognizing objects in a static scene, it requires
+a perceptual algorithm to infer the semantic interactions be-
+tween them. Scene graph generation has first been proposed
+in [16], and great progress has been made towards improv-
+ing its performance [4, 25, 26, 47, 48].
+While spatial scene graphs are an effective representa-
+tion of static scenes, they lack the ability to model temporal
+dynamics of visual elements across time. Temporal context
+plays a crucial role in action and activity understanding. By
+observing a single frame of a human-object interaction, it is
+often difficult, even for a person, to accurately identify the
+action. This indicates the importance for scene understand-
+
+
+
+
+
+
+	
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Figure 1. Top row shows a person pouring water into a cup and
+then drinking the water from the cup. Second and third row com-
+pare state-of-the-art dense temporal connections and our sparse
+and explicit temporal connections for dynamic scene graph gen-
+eration. Circular nodes (blue, green and orange) represent the de-
+tected objects, and rectangular nodes (brown and red) represent
+our encoded temporal relations.
+ing algorithms to analyze not a single frame but a sequence
+of frames, in order to correctly understand interactions.
+To mitigate the limits of static scene graphs for rep-
+resenting a dynamic scene, Jingwei et al. [14] proposed
+spatial-temporal scene graphs.
+Individual spatial scene
+graphs computed for each frame are stacked together to
+form the spatial-temporal scene graph. Therefore, this ap-
+proach doesn’t explicitly model temporal dynamics, which
+are important for understanding the semantics of a dynamic
+scene. For instance, in Fig. 1, the cup’s location changes
+from under the bottle to near the person’s face. This tempo-
+ral change is helpful in inferring the semantics that the per-
+son is pouring water from the bottle into the cup in frame
+t −1, and then drinks water from the cup in frame t.
+arXiv:2503.14524v1  [cs.CV]  15 Mar 2025
+
+--- Page 2 ---
+  
+    
+    
+    
+   
+     
+   	        
+      
+    
+          
+    
+     
+
+    
+
+
+
+
+
+
+
+
+
+
+
+
+
+			
+
+
+
+
+
+
+...
+..
+..
+.
+...
+...
+...
+...
+
+.
+
+
+Figure 2. Overview of Salient Temporal Relation Encoder (STRE). From left to right, frame t is input into PISP [11] to obtain an initial
+spatial scene graph proposal. To aggregate spatial context for each node, the spatial scene graph prediction from the previous frame t −1
+are input into a Graph Convolutional Network. The updated node features are passed into the Saliency Attention module to calculate
+temporal relevance score. The pairs with the highest temporal relevance scores are selected for encoding the temporal relation via the
+Temporal Relation Encoder. The spatial context and encoded temporal relations are summed up and passed into the spatial-temporal scene
+graph refinement module to obtain the final graph.
+We propose Salient Temporal Relationship Encoder
+(STRE) to leverage these temporal dynamics by explic-
+itly modelling them as additional features in the spatial-
+temporal scene graph. Temporal features encode dynamic
+changes of objects and context across frames. To the best
+of our knowledge, our approach is the first to model spatial-
+temporal context as feature vectors for scene graph genera-
+tion. These features can be used for downstream tasks and
+we show how they can improve action recognition.
+While learning temporal context is important, we posit
+that a limited set of temporal connections across frames
+contains meaningful information - temporal connections
+should be established sparsely, between objects that con-
+tribute to the same event of the scene. In the example given
+in Fig. 1, our proposed STRE (bottom row) does not con-
+nect the bottle in frame t −1 to every object in frame t
+because the bottle doesn’t contribute to the main event in
+the frame t that the person is drinking water from the cup.
+This is in contrast to previous work [1, 5, 44] that builds
+dense temporal connections (upper row) among all the ob-
+jects across frames. Experiments in Section 4.1 confirm that
+by selectively building only the most important temporal
+connections, STRE yields significant gains in performance
+and efficiency compared to recent state of the art.
+Details of Salient Temporal Relation Encoder (STRE)
+are outlined in Fig. 2. The contributions of our work can
+be summarized as follows: (i) we propose the use of sparse
+spatial-temporal graphs to only build the most important
+temporal connections and show state of the art performance
+on scene graph generation, while being more efficient, (ii) a
+method of explicitly encoding spatial-temporal context into
+features that can be used in downstream tasks, (iii) a novel
+way to incorporate the spatial-temporal scene graph into ac-
+tion recognition to better leverage temporal dynamics and
+improve action recognition.
+2. Related Work
+Spatial Scene Graphs
+Recently, structured scene repre-
+sentations have had much attention in the computer vision
+community. Static scene graphs introduced in [16] have
+been applied to solve different vision tasks. Scene graphs
+represent images by explicitly modeling objects and their
+relationships to create a graph where objects are represented
+as nodes and relations as edges. This structure can both
+be used for scene understanding [7, 11, 25, 40, 48, 50]
+and for downstream tasks [8, 15, 37]. An increase in uses
+for scene graph contextual reasoning has also been prolif-
+erated by new scene graph datasets [20, 21, 24].
+These
+datasets allow myriad of approaches towards improving
+scene graph generation.
+Some approaches use pairwise
+methods [11, 22, 37, 40, 51, 53] while others use recurrence
+[47, 50], GNNs [48], or transformers [9, 25]. Despite great
+progress made by these methods for scene graph generation,
+their applications on videos are limited, as they are designed
+for static images.
+Spatial-Temporal
+Scene
+Graphs
+Spatial-temporal
+graphs have been proposed to improve upon spatial scene
+graphs by considering the interactions between objects over
+
+--- Page 3 ---
+time. Recent datasets [14, 32, 38] in this area have mostly
+focused on human-object interactions. Many approaches
+have been proposed to solve the spatial-temporal scene
+graph generation task by applying different temporal
+context aggregation strategies. For example, some encode
+temporal context using recurrent [46] or pooling [9]
+methods.
+Others use graph convolutions [1, 9, 44] and
+attention [5, 9, 13, 41]. However, most of these models
+explicitly separate the spatial and temporal interaction to
+sequential modules, limiting their expressibility. More re-
+cent methods achieved state-of-the-art performance on the
+Action Genome dataset [14] by using the spatial-temporal
+transformer [5], or the message passing graph neural
+network [1]. However, these methods need to build dense
+temporal connections, which is inefficient and obscures
+important temporal dynamics.
+In contrast, our proposed
+STRE builds sparse temporal connections only between
+relevant objects. Experiments demonstrate that this leads
+to better temporal contextual understanding and more
+accurate spatial-temporal scene graph generation. Recently
+Li et al. [23] avoids building dense temporal connections
+by matching objects in different frames only if they are
+spatially-close. However, this approach has limits in cases
+when objects are moving fast, or when there are many
+objects located closely in one region. In contrast, our model
+selectively builds meaningful sparse temporal connections,
+by considering whether the established temporal connec-
+tions contribute to the main event in the scene. Experiments
+in Section 4.1 show our model’s advantage over [23]’s
+hand-crafted criteria for building temporal connections.
+Video Action Recognition
+Video action recognition has
+evolved rapidly in recent years.
+Common approaches
+focus primarily on utilizing RGB or flow-based features
+[3, 6, 12, 45].
+Recently, Baradel et al.
+[2] has found
+benefit of using spatial interaction of detected objects in a
+frame as additional features for action recognition. Spatial-
+temporal interactions between objects have also been shown
+[1, 28, 29, 44, 31, 34] to further improve action recognition
+performance. In particular, [14] suggests using structured
+spatial-temporal scene graph as the feature bank [45] for ac-
+tion recognition. However, they stack multiple static scene
+graphs to construct feature banks, which lack the ability to
+model temporal dynamics. While also using [45] as back-
+bone like in [14], our model explicitly encodes a temporal
+scene graph feature bank, which helps the action recogni-
+tion model leverage temporal context more easily.
+3. Salient Temporal Relation Encoder
+The goal of the Salient Temporal Relation Encoder
+(STRE) is to encode sparse spatial-temporal context as a
+feature and use this context to inform scene graph predic-
+tion. A common approach in literature [10, 14, 28, 46] to
+generate a spatial-temporal scene graph is to first generate a
+spatial scene graph for each individual frame and then stack
+them along the time axis.
+A static spatial scene graph SSG = (V, E) is a struc-
+tured representation of the content of an image I, where V
+is a set of nodes that correspond to objects in the image,
+and E is a set of edges representing relationships between
+nodes. Time adds dependencies between nodes in different
+frames I = {I1, I2, ...}. A spatial-temporal scene graph is
+often defined as: STSG = (Vt, Et), introducing an addi-
+tional temporal index t. To be able to explicitly leverage the
+temporal context, we propose a new spatial-temporal scene
+graph representation STSG = (Vt, Et, T t−1,t), where
+T t−1,t = {τ t−1,t
+11
+, τ t−1,t
+12
+, ...} is the temporal context, and
+each element τ t−1,t
+ij
+represents the temporal dependencies
+between the i-th object in frame It−1 and j-th object in
+frame It.
+Given a video, our approach generates spatial-temporal
+scene graph in three-stages: (i) spatial scene graph pro-
+posal using a well-tuned spatial scene graph generation net-
+work [11] (Section 3.1), (ii) temporal scene graph gener-
+ation (Section 3.2), and (iii) joint spatial-temporal scene
+graph refinement (Section 3.3).
+For application on the action recognition task, a long
+term feature bank is constructed from the final spatial-
+temporal scene graphs. Details are discussed in Section 3.4.
+3.1. Spatial Scene Graph
+A spatial scene graph is required as an initial proposal
+to define the nodes and edges per frame. We choose the
+Permutation-Invariant Structured Prediction model (PISP)
+[11] as a spatial baseline and an initial prediction of the
+spatial scene graph. We find this architecture simple and
+straightforward to integrate temporal features. Additionally,
+PISP can be tuned to perform similar to state-of-the-art for
+the spatial-only prediction on the Action Genome dataset.
+For a given frame It, a Faster R-CNN object de-
+tector [33] is used to extract a set of object proposals,
+where each object proposal i consists of a box location
+bi = [xi, yi, wi, hi], object label distributions pi over G ob-
+ject classes, and C-dimensional ROI-Aligned visual fea-
+tures µi ∈RC. Each node νi ∈V is represented as the
+concatenation of box location, label distribution and visual
+features, namely νi = (bi ⊕pi ⊕µi) ∈RM, where ⊕is
+the concatenation operation, and M = 4 + G + C. To rep-
+resent the initial guess of the relations between N number
+of objects, a relation distribution matrix R ∈RN×N×H is
+constructed for each object pair, where H is the number of
+relationship classes.
+3.2. Temporal Scene Graph
+To build only meaningful temporal connections, we pro-
+pose a two-stage temporal scene graph generation method.
+The first stage, Saliency Attention, sparsely connects the
+
+--- Page 4 ---
+top K node pairs from two spatial scene graphs based on
+contextual similarity. The second stage applies a Tempo-
+ral Relation Encoder to generate spatial-temporal features
+between node pairs.
+3.2.1
+Saliency Attention
+In order to build compact and effective temporal scene
+graphs, the most temporally-relevant node pairs need to be
+identified. We claim that, meaningful temporal dynamics
+are between either the same objects across frames, or dif-
+ferent objects if they contribute to the same event of the
+scene. To achieve this, we propose a novel Saliency Atten-
+tion module to calculate temporal relevance scores between
+objects across frames, and build temporal connections be-
+tween node pairs that have highest scores. The calculation
+of temporal relevance score takes into account the similar-
+ity of object features as well as their context. The latter
+of which is important for determining whether two objects
+contribute to the same event.
+To build spatial-temporal context across objects, a mod-
+ified Graph Convolutional Network (GCN) [18] is applied
+to the spatial scene graph proposal. The modified GCN ag-
+gregates both neighboring node information νj and relation
+information εi,j to obtain an updated node representation
+ˆνi ∈RM. More specifically, one propagation layer can be
+represented as:
+ˆνi = σ(νi +
+X
+j∈N(i)
+θij(Wννj + Wεεij)),
+(1)
+where σ is a non-linear activation function, N(i) is the first
+order neighborhood of node i, θij ∈[0, 1] represents the
+connectivity between node i and j, where 0 means the two
+nodes are not connected. Wν : RM →RM and Wε : RL →
+RM are two learned linear layers that transform the nodes
+and edges respectively into the same feature dimension.
+We use a temporal relevance score to determine if ob-
+jects should be connected (they involve the same spatial-
+temporal interaction). To do this, we sort pairs of objects
+by node feature similarity and select the K highest-ranked
+temporal relevance scores. K is a parameter that controls
+the sparsity of the temporal scene graph, and a smaller K
+results in sparser temporal scene graph. A common method
+to compute similarity is to concatenate two node features
+and use a Multi-Layer Perceptron (MLP). This requires cal-
+culation for each pair of nodes, which results in quadratic
+O(N t−1 × N t) time complexity. To reduce time complex-
+ity, a kernel function fγ(.) is applied instead. Given two
+GCN-updated node features ˆνt
+j and ˆνt−1
+k
+for the frame It
+and It−1 respectively, the temporal relevance score γjk is
+calculated as:
+γjk = fγ(ˆνt
+j, ˆνt−1
+k
+) =
+
+ϕ(ˆνt
+j), ϕ(ˆνt−1
+k
+)
+
+,
+(2)
+where ϕ : RM →RD is a learned projection function which
+projects nodes features into D-dimensional space.
+3.2.2
+Temporal Relation Encoding
+We propose a Temporal Relation Encoder to explicitly
+model the temporal context as features and not attention
+weights like [1, 5]. To achieve this, the frame context gt is
+defined as the average of the GCN-updated node features:
+gt =
+1
+Nt
+PNt
+i=1 ˆνt
+i, which is leveraged to guide the temporal
+relation encoding.
+More specifically, for every node pairs j, k that’s con-
+nected by Saliency Attention (i.e. ηjk = 1), their node
+features ˆνt
+j and ˆνt−1
+k
+are concatenated, and projected into
+a common space to form the global context feature gt. To-
+gether with gt, they are fed into a feature encoder to encode
+the temporal relations τ t,t−1
+jk
+. We adopted a MLP as the
+temporal relation encoder. More specifically, temporal rela-
+tions τ t,t−1
+jk
+can be represented as:
+τ t,t−1
+jk
+= fτ(gt ⊕fg(ˆνt
+j ⊕ˆνt−1
+k
+)),
+(3)
+where ⊕is the concatenation operation, and fτ : R2M →
+RM and fg : R2M →RM are both two-layer MLPs. A
+detailed comparison of different encoders (e.g Transformer)
+is provided in Section 2 of the supplemental material.
+3.3. Spatial-Temporal Scene Graph Refinement
+Finally, to improve the per-frame scene graph prediction
+from the initial proposal we use the spatial-temporal fea-
+tures. For each node j, its temporal relations are aggregated
+with a weighted sum over all its valid temporal connections,
+with using temporal relevance score as the weights. Aggre-
+gated temporal relation ζt
+j can be represented as:
+ζt
+j =
+1
+PNt−1
+k=1 γjk · ηjk
+Nt−1
+X
+k=1
+γjk · τ t,t−1
+jk
+· ηjk,
+(4)
+The spatial and temporal context are leveraged to form
+the final node feature representation ϑt
+j. To obtain ϑt
+j, ag-
+gregated temporal relations ζt
+j and GCN-updated node fea-
+tures ˆνt
+j are summed up:
+ϑt
+j = ˆνt
+j + ζt
+j,
+(5)
+To estimate the scene graph relations, the updated sub-
+ject node feature ϑt
+i and object node feature ϑt
+j are concate-
+nated, and passed into a fully-connected layer fr followed
+by a sigmoid activation function σ, resulting in the relation
+class distribution between subject i and object j:
+pt
+ij = σ(fr(ϑt
+i ⊕ϑt
+j)),
+(6)
+
+--- Page 5 ---
+3.4. Spatial-Temporal Scene Graph for Action
+Recognition
+An additional benefit of sparse and explicit temporal re-
+lations is that they can be easily leveraged for downstream
+action recognition. To validate this, similar to [14], we use
+[45] as our baseline action recognition model. In [14], the
+authors constructed a Scene Graph Feature Bank (SGFB)
+by stacking a sequence of spatial scene graphs, excluding
+any explicit temporal graph dynamics.
+To integrate explicit temporal dynamics, we propose
+a new Spatial-Temporal Scene Graph Feature Bank (ST-
+SGFB): ZST −SGF B
+= [z1, z2, ..., zT ] which leverages
+both spatial and temporal relations. More specifically, each
+component zt is a |K × M| matrix, given there are K num-
+ber of object classes, and each object has a M-dimensional
+feature representation. If an object of class i is detected in
+the frame It, the i-th row of zt will be updated with ϑt
+i,
+which is the aggregation of the spatial context and temporal
+context as shown in Eq. 5. If there is no detected object for
+the i-th class, then the i-th row in the zt will be set to zero.
+We follow the same approach as [14] to use ST-SGFB as the
+long-term feature bank together with the 3D CNN features
+for classifying the actions.
+4. Experiments
+In Section 4.1 the Salient Temporal Relation Encoder
+(STRE) is evaluated for the spatial-temporal scene graph
+generation task. In Section 4.2 the Spatial-Temporal Scene
+Graph Feature Bank is evaluated for the action recognition
+task.
+4.1. Spatial-Temporal Scene Graph Generation
+4.1.1
+Dataset, Training, and Evaluation
+Dataset
+Recently two video-based scene graph datasets
+with frame-level scene graph annotations have been re-
+leased (i) the Action Genome dataset [14] which is based
+upon well established Charades dataset [39] and (ii) the
+Home Action Genome dataset [32], a large-scale multi-view
+video dataset of daily activities at home. We evaluate scene
+graph generation on the Action Genome dataset [14], as the
+Home Action Genome dataset [32] has not been used yet in
+literature for evaluation of scene graph generation perfor-
+mance, while Action Genome dataset allows for compari-
+son with the widest selection of these approaches.
+Training
+To train the model, a sample is constructed from
+a series of frames. Since the ratio of relations to no relations
+across objects is low, the relation loss is divided by the num-
+ber of relations to ensure equal weight for relation and no-
+relation predictions. In addition the weight of no-relation
+predictions is decreased by a factor of 5.
+PredCls
+SGCls
+SGDet
+R@10 R@20
+R@10 R@20
+R@10 R@20
+VRD [27]
+51.7
+54.7
+32.4
+33.3
+19.2
+24.5
+Motif Freq [50]
+62.4
+65.1
+40.8
+41.9
+23.7
+31.4
+MSDN [22]
+65.5
+68.5
+43.9
+45.1
+24.1
+32.4
+VCTREE [40]
+66.0
+69.3
+44.1
+45.3
+24.4
+32.6
+RelDN [51]
+66.3
+69.5
+44.3
+45.4
+24.5
+32.8
+GPS-Net [25]
+66.8
+69.9
+45.3
+46.5
+24.7
+33.1
+STTran [5]
+68.6
+71.8
+46.4
+47.5
+25.2
+34.1
+APT [23]
+69.4
+73.8
+47.2
+48.9
+26.3
+36.1
+STRE (ours)
+69.4
+71.4
+47.4
+48.5
+29.0
+38.4
+Table 1. With-constraint comparison with state-of-the-art spatial
+(upper) and spatial-temporal (lower) scene graph generation meth-
+ods on the Action Genome dataset [14]. All other approaches use
+the same detector and following the protocol suggested in [5].
+PredCls
+SGCls
+SGDet
+mR@20 mR@50
+mR@20 mR@50
+mR@20 mR@50
+Freq Prior [49]
+55.1
+63.6
+34.3
+36.6
+24.8
+34.0
+G-RCNN [48]
+56.3
+61.3
+36.1
+38.2
+27.7
+34.9
+RelDN [51]
+59.8
+63.4
+39.9
+41.9
+30.3
+39.5
+TRACE [42]
+61.8
+65.3
+41.1
+43.2
+30.8
+40.1
+STRE(Ours)
+62.7
+67.5
+41.9
+44.2
+32.4
+42.7
+Table 2. Mean recall(%) of various models on AG. The number of
+triplets per frame is set to a limit of 50 and top 6 predictions for
+each pair are kept when evaluating.
+For classification of the relations a binary cross-entropy
+loss is applied. In addition STRE can refine the object class
+label predicted by the detector by utilizing an entity node
+classification loss in the SGCls and SGDet modes. Addi-
+tional training details (including hyper parameters) can be
+found in the supplemental.
+Evaluation
+Following [14], we adopt three common
+recall-based evaluation protocols for image-based scene
+graph generation: (i) Predicate Classification (PredCls), (ii)
+Scene Graph Classification (SGCls), and (iii) Scene Graph
+Detection (SGDet). Cong et al. [5] recently provided a uni-
+fied experimental protocol using the same object detector
+and evaluation protocol for different baseline methods to
+ensure comparability with previous work [14, 30, 50, 5].
+We are following the same evaluation protocol, and use their
+provided detector model checkpoint to obtain the same ob-
+ject detection results.
+In addition, to better account for the imbalanced distri-
+bution of relations, we also evaluate our model using mean
+Recall(mR), mAPrel and wmAPrel, following [42].
+4.1.2
+Quantitative Results and Comparison
+Table 1 compares STRE to several state-of-the-art scene
+graph generation methods on the Action Genome dataset
+[14]. Results using no constraint setting are available in the
+supplemental. STRE is trained using K = 1 as suggested
+by detailed performance analysis of this parameter in Sec-
+tion 4.1.4.
+
+--- Page 6 ---
+person
+sofa
+table
+bottle
+phone
+phone
+bottle
+sofa
+table
+sofa
+bottle
+phone
+table
+floor
+holding
+holding
+behind
+beneath
+in front of
+in front of
+drinking from
+in front of
+not contacting
+not contacting
+not looking at
+looking at
+looking at
+not looking at
+not looking at
+on the side of
+sitting on
+not contacting
+person
+sofa
+table
+bottle
+phone
+holding
+holding
+behind
+beneath
+in front of
+touching
+in front of
+drinking from
+in front of
+not looking at
+not looking at
+not looking at
+not looking at
+on the side of
+sitting on
+person
+sofa
+table
+bottle
+phone
+holding
+holding
+behind
+beneath
+in front of
+touching
+in front of
+drinking from
+in front of
+not looking at
+not looking at
+not looking at
+on the side of
+sitting on
+person
+sofa
+table
+bottle
+phone
+holding
+holding
+behind
+beneath
+in front of
+in front of
+drinking from
+in front of
+not contacting
+not looking at
+carrying
+not looking at
+behind
+not looking at
+not looking at
+on the side of
+sitting on
+()  
+
+
+
+
+
+
+Figure 3. Qualitative comparison of scene graphs generated by: (b) PISP[11], (c) STTran[5] and (d) our STRE model. Green box in the
+bottom-left image indicates a detected floor which does not exist in the ground-truth. For better visualization, only the top 12 relations from
+no constraint results are plotted, excluding the relations with the floor. The orange-colored relations are correct predictions, the red-colored
+relations are incorrect predictions that do not exist in the ground-truth, and the gray-colored relations are missing predictions.
+PredCls
+SGCls
+SGDet
+mAP r wmAP r mAP r wmAP r mAP r wmAP r
+Freq Prior [49]
+33.1
+65.9
+14.2
+22.6
+9.4
+15.5
+G-RCNN [48]
+41.2
+70.8
+17.6
+22.5
+11.7
+15.5
+RelDN [51]
+50.1
+72.2
+20.1
+23.8
+12.9
+15.9
+TRACE [42]
+53.2
+75.2
+20.7
+24.6
+13.4
+16.5
+STRE(Ours)
+53.1
+80.1
+21.0
+26.7
+13.9
+17.9
+Table 3. mAPrel and wmAPrel (%) of various models on AG.
+The number of triplets per frame is set to a limit of 50 and top 6
+predictions for each pair are kept when evaluating.
+Experimental results confirm that by sparsely building
+temporal connections and explicitly encoding temporal dy-
+namics, STRE is able to outperform other methods across
+almost all the metrics. A significant gain is observed com-
+pared to STTran [5] by 4.3% in SGDet-R@20. In addition
+STRE outperforms the recent Anticipatory Pre-Training
+(APT) method [23] by 2.3% in SGDet-R@20 , despite ATP
+using additional unlabeled data.
+While the same object detector is used for STRE as
+STTran [5], STRE consistently outperforms STTran[5] in
+the SGCls and SGDet metrics. This shows the strength of
+our STRE model to overcome the limitations of the object
+detector (e.g. miss-classifications of bounding boxes, false
+positive detections) when generating scene graphs, by bet-
+ter leveraging temporal dynamics across frames. For the
+PredCls metric, smaller performance gain of 0.8% at Re-
+call@10 is observed. When compared to SGCls and SGDet
+metrics, PredCls assumes perfect object detection predic-
+tions, which makes temporal association between frames
+much easier compared to object detector outputs.
+In addition, Table 2 compares different models using
+mean recall, and Table 3 compares models using mAPrel and
+wmAPrel. These are more balanced metrics for datasets with
+imbalanced class distribution, thus better revealing model’s
+capability.
+Results show that STRE improves over cur-
+rent state-of-the-art approaches in most metrics. Specifi-
+cally, STRE outperforms TRACE[42] by 2.6% and 1.4%
+on SGDet mR@50 and SGDet wmAPr.
+4.1.3
+Qualitative Results and Comparison
+Figure 3 shows a qualitative comparison of dynamic scene
+graphs generated by STRE, the baseline PISP [11], and the
+state-of-the-art STTran [5]. We primarily compare against
+STTran[5] as it is a strong baseline, which is also the most
+similar in training methodology, and has publicly available
+code and detectors to generate qualitative results and ensure
+a fair comparison. Results indicate that STRE improves
+capturing the important temporal dependencies among ob-
+jects, and generates more accurate scene graphs. For ex-
+ample, STRE predicts fewer incorrect relations (colored
+in red), while also having fewer missed relations (colored
+in gray). Specifically this example shows that our STRE
+approach is able to correctly infer the main event in the
+scene: person - drinking from - bottle, while both PISP and
+
+--- Page 7 ---
+Figure 4. Two examples showing temporal connections between
+different objects across frames predicted by STRE. Green arrows
+represent temporal connections.
+PredCls-R@20 SGCls-R@20 SGDet-R@20
+PISP [11]
+70.9
+48
+33.1
+STRE[K=1]
+71.4
+48.5
+38.4
+STRE[K=2]
+71.4
+48.4
+38.1
+STRE[K=3]
+71.3
+48.4
+38
+DTRE
+71.0
+48.2
+37.4
+Table 4. Performance comparison of PISP [11], STRE and DTRE
+for scene graph prediction. All metrics are with constraint.
+STTran[5] failed to capture that relation. Despite the over-
+all better quality of the generated scene graph, our model
+also has some limitations. For example, between person
+and phone, not looking at and holding haven’t been cap-
+tured. This might be due to the lack of clear visual clue,
+as the phone looks blended into the person’s clothes, which
+makes it hard to correctly infer the correct relations.
+4.1.4
+Sparse vs Dense Temporal Connections
+To evaluate the advantage of the sparse temporal connec-
+tions, we compare: (i) PISP [11], our baseline spatial scene
+graph generation model without modeling any temporal re-
+lations, (ii) different level of sparsity of STRE by varying
+the numbers of temporal connections K, and (iii) Dense
+Temporal Relation Encoder (DTRE). To enable DTRE,
+Saliency Attention is modified to allow temporal connec-
+tions between all node pairs across two frames. Based on
+our experiment, on average DTRE has 8 temporal connec-
+tions per object.
+Experiments in Table 4 confirm that by leveraging tem-
+poral context, STRE and DTRE both improve performance
+over the PISP model across all metrics. Further, sparser
+STRE (smaller K) outperforms denser STRE (larger K).
+For instance, STRE[K=1] has a performance improvement
+over STRE[K=3] ranging from 0.1% to 0.4% across all met-
+#Parameters (M)
+#FLOPs (M)/frame
+STTran [5]
+91.8
+577
+STRE[K=1]
+21.7
+120
+Table 5. Efficiency comparison between our STRE[K=1] and
+STTran [5].
+The object detector network is not included.
+FLOPs/frame computation is estimated for three detected objects
+per frame.
+rics. Especially, compared with fully-connected temporal
+graph DTRE, STRE[K=1] has an improvement of 1% in
+SGDet-R@20, which shows that meaningful temporal de-
+pendencies do not exist between all object pairs. This con-
+firms that capturing the most relevant temporal relations is
+important for generating more accurate scene graphs.
+To highlight the benefit on model efficiency when us-
+ing sparse temporal connections, we compare the number
+of parameters and FLOPs to the [5] in Table 5. Our model
+has significantly smaller number of parameters and FLOPs,
+and requires less computation than [5], while still achieving
+better performance both quantitatively and qualitatively.
+4.1.5
+Tracking vs Saliency Attention for Building Tem-
+poral Connections
+As discussed in Section 3.2, while tracking can only con-
+nect the same object across frames, Saliency Attention is
+able to also connect different objects as long as they con-
+tribute to the same event of the scene. This is possible be-
+cause the scene graph is updated by a GCN before feeding
+into Saliency Attention, and thus node features contain lo-
+cal context, which helps to determine whether two nodes
+are under the same context(contributing to the same event).
+For instance, in the upper example in Figure 4, STRE
+is able to build a temporal connection between the clothes
+in the second frame and the person in the first frame, as
+they both contribute to the event: “the person fetches the
+clothes”.
+Similarly, in the bottom example in Figure 4,
+STRE connects the phone in the first frame to the person
+in the second frame, as they are major objects in the event
+“the person puts phone away”. A tracking algorithm would
+fail to build such temporal connections for the clothes in
+the first example, and the phone in the second, due to occlu-
+sions.
+Table 6 shows the quantitative performance comparison
+between STRE using Saliency Attention (we set K = 1)
+and STRE using a detection-based tracker to build tempo-
+ral connections. The tracker connects each object in cur-
+rent frame to an object in the following frame that has the
+same detection label, and is spatially closest. Saliency at-
+tention based STRE outperforms the tracking-based STRE
+across all metrics and achieves 0.8% improvement on
+SGDet-R@20 compared to the tracking approach.
+Additional ablation studies on model architectures in-
+cluding Spatial Scene Graph Proposal and Temporal Rela-
+tion Encoder can be found in the supplementary materials.
+
+--- Page 8 ---
+PredCls-R@20 SGCls-R@20 SGDet-R@20
+Tracking-Based
+70.7
+48
+37.8
+STRE
+71.4
+48.5
+38.4
+Table 6. Performance comparison of Salient Temporal Relation
+Encoder (STRE) and replacing Saliency Attention with tracking
+(first row), for scene graph prediction. All metrics are with con-
+straint.
+Method
+Backbones
+mAP
+STAG [10]
+R50-I3D
+37.2
+I3D + NL [3, 43]
+R101-I3D-NL
+37.5
+STRG [44]
+R101-I3D-NL
+39.7
+SlowFast [6]
+R101
+42.1
+LFB [45]
+R101-I3D-NL
+42.5
+ASF [52]
+R101-I3D-NL
+44.2
+SGFB [14]
+R101-I3D-NL
+44.3
+OR2G [31]
+R101-I3D-NL
+44.9
+S-SGFB
+R101-I3D-NL
+45.1
+ST-SGFB
+R101-I3D-NL
+45.5
+Table 7. Action Recognition on Charades dataset. All backbone
+models are pretrained on Kinetics-400 [17].
+4.2. Video Action Recognition
+4.2.1
+Charades Dataset, Training, and Evaluation
+Charades [39] is a commonly used, large-scale video action
+recognition dataset. It contains 9, 848 videos with 80% of
+the videos in the training set. There are 157 total action
+classes and 46 object types. For comparability, all exper-
+iments use the sampling procedure and per frame annota-
+tions described in [14]. We pre-train with Kinetics-400 and
+cache scene graph predictions from STRE. To train for ac-
+tion classification, we follow the same protocol as [14] by
+sampling a subset of frames and using the standard binary
+cross entropy loss. More details are added in supplemental.
+4.2.2
+Quantitative Results and Comparisons
+To verify the benefit of our STRE for downstream ac-
+tion recognition two experiments are conducted to eval-
+uate the advantage of both the (i) spatial scene graphs
+and (ii) spatial-temporal scene graphs generated by our
+model. For (i), we follow [14] to construct a Spatial Scene
+Graph Feature Bank by stacking a sequence of spatial scene
+graphs(i.e. without temporal edges). While some recent
+methods [34, 19, 36, 35] perform better, we choose [14] as
+our main baseline as it integrates scene graphs to improve
+action recognition and can be used in an online manner, un-
+like [34] which is offline.
+To avoid confusion with SGFB [14] we denote our Spa-
+tial Scene Graph Feature Bank as S-SGFB. For (ii), we
+establish the Spatial-Temporal Scene Graph Feature Bank
+(ST-SGFB), as detailed in Section 3.4, by leveraging both
+spatial scene graphs as well as temporal scene graphs.
+Table 7 shows the quantitative comparison to several
+state-of-the-art action recognition approaches.
+In partic-
+ular, our direct comparison is SGFB [14], since we all
+apply scene graphs on the same baseline action recogni-
+Figure 5. Action Recognition qualitative results from two models:
+(1) S-SGFB which uses spatial scene graph as feature bank, (2) ST-
+SGFB which uses spatial-temporal scene graph as feature bank.
+Red means wrong predictions.
+tion model: LFB [45]. Experiments demonstrate a 2.6%
+and 0.8% improvement in mAP over LFB [45] and SGFB
+[14] respectively, by using our Spatial Scene Graph Feature
+Bank (S-SGFB). This highlights that by leveraging salient
+temporal context, the suggested STRE approach generates
+more accurate spatial scene graphs, which improves action
+recognition performance. Using ST-SGFB further increased
+the performance by 0.4% compared to using our S-SGFB.
+This demonstrates that the explicitly encoded temporal re-
+lations in the scene graph feature bank are beneficial for the
+action recognition task.
+4.2.3
+Qualitative Results and Comparisons
+Figure 5 shows that ST-SGFB improves qualitatively com-
+pared to S-SGFB. In the left example, S-SGFB captures
+only one correct action label with respect to the shoes:
+putting shoes somewhere. In comparison, ST-SGFB cor-
+rectly predicts all three actions, by leveraging the temporal
+dynamic change of the person-shoes relations from holding
+it to putting it away. In the right example, S-SGFB wrongly
+predicts the person is taking a book from somewhere. ST-
+SGFB overcomes this false prediction by recognizing that
+there is little temporal changes of the person’s relation to
+the book: as the person is always holding the book.
+5. Conclusion
+We proposed a novel and efficient way for modeling
+sparse, explicit spatial-temporal interactions in dynamic
+scene graphs. Experiments demonstrated how Saliency At-
+tention and Temporal Relation Encoding helped improve
+spatial-temporal scene graph predictions. In addition, we
+showed that using predicted spatial-temporal scene graphs
+can additionally improve action recognition performance.
+Future work could explore sparse temporal connections
+across more frames, or further improvement in model ef-
+ficiency.
+
+--- Page 9 ---
+References
+[1] Anurag Arnab, Chen Sun, and Cordelia Schmid.
+Unified
+graph structured models for video understanding. In ICCV,
+2021.
+[2] Fabien Baradel, Natalia Neverova, Christian Wolf, Julien
+Mille, and Greg Mori.
+Object level visual reasoning in
+videos. In ECCV, 2018.
+[3] Jo˜ao Carreira and Andrew Zisserman.
+Quo vadis, action
+recognition? a new model and the kinetics dataset. In CVPR,
+pages 4724–4733, 2017.
+[4] Tianshui Chen, Weihao Yu, Riquan Chen, and Liang Lin.
+Knowledge-embedded routing network for scene graph gen-
+eration. In CVPR, 2019.
+[5] Yuren Cong, Wentong Liao, Hanno Ackermann, Bodo
+Rosenhahn, and Michael Ying Yang. Spatial-temporal trans-
+former for dynamic scene graph generation. In ICCV, 2021.
+[6] Christoph Feichtenhofer, Haoqi Fan, Jitendra Malik, and
+Kaiming He. Slowfast networks for video recognition. In
+ICCV, pages 6201–6210, 2019.
+[7] Chen Gao, Jiarui Xu, Yuliang Zou, and Jia-Bin Huang. Drg:
+Dual relation graph for human-object interaction detection.
+In ECCV, 2020.
+[8] Lizhao Gao, Bo Wang, and Wenmin Wang. Image captioning
+with scene-graph based semantic concepts. In ICMLC, 2018.
+[9] Shijie Geng, Peng Gao, Moitreya Chatterjee, Chiori Hori,
+Jonathan Le Roux, Yongfeng Zhang, Hongsheng Li, and
+Anoop Cherian. Dynamic graph representation learning for
+video dialog via multi-modal shuffled transformers. In AAAI,
+2021.
+[10] Roei Herzig, Elad Levi, Huijuan Xu, Hang Gao, Eli
+Brosh, Xiaolong Wang, Amir Globerson, and Trevor Dar-
+rell. Spatio-temporal action graph networks. In International
+Conference on Computer Vision Workshops, 2019.
+[11] Roei Herzig, Moshiko Raboh, Gal Chechik, Jonathan Be-
+rant, and Amir Globerson.
+Mapping images to scene
+graphs with permutation-invariant structured prediction. In
+NeurIPS, 2018.
+[12] Noureldien Hussein, Efstratios Gavves, and Arnold W. M.
+Smeulders. Timeception for complex action recognition. In
+CVPR, pages 254–263, 2019.
+[13] Jingwei Ji, Rishi Desai, and Juan Carlos Niebles. Detecting
+human-object relationships in videos. In ICCV, pages 8106–
+8116, October 2021.
+[14] Jingwei Ji, Ranjay Krishna, Li Fei-Fei, and Juan Carlos
+Niebles. Action genome: Actions as compositions of spatio-
+temporal scene graphs. In CVPR, pages 10236–10247, 2020.
+[15] Justin Johnson, Agrim Gupta, and Li Fei-Fei. Image genera-
+tion from scene graphs. In CVPR, 2018.
+[16] Justin Johnson, Ranjay Krishna, Michael Stark, Li-Jia Li,
+David A. Shamma, Michael S. Bernstein, and Li Fei-Fei. Im-
+age retrieval using scene graphs. In CVPR, 2015.
+[17] Will Kay, Joao Carreira, Karen Simonyan, Brian Zhang,
+Chloe Hillier, Sudheendra Vijayanarasimhan, Fabio Viola,
+Tim Green, Trevor Back, Paul Natsev, Mustafa Suleyman,
+and Andrew Zisserman. The kinetics human action video
+dataset, 2017.
+[18] Thomas N. Kipf and Max Welling. Semi-supervised classi-
+fication with graph convolutional networks. In ICLR, 2017.
+[19] Dan Kondratyuk, Liangzhe Yuan, Yandong Li, Li Zhang,
+Mingxing
+Tan,
+Matthew
+Brown,
+and
+Boqing
+Gong.
+Movinets: Mobile video networks for efficient video recog-
+nition. In IEEE Conference on Computer Vision and Pattern
+Recognition, CVPR 2021, virtual, June 19-25, 2021. Com-
+puter Vision Foundation / IEEE, 2021.
+[20] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A. Shamma, Michael S. Bernstein, and
+Fei-Fei Li. Visual genome: Connecting language and vision
+using crowdsourced dense image annotations. In IJCV, 2016.
+[21] Alina Kuznetsova, Hassan Rom, Neil Alldrin, Jasper Ui-
+jlings, Ivan Krasin, Jordi Pont-Tuset, Shahab Kamali, Ste-
+fan Popov, Matteo Malloci, Alexander Kolesnikov, and et al.
+The open images dataset v4. In IJCV, 2020.
+[22] Yikang Li, Wanli Ouyang, Bolei Zhou, Kun Wang, and Xi-
+aogang Wang. Scene graph generation from objects, phrases
+and region captions. In ICCV, 2017.
+[23] Yiming Li, Xiaoshan Yang, and Changsheng Xu. Dynamic
+scene graph generation via anticipatory pre-training.
+In
+CVPR, 2022.
+[24] Yuanzhi Liang, Yalong Bai, Wei Zhang, Xueming Qian, Li
+Zhu, and Tao Mei. VrR-VG: Refocusing visually-relevant
+relationships. In ICCV, 2019.
+[25] Xin Lin, Changxing Ding, Jinquan Zeng, and Dacheng Tao.
+GPS-Net: Graph property sensing network for scene graph
+generation. In CVPR, 2020.
+[26] Hengyue Liu, Ning Yan, Masood S. Mortazavi, and Bir
+Bhanu.
+Fully convolutional scene graph generation.
+In
+CVPR, 2021.
+[27] Cewu Lu, Ranjay Krishna, Michael Bernstein, and Li Fei-
+Fei. Visual relationship detection with language priors. In
+ECCV, 2016.
+[28] Joanna Materzynska, Tete Xiao, Roei Herzig, Huijuan Xu,
+Xiaolong Wang, and Trevor Darrell. Something-else: Com-
+positional action recognition with spatial-temporal interac-
+tion networks. In CVPR, pages 1046–1056, 2020.
+[29] Effrosyni Mavroudi, Prashast Bindal, and Ren´e Vidal. Actor-
+centric tubelets for real-time activity detection in extended
+videos. In WACVW, pages 172–181, 2022.
+[30] Alejandro Newell and Jia Deng. Pixels to graphs by associa-
+tive embedding. In NeurIPS, 2017.
+[31] Yangjun Ou, Li Mi, and Zhenzhong Chen. Object-relation
+reasoning graph for action recognition. In CVPR, 2022.
+[32] Nishant Rai, Haofeng Chen, Jingwei Ji, Rishi M. Desai,
+Kazuki Kozuka, Shun Ishizaka, Ehsan Adeli, and Juan Car-
+los Niebles. Home action genome: Cooperative composi-
+tional action understanding. In CVPR, 2021.
+[33] Shaoqing Ren, Kaiming He, Ross B. Girshick, and Jian Sun.
+Faster R-CNN: Towards real-time object detection with re-
+gion proposal networks. IEEE TPAMI, 39:1137–1149, 2015.
+[34] Michael Ryoo, AJ Piergiovanni, Anurag Arnab, Mostafa
+Dehghani, and Anelia Angelova.
+Tokenlearner:
+Adap-
+tive space-time tokenization for videos.
+In M. Ranzato,
+A. Beygelzimer, Y. Dauphin, P.S. Liang, and J. Wortman
+
+--- Page 10 ---
+Vaughan, editors, Advances in Neural Information Process-
+ing Systems, volume 34, pages 12786–12797. Curran Asso-
+ciates, Inc., 2021.
+[35] Michael S. Ryoo, AJ Piergiovanni, Juhana Kangaspunta, and
+Anelia Angelova.
+Assemblenet++: Assembling modality
+representations via attention connections. In ECCV, 2020.
+[36] Michael S. Ryoo, AJ Piergiovanni, Tan Mingxing, and
+Anelia Angelova. Assemblenet: Searching for multi-stream
+neural connectivity in video architectures. In ICLR, 2020.
+[37] Adam Santoro, David Raposo, David G Barrett, Mateusz
+Malinowski, Razvan Pascanu, Peter Battaglia, and Timothy
+Lillicrap. A simple neural network module for relational rea-
+soning. In NeurIPS, 2017.
+[38] Xindi Shang, Tongwei Ren, Jingfan Guo, Hanwang Zhang,
+and Tat-Seng Chua. Video visual relation detection. In ACM
+International Conference on Multimedia, 2017.
+[39] Gunnar A Sigurdsson, G¨ul Varol, Xiaolong Wang, Ali
+Farhadi, Ivan Laptev, and Abhinav Gupta.
+Hollywood in
+homes: Crowdsourcing data collection for activity under-
+standing. In ECCV, 2016.
+[40] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan Luo,
+and W. Liu. Learning to compose dynamic tree structures for
+visual contexts. In CVPR, pages 6612–6621, 2019.
+[41] Yao Teng, Limin Wang, Zhifeng Li, and Gangshan Wu. Tar-
+get adaptive context aggregation for video scene graph gen-
+eration. In ICCV, 2021.
+[42] Yao Teng, Limin Wang, Zhifeng Li, and Gangshan Wu. Tar-
+get adaptive context aggregation for video scene graph gen-
+eration.
+In 2021 IEEE/CVF International Conference on
+Computer Vision, ICCV 2021, Montreal, QC, Canada, Oc-
+tober 10-17, 2021, pages 13668–13677. IEEE, 2021.
+[43] X. Wang, Ross B. Girshick, Abhinav Gupta, and Kaiming
+He. Non-local neural networks. In CVPR, pages 7794–7803,
+2018.
+[44] X. Wang and Abhinav Gupta. Videos as space-time region
+graphs. In ECCV, 2018.
+[45] Chao-Yuan Wu, Christoph Feichtenhofer, Haoqi Fan, Kaim-
+ing He, Philipp Kr¨ahenb¨uhl, and Ross B. Girshick. Long-
+term feature banks for detailed video understanding.
+In
+CVPR, pages 284–293, 2019.
+[46] Wanze Xie, Junshen K Chen, and Alan Zelun Luo. Towards
+compositional action recognition with spatio-temporal graph
+neural network.
+[47] Danfei Xu, Yuke Zhu, Christopher B. Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing.
+In
+CVPR, 2017.
+[48] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi
+Parikh. Graph R-CNN for scene graph generation. In ECCV,
+2018.
+[49] Guojun Yin, Lu Sheng, Bin Liu, Nenghai Yu, Xiaogang
+Wang, Jing Shao, and Chen Change Loy. Zoom-net: Min-
+ing deep feature interactions for visual relationship recog-
+nition. In Computer Vision - ECCV 2018 - 15th European
+Conference, Munich, Germany, September 8-14, 2018, Pro-
+ceedings, Part III, 2018.
+[50] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin
+Choi. Neural motifs: Scene graph parsing with global con-
+text. In CVPR, 2018.
+[51] Ji Zhang, Kevin J. Shih, Ahmed Elgammal, Andrew Tao,
+and Bryan Catanzaro. Graphical contrastive losses for scene
+graph parsing. In CVPR, 2019.
+[52] Yanyi Zhang, Xinyu Li, and Ivan Marsic. Multi-label ac-
+tivity recognition using activity-specific features and activity
+correlations. In CVPR, 2021.
+[53] Zhihao Zhu, Zhan Xue, and Zejian Yuan. Automatic graph-
+ics program generation using attention-based hierarchical
+decoder. In Asian Conference on Computer Vision, pages
+181–196. Springer, 2018.

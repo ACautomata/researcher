@@ -1,0 +1,3445 @@
+DIFFVSGG: Diffusion-Driven Online Video Scene Graph Generation
+Mu Chen1, Liulei Li2, Wenguan Wang1†, Yi Yang1
+1 ReLER, CCAI, Zhejiang University 2 ReLER, AAII, University of Technology Sydney
+https://github.com/kagawa588/DiffVsgg
+Abstract
+Top-leading solutions for Video Scene Graph Generation
+(VSGG) typically adopt an offline pipeline. Though demon-
+strating promising performance, they remain unable to han-
+dle real-time video streams and consume large GPU mem-
+ory. Moreover, these approaches fall short in temporal rea-
+soning, merely aggregating frame-level predictions over a
+temporal context. In response, we introduce DIFFVSGG, an
+online VSGG solution that frames this task as an iterative
+scene graph update problem. Drawing inspiration from La-
+tent Diffusion Models (LDMs) which generate images via
+denoising a latent feature embedding, we unify the decod-
+ing of object classification, bounding box regression, and
+graph generation three tasks using one shared feature em-
+bedding. Then, given an embedding containing unified fea-
+tures of object pairs, we conduct a step-wise Denoising on
+it within LDMs, so as to deliver a clean embedding which
+clearly indicates the relationships between objects. This
+embedding then serves as the input to task-specific heads
+for object classification, scene graph generation, etc. DIF-
+FVSGG further facilitates continuous temporal reasoning,
+where predictions for subsequent frames leverage results of
+past frames as the conditional inputs of LDMs, to guide the
+reverse diffusion process for current frames. Extensive ex-
+periments on three setups of Action Genome demonstrate
+the superiority of DIFFVSGG.
+1. Introduction
+Video Scene Graph Generation (VSGG) is receiving grow-
+ing attention as it benefits a wide range of downstream tasks
+(e.g., video caption [32, 92], video retrieval [28, 48], and
+visual question answering [47, 88]). To deliver a holistic
+understanding of the underlying spatial-temporal dynamics
+within scenes, this task aims to construct a sequence of di-
+rected graphs where nodes represent objects and edges de-
+scribe inter-object relationships (a.k.a., predicate).
+†Corresponding author: Wenguan Wang.
+Object
+Detector
+Pred.
+T1
+Pred.
+T2
+Temporal Trans. Enc.
+Pred.
+T3
+Spatial Trans. Dec.
+Predicate Class.
+Cond.
+Denoising Diffusion 
+Box Regression
+Predicate Class.
+Object Class.
+Spatial-temporal 
+Reasoning
+(a) Offline Training
+ (b) Online Training
+Unified
+Generation
+Scene Graph Prediction
+Object Class. & Box Regression
+Scene Graph Prediction
+Current Frame
+Prior Frame
+Figure 1. (a) Existing VSGG solutions typically adopt an offline
+training pipeline, dividing the problem into various components:
+object detection, temporal association, and contextual aggregation.
+(b) DIFFVSGG introduces a new paradigm that performs spatial-
+temporal reasoning directly as each frame is processed sequen-
+tially, enabling progressive, online updates to the scene graph.
+Top-leading VSGG approaches typically adopt an offline
+pipeline[27, 68, 96], where scene graphs are generated in-
+dependently for each frame and then aggregated along the
+temporal dimension (i.e., Fig.2(a)). Though demonstrating
+strong performance, they require full video sequences as in-
+puts, which faces challenges in processing long videos con-
+taining hundreds of frames due to GPU memory constraints,
+and is unable to handle real-time video streams for applica-
+tions like autonomous driving and augmented reality[104].
+Moreover, the dealing of temporal cues focuses solely on
+the global aggregation of frame-level predictions via Trans-
+form blocks. This falls short in the reasoning over tem-
+poral space, which is essential for modeling the dynamic
+changes of interactions between subjects and objects, and
+arXiv:2503.13957v1  [cs.CV]  18 Mar 2025
+potentially benefits predicate prediction. Though a surge of
+early work has sought to facilitate explicit reasoning over
+the temporal domain via messaging passing[91] or spatial-
+temporal graph[73], a large performance gap remains when
+compared to these offline temporal aggregation approaches.
+To address these challenges, we propose DIFFVSGG, a
+high performance online approach for VSGG in leverage of
+Latent Diffusion Models (LDMs)[76, 82] (i.e., Fig.2(b)). In
+VSGG, the scene graph is dynamically evolved throughout
+the progression of video frames, with nodes and edges be-
+ing continuously updated to precisely reflect the latest video
+content. Such an iterative update process shares a similar
+spirit of LDMs, which progressively remove noise to gen-
+erate new samples from data distributions. Naturally, our
+motivation is to develop a VSGG model that aligns with the
+denoising principle of LDMs to iterative refine scene graphs
+along the temporal dimension, facilitating online temporal
+reasoning within this reverse diffusion process.
+To achieve this, we tackle VSGG from a unified per-
+spective, organizing the decoding of object classification,
+bounding box regression, and graph generation three tasks
+from a shared feature embedding, which serves as the input
+and output of the Denoising U-Net. Concretely, from the
+spatial perspective, given the object detection results from
+each frame, multiple object pairs can be constructed. Then,
+for each object pair, we integrate i) the visual feature of two
+objects, ii) the union feature between, and iii) the locations
+of two objects, into a unified embedding. This embedding
+serves as the input to the denoising U-Net, after steps of
+denoising, a clean embedding clearly describing the objects
+as well as their inter-object relationships can be delivered.
+From the temporal perspective, DIFFVSGG conducts frame-
+by-frame reasoning where the result for each subsequent
+frame is delivered by iteratively refining the predictions
+of previous frames via reverse diffusion. Specifically, ob-
+ject positions and contextual information from prior frames
+are leveraged as conditions to guide the denoising of the
+shared feature embeddings for current frames. This encour-
+ages continuous temporal reasoning as the video progresses,
+allowing DIFFVSGG to effectively capture long-term spa-
+tiotemporal dependencies and adapt to complex motion pat-
+terns in an online manner. To further unlock the potential of
+LDMs, we build a memory bank to store positions for each
+object. In this way, motion information including accelera-
+tion and deceleration of object can be explicitly calculated.
+These motion cues are integrated into conditional inputs for
+the reverse diffusion step, which can help infer relationships
+such as following or approaching between objects.
+DIFFVSGG distinguishes itself in several aspects: First,
+it tackles VSGG in an online manner to continuously ad-
+dress an unlimited number of frames, while being friendly
+to devices with limited GPU memory. Second, the predic-
+tion of each video is implemented as a reverse diffusion pro-
+cess, which elegantly encodes spatial and temporal reason-
+ing into the Denoising step. Third, the temporal cues (i.e.,
+historic predictions) are propagated into subsequent frames
+as conditions and participating in the prediction, while prior
+work simply aggregates predictions of all frames along the
+temporal dimension. Fourth, the learning of object clas-
+sification, bounding box regression, and graph generation
+three tasks are jointly optimized with a shared feature em-
+bedding. Such a unified learning paradigm allows for the
+solving of VSGG from a global view, and avoids error made
+in one task propagating to subsequent tasks. Fifth, this uni-
+fied decoding simplifies the VSGG pipeline and eliminates
+cumbersome handcrafted modules such as non-maximum
+suppression (NMS), and entity matching across frames.
+To the best of our knowledge, DIFFVSGG is the first
+work that treats the VSGG task as an iterative denoising
+problem along the temporal dimension. Extensive experi-
+ments on Action Genome (AG) [37] demonstrate the superi-
+ority of our proposed method. Notably, DIFFVSGG achieves
+SOTA results across all three setups and surpasses the top-
+leading solutions (e.g., DSG-DETR[27]) by 3.3 in terms of
+R@10, highlighting the great potential of utilizing diffusion
+models for visual relation understanding in videos.
+2. Related Work
+Scene Graph Generation (SGG). SGG involves detecting
+object instances and classifying their pairwise visual rela-
+tions in an image, which is essential for comprehensive vi-
+sual tasks [50, 99, 100, 122, 123]. Recent SGG approaches
+seek to comprehend visual context by aggregating spatial
+context through various strategies, including explicit mes-
+sage passing [12, 18, 54, 55, 107, 116], graph structure
+modeling[84, 86, 103, 110, 114], external knowledge inte-
+gration[3, 7, 12, 31, 113, 115], and transformer-based net-
+works[9, 16, 22, 23, 40, 46, 53, 57, 63, 71, 80].
+Extended from SGG, Video Scene Graph Generation
+(VSGG) aims to ground visual relationships jointly in spa-
+tial and temporal dimensions. Prior research primarily con-
+centrates on addressing the long-tail distribution problem
+observed in prominent benchmarks [37].
+Numerous un-
+biased approaches [14, 19, 43, 49, 52, 67, 87, 109] have
+been devised to handle infrequent predicate classes arising
+from this distribution. Furthermore, recent VSGG meth-
+ods underscore the importance of spatial-temporal learn-
+ing, and make use of the sequence-processing ability of
+Transformer [2, 69, 85] to capture temporal continuity.
+Nonetheless, these approaches often depend on complex
+post-processing that decouples spatial and temporal learn-
+ing into two independent steps, and simply emphasizes on
+the consistent matching between frames.
+In contrast, DIFFVSGG handles both spatial and tempo-
+ral reasoning from a unified perspective, where the reason-
+ing on temporal dimension is naturally achieved via utiliz-
+ing the spatial reasoning results of prior frames as the con-
+ditions to guide predictions for the current frames.
+Diffusion Models Beyond Image Generation. Diffusion
+Models (DMs) have surpassed many other generative mod-
+els in image generation[6, 20, 34, 35, 93, 108] by succes-
+sively denoising images. Beyond image generation, DMs
+inherently perform implicit discriminative reasoning while
+generating data, which proves highly effective in visual
+tasks that require complex relationship modeling and spa-
+tiotemporal reasoning. Therefore, a surge of work has suc-
+cessfully adapted generative diffusion models for tasks in-
+cluding image segmentation [1, 4, 5, 13, 30, 41, 95], ob-
+ject detection [11, 75, 106], object tracking [64, 65, 105],
+and monocular depth estimation [24, 66, 77, 121].
+Re-
+cent research has also utilizes DMs for more complex tasks
+that require high-level visual understanding abilities such as
+visual-linguistic understanding [45], scene generation [36],
+and human-object interaction detection [38, 51]. The po-
+tential of DMs in processing graph data has also been ex-
+plored, encompassing a range of advanced tasks. This in-
+cludes early work employing score-based methods for gen-
+erating permutation-invariant graphs[39, 70], as well as re-
+cent approaches focused on enhancing graph neural net-
+works[119, 120] and graph generation techniques[111].
+In this work, we borrow the step-wise denoising ability
+of latent diffusion models to enable spatial reasoning within
+a single frame. This is achieved by iteratively refining the
+union embeddings of object pairs, which serve to inform
+the prediction for bounding boxes and predicate classes, etc.
+On the other hand, temporal reasoning across frames is fa-
+cilitated via conditional prompting, i.e., using predictions
+of prior frames which contain rich location and inter-object
+relationship cues to guide the denoising of current frames.
+Temporal Reasoning in Videos.Reasoning within the tem-
+poral dimension poses significant challenges for achieving
+high-level comprehension in video-related tasks [8, 26, 60,
+72, 112]. Recent advancements in video question answer-
+ing (VQA) seek to tackle temporal reasoning by employ-
+ing attention mechanisms [25, 83] or incorporating exter-
+nal memory modules [42, 74] across video frames. In ad-
+dition, to accurately capture the start, progression, and end
+of an action, action recognition approaches[90, 97] model
+complex motion patterns and dependencies in sequence.
+Video object detection (VOD) [17, 61] focuses on accu-
+rately capturing object trajectories, even in the presence of
+occlusions and abrupt movements. The top-leading VSGG
+solutions [27, 68, 96] instead aggregate predictions across
+frames to maintain the temporal consistency of objects.
+In summary, although existing work facilitates tempo-
+ral reasoning from different perspectives and demonstrates
+it effectiveness, the potential of diffusion models remains
+largely underexplored. In fact, the sequential denoising in
+time, where each step is informed by previous one, offers
+a suitable tool to reconstruct the states for current frames
+based on observations from past frames. This insight moti-
+vates the proposal of DIFFVSGG, which tackles the VSGG
+task via graph denoising over the temporal dimension.
+3. Methodology
+In this section, we first give a brief introduction to the gen-
+eral background of latent Diffusion Models (§3.1), then
+elaborate on the overall design of our proposed DIFFVSGG
+(§3.2), and finally present the detailed information on the
+network architecture and training objectives (§3.3).
+3.1. Preliminary: Latent Diffusion Models
+To begin, we give an illustration on how diffusion pro-
+cesses [82] are used to model data distributions and gen-
+erate high-quality samples.
+Specifically, we consider a
+continuous-time Markov chain with t ∈[0, T]:
+q(xt|xt−1) = N(xt;
+p
+1 −βtxt−1, βtI),
+(1)
+where βt is a small noise variance term at timestep t, and N
+denotes a Gaussian distribution. The corrupted data at any
+intermediate time step t can be derived recursively as:
+xt =√αtx0 +
+√
+1 −αϵ,
+(2)
+where αt = 1 −βt and αt = Qt
+s=1 αs is the cumulative
+product of αt over the timesteps, ϵ ∼N(0, I) represents
+the sampled noise. The reverse process essentially involves
+learning to reverse the noise addition at each step.
+The
+cleaned data at time step t can be written recursively as:
+xt−1 =
+1
+√αt
+(xt −
+βt
+√1 −αϵθ(xt, t),
+(3)
+where a time-conditioned denoising neural network ϵθ(x, t)
+is trained to minimize the mean squared error between the
+true and predicted noise at each timestep:
+LDM := Ex0,ϵ,t
+h
+∥ϵ −ϵθ(xt, t)∥2
+2
+i
+.
+(4)
+Building on the diffusion process described above, latent
+diffusion models (LDMs) [76] first encode samples into a
+low-dimensional latent space z = E(x) using an encoder E,
+and then apply the diffusion process within this compressed
+space. Moreover, LDMs introduce the conditioning mech-
+anisms which allow for control over the generated output
+based on additional input y such as text, labels, or images.
+Consequently, the training objective for LDMs is given as:
+LLDM := EE(x0),y,ϵ,t
+h
+∥ϵ −ϵθ(zt, t, cθ(y))∥2
+2
+i
+,
+(5)
+where cθ is a conditioning model to encode y.
+Forward Diffusion
+Reverse Diffusion
+Inter-object 
+Relation 
+Learning
+Instance 
+Features
+Union 
+Features
+Bounding 
+Box Features
+Step 0
+Step 1
+Step k-1
+Step k
+Step k-1
+Step 1
+Step 0
+ROIAlign
+Graph Construction
+person
+ball box
+ROIAlign
+Box Map
+Adjacency 
+Matrix
+person hold ball
+Figure 2. Overview of our proposed inter-object relationship learning strategy using latent diffusion models.
+3.2. DIFFVSGG: Diffusion Models for VSGG
+Problem Definition. Considering a video sequence repre-
+sented as I =
+
+I1, · · · , IT 	
+containing T frames, the ob-
+jective of VSGG is to generate a sequence of scene graph
+G =
+
+G1, · · · , GT 	
+over time, where each element Gt rep-
+resents the corresponding scene graph for frame It. Each
+graph Gt is defined as Gt = (Vt, Et), with Vt and Et de-
+noting the sets of graph nodes and edges, respectively. Each
+node vt
+i ∈Vt includes attributes such as category and loca-
+tion for object i, while each edge et
+i,j ∈Et describes the
+inter-object relationship (a.k.a.predicate) between subject i
+and object j. In this manner, G captures all objects (i.e., V),
+their interactions (i.e., E), and the dynamics as they evolve
+over time (i.e., from t = 1 to t = T) within the scene.
+Graph Construction. Given a video I =
+
+I1, · · · , IT 	
+,
+we first employ an on-the-shelf object detector Fdet for each
+frame:
+{F t, Bt, Ot} = Fdet(It),
+(6)
+where F t is the feature extracted by backbone, Bt
+=
+{bt
+1, · · · , bt
+Nt} and Ot = {ot
+1, · · · , ot
+Nt} are bounding box
+and class predictions for Nt objects detected from frame It,
+respectively. This serves to initialize an adjacency matrix
+At ∈RNt×Nt×De, of which each element aims to repre-
+sent the inter-object relationships between object i and j:
+At
+i,j = [F t
+oi; F t
+oi,oj; F t
+bi] ∈RDe,
+At
+j,i = [F t
+oj; F t
+oj,oi; F t
+bj] ∈RDe.
+(7)
+Here [] refers to the concatenation of features, implemented
+as torch.cat(). F t
+oi = FROI(F t, bt
+i) is the instance-
+level feature for object i extracted via ROIAlign [33] (i.e.,
+FROI), F t
+oi,oj = FROI(F t, bt
+i ∪bt
+j) is the feature mapped
+from the union box of object i and j (i.e., bt
+i ∪bt
+j), and F t
+bi
+describes bounding box bt
+i using a box-to-feature mapping
+function identical to that in [116]. At
+i,j represents the rela-
+tionship predicted from subject i, which differs from At
+j,i
+where j is considered the subject. In this way, the matrix
+At encodes both node features of each object and the edge
+features between any pair of them. Note that such subject-
+based encoding does not incorporate F oj and F bj into Ai,j
+(i.e., [Foi; Fbi; Foi,oj; Foj; Fbj]), which hinders the neural
+network to distinguish between the subject (i) and object
+(j). Additionally, as the number of instances (i.e., Nt) typ-
+ically varies across frames due to the emergence or disap-
+pearance of some instances, we pad At to a fixed size of
+N × N where N > max(N1, · · · , NT ), using randomly
+generated feature embedding from Gaussian distributions.
+Inter-object Relationship Learning via LDMs. Next we
+aim to facilitate the learning of inter-object relationships
+within LDMs using ground truth scene graph (i.e., Fig.2).
+Since we use an off-the-self object detector, the extracted
+feature F t remains static for each frame. Therefore, with
+access to the ground truth bounding box annotations, we
+can compute precise edge features via Eq.7 from F t. The
+adjacency matrix ˆ
+At which exactly encodes the inter-object
+features can also be obtained. Here ˆ
+At is the ground truth of
+inter-object relationships, initialized using features derived
+from ground-truth bounding boxes, where object pairs with
+no relations are represented as empty entries.
+ˆ
+At instructs
+the learning of a LDM which is responsible for recovering
+object features and their relationships from random noise.
+• Forward Process. Let ˆ
+At,0 represent the clean adjacency
+matrix. The noise injection process to progressively perturb
+this matrix is defined following Eq.2, and expressed as:
+ˆ
+At,k =√αtx ˆ
+At,0 +
+√
+1 −αϵ,
+(8)
+where ˆ
+At,k denotes the noisy adjacency matrix at step k.
+This enables the model to learn robust feature representa-
+tions, through the exposure to degraded versions of ˆ
+At,0.
+• Reverse Process. To recover the original adjacency matrix
+ˆ
+At,0, we employ a denoising U-Net ϵθ which is trained to
+iteratively remove noise starting from the initial noisy ma-
+trix ˆ
+At,K. This process follows the denoising step defined
+in Eq.3 and proceeds as:
+ˆ
+At,k−1 =
+1
+√αt
+( ˆ
+At,k −
+βt
+√1 −αϵθ( ˆ
+At,k, k),
+(9)
+where ϵθ is optimized to recover meaningful inter-object re-
+lationships. Following Eq.5, we define the training objec-
+tive LVSGG by minimizing the spatial structure loss:
+LVSGG := E ˆ
+At,k,ϵ,k
+h
+∥ϵ −ϵθ( ˆ
+At,k, k)∥2
+2
+i
+.
+(10)
+Graph Readout
+Condition Based 
+Temporal Reasoning
+look at
+Frame 1
+Frame 2
+Frame 3
+hold
+hold
+ride
+hold
+ride
+ride
+skateboard
+person
+ball
+Figure 3. Overview of our proposed temporal prompting strategy.
+LVSGG encourages ϵθ to accurately predict and remove the
+noise at each step k, so as to restore ˆ
+At structured in the
+way that preserves spatial and relational coherence. Dur-
+ing inference, given the adjacency matrix At from an ar-
+bitrary frame t, we consider it noisy and utilize the well-
+trained denoising U-Net above to refine it, so as to deliver
+an updated version that indicates the interaction between
+objects, as well as the location and category of objects:
+At,k−1 =
+1
+√αt (At,k−
+βt
+√1−αϵθ(At,k, k). Unlike the training
+process which utilizes ˆ
+A derived from ground truth bound-
+ing boxes, A here is obtained from the predicated ones.
+Note that the main challenge of VSGG lies in modeling of
+the dynamic changes of relation between object and subject,
+and the diffusion models primarily focus on recovering ob-
+ject features and their relationships. Thus, the slight bias
+in predicated bounding boxes, especially after ROIAlign,
+causes negligible impacts to relation predictions.
+Condition Based Temporal Reasoning. For a given video
+stream, we can infer future frames based on the content of
+preceding frames. This observation serves as the motiva-
+tion for our temporal prompting strategy (i.e., Fig.4), where
+we condition the denoising process of At on the denoised
+adjacency matrix of prior frames (i.e., At−1,0), as follows:
+At,k−1 = 1
+√αt
+(At,k−
+βt
+√1 −αϵθ(At,k, k, At−1,0), (11)
+where the condition decoder cθ in Eq. 5 is discarded, as
+At−1,0 has already shared the same dimension as At,k.
+With this condition-based temporal association for denois-
+ing, the training objective for ϵθ is updated as:
+LT VSGG :=EAt,k,At−1,0,ϵ,k
+h
+∥ϵ −ϵθ(At,k, At−1,0, k)∥2
+2
+i
+.
+(12)
+Here LT VSGG encourages ϵθ to generate temporally consis-
+tent outputs, enabling a smooth and coherent denoising of
+adjacency matrix across frames. Moreover, since new in-
+stances keep emerging as the video progresses, we calculate
+similarities between ROIAligned features of the potential
+new object (i.e., F t
+op) and all other objects in the past frame
+(i.e., F t−1
+oi
+), and consider op as new object if the similarities
+is smaller than 0.2 for all other objects. Then, the random
+padded features in A during graph construction are replaced
+with union and instance features of these new instances.
+Motion Enhanced Denoising for VSGG. Motion cues
+serve as indicators to describe object movements in a given
+scene. They provide essential context for understanding the
+position and duration of events. Moreover, the speed and
+direction of object movements can reveal intentions for in-
+teractions (e.g., approaching), which aids in temporal rea-
+soning by inferring whether they might complete an ac-
+tion or reach a goal.
+Therefore, given a box prediction
+bt
+i = {xt
+i, yt
+i, wt
+i, ht
+i} for object i, we explicitly calculate
+the approaching speed between object i and j as follows:
+dt
+i,j =
+q
+(xt
+i −xt
+j)2+(yt
+i −yt
+j)2,
+vt
+i,j = (dt
+i,j −dt−∆t
+i,j
+)/∆t,
+(13)
+where ∆t is the interval of frame. Given vt ∈RNt×Nt,
+we pad it into the same size with At (i.e., vt ∈RN×N)
+and inject it into At,k at each denoising step k: At,k =
+At,k + vt.
+Graph Readout. Next we investigate how to deliver SGG
+predictions for each frame based on the denoised adjacency
+matrix At,0. Specifically, the prediction for predicate of
+each subject-object pair is obtained as follows:
+rt
+i,j = softmax(Fpred(At,0
+i,j)) ∈RNpred cls
+(14)
+where Fpred is an MLP-based classifier and Npred cls repre-
+sents the number of predicate classes. For object classifica-
+tion and bounding box regression, to render a global view,
+we utilize the entire row i of At,0 (i.e., At,0
+i ) where all ele-
+ments consider i as the subject, to deliver the prediction:
+ot
+i = softmax(Fobj(At,0
+i )) ∈RNobj cls,
+(15)
+bt
+i = sigmoid(Fbox(At,0
+i )) ∈R4,
+(16)
+where Nobj cls is the number of object classes, Fobj and Fbox
+are the MLP-based classifier and projector, respectively.
+3.3. Implementation Details
+Network Configuration. DIFFVSGG is an online VSGG
+framework built upon the iterative diffusion diagram.
+It
+comprises three components: one off-the-shelf detector to
+deliver object detection results, the LDMs for inter-object
+relationship denosing, and projector heads for object classi-
+fication, predicate prediction, and bounding box regression.
+Training Objective. The training process of DIFFVSGG
+consists of two stages. In the first stage, we pre-train the
+denoising U-Net ϵθ in Eq. 9, using ˆ
+At constructed from
+ground truth bounding box annotations. In the second stage,
+we optimize the MLP classifier and projector in Eq.14-15,
+which generate the final VSGG predictions. Specifically,
+Method
+PredCLS
+SGCLS
+SGDET
+R@10R@20R@50mR@10mR@20mR@50 R@10R@20R@50mR@10mR@20mR@50 R@10R@20R@50mR@10mR@20mR@50
+RelDN [117] 20.3
+20.3
+20.3
+6.2
+6.2
+6.2
+11.0
+11.0
+11.0
+3.4
+3.4
+3.4
+9.1
+9.1
+9.1
+3.3
+3.3
+3.3
+TRACE [89] 27.5
+27.5
+27.5
+15.2
+15.2
+15.2
+14.8
+14.8
+14.8
+8.9
+8.9
+8.9
+13.9
+14.5
+14.5
+8.2
+8.2
+8.2
+VRD [62] 51.7
+54.7
+54.7
+-
+-
+-
+32.4
+33.3
+33.3
+-
+-
+-
+19.2
+24.5
+26.0
+-
+-
+-
+Motif Freq [116] 62.4
+65.1
+65.1
+-
+-
+-
+40.8
+41.9
+41.9
+-
+-
+-
+23.7
+31.4
+33.3
+-
+-
+-
+MSDN [55] 65.5
+68.5
+68.5
+-
+-
+-
+43.9
+45.1
+45.1
+-
+-
+-
+24.1
+32.4
+34.5
+-
+-
+-
+VCTREE [86] 66.0
+69.3
+69.3
+-
+-
+-
+44.1
+45.3
+45.3
+-
+-
+-
+24.4
+32.6
+34.7
+-
+-
+-
+GPS-Net [58] 66.8
+69.9
+69.9
+-
+-
+-
+45.3
+46.5
+46.5
+-
+-
+-
+24.7
+33.1
+35.1
+-
+-
+-
+STTran [15] 68.6
+71.8
+71.8
+37.8
+40.1
+40.2
+46.4
+47.5
+47.5
+27.2
+28.0
+28.0
+25.2
+34.1
+37.0
+16.6
+20.8
+22.2
+APT [56] 69.4
+73.8
+73.8
+-
+-
+-
+47.2
+48.9
+48.9
+-
+-
+-
+26.3
+36.1
+38.3
+-
+-
+-
+STTran-TPI [98] 69.7
+72.6
+72.6
+37.3
+40.6
+40.6
+47.2
+48.3
+48.3
+28.3
+29.3
+29.3
+26.2
+34.6
+37.4
+15.6
+20.2
+21.8
+TR2 [96] 70.9
+73.8
+73.8
+-
+-
+-
+47.7
+48.7
+48.7
+-
+-
+-
+26.8
+35.5
+38.3
+-
+-
+-
+TEMPURA [68] 68.8
+71.5
+71.5
+42.9
+46.3
+46.3
+47.2
+48.3
+48.3
+34.0
+35.2
+35.2
+28.1
+33.4
+34.9
+18.5
+22.6
+23.7
+DSG-DETR [27]
+-
+-
+-
+-
+-
+-
+50.8
+52.0
+52.0
+-
+-
+-
+30.3
+34.8
+36.1
+-
+-
+-
+DIFFVSGG 71.9
+74.5
+74.5
+48.1
+50.2
+50.2
+52.5
+53.7
+53.7
+37.3
+38.4
+38.4
+32.8
+39.9
+45.5
+20.9
+23.6
+26.2
+Table 1. Comparison of state-of-the-art VSGG methods on Action Genome test [37] under the w constraint setting.
+given the relation class number Cr, the relation prediction
+pr, and ground truth yr, the relation classification loss is:
+Lpred cls = −
+XCr
+i=1 yr,i log(pr,i).
+(17)
+Similarly, given the object class number Co, object predic-
+tion po, and ground truth yo, the object classification loss is:
+Lobj cls = −
+XCo
+j=1 yo,j log(po,j).
+(18)
+For bounding box regression, given the ground truth bound-
+ing box tk (e.g., (x, y, w, h)) and the predicted bounding
+box ˆtk, the regression loss is formulated as:
+Lbox reg = Smooth L1(tk −ˆtk).
+(19)
+The training objectives for each stage are formulated as:
+Stage 1 :
+L = LT VSGG,
+Stage 2 :
+L = Lpred cls + Lobj cls + 0.5Lbox reg,
+(20)
+4. Experiment
+4.1. Experimental setting
+Dataset. We evaluate DIFFVSGG on Action Genome
+(AG) [37], the largest video scene graph generation dataset
+comprising over 10K videos extended from the Charades
+dataset [81]. This dataset includes 1,715,568 predicate in-
+stances across 25 predicate classes, spanning 234,253 video
+frames, and features 476,229 bounding boxes across 35 ob-
+ject categories. The 1,715,568 instances for 25 predicate
+classes are divided into attention, spatial and contacting,
+three different types. Following prior work [15, 56], we
+use the same training/testing split.
+Training. In the first training stage which optimizes the
+LDMs with ground-truth bounding box annotations, we set
+the learning rate to 10−4 and use the Adam optimizer. The
+batch size is set to 2048, and the model is trained for 100
+epochs. Each input clip consists of five frames sampled at
+random time intervals, enabling conditional temporal rea-
+soning. The denoising U-Net ϵθ remains frozen once after
+pre-training. In the second training stage, the classifiers and
+projectors are trained for 10 epochs with a batch size of 8.
+We use the AdamW optimizer with a learning rate of 10−5,
+which decays by a factor of 5 halfway through the training.
+Evaluation Setup. In line with previous studies[27, 37, 56,
+62], three standard evaluation protocols are adopted:
+• PredCLS: With oracle-provided object labels and bound-
+ing boxes as well as grounding-truth subject-object pairs,
+PredCLS assesses the model capability to predict predi-
+cate labels for each subject-object pair.
+• SGCLS: Building on PredCLS, SGCLS requires the si-
+multaneous prediction of both predicate labels and the as-
+sociated subject-object pairs for each predicate.
+• SGDET: As the most challenging task, SGDET requires
+generating complete scene graphs from scratch, including
+object detection, subject-object pair selection, and predi-
+cate classification. Detection is considered accurate if the
+overlap between prediction and ground truth exceeds 0.5.
+Evaluation Metric. We employ the Recall@k where k ∈
+10, 20, 50 as the evaluation metric, to measure the propor-
+tion of ground truth elements within the top-k predictions.
+Additionally, Mean-Recall@k is also adopted to ensure the
+evaluation is not biased toward high-frequency classes. The
+evaluation is performed under two different scenarios:
+• w constraint: Each subject-object pair is restricted to a
+maximum of one predicate.
+• w/o constraints: Each subject-object pair is allowed to
+have multiple predicates simultaneously.
+4.2. Comparison with State-of-the-arts
+Tables 1-3 present the main experimental results of DIF-
+FVSGG against several top-leading approaches on Action
+Genome test [37]. Following existing VSGG works [15,
+56], we firstly select a few representative image-level SGG
+methods such as RelDN [117] and GPS-Net [58]. Then,
+Method
+PredCLS
+SGCLS
+SGDET
+R@10R@20R@50mR@10mR@20mR@50 R@10R@20R@50mR@10mR@20mR@50 R@10R@20R@50mR@10mR@20mR@50
+RelDN [117] 44.2
+75.4
+89.2
+31.2
+63.1
+75.5
+25.0
+41.9
+47.9
+18.6
+36.9
+42.6
+13.6
+23.0
+36.6
+7.5
+18.8
+33.7
+VRD [62] 51.7
+54.7
+54.7
+-
+-
+-
+32.4
+33.3
+33.3
+-
+-
+-
+19.2
+24.5
+26.0
+-
+-
+-
+Motif Freq [116] 62.4
+65.1
+65.1
+-
+-
+-
+40.8
+41.9
+41.9
+-
+-
+-
+23.7
+31.4
+33.3
+-
+-
+-
+MSDN [55] 65.5
+68.5
+68.5
+-
+-
+-
+43.9
+45.1
+45.1
+-
+-
+-
+24.1
+32.4
+34.5
+-
+-
+-
+VCTREE [86] 66.0
+69.3
+69.3
+-
+-
+-
+44.1
+45.3
+45.3
+-
+-
+-
+24.4
+32.6
+34.7
+-
+-
+-
+TRACE [89] 72.6
+91.6
+96.4
+50.9
+73.6
+82.7
+37.1
+46.7
+50.5
+31.9
+42.7
+46.3
+26.5
+35.6
+45.3
+22.8
+31.3
+41.8
+GPS-Net [58] 76.0
+93.6
+99.5
+-
+-
+-
+-
+-
+-
+-
+-
+-
+24.5
+35.7
+47.3
+-
+-
+-
+STTran [15] 77.9
+94.2
+99.1
+51.4
+67.7
+82.7
+54.0
+63.7
+66.4
+40.7
+50.1
+58.5
+24.6
+36.2
+48.8
+20.9
+29.7
+39.2
+APT [56] 78.5
+95.1
+99.2
+-
+-
+-
+55.1
+65.1
+68.7
+-
+-
+-
+25.7
+37.9
+50.1
+-
+-
+-
+TR2 [96] 83.1
+96.6
+99.9
+-
+-
+-
+57.2
+64.4
+66.2
+-
+-
+-
+27.8
+39.2
+50.0
+-
+-
+-
+TEMPURA [68] 80.4
+94.2
+99.4
+61.5
+85.1
+98.0
+56.3
+64.7
+67.9
+48.3
+61.1
+66.4
+29.8
+38.1
+46.4
+24.7
+33.9
+43.7
+DSG-DETR [27]
+-
+-
+-
+-
+-
+-
+59.2
+69.1
+72.4
+-
+-
+-
+32.1
+40.9
+48.3
+-
+-
+-
+DIFFVSGG 83.1
+94.5
+99.1
+66.3
+90.5
+98.4
+60.5
+70.5
+74.4
+51.0
+64.2
+68.8
+35.4
+42.5
+51.0
+27.2
+37.0
+45.6
+Table 2. Comparison of state-of-the-art VSGG methods on Action Genome test [37] under the w/o constraint setting.
+t
+person1
+person2
+laptop
+food
+not look at
+not look at
+ look at
+ look at
+not look at
+Attention
+person1
+laptop
+Spatial
+person2
+food
+person1
+laptop
+Contact
+person2
+food
+person1
+person2
+laptop
+food
+person1
+laptop
+person2
+food
+person1
+laptop
+person2
+food
+person1
+person2
+laptop
+food
+person1
+laptop
+person2
+food
+person1
+laptop
+person2
+food
+not look at
+not look at
+not look  at
+not look at
+look at
+on the side of
+in front of on the side of
+in front  of
+on the side of
+on the side of
+on the side of
+on the side of
+on the side of
+touching
+not contacting
+not contacting
+not contacting
+not contacting
+not contacting
+not contacting
+not contacting
+not contacting
+eating
+holding
+ 
+ look at
+ 
+ look at
+ 
+not look at
+not look at
+ 
+ look at
+ 
+ 
+ 
+ 
+on the side of
+on the side of
+in front of
+ 
+in front of
+ 
+in front  of
+ 
+in front  of
+ 
+ 
+touching
+ 
+touching
+ 
+ 
+ 
+ 
+not contacting
+not contacting
+Figure 4. Visualization results on Action Genome test [37]. All results are given under the SGDET setup. Predicates in red indicate
+relationships are transformed to another one. See §4.3 for detailed analysis.
+we compare DIFFVSGG with existing video-level solu-
+tions such as STTran[15], APT[56], etc. In general, DIF-
+FVSGG outperform image-level SGG methods by a large
+margin in all metrics.
+Concretely, under the w con-
+straint setup, our proposed method achieves R@10/R@20/
+R50 scores of 32.8/39.9/45.5, surpassing GPS-Net which
+achieves 24.7/33.1/35.1 scores by 8.1/6.8/10.4 scores, re-
+spectively. Similar trends can be observed on the w/o con-
+straint setup. All of the above firmly demonstrates the ef-
+fectiveness of incorporating temporal cues to tackle relation
+understanding in dynamic scene.
+Additionally, when compared to the video-level coun-
+terparts, DIFFVSGG can still deliver state-of-the-art per-
+formance. Specifically, though DSG-DETR[27] adopts a
+modern DETR-like architecture and uses a Transformer-
+based decoder with all frames as the inputs to aggregate
+temporal cues, our DIFFVSGG which conducts online infer-
+ence still outperforms it by a solid gap (i.e., 35.4/42.5/51.0
+vs. 32.1/40.9/48.3 under the w/o constraint).
+More im-
+portantly, when it comes to the comparison of mR met-
+ric which prevents the bias toward high-frequency classes,
+DIFFVSGG obtains significantly higher performance com-
+pared to existing work. This suggests that using latent dif-
+fusion models (LDMs) to model the inter-object relation-
+ship is effective, and it successfully learned meaning dis-
+tributions which can prevent overfitting to high-frequency
+classes. Similar conclusions can be drawn on PredCLS and
+SGCLS two evaluation protocols, where DIFFVSGG can
+still deliver SOTA performance under both w constraint
+and w/o constraint two setups.
+4.3. Qualitative Results
+We provide visualization results of UNIALIGN in Fig.4. It
+can be seen that our proposed method is able to generate
+accurate scene graphs across various challenging scenarios,
+such as fast motion and occlusion.
+4.4. Diagnostic Experiment
+To assess the effectiveness of the detailed designs of DIF-
+FVSGG and gain deeper insights, we conduct a series of ex-
+w constraints
+w/o constraints
+# LVSGG LT VSGG Motion R@10 R@20 R@50 R@10 R@20 R@50
+1
+26.9
+35.3
+38.0
+27.5
+38.9
+48.5
+2
+✓
+29.7
+37.7
+41.5
+30.3
+40.1
+49.9
+3
+✓
+32.0
+39.3
+44.6
+33.9
+42.0
+50.3
+4
+✓
+✓
+32.8
+39.9
+45.5
+35.4
+42.5
+51.0
+Table 3. Analysis on key components of DIFFVSGG.
+Union Box Subject Subject
+w constraints
+No Constraints
+#
+Feature
+Feature Location R@10 R@20 R@50 R@10 R@20 R@50
+1
+✓
+29.5
+36.7
+42.0
+32.3
+39.2
+47.5
+2
+✓
+✓
+31.0
+38.2
+43.6
+33.7
+40.8
+48.7
+3
+✓
+✓
+✓
+32.8
+39.9
+45.5
+35.4
+42.5
+51.0
+Table 4. Analysis on elements to construct adjacency matrix At.
+w constraints
+w/o constraints
+Step T
+R@10
+R@20
+R@50
+R@10
+R@20
+R@50
+10
+31.7
+38.5
+42.9
+34.0
+41.1
+49.5
+20
+32.8
+39.9
+45.5
+35.4
+42.5
+51.0
+50
+33.2
+40.5
+46.4
+35.7
+43.1
+51.4
+100
+33.1
+40.3
+45.9
+35.5
+42.8
+51.1
+Table 5. Analysis on forward and reverse diffusion steps.
+periments on the AG test[37]. All performance metrics
+are reported under the SGDET setup.
+Key Component Analysis. We first examine the efficacy
+of essential components of DIFFVSGG in Table3, where the
+first row denotes the baseline model directly using bounding
+box predictions to construct scene graphs without denois-
+ing refinement. After integrating LDMs to model complex
+inter-object relationships within the scene (i.e., row #2),
+DIFFVSGG enjoys considerable improvement on both w
+and w/o constraint setups. Next, applying condition based
+temporal reasoning to capture long-term temporal depen-
+dencies further boosts the performance to 32.0 and 33.9
+on two setups. Finally, upon the incorporation of motion
+enhanced denoising (i.e., row #4), DIFFVSGG obtains the
+best performance on both setups, suggesting that motion
+cues can effectively enhance the awareness of temporal cues
+through conditional promoting.
+Graph Construction. We study the impact of using vari-
+ous features to construct the adjacency matrix At in Table 4.
+As shown, incorporating all three types of features, as de-
+scribed in Eq.7, achieves the best performance.
+Number of Diffusion Step. Next we investigate the effect
+of different number of diffusion steps. As shown in Table
+5, the best performance is achieved at T = 50. However,
+to balance the performance and efficiency efficiency, we set
+T = 20, which yields a slight reduction in performance.
+Number of Layer in Denoising U-Net. We further ana-
+lyze the impact of using different number of layers in the
+encoder and decoder of denoising U-Net. As shown in Ta-
+ble 6, DIFFVSGG achieves similar performance when the
+# Layer
+w constraints
+w/o constraints
+R@10
+R@20
+R@50
+R@10
+R@20
+R@50
+2
+31.9
+38.2
+44.5
+34.0
+42.1
+50.1
+3
+32.8
+39.9
+45.5
+35.4
+42.5
+51.0
+5
+32.4
+39.6
+46.1
+34.4
+43.0
+50.7
+6
+32.6
+39.3
+46.3
+34.7
+44.0
+50.9
+Table 6. Analysis of the layer configuration of the U-Net.
+w constraints
+w/o constraints
+Element
+R@10
+R@20
+R@50
+R@10
+R@20
+R@50
+At,0
+i
+32.8
+39.9
+45.5
+35.4
+42.5
+51.0
+At,0
+i,j
+31.7
+37.7
+43.5
+33.6
+41.2
+49.6
+Table 7. Analysis on the elements used for graph readout.
+ParameterInference
+w constraints
+w/o constraints
+Model Number
+Time
+R@10R@20R@50R@10R@20R@50
+TRACE [89] 66.7 M
+8.4 FPS
+13.9
+14.5
+14.5
+26.5
+35.6
+45.3
+STTran [15] 51.1 M 10.9 FPS 25.2
+34.1
+37.0
+24.6
+36.2
+48.8
+TEMPURA [68] 53.5 M
+9.6 FPS
+28.1
+33.4
+34.9
+29.8
+38.1
+46.4
+DSG-DETR [27] 65.5 M
+7.3 FPS
+30.3
+34.8
+36.1
+32.1
+40.9
+48.3
+DIFFVSGG 46.7 M
+8.7 FPS
+32.8
+39.9
+45.5
+35.4
+42.5
+51.0
+Table 8. Analysis on the trainable parameters and inference time.
+layer number exceeds 2. For efficiency, we set it to 3.
+Graph Readout. We explore different graph readout strate-
+gies in Table 7. Here At,0
+i
+refers to utilize the entire row i of
+At,0 to deliver the predictions (i.e., Eq.15-16), while At,0
+i,j
+denoting utilize one element at (i, j) of At,0 to make pre-
+diction. It can be seen that aggregating all elements in a row
+that contains the same subject delivers higher performance.
+Running Efficiency.
+Finally we probe the running effi-
+ciency of DIFFVSGG. As seen in Table 8, our method re-
+quires the fewest trainable parameters among all competi-
+tors. Though inference speed is slightly slower than exist-
+ing work due to step-wise denoising, the improvement in
+performance compensates for this limitation.
+5. Conclusion
+We presented DIFFVSGG, a diffusion-based VSGG solution
+that makes contributions in three aspects. First, as an online
+approach, it effectively addresses challenges such as GPU
+memory constraints and real-time processing while deliv-
+ering high performance, highlighting its potential for real-
+world application.
+Second, we propose a learning strat-
+egy for LDMs to generate inter-object relationships from
+random subject-object pairs, with ground-truth object loca-
+tions as the annotations. Third, in leverage of LDMs, DIF-
+FVSGG provides a new approach to enable temporal reason-
+ing via dynamic, iterative refinement of scene graphs across
+frames, conditioned on predictions of prior frame. We hope
+this work could provide a new perspective for video analy-
+sis through reverse diffusion along the temporal dimension.
+References
+[1] Tomer Amit, Tal Shaharbany, Eliya Nachmani, and Lior
+Wolf. Segdiff: Image segmentation with diffusion proba-
+bilistic models. arXiv preprint arXiv:2112.00390, 2021. 3
+[2] Anurag Arnab, Mostafa Dehghani, Georg Heigold, Chen
+Sun, Mario Luˇci´c, and Cordelia Schmid. Vivit: A video
+vision transformer. In ICCV, 2021. 2
+[3] Stephan Baier, Yunpu Ma, and Volker Tresp. Improving
+visual relationship detection using semantic modeling of
+scene descriptions. In ISWC, 2017. 2
+[4] Dmitry Baranchuk,
+Andrey Voynov,
+Ivan Rubachev,
+Valentin Khrulkov, and Artem Babenko. Label-efficient se-
+mantic segmentation with diffusion models. In ICLR, 2021.
+3
+[5] Emmanuel Asiedu Brempong, Simon Kornblith, Ting
+Chen, Niki Parmar, Matthias Minderer, and Mohammad
+Norouzi. Denoising pretraining for semantic segmentation.
+In CVPR, 2022. 3
+[6] Hanqun Cao, Cheng Tan, Zhangyang Gao, Yilun Xu,
+Guangyong Chen, Pheng-Ann Heng, and Stan Z Li. A sur-
+vey on generative diffusion models. IEEE Transactions on
+Knowledge and Data Engineering, 2024. 3
+[7] Guikun Chen, Jin Li, and Wenguan Wang. Scene graph
+generation with role-playing large language models.
+In
+NeurIPS, 2025. 2
+[8] Mu Chen, Liulei Li, Wenguan Wang, Ruijie Quan, and Yi
+Yang. General and task-oriented video segmentation. In
+ECCV, 2024. 3
+[9] Minghan Chen, Guikun Chen, Wenguan Wang, and Yi
+Yang. Hydra-sgg: Hybrid relation assignment for one-stage
+scene graph generation. In ICLR, 2025. 2
+[10] Shuo Chen, Zenglin Shi, Pascal Mettes, and Cees GM
+Snoek. Social fabric: Tubelet compositions for video re-
+lation detection. In ICCV, 2021. 13, 14
+[11] Shoufa Chen, Peize Sun, Yibing Song, and Ping Luo. Dif-
+fusiondet: Diffusion model for object detection. In ICCV,
+2023. 3
+[12] Tianshui Chen, Weihao Yu, Riquan Chen, and Liang Lin.
+Knowledge-embedded routing network for scene graph
+generation. In CVPR, 2019. 2
+[13] Ting Chen, Lala Li, Saurabh Saxena, Geoffrey Hinton, and
+David J Fleet. A generalist framework for panoptic seg-
+mentation of images and videos. In CVPR, 2023. 3
+[14] Meng-Jiun Chiou, Henghui Ding, Hanshu Yan, Changhu
+Wang, Roger Zimmermann, and Jiashi Feng. Recovering
+the unbiased scene graphs from the biased ones. In ACM
+MM, 2021. 2
+[15] Yuren Cong, Wentong Liao, Hanno Ackermann, Bodo
+Rosenhahn, and Michael Ying Yang.
+Spatial-temporal
+transformer for dynamic scene graph generation. In ICCV,
+2021. 6, 7, 8, 15
+[16] Yuren Cong, Michael Ying Yang, and Bodo Rosenhahn.
+Reltr: Relation transformer for scene graph generation.
+IEEE Transactions on Pattern Analysis and Machine Intel-
+ligence, 45(9):11169–11183, 2023. 2
+[17] Yiming Cui. Feature aggregated queries for transformer-
+based video object detectors. In CVPR, 2023. 3
+[18] Bo Dai, Yuqi Zhang, and Dahua Lin. Detecting visual re-
+lationships with deep relational networks. In CVPR, 2017.
+2
+[19] Alakh Desai, Tz-Ying Wu, Subarna Tripathi, and Nuno
+Vasconcelos. Learning of visual relations: The devil is in
+the tails. In ICCV, 2021. 2
+[20] Prafulla Dhariwal and Alexander Quinn Nichol. Diffusion
+models beat gans on image synthesis. In NeurIPS, 2021. 3
+[21] Donglin Di, Xindi Shang, Weinan Zhang, Xun Yang, and
+Tat-Seng Chua. Multiple hypothesis video relation detec-
+tion. In BigMM, 2019. 14
+[22] Qi Dong, Zhuowen Tu, Haofu Liao, Yuting Zhang, Vi-
+jay Mahadevan, and Stefano Soatto.
+Visual relationship
+detection using part-and-sum transformers with composite
+queries. In ICCV, 2021. 2
+[23] Xingning Dong, Tian Gan, Xuemeng Song, Jianlong Wu,
+Yuan Cheng, and Liqiang Nie.
+Stacked hybrid-attention
+and group collaborative learning for unbiased scene graph
+generation. In CVPR, 2022. 2
+[24] Yiqun Duan, Xianda Guo, and Zheng Zhu. Diffusiondepth:
+Diffusion denoising approach for monocular depth estima-
+tion. arXiv preprint arXiv:2303.05021, 2023. 3
+[25] Chenyou Fan, Xiaofan Zhang, Shu Zhang, Wensheng
+Wang, Chi Zhang, and Heng Huang. Heterogeneous mem-
+ory enhanced multimodal attention model for video ques-
+tion answering. In CVPR, 2019. 3
+[26] Lifeng Fan, Wenguan Wang, Siyuan Huang, Xinyu Tang,
+and Song-Chun Zhu. Understanding human gaze communi-
+cation by spatio-temporal graph reasoning. In ICCV, 2019.
+3
+[27] Shengyu Feng, Hesham Mostafa, Marcel Nassar, Somdeb
+Majumdar, and Subarna Tripathi. Exploiting long-term de-
+pendencies for generating dynamic scene graphs. In WACV,
+2023. 1, 2, 3, 6, 7, 8, 13, 14, 15, 17, 18
+[28] Jiyang Gao, Chen Sun, Zhenheng Yang, and Ram Nevatia.
+Tall: Temporal activity localization via language query. In
+ICCV, 2017. 1
+[29] Kaifeng Gao, Long Chen, Yulei Niu, Jian Shao, and Jun
+Xiao. Classification-then-grounding: Reformulating video
+scene graphs as temporal bipartite graphs. In CVPR, 2022.
+13, 14
+[30] Alexandros Graikos, Nikolay Malkin, Nebojsa Jojic, and
+Dimitris Samaras. Diffusion models as plug-and-play pri-
+ors. In NeurIPS, 2022. 3
+[31] Jiuxiang Gu, Handong Zhao, Zhe Lin, Sheng Li, Jianfei
+Cai, and Mingyang Ling.
+Scene graph generation with
+external knowledge and image reconstruction. In CVPR,
+2019. 2
+[32] Sergio
+Guadarrama,
+Niveda
+Krishnamoorthy,
+Girish
+Malkarnenkar,
+Subhashini
+Venugopalan,
+Raymond
+Mooney, Trevor Darrell, and Kate Saenko. Youtube2text:
+Recognizing and describing arbitrary activities using
+semantic hierarchies and zero-shot recognition. In ICCV,
+2013. 1
+[33] Kaiming He, Georgia Gkioxari, Piotr Doll´ar, and Ross Gir-
+shick. Mask r-cnn. In ICCV, 2017. 4
+[34] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising dif-
+fusion probabilistic models. In NeurIPS, 2020. 3
+[35] Jonathan Ho, Tim Salimans, Alexey Gritsenko, William
+Chan, Mohammad Norouzi, and David J Fleet. Video dif-
+fusion models. In NeurIPS, 2022. 3
+[36] Xiaolin Hong,
+Hongwei Yi,
+Fazhi He,
+and Qiong
+Cao.
+Human-aware
+3d
+scene
+generation
+with
+spatially-constrained diffusion models.
+arXiv preprint
+arXiv:2406.18159, 2024. 3
+[37] Jingwei Ji, Ranjay Krishna, Li Fei-Fei, and Juan Car-
+los Niebles. Action genome: Actions as compositions of
+spatio-temporal scene graphs. In CVPR, 2020. 2, 6, 7, 8,
+13, 14, 15
+[38] Jian-Yu Jiang-Lin, Kang-Yang Huang, Ling Lo, Yi-Ning
+Huang, Terence Lin, Jhih-Ciang Wu, Hong-Han Shuai, and
+Wen-Huang Cheng. Record: Reasoning and correcting dif-
+fusion for hoi generation. In ACM MM, 2024. 3
+[39] Jaehyeong Jo, Seul Lee, and Sung Ju Hwang. Score-based
+generative modeling of graphs via the system of stochastic
+differential equations. In ICML, 2022. 3
+[40] Deunsol Jung, Sanghyun Kim, Won Hwa Kim, and Minsu
+Cho.
+Devil’s on the edges: Selective quad attention for
+scene graph generation. In CVPR, 2023. 2
+[41] Boah Kim, Yujin Oh, and Jong Chul Ye. Diffusion adver-
+sarial representation learning for self-supervised vessel seg-
+mentation. In ICLR, 2023. 3
+[42] Junyeong Kim, Minuk Ma, Trung Pham, Kyungsu Kim,
+and Chang D Yoo. Modality shifting improvedion network
+for multi-modal video question answering. In CVPR, 2020.
+3
+[43] Boris Knyazev, Harm De Vries, C˘at˘alina Cangea, Gra-
+ham W Taylor, Aaron Courville, and Eugene Belilovsky.
+Graph density-aware losses for novel compositions in scene
+graph generation. arXiv preprint arXiv:2005.08230, 2020.
+2
+[44] Jonas Kohler, Albert Pumarola, Edgar Sch¨onfeld, Artsiom
+Sanakoyeu, Roshan Sumbaly, Peter Vajda, and Ali Tha-
+bet. Imagine flash: Accelerating emu diffusion models with
+backward distillation.
+arXiv preprint arXiv:2405.05224,
+2024. 14
+[45] Benno Krojer, Elinor Poole-Dayan, Vikram Voleti, Christo-
+pher Pal, and Siva Reddy. Are diffusion models vision-and-
+language reasoners? In NeurIPS, 2023. 3
+[46] Sanjoy Kundu and Sathyanarayanan N Aakur. Is-ggt: Iter-
+ative scene graph generation with generative transformers.
+In CVPR, 2023. 2
+[47] Jie Lei, Licheng Yu, Mohit Bansal, and Tamara L Berg.
+Tvqa: Localized, compositional video question answering.
+arXiv preprint arXiv:1809.01696, 2018. 1
+[48] Jie Lei, Licheng Yu, Tamara L Berg, and Mohit Bansal.
+Tvr: A large-scale dataset for video-subtitle moment re-
+trieval. In ECCV, 2020. 1
+[49] Lin Li, Long Chen, Yifeng Huang, Zhimeng Zhang,
+Songyang Zhang, and Jun Xiao. The devil is in the labels:
+Noisy label correction for robust scene graph generation. In
+CVPR, 2022. 2
+[50] Liulei Li, Jianan Wei, Wenguan Wang, and Yi Yang.
+Neural-logic human-object interaction detection.
+In
+NeurIPS, 2023. 2
+[51] Liulei Li, Wenguan Wang, and Yi Yang. Human-object in-
+teraction detection collaborated with large relation-driven
+diffusion models. In NeurIPS, 2024. 3
+[52] Lin Li, Jun Xiao, Hanrong Shi, Hanwang Zhang, Yi Yang,
+Wei Liu, and Long Chen.
+Nicest: Noisy label correc-
+tion and training for robust scene graph generation. IEEE
+Transactions on Pattern Analysis and Machine Intelligence,
+2024. 2
+[53] Rongjie Li, Songyang Zhang, and Xuming He. Sgtr: End-
+to-end scene graph generation with transformer. In CVPR,
+2022. 2
+[54] Yikang Li, Wanli Ouyang, Xiaogang Wang, and Xiao’ou
+Tang. Vip-cnn: Visual phrase guided convolutional neural
+network. In CVPR, 2017. 2
+[55] Yikang Li, Wanli Ouyang, Bolei Zhou, Kun Wang, and
+Xiaogang Wang.
+Scene graph generation from objects,
+phrases and region captions. In CVPR, 2017. 2, 6, 7, 15
+[56] Yiming Li, Xiaoshan Yang, and Changsheng Xu. Dynamic
+scene graph generation via anticipatory pre-training.
+In
+CVPR, 2022. 6, 7, 15
+[57] Yuanzhi Liang, Yalong Bai, Wei Zhang, Xueming Qian, Li
+Zhu, and Tao Mei. Vrr-vg: Refocusing visually-relevant
+relationships. In CVPR, 2019. 2
+[58] Xin Lin, Changxing Ding, Jinquan Zeng, and Dacheng Tao.
+Gps-net: Graph property sensing network for scene graph
+generation. In CVPR, 2020. 6, 7, 15
+[59] Chenchen Liu, Yang Jin, Kehan Xu, Guoqiang Gong, and
+Yadong Mu.
+Beyond short-term snippet: Video relation
+detection with spatio-temporal global context. In CVPR,
+2020. 13, 14
+[60] Rui Liu, Xiaohan Wang, Wenguan Wang, and Yi Yang.
+Bird’s-eye-view scene graph for vision-language naviga-
+tion. In ICCV, 2023. 3
+[61] Xin Liu, Fatemeh Karimi Nejadasl, Jan C van Gemert, Olaf
+Booij, and Silvia L Pintea. Objects do not disappear: Video
+object detection by single-frame object location anticipa-
+tion. In CVPR, 2023. 3
+[62] Cewu Lu, Ranjay Krishna, Michael Bernstein, and Li Fei-
+Fei. Visual relationship detection with language priors. In
+ECCV, 2016. 6, 7, 15
+[63] Yichao Lu, Himanshu Rai, Jason Chang, Boris Knyazev,
+Guangwei Yu, Shashank Shekhar, Graham W Taylor, and
+Maksims Volkovs. Context-aware scene graph generation
+with seq2seq transformers. In ICCV, 2021. 2
+[64] Run Luo, Zikai Song, Lintao Ma, Jinlin Wei, Wei Yang,
+and Min Yang. Diffusiontrack: Diffusion model for multi-
+object tracking. In AAAI, 2024. 3
+[65] Weiyi Lv, Yuhang Huang, Ning Zhang, Ruei-Sung Lin,
+Mei Han, and Dan Zeng. Diffmot: A real-time diffusion-
+based multiple object tracker with non-linear prediction. In
+CVPR, 2024. 3
+[66] Yifan Mao, Jian Liu, and Xianming Liu. Stealing stable dif-
+fusion prior for robust monocular depth estimation. arXiv
+preprint arXiv:2403.05056, 2024. 3
+[67] Ishan Misra, C Lawrence Zitnick, Margaret Mitchell, and
+Ross Girshick. Seeing through the human reporting bias:
+Visual classifiers from noisy human-centric labels.
+In
+CVPR, 2016. 2
+[68] Sayak Nag, Kyle Min, Subarna Tripathi, and Amit K Roy-
+Chowdhury. Unbiased scene graph generation in videos. In
+CVPR, 2023. 1, 3, 6, 7, 8, 13, 15
+[69] Megha Nawhal and Greg Mori.
+Activity graph trans-
+former for temporal action localization.
+arXiv preprint
+arXiv:2101.08540, 2021. 2
+[70] Chenhao Niu, Yang Song, Jiaming Song, Shengjia Zhao,
+Aditya Grover, and Stefano Ermon. Permutation invariant
+graph generation via score-based generative modeling. In
+ICAIS, 2020. 3
+[71] Mengshi Qi, Weijian Li, Zhengyuan Yang, Yunhong Wang,
+and Jiebo Luo. Attentive relational networks for mapping
+images to scene graphs. In CVPR, 2019. 2
+[72] Siyuan Qi, Wenguan Wang, Baoxiong Jia, Jianbing Shen,
+and Song-Chun Zhu. Learning human-object interactions
+by graph parsing neural networks. In ECCV, 2018. 3
+[73] Xufeng Qian, Yueting Zhuang, Yimeng Li, Shaoning Xiao,
+Shiliang Pu, and Jun Xiao. Video relation detection with
+spatio-temporal graph. In ACM MM, 2019. 2, 13, 14
+[74] Tanzila Rahman, Shih-Han Chou, Leonid Sigal, and
+Giuseppe Carenini. An improved attention for visual ques-
+tion answering. In CVPR, 2021. 3
+[75] Yasiru Ranasinghe, Deepti Hegde, and Vishal M Patel.
+Monodiff: Monocular 3d object detection and pose estima-
+tion with diffusion models. In CVPR, 2024. 3
+[76] Robin Rombach, Andreas Blattmann, Dominik Lorenz,
+Patrick Esser, and Bj¨orn Ommer. High-resolution image
+synthesis with latent diffusion models. In CVPR, 2022. 2,
+3
+[77] Saurabh Saxena, Abhishek Kar, Mohammad Norouzi, and
+David J Fleet. Monocular depth estimation using diffusion
+models. arXiv preprint arXiv:2302.14816, 2023. 3
+[78] Xindi Shang, Tongwei Ren, Jingfan Guo, Hanwang Zhang,
+and Tat-Seng Chua.
+Video visual relation detection.
+In
+ACM MM, 2017. 13, 14
+[79] Xindi Shang, Yicong Li, Junbin Xiao, Wei Ji, and Tat-Seng
+Chua. Video visual relation detection via iterative infer-
+ence. In ACM MM, 2021. 13, 14
+[80] Suprosanna Shit, Rajat Koner, Bastian Wittmann, Johannes
+Paetzold, Ivan Ezhov, Hongwei Li, Jiazhen Pan, Sahand
+Sharifzadeh, Georgios Kaissis, Volker Tresp, et al. Rela-
+tionformer: A unified framework for image-to-graph gen-
+eration. In ECCV, 2022. 2
+[81] Gunnar A Sigurdsson, G¨ul Varol, Xiaolong Wang, Ali
+Farhadi, Ivan Laptev, and Abhinav Gupta. Hollywood in
+homes: Crowdsourcing data collection for activity under-
+standing. In ECCV, 2016. 6
+[82] Jascha Sohl-Dickstein, Eric Weiss, Niru Maheswaranathan,
+and Surya Ganguli.
+Deep unsupervised learning using
+nonequilibrium thermodynamics. In ICML, 2015. 2, 3
+[83] Zhou Su, Chen Zhu, Yinpeng Dong, Dongqi Cai, Yurong
+Chen, and Jianguo Li. Learning visual knowledge memory
+networks for visual question answering. In CVPR, 2018. 3
+[84] Mohammed Suhail, Abhay Mittal, Behjat Siddiquie, Chris
+Broaddus, Jayan Eledath, Gerard Medioni, and Leonid Si-
+gal. Energy-based learning for scene graph generation. In
+CVPR, 2021. 2
+[85] Chen Sun, Austin Myers, Carl Vondrick, Kevin Murphy,
+and Cordelia Schmid. Videobert: A joint model for video
+and language representation learning. In ICCV, 2019. 2
+[86] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan Luo,
+and Wei Liu. Learning to compose dynamic tree structures
+for visual contexts. In CVPR, 2019. 2, 6, 7, 15
+[87] Kaihua Tang, Yulei Niu, Jianqiang Huang, Jiaxin Shi, and
+Hanwang Zhang. Unbiased scene graph generation from
+biased training. In CVPR, 2020. 2
+[88] Makarand Tapaswi, Yukun Zhu, Rainer Stiefelhagen,
+Antonio Torralba, Raquel Urtasun, and Sanja Fidler.
+Movieqa:
+Understanding stories in movies through
+question-answering. In CVPR, 2016. 1
+[89] Yao Teng, Limin Wang, Zhifeng Li, and Gangshan Wu. Tar-
+get adaptive context aggregation for video scene graph gen-
+eration. In ICCV, 2021. 6, 7, 8, 15
+[90] Thanh-Dat Truong, Quoc-Huy Bui, Chi Nhan Duong, Han-
+Seok Seo, Son Lam Phung, Xin Li, and Khoa Luu. Di-
+recformer: A directed attention in transformer approach to
+robust action recognition. In CVPR, 2022. 3
+[91] Yao-Hung Hubert Tsai, Santosh Divvala, Louis-Philippe
+Morency, Ruslan Salakhutdinov, and Ali Farhadi. Video
+relationship reasoning using gated spatio-temporal energy
+graph. In CVPR, 2019. 2, 14
+[92] Subhashini Venugopalan, Marcus Rohrbach, Jeffrey Don-
+ahue, Raymond Mooney, Trevor Darrell, and Kate Saenko.
+Sequence to sequence-video to text. In ICCV, 2015. 1
+[93] Clement Vignac, Igor Krawczuk, Antoine Siraudin, Bohan
+Wang, Volkan Cevher, and Pascal Frossard. Digress: Dis-
+crete denoising diffusion for graph generation. In ICLR,
+2023. 3
+[94] Guan Wang, Zhimin Li, Qingchao Chen, and Yang Liu.
+Oed: Towards one-stage end-to-end dynamic scene graph
+generation. In CVPR, 2024. 13, 15
+[95] Hefeng Wang, Jiale Cao, Rao Muhammad Anwer, Jin
+Xie, Fahad Shahbaz Khan, and Yanwei Pang.
+Dformer:
+Diffusion-guided transformer for universal image segmen-
+tation. arXiv preprint arXiv:2306.03437, 2023. 3
+[96] Jingyi Wang, Jinfa Huang, Can Zhang, and Zhidong
+Deng.
+Cross-modality time-variant relation learning
+for generating dynamic scene graphs.
+arXiv preprint
+arXiv:2305.08522, 2023. 1, 3, 6, 7, 13, 15
+[97] Limin Wang, Zhan Tong, Bin Ji, and Gangshan Wu. Tdn:
+Temporal difference networks for efficient action recogni-
+tion. In CVPR, 2021. 3
+[98] Shuang Wang, Lianli Gao, Xinyu Lyu, Yuyu Guo, Peng-
+peng Zeng, and Jingkuan Song. Dynamic scene graph gen-
+eration via temporal prior inference. In ACM MM, 2022. 6,
+15
+[99] Wenguan Wang, Yi Yang, and Yunhe Pan. Visual knowl-
+edge in the big model era: Retrospect and prospect. Fron-
+tiers of Information Technology & Electronic Engineering,
+26(1):1–19, 2025. 2
+[100] Jianan Wei, Tianfei Zhou, Yi Yang, and Wenguan Wang.
+Nonverbal interaction detection. In ECCV, 2024. 2
+[101] Meng Wei, Long Chen, Wei Ji, Xiaoyu Yue, and Roger
+Zimmermann. In defense of clip-based video relation de-
+tection. IEEE Transactions on Image Processing, 2024. 13,
+14
+[102] Felix Wimbauer, Bichen Wu, Edgar Schoenfeld, Xiaoliang
+Dai, Ji Hou, Zijian He, Artsiom Sanakoyeu, Peizhao Zhang,
+Sam Tsai, Jonas Kohler, et al. Cache me if you can: Accel-
+erating diffusion models through block caching. In CVPR,
+2024. 14
+[103] Sanghyun Woo, Dahun Kim, Donghyeon Cho, and In So
+Kweon. Linknet: relational embedding for scene graph. In
+NeurIPS, 2018. 2
+[104] Junfeng Wu, Qihao Liu, Yi Jiang, Song Bai, Alan Yuille,
+and Xiang Bai. In defense of online models for video in-
+stance segmentation. In ECCV, 2022. 1
+[105] Fei Xie, Zhongdao Wang, and Chao Ma. Diffusiontrack:
+Point set diffusion model for visual object tracking.
+In
+CVPR, 2024. 3
+[106] Chenfeng Xu, Huan Ling, Sanja Fidler, and Or Litany.
+3difftection: 3d object detection with geometry-aware dif-
+fusion features. In CVPR, 2024. 3
+[107] Danfei Xu, Yuke Zhu, Christopher B Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing. In
+CVPR, 2017. 2
+[108] Minkai Xu, Alexander S Powers, Ron O Dror, Stefano Er-
+mon, and Jure Leskovec. Geometric latent diffusion models
+for 3d molecule generation. In ICML, 2023. 3
+[109] Shaotian Yan, Chen Shen, Zhongming Jin, Jianqiang
+Huang, Rongxin Jiang, Yaowu Chen, and Xian-Sheng Hua.
+Pcpl: Predicate-correlation perception learning for unbi-
+ased scene graph generation. In ACM MM, 2020. 2
+[110] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi
+Parikh. Graph r-cnn for scene graph generation. In ECCV,
+2018. 2
+[111] Ling Yang, Zhilin Huang, Zhilong Zhang, Zhongyi Liu,
+Shenda Hong, Wentao Zhang, Wenming Yang, Bin Cui, and
+Luxia Zhang. Graphusion: Latent diffusion for graph gen-
+eration. IEEE Transactions on Knowledge and Data Engi-
+neering, 2024. 3
+[112] Zongxin Yang, Guikun Chen, Xiaodi Li, Wenguan Wang,
+and Yi Yang.
+Doraemongpt: Toward understanding dy-
+namic scenes with large language models (exemplified as
+a video agent). In ICML, 2024. 3
+[113] Yuan Yao, Ao Zhang, Xu Han, Mengdi Li, Cornelius We-
+ber, Zhiyuan Liu, Stefan Wermter, and Maosong Sun. Vi-
+sual distant supervision for scene graph generation.
+In
+ICCV, 2021. 2
+[114] Guojun Yin, Lu Sheng, Bin Liu, Nenghai Yu, Xiaogang
+Wang, Jing Shao, and Chen Change Loy. Zoom-net: Min-
+ing deep feature interactions for visual relationship recog-
+nition. In ECCV, 2018. 2
+[115] Ruichi Yu, Ang Li, Vlad I Morariu, and Larry S Davis. Vi-
+sual relationship detection with internal and external lin-
+guistic knowledge distillation. In ICCV, 2017. 2
+[116] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin
+Choi. Neural motifs: Scene graph parsing with global con-
+text. In CVPR, 2018. 2, 4, 6, 7, 15
+[117] Ji Zhang, Kevin J Shih, Ahmed Elgammal, Andrew Tao,
+and Bryan Catanzaro.
+Graphical contrastive losses for
+scene graph parsing. In CVPR, 2019. 6, 7, 15
+[118] Yong Zhang, Yingwei Pan, Ting Yao, Rui Huang, Tao
+Mei, and Chang-Wen Chen. End-to-end video scene graph
+generation with temporal propagation transformer. IEEE
+Transactions on Multimedia, 2023. 15
+[119] Jialin Zhao, Yuxiao Dong, Ming Ding, Evgeny Kharlamov,
+and Jie Tang. Adaptive diffusion in graph neural networks.
+In NeurIPS, 2021. 3
+[120] Songwei Zhao.
+Flexible diffusion for graph neural net-
+works. arXiv preprint arXiv:2010.04159, 2020. 3
+[121] Wenliang Zhao, Yongming Rao, Zuyan Liu, Benlin Liu, Jie
+Zhou, and Jiwen Lu. Unleashing text-to-image diffusion
+models for visual perception. In ICCV, 2023. 3
+[122] Tianfei Zhou, Wenguan Wang, Siyuan Qi, Haibin Ling, and
+Jianbing Shen. Cascaded human-object interaction recog-
+nition. In CVPR, 2020. 2
+[123] Tianfei Zhou, Siyuan Qi, Wenguan Wang, Jianbing Shen,
+and Song-Chun Zhu. Cascaded parsing of human-object in-
+teraction recognition. IEEE Transactions on Pattern Anal-
+ysis and Machine Intelligence, 44(6):2827–2840, 2021. 2
+Supplemental Material
+The appendix is structured as follows:
+• §1 supplements additional implementation details.
+• §2 analyzes additional quantitative results.
+• §3 provides pseudo codes of major components of DIF-
+FVSGG.
+• §4 shows an additional diagram of the diffusion-based
+reasoning process.
+• §5 presents more visualization results.
+• §6 demonstrates failure case analysis.
+• §7 boardly discusses the limitations and social impact.
+1. More Implementation Details
+Network Configuration. Conventional denoising diffusion
+models typically follow a multi-step image-to-noise pro-
+cess, wherein noise is progressively added and subsequently
+reversed to generate refined outputs. However, these models
+are computationally intensive. To mitigate this,DIFFVSGG
+adopts an efficient forward diffusion strategy that decou-
+ples the traditional multi-step image-to-noise process into
+two sub-processes: image-to-zero and zero-to-noise. The
+projector heads are implemented as two 1×1 convolutional
+layers with ReLU as the activation function.
+Testing. Following established conventions[27, 68, 96], we
+apply no test-time data augmentation. Images are resized to
+a maximum of 720 pixels on the longer edge, with 50 steps
+of reverse diffusion are conducted to remove noise.
+2. Additional Quantitative Analysis
+Additional Backbone. To validate the generalization ca-
+pability of DIFFVSGG, we also conducted experiments us-
+ing ResNet-50 + DETR as an alternative backbone. The
+results, shown in Table 2, demonstrate that DIFFVSGG
+achieves state-of-the-art performance in SGDET, SGCLS
+and PredCLS, particularly in PredCLS, where it surpasses
+OED [94] with a notable improvement of 1.8%, 1.4%, and
+1.4% in R@10, R@20, and R@50 under with constraint
+setting. In addition, under without constraint setting, DIF-
+FVSGG still achieves competitive performance in terms of
+both mR and R metrics. In SGDET, the performance im-
+provement of R@10, R@20, and R@50 are 1.9%, 1.1%,
+and 1.3%, respectively. These improvements verify the sig-
+nificant efficacy of DIFFVSGG in leveraging its diffusion-
+based reasoning mechanism to capture object relationships
+and temporal dynamics across frames.
+Additional Dataset. To further assess the adaptability of
+DIFFVSGG, we conducted experiments on the ImageNet-
+VidVRD dataset as an additional benchmark. Compared to
+AG [37] which mostly contains human-related interaction at
+indoor scenes, ImageNet-VidVRD [78] focuses on a wider
+range of relations not limited to human-centric interactions,
+where the average number of relations and objects is 9.7
+and 2.5 in each frame respectively. Videos in VidVRD are
+selected with the criteria of whether they have clear visual
+relations, containing 35 object categories and 132 relation
+categories, respectively. Following the standard evaluation
+task settings and metrics [10, 29, 79], we utilize relation
+tagging (RelTag) and relation detection (RelDet) to evaluate
+the performance of DIFFVSGG:
+•
+RelTag is the task to find all object categories and ex-
+isting relations. It needs to determine whether the top-K
+classification results of triplets occur within the videos
+without considering the localization of objects and rela-
+tions. We employ top-K precision (P@k , where k = 1,
+5, 10) as the evaluation metric.
+•
+RelDet is a more comprehensive task for both evaluat-
+ing object categories, trajectories and existing relations.
+Same as AG, Recalls and mAP of relation detection are
+used to evaluate our model. The threshold for viewing a
+predicted box as a hit is 0.5.
+The results, presented in Table 1, compare DIFFVSGG
+with previous methods on the ImageNet-VidVRD dataset.
+Compared to traditional graph-based methods such as
+GCN [73] and STGC [59], DIFFVSGG achieves over a
++10% improvement, demonstrating its superiority in captur-
+ing contextualized information. Recent efforts such as BIG
+[29] and HCM [101] highlight the importance of tempo-
+ral reasoning in video relation detection. Comparisons with
+these methods further validate the effectiveness of DIF-
+FVSGG in spatial-temporal reasoning modeling via denois-
+ing diffusion process. Specifically, in RelDet task, com-
+pared to the previous best method, HCM [101], DIFFVSGG
+improves mAP by +0.47%, R@50 by +0.13%, and R@100
+by +0.06%. These improvements highlight that DIFFVSGG
+is more effective in detecting and tracking relations. Sim-
+ilar trend is observed in the relation classification setting,
+RelTag, where DIFFVSGG surpasses HCM by +1.45% in
+P@1, +1.40% in P@5, and +0.16% in P@10.
+3. Pseudo Code
+We provide pytorch-style pseudo code of the proposed
+Graph Construction strategy in Algorithm 1 and Condi-
+tional Temporal Reasoning in Algorithm 2.
+4. Additional Diagram
+We provide an additional diagram in Fig. 1 to illustrate
+the core concept of iterative reasoning in DIFFVSGG. This
+diagram highlights the step-by-step reasoning process for
+scene graph generation, where the graph is progressively
+updated and refined through a series of iterative steps that
+integrate spatiotemporal cues.
+Frame 1
+Reasoning Step I
+Frame 2
+Reasoning Step II
+Frame 3
+look at  
+on the side of
+in front of
+unsure
+leaning on
+eating
+covered by
+lying on
+Diffusion Model
+Diffusion Model
+leaning
+holding
+eating
+covered by
+touching
+look at  
+not look at
+in front of
+unsure
+beneath
+leaning
+holding
+eating
+covered by
+on the side of  
+in front of
+unsure
+beneath
+person < lean on not look at>      refrigerator
+person  < on the side of >     table
+person < touching>      refrigerator
+person  < not looking at >     table
+person < holding>      pillow
+person  < on the side of >     table
+Figure 1. A diagram illustrating step-by-step reasoning process of DIFFVSGG.
+Method
+Relation Detection
+Relation Tagging
+mAP R@50 R@100
+P@1
+P@5
+P@10
+VidVRD [78]
+8.58
+5.54
+6.37
+43.00 28.90 20.80
+GSTEG [91]
+9.52
+7.05
+8.67
+51.50 39.50 28.23
+MHRA [21]
+13.27
+6.82
+7.39
+41.00 28.70 20.95
+GCN [73]
+14.27
+7.43
+8.75
+59.50 40.50 27.58
+STGC [59]
+18.38
+11.21
+13.69
+60.00 43.10 32.24
+Fabric [10]
+19.23
+12.74
+16.19
+57.50 43.40 31.90
+VidVRD-II [79] 23.85
+9.74
+10.86
+73.00 53.20 39.75
+BIG [29]
+26.08
+14.10
+16.25
+73.00 55.10 40.00
+HCM [101]
+29.68
+17.97
+21.45
+78.50 57.40 43.55
+Ours
+30.15
+18.10
+21.51
+79.95 58.80 43.71
+Table 1.
+Comparison of state-of-the-art VRD methods on
+ImageNet-VidVRD [78].
+5. Further Qualitative Results
+In this section, we provide more qualitative comparison
+with existing method DSG-DETR [27] on Action Genome
+test[37]. It could be observed in Fig. 2/ Fig. 4 that DIF-
+FVSGG performs better in distinguish difference between
+hard relationship such as spatial relation: “in front of” vs
+“behind”, and contact relation:“lying on” vs “sitting on”.
+6. Failure Case Analysis
+Due to the long-tail distribution of visual relationships in
+Action Genome [37], the model struggles to accurately cap-
+ture tail classes in the text, leading to biased scene graph
+generation. We summarize the most representative failure
+cases in Fig. 3. As observed, the contact category ”writing”
+is misclassified as ”touching.”
+7. Discussion
+Limitations. Although DIFFVSGG has demonstrated re-
+markable performance, it has some limitations, particularly
+its reliance on a multi-step denoising process. Achieving
+high-quality outputs requires iteratively refining the predic-
+tions over numerous steps, which can be time-consuming.
+Drawing inspiration from recent advancements in step-
+reduction techniques [44, 102], a potential future improve-
+ment would be to incorporate these methods to reduce the
+number of required steps and accelerate inference. Another
+limitation of DIFFVSGG is its dependence on the quality
+and distribution of training , which is also a common chal-
+lenge for other VSGG methods. Biased predicate sample
+distributions within the dataset can lead to spurious correla-
+tions between input object pairs and predicate labels, nega-
+tively impacting the model’s accuracy, especially for long-
+tail categories. Fig. 3 illustrates several failure cases where
+biased scene graphs are generated due to the long-tailed dis-
+tribution of predicates in the Action Genome dataset [37].
+We aim to address this limitation by introducing additional
+training strategy to debias the predicate learning in our fu-
+ture work
+Broader Impact. Currently, we have only demonstrated
+the effectiveness of the denoising diffusion model in the
+VSGG task. However, the temporal reasoning capabilities
+across frames via diffusion offer valuable insights for de-
+signing task-specific condition prompting in related vision
+tasks. Integrating more informative cues from preceding
+frames could be an effective starting point for improving
+current frame predictions. The proposed continuous tem-
+poral reasoning approach could potentially be extended to
+tasks such as Action Recognition (AR), Video Event De-
+tection (VED), Video-based Human-Object Interaction (V-
+HOI), and Multi-Object Tracking (MOT).
+On the negative side, it is important to acknowledge the
+risks associated with DIFFVSGG regarding the generation
+of false content and data bias. The generative nature of the
+model during training poses the risk of creating false infor-
+mation about individuals, potentially damaging their reputa-
+tion and privacy, and even leading to legal and ethical chal-
+lenges. Furthermore, if the dataset used for training con-
+tains biases or imbalances, such as underrepresentation of
+certain races, genders, or social groups, the model’s video
+analysis could exacerbate existing prejudices and injustices,
+resulting in biased and unfair decisions in real-world ap-
+plications. For example, in security surveillance or crowd
+analysis, this bias could lead to certain groups being dispro-
+portionately monitored or wrongly accused, while others re-
+Method
+PredCLS
+SGCLS
+SGDET
+R@10 R@20 R@50 mR@10 mR@20 mR@50 R@10 R@20 R@50 mR@10 mR@20 mR@50 R@10 R@20 R@50 mR@10 mR@20 mR@50
+ResNet-101+Faster-RCNN
+RelDN [117] 20.3
+20.3
+20.3
+6.2
+6.2
+6.2
+11.0
+11.0
+11.0
+3.4
+3.4
+3.4
+9.1
+9.1
+9.1
+3.3
+3.3
+3.3
+TRACE [89] 27.5
+27.5
+27.5
+15.2
+15.2
+15.2
+14.8
+14.8
+14.8
+8.9
+8.9
+8.9
+13.9
+14.5
+14.5
+8.2
+8.2
+8.2
+VRD [62] 51.7
+54.7
+54.7
+-
+-
+-
+32.4
+33.3
+33.3
+-
+-
+-
+19.2
+24.5
+26.0
+-
+-
+-
+Motif Freq [116] 62.4
+65.1
+65.1
+-
+-
+-
+40.8
+41.9
+41.9
+-
+-
+-
+23.7
+31.4
+33.3
+-
+-
+-
+MSDN [55] 65.5
+68.5
+68.5
+-
+-
+-
+43.9
+45.1
+45.1
+-
+-
+-
+24.1
+32.4
+34.5
+-
+-
+-
+VCTREE [86] 66.0
+69.3
+69.3
+-
+-
+-
+44.1
+45.3
+45.3
+-
+-
+-
+24.4
+32.6
+34.7
+-
+-
+-
+GPS-Net [58] 66.8
+69.9
+69.9
+-
+-
+-
+45.3
+46.5
+46.5
+-
+-
+-
+24.7
+33.1
+35.1
+-
+-
+-
+STTran [15] 68.6
+71.8
+71.8
+37.8
+40.1
+40.2
+46.4
+47.5
+47.5
+27.2
+28.0
+28.0
+25.2
+34.1
+37.0
+16.6
+20.8
+22.2
+APT [56] 69.4
+73.8
+73.8
+-
+-
+-
+47.2
+48.9
+48.9
+-
+-
+-
+26.3
+36.1
+38.3
+-
+-
+-
+STTran-TPI [98] 69.7
+72.6
+72.6
+37.3
+40.6
+40.6
+47.2
+48.3
+48.3
+28.3
+29.3
+29.3
+26.2
+34.6
+37.4
+15.6
+20.2
+21.8
+TR2 [96] 70.9
+73.8
+73.8
+-
+-
+-
+47.7
+48.7
+48.7
+-
+-
+-
+26.8
+35.5
+38.3
+-
+-
+-
+TEMPURA [68] 68.8
+71.5
+71.5
+42.9
+46.3
+46.3
+47.2
+48.3
+48.3
+34.0
+35.2
+35.2
+28.1
+33.4
+34.9
+18.5
+22.6
+23.7
+DSG-DETR [27]
+-
+-
+-
+-
+-
+-
+50.8
+52.0
+52.0
+-
+-
+-
+30.3
+34.8
+36.1
+-
+-
+-
+DIFFVSGG 71.9
+74.5
+74.5
+48.1
+50.2
+50.2
+52.5
+53.7
+53.7
+37.3
+38.4
+38.4
+32.8
+39.9
+45.5
+20.9
+23.6
+26.2
+ResNet-50+DETR
+OED [94] 73.0
+76.1
+76.1
+-
+-
+-
+-
+-
+-
+-
+-
+-
+33.5
+40.9
+48.9
+-
+-
+-
+DIFFVSGG 74.8
+77.5
+77.5
+53.3
+56.1
+56.1
+54.0
+54.9
+54.9
+40.7
+42.5
+42.5
+34.7
+41.9
+47.3
+24.7
+27.3
+28.4
+Table 2. Comparison of state-of-the-art VSGG methods on Action Genome test [37] under the w constraint setting.
+Method
+PredCLS
+SGCLS
+SGDET
+R@10 R@20 R@50 mR@10 mR@20 mR@50 R@10 R@20 R@50 mR@10 mR@20 mR@50 R@10 R@20 R@50 mR@10 mR@20 mR@50
+ResNet-101+Faster-RCNN
+RelDN [117] 44.2
+75.4
+89.2
+31.2
+63.1
+75.5
+25.0
+41.9
+47.9
+18.6
+36.9
+42.6
+13.6
+23.0
+36.6
+7.5
+18.8
+33.7
+VRD [62] 51.7
+54.7
+54.7
+-
+-
+-
+32.4
+33.3
+33.3
+-
+-
+-
+19.2
+24.5
+26.0
+-
+-
+-
+Motif Freq [116] 62.4
+65.1
+65.1
+-
+-
+-
+40.8
+41.9
+41.9
+-
+-
+-
+23.7
+31.4
+33.3
+-
+-
+-
+MSDN [55] 65.5
+68.5
+68.5
+-
+-
+-
+43.9
+45.1
+45.1
+-
+-
+-
+24.1
+32.4
+34.5
+-
+-
+-
+VCTREE [86] 66.0
+69.3
+69.3
+-
+-
+-
+44.1
+45.3
+45.3
+-
+-
+-
+24.4
+32.6
+34.7
+-
+-
+-
+TRACE [89] 72.6
+91.6
+96.4
+50.9
+73.6
+82.7
+37.1
+46.7
+50.5
+31.9
+42.7
+46.3
+26.5
+35.6
+45.3
+22.8
+31.3
+41.8
+GPS-Net [58] 76.0
+93.6
+99.5
+-
+-
+-
+-
+-
+-
+-
+-
+-
+24.5
+35.7
+47.3
+-
+-
+-
+STTran [15] 77.9
+94.2
+99.1
+51.4
+67.7
+82.7
+54.0
+63.7
+66.4
+40.7
+50.1
+58.5
+24.6
+36.2
+48.8
+20.9
+29.7
+39.2
+APT [56] 78.5
+95.1
+99.2
+-
+-
+-
+55.1
+65.1
+68.7
+-
+-
+-
+25.7
+37.9
+50.1
+-
+-
+-
+TR2 [96] 83.1
+96.6
+99.9
+-
+-
+-
+57.2
+64.4
+66.2
+-
+-
+-
+27.8
+39.2
+50.0
+-
+-
+-
+TEMPURA [68] 80.4
+94.2
+99.4
+61.5
+85.1
+98.0
+56.3
+64.7
+67.9
+48.3
+61.1
+66.4
+29.8
+38.1
+46.4
+24.7
+33.9
+43.7
+DSG-DETR [27]
+-
+-
+-
+-
+-
+-
+59.2
+69.1
+72.4
+-
+-
+-
+32.1
+40.9
+48.3
+-
+-
+-
+DIFFVSGG 83.1
+94.5
+99.1
+66.3
+90.5
+98.4
+60.5
+70.5
+74.4
+51.0
+64.2
+68.8
+35.4
+42.5
+51.0
+27.2
+37.0
+45.6
+ResNet-50+DETR
+TPT [118] 85.6
+97.4
+99.9
+-
+-
+-
+-
+-
+-
+-
+-
+-
+32.0
+39.6
+51.5
+-
+-
+-
+OED [94] 83.3
+95.3
+99.2
+-
+-
+-
+-
+-
+-
+-
+-
+-
+35.3
+44.0
+51.8
+-
+-
+-
+DIFFVSGG 84.5
+95.9
+99.5
+67.9
+91.6
+98.9
+62.3
+71.8
+75.9
+52.7
+65.1
+69.5
+37.4
+45.1
+53.1
+29.7
+37.9
+46.4
+Table 3. Comparison of state-of-the-art VSGG methods on Action Genome test [37] under the w/o constraint setting.
+main under-identified, ultimately affecting social equity and
+public trust in the technology.
+Algorithm 1 Pseudo-code of Graph Construction in a
+PyTorch-like style.
+"""
+I: input video sequence with frames Iˆ1, Iˆ2,
+..., Iˆt.
+F_det: pretrained object detector.
+N_max: Max number of objects in a frame
+"""
+# Detect
+# B_t: set of bounding boxes detected in frame t.
+# b_i : bounding box for object i.
+# b_j : bounding box for object j
+# O_t: set of class predictions for objects in
+frame t.
+# F_t: feature map extracted from frame t.
+F_t, b_i, b_j, O_t = F det((Iˆt))
+# Perform graph construction for each video frame
+def construct adjacency matrix(F_t, b_i, b_j, O_t
+):
+N_max = 100
+D_embedding = 128
+# extract instance-level feature for object i
+F_o_i = roi align(F_t, b_i)
+# extract union feature from union box of i
+and j
+F_union = roi align(F_t, torch.cat([b_i, b_j],
+dim=1))
+# F_b_i box-to-feature mapping for bounding
+box of object j
+F_b_i = box to map(b_j)
+return torch.cat([F_o_i, F_union, F_b_j], dim
+=-1)
+# Initialize adjacency matrix
+N_t = B_t.shape[0]
+A_t = torch.zeros(N_max, N_max, D_embedding)
+for i in range(N_t):
+for j in range(N_t):
+if i != j:
+At[i, j] = construct adjacency matrix(
+F_t, b_i, b_j, O_t):
+# Pad to fixed size
+if N_t < N_max:
+padding = torch.randn(N_max-N_t, N_max,
+D_embedding)
+A_t[N_t:, :, :] = padding
+A_t[:, N_t:, :] = torch.transpose(padding, 0,
+1)
+return A_t
+Algorithm 2 Pseudo-code of Temporal Reasoning in a
+PyTorch-like style.
+"""
+A_t_k: Noisy adjacency matrix at step k for frame
+t.
+A_t_prev_0: Denoised adjacency matrix from the
+previous frame t-1.
+A_t_k_minus_1: adjacency matrix at the end of the
+k step in the denoising process for frame t
+beta_t: Noise scheduling parameter for step k.
+alpha_t: Alpha value for step k.
+epsilon_theta: Denoising model.
+epsilon_pred: The noise predicted by the
+denoising model.
+"""
+# Perform temporal reasoning for each denoising
+step
+def temporal reasoning step(A_t_k, A_t_prev_0,
+beta_t, alpha_t, epsilon_theta, k):
+# Predict noise with temporal conditioning
+epsilon_pred = epsilon theta(A_t_k, k,
+A_t_prev_0)
+# Compute reverse denoising step
+A_t_k_minus_1 = (1 / torch.sqrt(alpha_t)) * (
+A_t_k - (beta_t / torch.sqrt(1 - alpha_t)
+) * epsilon_pred)
+return A_t_k_minus_1
+# Iterate through denoising steps with temporal
+conditioning
+def temporal reasoning process(A_t_k, A_t_prev_0,
+beta_schedule, alpha_schedule,
+epsilon_theta, K):
+# Iterate from step K to 1
+for k in range(K, 0, -1):
+A_t_k = temporal reasoning step(A_t_k,
+A_t_prev_0, beta_schedule[k-1],
+alpha_schedule[k-1], epsilon_theta, k)
+return A_t_k
+Frame 1
+Frame 10
+person
+cup
+sofacoach
+laptop
+look at
+Attention
+Spatial
+Contact
+person
+cup
+laptop
+not look at
+not look at
+Frame 20
+not look at
+person
+cup
+sofacoach
+laptop
+look at
+not look at
+person
+cup
+sofacoach
+laptop
+on the side of
+ 
+on the side of
+above
+above
+on the side of
+ 
+person
+cup
+sofacoach
+laptop
+not contacting
+lying on not contacting
+ 
+person
+cup
+sofacoach
+laptop
+in front of
+ 
+on the side of
+above
+on the side of
+on the side of
+ 
+person
+cup
+sofacoach
+laptop
+not contacting
+lying on not contacting
+ 
+sofacoach
+person
+cup
+sofacoach
+laptop
+not look at
+not look at
+person
+cup
+sofacoach
+laptop
+on the side of
+ 
+on the side of
+above
+above
+in front of
+ 
+person
+cup
+sofacoach
+laptop
+not contacting
+lying on
+holding
+ 
+person
+cup
+sofacoach
+laptop
+in front of
+ 
+on the side of
+above
+on the side of
+in front of
+ 
+person
+cup
+sofacoach
+laptop
+not contacting
+sitting on
+holding
+ 
+person
+cup
+laptop
+not look at
+not look at
+sofacoach
+person
+cup
+sofacoach
+laptop
+not look at
+not look at
+person
+cup
+sofacoach
+laptop
+on the side of
+ 
+on the side of
+above
+above
+on the side of
+ 
+person
+cup
+sofacoach
+laptop
+not contacting
+standing onnot contacting
+ 
+person
+cup
+sofacoach
+laptop
+ 
+on the side of
+above
+on the side of
+behind
+ 
+person
+cup
+sofacoach
+laptop
+not contacting
+standing onnot contacting
+ 
+in front of
+DiffVsgg
+DSG
+DETR
+DiffVsgg
+DSG
+DETR
+DiffVsgg
+DSG
+DETR
+Figure 2. More visual comparison with [27] in different time steps.
+Frame 1
+Frame 10
+person
+chair
+book
+look at
+Attention
+Spatial
+Contact
+Frame 20
+not look at
+ 
+person
+chair
+book
+in front of
+beneath
+ 
+person
+chair
+book
+touching
+sitting on
+ 
+writing
+person
+chair
+book
+look at
+not look at
+ 
+person
+chair
+book
+in front of
+beneath
+ 
+person
+chair
+book
+holding
+sitting on
+ 
+person
+chair
+phone
+look at
+not look at
+ 
+person
+chair
+in front of
+beneath
+ 
+person
+chair
+holding
+sitting on
+ 
+phone
+phone
+Figure 3. Failure case due to dataset bias issue.
+Frame 1
+Frame 10
+person
+pillow
+television
+bed
+not look at
+Attention
+Spatial
+Contact
+Frame 20
+DiffVsgg
+DSG
+DETR
+not look at
+person
+table
+bed
+look at
+not look at
+television
+look at
+ 
+person
+pillow
+television
+bed
+not look at
+not look at
+look at
+ 
+person
+pillow
+television
+bed
+above
+in front of
+in front of
+ 
+on the side of
+on the side of
+ 
+person
+pillow
+television
+bed
+above
+in front of
+in front of
+ 
+on the side of
+beneth
+ 
+person
+pillow
+television
+bed
+sitting on
+not contacting
+not contacting
+ 
+person
+pillow
+television
+bed
+sitting on
+not contacting
+not contacting
+ 
+person
+pillow
+television
+bed
+not look at
+look at
+ 
+person
+pillow
+television
+bed
+not look at
+not look at
+not look at
+ 
+person
+pillow
+television
+bed
+above
+in front of
+in front of
+ 
+on the side of
+person
+pillow
+television
+bed
+above
+in front of
+in front of
+ 
+on the side of
+beneth
+ 
+person
+pillow
+television
+bed
+sitting on
+not contacting
+not contacting
+ 
+person
+pillow
+television
+bed
+sitting on
+not contacting
+not contacting
+ 
+not look at
+person
+table
+bed
+look at
+not look at
+television
+person
+table
+bed
+above
+behind
+television
+person
+table
+bed
+in front of
+behind
+television
+person
+table
+bed
+standing on
+not contacting
+television
+person
+table
+bed
+leaning on
+not contacting
+television
+look at
+ 
+look at
+ 
+above
+above
+ 
+behind
+ 
+behind
+on the side of
+ 
+on the side of
+ 
+on the side of
+ 
+not contacting
+ 
+not contacting
+ 
+DiffVsgg
+DSG
+DETR
+DiffVsgg
+DSG
+DETR
+Figure 4. More visual comparison with [27] in different time steps.

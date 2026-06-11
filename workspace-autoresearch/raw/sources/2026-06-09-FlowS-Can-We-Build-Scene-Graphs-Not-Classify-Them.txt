@@ -1,0 +1,1500 @@
+
+
+=== PAGE 1 ===
+
+Can We Build Scene Graphs, Not Classify Them? FlowSG: Progressive
+Image-Conditioned Scene Graph Generation with Flow Matching
+Xin Hu1,2, Ke Qin1, Wen Yin1, Yuan-Fang Li3, Ming Li4, Tao He1∗
+1The Laboratory of Intelligent Collaborative Computing of UESTC
+2Tianfu Jiangxi Laboratory, 3Monash University
+4Guangdong Laboratory of Artificial Intelligence and Digital Economy (SZ)
+{xh1m22,qinke,yinwen1999}@uestc.edu.cn
+yuanfang.li@monash.edu,ming.li@u.nus.edu,tao.he01@hotmail.com
+Abstract
+Scene Graph Generation (SGG) unifies object localization
+and visual relationship reasoning by predicting boxes and
+subject–predicate–object triples. Yet most pipelines treat
+SGG as a one-shot, deterministic classification instead of a
+genuine progressive, generative task. We propose FlowSG,
+which recasts SGG as continuous-time transport on a hybrid
+discrete–continuous state: starting from a noised graph,
+the model progressively grows an image-conditioned scene
+graph through constraint-aware refinements that jointly syn-
+thesize nodes (objects) and edges (predicates). Specifically,
+we first leverage a VQ-VAE to quantize a scene graph (e.g.,
+the continuous visual features) into compact, predictable to-
+kens; a graph Transformer then (i) predicts a conditional
+velocity field to transport continuous geometry (boxes) and
+(ii) updates discrete posteriors for categorical tokens (ob-
+ject features and predicate labels), coupling semantics and
+geometry via flow-conditioned message aggregation. Train-
+ing combines flow-matching losses for geometry with a
+discrete-flow objective for tokens, yielding few-step infer-
+ence and plug-and-play compatibility with standard detec-
+tors/segmenters. Extensive experiments on VG and PSG un-
+der closed- and open-vocabulary protocols show consistent
+gains in predicate R/mR and graph-level metrics, validating
+the mixed discrete–continuous generative formulation over
+one-shot classification baselines, e.g., an average improve-
+ment of about 3 points over the SOTA USG-Par.
+1. Introduction
+Scene Graph Generation (SGG) [6, 54] parses an image into
+a structured graph in which nodes are objects and directed
+edges encode their relations. This representation closes the
+∗Corresponding author.
+Figure 1.
+Comparison of recent SGG paradigms.
+(a) Two-
+stage: a pre-trained detector proposes objects and enumerates
+human–object pairs; a relation head refines multi-stream features
+to classify predicates. (b) One-stage: objects and predicates are
+detected jointly in a single pass, followed by a matching step to
+attach predicates to object pairs. (c) Ours (generative): given an
+image and an initially noisy graph, an image-conditioned denoiser
+iteratively refines the graph to sample a coherent scene graph.
+gap between low-level perception and high-level reasoning,
+supporting applications such as visual question answering
+[68], image retrieval [51], cross-modal learning [39, 63],
+and emotion reasoning [66, 67]. The subsequent Panoptic
+SGG (PSG) [21, 64] further extends SGG by incorporating
+pixel segmentations of both countable objects and amor-
+phous stuff, while simultaneously predicting relationships.
+Broadly speaking, most SGG/PSG models follow a one-
+shot formulation: either (i) a two-stage pipeline (see Fig.
+1(a)) [42, 72] that first detects objects and then classifies
+relations over pre-defined pairs using GNN [60] or trans-
+formers [9, 19], or (ii) a one-stage set prediction (see Fig.
+1(b)) that emits all subject–predicate–object triplets in a sin-
+arXiv:2604.18623v1  [cs.CV]  18 Apr 2026
+
+
+=== PAGE 2 ===
+
+gle forward pass [9, 64]. Despite architectural differences,
+both families make deterministic pair-selection and graph
+construction decisions within a single pass, eschewing iter-
+ative, progressive graph generation.
+In effect, these methods perform scene graph prediction
+rather than generation: visual features are mapped directly
+to a final graph without an explicit, generative process. We
+deem that this paradigm has three drawbacks.
+First, al-
+though internal feature refinement (e.g., via GNNs or Trans-
+formers) may occur, the decisive relation assignments are
+made in a single forward pass, leaving no mechanism for
+iterative correction, i.e., mis-paired entities or misclassified
+predicates cannot be revisited in light of emerging graph-
+level evidence. Second, semantic and geometric cues are
+treated as static inputs rather than jointly evolving states,
+preventing mutual refinement across iterations. Third, en-
+forcing graph-level constraints (e.g., spatial transitivity [2])
+is difficult when relations are scored independently, resulting
+in globally inconsistent scene graphs. We posit that, absent
+a genuinely generative, progressive construction of scene
+graphs, these methods are intrinsically limited in produc-
+ing coherent, globally consistent SGs. This insight raises a
+research question: Can scene graph generation be reformu-
+lated as a truly progressive, generative problem rather than
+a one-shot classification task?
+With this question in mind, we advocate a generative per-
+spective in which scene graphs are constructed through pro-
+gressive graph refinement. Recent advances in Flow Match-
+ing [11, 56] for discrete graph generation demonstrate that
+iterative denoising of node/edge states yields high-fidelity,
+constraint-aware graphs, such as molecule graphs genera-
+tion [8, 14]. In this work, we cast SGG as continuous-time
+transport on a hybrid state space by flow matching to evolve
+an noised graph into a coherent, image-conditioned scene
+graph via a sequence of constraint-aware refinements that
+jointly generate scene graph.
+Concretely, we propose a generative FlowSG framework,
+which models a scene as a hybrid graph coupling symbolic
+semantics with geometry: each node stores a discrete object
+label and continuous box parameters, and each edge carries
+a discrete predicate. To curb the cost of high-dimensional
+visual features, we first compress object apperance features
+into compact codes via vector quantization [55]. For gen-
+eration, we adopt flow matching: a time-conditioned vector
+field drives a probability-flow ODE [46] that deterministi-
+cally transports corrupted geometry and semantics toward
+the data manifold in a few large steps than conventional
+diffusion process [11, 20]. In parallel, discrete tokens are
+updated by predicting masked categorical posteriors under
+a discrete-flow objective [11], while the continuous geom-
+etry boxes are learned via conditional flow matching on
+Gaussian-perturbed boxes [8].
+In practice, the network
+directly regresses the conditional flow for boxes and the
+clean categorical distributions for tokens, fusing them at
+each step to yield fast, few-step synthesis with strong se-
+mantic–geometric consistency.
+Moreover, scene graphs are typically sparse and exhibit
+heavy-tailed degree distributions, making vanilla message
+passing under-expressive and degree-sensitive.
+We first
+leverage relation-modulated attention in a FiLM [45, 56]
+manner to inject predicate semantics into the attention com-
+putation, selectively amplifying relation-consistent neigh-
+bors while suppressing spurious connection. We then in-
+troduce a Flow-conditioned Message Aggregation (FMA)
+block: FMA computes a bank of neighborhood moments
+(e.g., degree, variance, skewness) and applies learned
+degree-aware scalers to regularize messages across low-
+/high-degree nodes, yielding richer and more stable updates.
+Conditioned on frozen image features, the graph transformer
+iteratively denoises node geometry and edge predicates, pro-
+ducing clean posteriors and geometry flows that remain con-
+sistent with the visual evidence.
+In summary, our contribution can be fourfold as below:
+• New Paradigm. We reformulate SGG as progressive gen-
+eration in a mixed space, jointly denoising discrete seman-
+tics and continuous geometry to enable global, structure-
+constrained refinement.
+• Hybrid Flow Matching. We learn a time-aware velocity
+field that transports boxes via conditional flow matching
+and updates discrete tokens via a discrete-flow objective,
+where the two streams are tightly coupled at each step.
+• Novel SG Denoiser. A graph transformer with relation-
+modulated attention and flow-conditioned message aggre-
+gation integrates node and edge updating.
+• SOTA Results. We validate FlowSG on open-vocabulary
+PSG and SGG settings, and show that the mixed denoising
+process offers consistent gains in relation accuracy and
+graph-level metrics, e.g., ∼3 points better than the current
+state-of-the-art USG-Par [58] across all metrics.
+2. Related Work
+Scene Graph Generation. SGG methods are commonly
+grouped into two-stage and one-stage pipelines.
+Two-
+stage models first detect objects and then infer relations
+via message passing [16, 69], external knowledge [12],
+or transformer-based reasoning [18, 52]. One-stage mod-
+els [6, 37] formulate SGG/PSG as set prediction, jointly
+decoding objects and predicates in a single pass.
+Vi-
+sion–language pretraining further improves semantic cov-
+erage [35, 72], and panoptic SGG integrates pixel-level
+masks [29, 64].
+Despite these advances, prevailing ap-
+proaches remain deterministic and one-shot:
+even with
+multi-round attention or message passing, decisions are fi-
+nalized in a single forward pass without explicitly refining
+the graph structure over time. This limits error correction
+and weakens global structural consistency.
+
+
+=== PAGE 3 ===
+
+Flow Matching for Graph Generation.
+Graph gener-
+ative modeling has evolved from autoregressive architec-
+tures [10, 30, 31] and VAEs [50] to GANs [41]. More re-
+cently, score-based diffusion over discrete nodes/edges [27]
+and closely related transport formulations have achieved
+strong fidelity by progressively denoising combinatorial
+structures under graph constraints.
+Flow matching (FM)
+offers an alternative training objective that learns a time-
+dependent vector field to transport a simple prior to the data
+distribution [32, 33], with conditional variants enabling ef-
+ficient guidance at inference [38]. Compared with diffusion
+process, FM avoids explicit score normalization and ad-
+mits flexible ODE or SDE solvers [46], thereby bringing
+improved sampling efficiency and training stability. How-
+ever, prior graph FM work is predominantly unconditional
+or weakly conditioned, and typically treats semantic labels
+and geometry in isolation.
+3. Preliminaries
+In this section, we briefly introduce two techniques in flow
+matching: continuous flow matching (CFM) and discrete
+flow via a continuous-time Markov chain (CTMC).
+Continuous Flow Matching (CFM).Let 𝑥∈R𝑑𝑥denote
+a continuous variable and 𝑧∈{1, . . . , 𝐾} ∪{[MASK]} a
+categorical token (we use one-hot vectors and the probability
+simplex Δ𝐾for simplicity). We couple source and target
+samples with a joint 𝜋and define conditional probability
+paths {𝑝𝑡}𝑡∈[0,1] that interpolate between 𝑝0 and 𝑝1 under a
+monotone scheduler 𝜅𝑡. Given a coupling (𝑥0, 𝑥1) ∼𝜋and
+an interpolant 𝜓𝑡: R𝑑𝑥× R𝑑𝑥→R𝑑𝑥, define the path
+𝑥𝑡= 𝜓𝑡(𝑥0, 𝑥1), 𝑢★(𝑥𝑡, 𝑡| 𝑥0, 𝑥1) = 𝜕𝑡𝜓𝑡(𝑥0, 𝑥1).
+(1)
+A neural vector field 𝑣𝜃(𝑥, 𝑡, 𝑐) (conditioned on image con-
+text 𝑐and 𝑡∼U[0, 1]) is trained to match the target velocity:
+LCFM =E(𝑥0,𝑥1)∼𝜋
+𝑣𝜃(𝑥𝑡, 𝑡, 𝑐)−𝑢★(𝑥𝑡, 𝑡| 𝑥0, 𝑥1)
+2
+2.
+(2)
+With the common linear path 𝜓𝑡(𝑥0, 𝑥1) = (1 −𝑡) 𝑥0 + 𝑡𝑥1,
+we have 𝑢★= 𝑥1 −𝑥0. At inference, we integrate the ODE
+𝑑
+𝑑𝑡𝑥𝑡= 𝑣𝜃(𝑥𝑡, 𝑡, 𝑐),
+(3)
+starting from 𝑥𝑡=0 ∼𝑝0 (e.g., a simple Gaussian) and using
+a few ODE steps [8] to transport to 𝑝1.
+Discrete Flow via CTMC (DFM). For a categorical to-
+ken, let 𝑝𝑡∈Δ𝐾be its marginal Probability Mass Func-
+tion (PMF) at time 𝑡.
+We realize a discrete-time flow
+with a CTMC whose time-varying rate matrix 𝑅𝜃(𝑡, 𝑐) ∈
+R(𝐾+1)×(𝐾+1) satisfies 𝑅𝑖𝑗≥0 for 𝑖≠𝑗and 𝑅𝑖𝑖=
+−Í
+𝑗≠𝑖𝑅𝑖𝑗[11]. The distribution evolves via:
+𝑑
+𝑑𝑡𝑝𝑡= 𝑝𝑡𝑅𝜃(𝑡, 𝑐).
+To specify a target flow for matching, we use a two-point
+conditional path between a source categorical distribution
+𝑞0 (masked with [MASK]) and the clean one-hot 𝑞1:
+𝑝𝑡= (1 −𝜅𝑡) 𝑞0 + 𝜅𝑡𝑞1,
+𝜅𝑡∈[0, 1], ¤𝜅𝑡≥0.
+The target instantaneous velocity is then 𝑢★
+𝑡
+=
+𝑑
+𝑑𝑡𝑝𝑡=
+¤𝜅𝑡(𝑞1 −𝑞0). In practice, instead of directly regressing a
+rate matrix to satisfy 𝑝𝑡𝑅𝜃≈𝑢★
+𝑡, it is numerically advan-
+tageous to train a network to predict the clean posterior
+𝑞1 = 𝑝1|𝑡(· | 𝑧𝑡, 𝑐) and assemble a feasible rate matrix from it
+at sampling time. We therefore minimize a time-conditioned
+cross-entropy:
+LDFM = E(𝑧0,𝑧1)∼𝜋, 𝑡∼U[0,1]
+h
+CE 𝑞1, 𝑓𝜃(𝑧𝑡, 𝑡, 𝑐) i
+,
+(4)
+where 𝑧𝑡∼𝑝𝑡from Eq. (4) and 𝑓𝜃outputs logits over the
+𝐾+1 categories. At inference, we either (i) integrate Eq. (4)
+with an ODE solver using a rate matrix assembled from 𝑓𝜃
+and 𝜅𝑡, or (ii) simulate jumps with an Euler scheme [11, 46];
+both choices leave the trained classifier 𝑓𝜃unchanged and
+permit schedule/solver swaps without retraining.
+Hybrid Graph-Wise Factorization. For a graph 𝐺𝑡with
+node slots {𝑥(𝑛)
+𝑡
+, 𝑧(𝑛)
+𝑡
+} and edge slots {𝑧(𝑖𝑗)
+𝑡
+}, we evolve all
+slots in parallel while conditioning each local update on the
+global noisy graph and image features C:
+𝑥(𝑛)
+𝑡
+:
+𝑑
+𝑑𝑡𝑥(𝑛)
+𝑡
+= 𝑣node
+𝜃
+ 𝑥(𝑛)
+𝑡
+, 𝑡, 𝐺𝑡, C,
+𝑝(𝑛)
+𝑡
+:
+𝑑
+𝑑𝑡𝑝(𝑛)
+𝑡
+= 𝑝(𝑛)
+𝑡
+𝑅node
+𝜃
+ 𝑡, 𝐺𝑡, C,
+𝑝(𝑖𝑗)
+𝑡
+:
+𝑑
+𝑑𝑡𝑝(𝑖𝑗)
+𝑡
+= 𝑝(𝑖𝑗)
+𝑡
+𝑅edge
+𝜃
+ 𝑡, 𝐺𝑡, C.
+(5)
+Conditioned independence across slots given (𝐺𝑡, 𝑥) yields
+the standard factorization for a small step from 𝑡to 𝜏:
+𝑝(𝐺𝜏| 𝐺𝑡) =
+Ö
+𝑛
+𝑝(𝑛)
+𝜏|𝑡
+Ö
+𝑖< 𝑗
+𝑝(𝑖𝑗)
+𝜏|𝑡,
+(6)
+with each factor obtained by the corresponding ODE (con-
+tinuous 𝑥) or CTMC update (discrete 𝑧).
+4. Method
+The overall architecture of FlowSG is depicted in Fig. 2.
+Briefly, we construct an initial scene graph from detected
+objects, discretize semantic features via a vision-language
+codebook, and apply hybrid discrete-continuous flow match-
+ing to iteratively refine graph structure and semantics. Sec.
+§4.1 details semantic discretization and Sec. §4.2 describes
+the hybrid flow matching process. §4.3 describes the archi-
+tecture of the denoiser.
+
+
+=== PAGE 4 ===
+
+Figure 2. The overview of our FlowSG. (Left) Image-guided iterative scene graph generation via flow matching. Starting from a noised
+graph 𝐺0, our graph transformer refines predictions through ODE integration steps (𝐺𝑡→𝐺𝑡+Δ𝑡), outputting velocity fields for continuous
+bounding boxes and clean posteriors for discrete codes. (Right) Graph transformer architecture consisting of: (i) Relation-modulated
+Self-Attention (FiLM-based predicate injection), (ii) Flow-conditioned Message Aggregation (ime-conditioned neighborhood message
+aggregation with degree-aware weighting), and (iii) Global Image-condition Integration module (cross-attention to image features).
+4.1. Scene Graph Tokenization
+We
+cast
+scene-graph
+generation
+as
+a
+hybrid
+dis-
+crete–continuous construction process. To make the discrete
+part predictable and semantics-aware, we tokenize objects
+and relations into compact codes; geometry remains contin-
+uous and is handled by CFM. This section details the object
+and relation tokenizers.
+Setup. Given an image 𝐼, a frozen detector Φdet [5] produces
+𝑁region proposals with RoI features, class logits, and boxes:
+
+(f𝑖, s𝑖, b𝑖)
+	𝑁
+𝑖=1 =Φdet(𝐼; 𝜃det), f𝑖∈R𝑑, s𝑖∈R𝐶𝑜𝑏𝑗.
+(7)
+We denote the ground-truth object class by
+𝑦★
+𝑖
+∈
+{1, . . . , 𝐶𝑜𝑏𝑗} and the ground-truth predicate phrase for an
+ordered pair (𝑖, 𝑗) by 𝑟★
+𝑖𝑗.
+Object Discretization. Operating generatively in raw fea-
+ture space R𝑑is costly and unstable. Following discrete
+representation learning [36], we adopt vector quantization
+to discretize object visual features into compact codes in
+a language-aligned embedding space. Specifically, we ex-
+tract region features by cropping and encoding with CLIP’s
+frozen image encoder:
+u𝑖= CLIPimg(Φcrop
+ 𝐼, b𝑖
+),
+(8)
+where CLIPimg(.) is the image encoder of CLIP and Φcrop(.)
+is an image crop function given a box. Then we train a
+VQ-VAE with codebook H𝑜𝑏𝑗= {e𝑘}𝐾𝑎
+𝑘=1. For each region
+feature u𝑖, we quantize to the nearest codebook entry:
+𝑎★
+𝑖= arg min
+𝑘∈[𝐾𝑎]
+u𝑖−e𝑘
+2
+2.
+(9)
+The encoder, decoder, and codebook are trained with the
+discrete VQ-VAE objective [24, 48, 49].
+Finally, geometry remains continuous and object class
+labels follow the dataset taxonomy. We represent the final
+target node tokens in a scene graph as
+n𝑖=  a★
+𝑖, c★
+𝑖, b★
+𝑖
+ ∈[𝐾𝑎] × [𝐶𝑜𝑏𝑗] × R4,
+(10)
+where c★
+𝑖is one–hot object class. During flow matching,
+we initialize appearance tokens as [MASK] and leverage
+category labels 𝑦𝑖as untouched informative priors, allowing
+the model to progressively refine appearance codes from
+scratch while grounded in semantic guidance.
+Relation Discretization. One-hot predicate labels discard
+semantic proximity and hinder open-vocabulary generaliza-
+tion. We therefore quantize relation phrases into a compact
+predicate codebook using language embeddings. Let C𝑟𝑒𝑙be
+a corpus of relation words aggregated from datasets [13, 64]
+and external corpus, e.g., ConceptNet [53], and let Ttext be
+CLIP’s text encoder [47]: u(𝑤) =
+Ttext(𝑤)
+∥Ttext(𝑤) ∥2 ∈R𝑑𝑡, 𝑤∈
+C𝑟𝑒𝑙. The quantization training loss is the same as object fea-
+ture VQ-VAE. Last, for each edge (𝑖, 𝑗) with ground-truth
+phrase 𝑟★
+𝑖𝑗, the predicate token is
+𝑝𝑖𝑗= 𝑘 𝑟★
+𝑖𝑗
+ ∈[𝐾𝑟].
+(11)
+Since the codebook is learned in language space, simi-
+lar meaning or fine-grained phrases can map to nearby
+or identical codes, providing semantic smoothing and en-
+abling open-vocabulary decoding via nearest-neighbor back
+to CLIP space at inference.
+4.2. Hybrid Flow Matching for SGG
+We generate a hybrid scene graph from a masked/noisy prior
+using flow matching. Given a prior graph 𝐺0 with masked
+
+
+=== PAGE 5 ===
+
+node/edge semantics, we refine it into a complete scene
+graph 𝐺1 via the hybrid formulation in Sec. 3. Heteroge-
+neous attributes are handled separately yet coupled through
+a shared, image–conditioned graph encoder: discrete se-
+mantics s = (c, r, a) (object labels, predicate categories,
+appearance (visual feature) tokens) evolve with a CTMC-
+based discrete flow, while continuous boxes g = {b𝑖}𝑁
+𝑖=1
+evolve with CFM.
+Noised and Target SG Construction. Formally, we write
+a scene graph at time 𝑡as 𝐺𝑡= (V, E, s𝑡, g𝑡),
+s𝑡=
+(c𝑡, r𝑡, a𝑡),
+g𝑡
+=
+{b𝑖(𝑡)}𝑁
+𝑖=1, with node set V
+=
+{1, . . . , 𝑁} and directed edge set E ⊆{(𝑖, 𝑗) | 𝑖≠𝑗}. Here,
+c𝑡denotes object categories, r𝑡denotes relation types, a𝑡
+denotes appearance codes, and g𝑡collects bounding boxes.
+Each discrete slot is modeled by a probability mass function
+on a simplex that includes a [MASK] state:
+𝑝obj
+𝑡(𝑖) ∈Δ𝐾𝑐, 𝑝rel
+𝑡(𝑖, 𝑗) ∈Δ𝐾𝑟, 𝑝app
+𝑡
+(𝑖) ∈Δ𝐾𝑎,
+where 𝐾𝑐, 𝐾𝑟, and 𝐾𝑎denote the vocabulary sizes for ob-
+jects, predicates, and appearance codes, respectively.
+We initialize from a simple source 𝐺0 = (V, E, s0, g0)
+with 𝑝obj
+0 (𝑖) = 𝛿𝑐det
+𝑖,
+𝑝rel
+0 (𝑖, 𝑗) = 𝛿[MASK],
+𝑝app
+0 (𝑖) =
+𝛿[MASK],
+b𝑖(0) ∼N (0, I4), where 𝑐det
+𝑖
+is the object cate-
+gory from the pretrained detector. Notably, object categories
+are not masked but serve as priors to guide the generation of
+relationships and appearances, simplifying training and en-
+hancing stability. In contrast, relation types and appearance
+codes are fully masked, and bounding boxes are initialized
+from standard Gaussian noise. Similarly, the target scene
+graph 𝐺1 = (V, E, s1, g1) is defined with
+𝑝obj
+1 (𝑖) = 𝛿𝑦★
+𝑖,
+𝑝rel
+1 (𝑖, 𝑗) = 𝛿𝑟★
+𝑖𝑗,
+𝑝app
+1 (𝑖) = 𝛿𝑎★
+𝑖,
+b𝑖(1) = b★
+𝑖,
+(12)
+where 𝑦★
+𝑖
+∈[𝐾𝑐] are ground-truth object classes, 𝑟★
+𝑖𝑗∈
+[𝐾𝑟] are ground-truth predicate types, 𝑎★
+𝑖∈[𝐾𝑎] are CLIP-
+aligned appearance codes from the semantic codebook Hobj
+(Sec. 4.1), and b★
+𝑖∈R4 are ground-truth bounding boxes.
+Hybrid Flow.
+The hybrid flow transports (s0, g0) ↦→
+(s1, g1) by integrating the continuous flow matching (CFM)
+ODE for geometric attributes g (Eqs. (13)–(14), (3)) and
+evolving the categorical marginals for semantic attributes s
+under the continuous-time Markov chain (Eq. (4)). Both
+processes are conditioned on visual context C via a graph
+transformer. The global visual context C is encoded by a
+frozen CLIP visual encoder with an adapter (see Figure 2).
+Flow Path Construction We interpolate between a sim-
+ple source at 𝑡=0 and the target at 𝑡=1 using a monotone
+scheduler 𝜅𝑡∈[0, 1] (e.g., 𝜅𝑡= 1 −cos( 𝜋𝑡
+2 )).
+CFM for continuous boxes.
+Let g1 be the clean box
+configuration and draw g0 ∼N (0, I). Using the conditional
+interpolant of Sec. 3,
+g𝑡= 𝜓𝑡(g0, g1) = (1 −𝜅𝑡) g0 + 𝜅𝑡g1,
+(13)
+the target velocity is
+u★
+g (g𝑡, 𝑡) = 𝜕𝑡𝜓𝑡= ¤𝜅𝑡(g1 −g0).
+(14)
+DFM for discrete semantics. Let s0 denote the masked
+prior (all [MASK]) and s1 the clean assignment.
+As in
+Eq. (4), we use the two-point conditional path
+𝑝𝑡(s | s0, s1) = (1 −𝜅𝑡) 𝛿s0(s) + 𝜅𝑡𝛿s1(s),
+(15)
+whose slot-wise marginals evolve under the CTMC in (4).
+Flow Velocity Prediction. A frozen image encoder (e.g.,
+CLIP’s image encoder [47]) first extracts global visual con-
+dition C from 𝐼. Then, we use a graph transformer F𝑔𝑡𝑟to
+encode the current state (𝐺𝑡, 𝐼), from which we predict (i)
+a geometric vector field for CFM and (ii) time-conditioned
+clean posteriors for DFM.
+Geometry head. We predict v𝜃(g𝑡, 𝑡, C) and train it to match
+Eq. (14) using the CFM loss in Eq. (2); at sampling, we
+integrate the ODE in Eq. (3) starting from g𝑡=0.
+Semantic head.
+For each node 𝑖and edge (𝑖, 𝑗),
+F𝑔𝑡𝑟produces time-conditioned clean posteriors 𝑝1|𝑡
+ 𝑐𝑖|
+𝐺𝑡, C,
+𝑝1|𝑡
+ 𝑎𝑖| 𝐺𝑡, C,
+𝑝1|𝑡
+ 𝑟𝑖𝑗| 𝐺𝑡, C, which fac-
+torize across slots as in Eq. (6). We assemble a feasible,
+time-varying rate matrix 𝑅𝜃(𝑡, C) from these posteriors and
+𝜅𝑡to evolve the categorical marginals via Eq. (4). Training
+follows the time-conditioned cross-entropy of Eq. (4) with
+targets given by the clean tokens.
+4.3. Denoiser Architecture
+We parameterize the hybrid flow with a graph-aware DiT-
+style [44] Transformer 𝑓𝜃(Fig. 2). At time 𝑡∈[0, 1], node
+and edge embeddings are initialized as
+h(0)
+𝑖
+=
+
+Emb(𝑐𝑡
+𝑖) ⊕Emb(𝑎𝑡
+𝑖) ⊕Enc(b𝑡
+𝑖)
+
+,
+and e(0)
+𝑖𝑗
+= Emb(𝑟𝑡
+𝑖𝑗), where Emb(.) is an embedding func-
+tion (e.g., the codebook of VQ-VAE) to convert the dis-
+crete code to a continuous vector. A sinusoidal time code
+𝜙(𝑡) modulates all blocks via adaptive layer normalization
+(AdaLN) [44]. We stack 𝐿transformer blocks; each block
+contains: (i) global image–condition integration via cross-
+attention, following image conditional guidance [61, 65]; (ii)
+relation-modulated self-attention, which injects predicate
+semantics into node updates; and (iii) a flow-conditioned
+message aggregation layer that explicitly couples nodes and
+edges with time-aware graph statistics. We next detail mod-
+ules (ii) and (iii).
+Relation-modulated Self-attention (ReSA). Let h(ℓ)
+𝑖
+and
+e(ℓ)
+𝑖𝑗
+denote node and edge states at block ℓ.
+With
+queries/keys q𝑖= 𝑊𝑞h(ℓ)
+𝑖
+, k 𝑗= 𝑊𝑘h(ℓ)
+𝑗, we compute at-
+tention using an edge-conditioned FiLM bias [45]:
+𝛼𝑖𝑗(𝑡) = softmax𝑗
+q⊤
+𝑖k𝑗
+√
+𝑑
++ FiLM e(ℓ)
+𝑖𝑗
+
+,
+(16)
+
+
+=== PAGE 6 ===
+
+Node values v𝑗= 𝑊𝑣h(ℓ)
+𝑗
+are aggregated with 𝛼𝑖𝑗(𝑡) and
+passed to the feed-forward sublayer.
+Flow-conditioned Message Aggregation (FMA). Intu-
+itively, aggregation should match the denoising stage: early
+𝑡≈1 requires conservative, robust summaries; late 𝑡→0
+benefits from sharper, higher-order cues [25, 43]. We there-
+fore condition the neighborhood summary on time, degree,
+and local graph context. Let the neighbor set be N (𝑖), with
+degree deg(𝑖, 𝑡), and define the average relation context
+¯rℓ
+𝑖(𝑡) =
+1
+|N (𝑖)ℓ|
+∑︁
+𝑗∈N(𝑖)ℓ
+e𝑖𝑗(𝑡)ℓ,
+𝜁𝑖(𝑡)ℓ=
+
+𝜙(𝑡) ⊕log(1 + deg(𝑖, 𝑡)ℓ) ⊕¯rℓ
+𝑖(𝑡)
+
+,
+where deg(i, t) is the degree of node 𝑖.
+We maintain a
+bank of permutation-invariant moment operators {Ψ𝑘} (e.g.,
+mean, variance, skewness, kurtosis. The time-conditioned
+neighborhood message aggregation is
+𝑀𝑖(𝑡)ℓ=
+∑︁
+𝑘
+softmax 𝑊𝛽𝜁𝑖(𝑡)ℓ · Ψ𝑘
+ {v𝑗} 𝑗∈N(𝑖)
+
+which favors robust statistics over PNA [7] when 𝜁𝑖(𝑡)ℓin-
+dicates high noise/degree and shifts to sharper moments as
+the graph cleans. We produce the node update via
+h(ℓ+1)
+𝑖
+= h(ℓ)
+𝑖
++ MLP
+
+AdaLN𝜙(𝑡) (𝑀𝑖(𝑡))ℓ
+.
+To couple node denoising and relation inference, we re-
+fine an edge hidden state e(ℓ)
+𝑖𝑗
+using both endpoint features
+and their time-conditioned summaries:
+z𝑖𝑗(𝑡) =
+
+h(ℓ+1)
+𝑖
+⊕h(ℓ+1)
+𝑗
+⊕𝑀𝑖(𝑡)ℓ⊕𝑀𝑗(𝑡)ℓ⊕𝜙(𝑡)
+
+,
+e(ℓ+1)
+𝑖𝑗
+= e(ℓ)
+𝑖𝑗+ MLP𝑒
+ AdaLN𝜙(𝑡) (z𝑖𝑗(𝑡)).
+Then, edge logits combine FiLM bias and the refined edge:
+e(ℓ+1)
+𝑖𝑗
+(𝑡) = FiLM Emb(e(ℓ+1)
+𝑖𝑗
+) + W𝑒e(ℓ+1)
+𝑖𝑗
+.
+(17)
+Training Objective. We follow the flow–matching formu-
+lation from Sec. 3: match target velocities for continuous
+variables and learn time–conditioned clean posteriors for
+discrete variables.
+Continuous geometry (CFM). With the conditional path
+g𝑡= 𝜓𝑡(g0, g1) = (1 −𝜅𝑡)g0 + 𝜅𝑡g1 and target velocity
+u★
+g = 𝜕𝑡𝜓𝑡= ¤𝜅𝑡(g1 −g0), we minimize
+LCFM = E𝑡∼U[0,1]
+ v𝜃(g𝑡, 𝑡, 𝑐) −¤𝜅𝑡(g1 −g0)
+
+2
+2,
+(18)
+where 𝑐is the shared context from (𝐺𝑡, 𝐼).
+Discrete semantics (DFM). Let s0 be the masked prior
+and s1 the clean assignment. Sampling s𝑡∼𝑝𝑡(s | s0, s1)
+from Eq. (15), a classifier 𝑓𝜃predicts clean posteriors 𝑝1|𝑡
+for each slot. We train with time–conditioned cross–entropy
+(factorized over nodes and edges in Eq. (6)):
+LDFM = −
+∑︁
+𝑖
+𝑛𝑜
+∑︁
+𝑚=1
+log 𝑝1|𝑡(𝑎1
+𝑖,𝑚| 𝐺𝑡, C)
+−
+∑︁
+(𝑖, 𝑗)
+𝑛𝑟
+∑︁
+𝑚=1
+log 𝑝1|𝑡(𝑟1
+𝑖𝑗,𝑚| 𝐺𝑡, C)
+i
+.
+(19)
+The overall objective is L = LCFM + 𝜆LDFM.
+5. Experiments
+5.1. Experimental Setup and Datasets
+Datasets.
+We conduct experiments on Visual Genome
+(VG) [28] and Panoptic Scene Graph (PSG) [64]. VG is the
+standard scene graph benchmark with 108,077 images. We
+use the VG150 split (150 object categories, 50 predicates),
+comprising ∼75K training and ∼32K test images. PSG ex-
+tends to panoptic segmentation with pixel-level masks. De-
+rived from COCO, it contains 48,749 images (46,563 train,
+2,186 test) across 80 thing categories, 53 stuff categories,
+and 56 predicates.
+Evaluation Protocol. We benchmark two standard SGG
+subtasks: PredCls (ground-truth boxes and labels provided;
+predict predicates between object pairs) and SGDet (jointly
+detect objects, classify them, and infer pairwise relations).
+Performance is reported using Recall (R@K) and mean Re-
+call (mR@K) on the VG and PSG test sets. In the closed-set
+setting, all relation categories are seen during training. For
+the open-vocabulary (OV) setting, we follow prior work
+[4, 17, 72]: relation categories are split into base and novel
+at a 7:3 ratio; models are trained only on base relations and
+evaluated for generalization to novel ones.
+Implementation Details. We instantiate our model with
+five Transformer blocks, each equipped with 8-head self-
+attention, a hidden dimension of 512, and a dropout rate
+of 0.1. For visual conditioning, we adopt a frozen CLIP
+ViT-B/16 image encoder [47] to extract image features for
+cross-attention, and follow Detector [5] by using predictions
+from a frozen detector as object priors to ensure fair com-
+parison. Both the object and relation codebooks contain
+64 entries with dimensionality 512. We use 4 ordered in-
+dices to quantize object appearance features and 4 ordered
+indices to encode relation categories, following [36]. To
+improve training robustness, we introduce a stochastic edge-
+only refinement mode: with probability 0.2, we keep node
+attributes fixed and only generate edges (relations).
+The
+model is optimized with AdamW [40] for 500K iterations
+using a batch size of 128, a learning rate of 1 × 10−4, and a
+weight decay of 0.02. All experiments are run on 4 NVIDIA
+A100 GPUs.
+
+
+=== PAGE 7 ===
+
+Methods
+SGDet
+PredCls
+R/mR@50
+R/mR@100
+R/mR@50
+R/mR@100
+PSG Dataset
+IMP[59]
+18.2 / 7.1
+18.6 / 7.2
+36.8 / 10.9
+38.9 / 11.6
+MOTIF[69]
+21.7 / 9.6
+22.0 / 9.7
+50.4 / 22.1
+52.4 / 22.9
+VCTree[54]
+22.1 / 10.2
+22.5 / 10.2
+50.8 / 22.6
+52.7 / 23.3
+ADtrans[29]
+29.6 / 29.7
+30.0 / 30.0
+— / 36.2
+— / 38.8
+PairNet[57]
+35.6 / 28.5
+39.6 / 30.6
+— / —
+— / —
+SPADE†[21]
+43.8 / 38.9
+49.3 / 46.5
+64.2 / 49.1
+69.3 / 54.8
+USG-Par†[58]
+44.6 / 40.9
+51.3 / 42.7
+67.2 / 51.1
+72.3 / 57.8
+FlowSG
+46.3 / 42.7
+53.3 / 48.3
+69.4 / 54.9
+74.3 / 61.3
+Visual Genome Dataset
+MOTIF[69]
+32.5 / 6.6
+36.8 / 7.9
+65.3 / 14.9
+67.2 / 16.3
+VCTree[54]
+31.9 / 6.4
+36.0 / 7.3
+65.5 / 16.7
+67.4 / 17.9
+PE-Net[71]
+26.5 / 16.7
+30.9 / 18.8
+59.0 / 38.8
+61.4 / 40.7
+OpenPSG†[72]
+32.7 / 13.5
+38.0 / 18.3
+62.2 / 45.8
+67.4 / 50.3
+DSGG[15]
+32.9 / 13.0
+38.5 / 17.3
+53.9 / 39.4
+65.1 / 49.9
+CAPSGG[22]
+18.3 / —
+22.8 / —
+63.4 / —
+67.7 / —
+FlowSG
+36.5 / 18.4
+42.4 / 21.6
+65.7 / 49.2
+68.8 / 53.3
+Table 1.
+Results of two-stage methods on PSG and VG under
+the closed-set protocol. † denotes reproduced numbers. Best and
+second-best are marked in bold and underlined, respectively.
+Methods
+R@50
+mR@50
+R@100
+mR@100
+SGTR [34]
+24.6
+12.0
+28.4
+15.2
+EGTR [23]
+30.2
+5.5
+34.3
+7.9
+SpeaQ [26]
+32.9
+11.8
+36.0
+14.1
+OvSGTR† [4]
+33.8
+7.2
+37.3
+8.8
+Hydra-SGG [3]
+28.6
+15.9
+33.4
+19.4
+HRTrans [9]
+34.1
+16.0
+38.3
+20.5
+FlowSG
+36.5
+18.4
+42.4
+21.6
+Table 2.
+Performance of one-stage methods on VG dataset on
+SGDet task in the closed-set scenario.
+5.2. Main Results
+VG Results.
+We evaluate FlowSG on Visual Genome
+(VG) under both closed- and open-set protocols using the
+same pre-trained detector for SGDet (Tabs. 1, 2, 3).
+In
+the closed-set setting, FlowSG sets a new state of the art
+among two-stage systems on SGDet with ∼3–4 point gains
+in R@50/100, while remaining competitive on mR@50/100.
+On PredCls it achieves the best mR@50/100 and recall,
+indicating improved long-tail robustness without sacrific-
+ing head performance. Against strong one-stage models,
+FlowSG attains the best R@50/100 and mR@50/100 with
+about 2 point improvements.
+In the open-set evaluation
+(Tab. 3), FlowSG further strengthens generalization to un-
+seen predicates, surpassing VL-IRM on mR@50/100 and
+lifting R@100 by about +2, validating the benefit of pro-
+gressive, image-conditioned generation.
+PSG Results. On PSG (Tabs. 1, 3), FlowSG leads across
+protocols. In the closed-set two-stage setting, it improves
+SGDet R/mR@50/100 by roughly +1–2 points over prior
+strong baselines (e.g., USG-Par[58]), and on PredCls widens
+Datasets
+Methods
+R@50
+mR@50
+R@100
+mR@100
+PSG
+PGSG[35]
+15.5
+10.1
+17.7
+11.5
+OvSGTR∗[4]
+19.3
+12.4
+22.8
+14.0
+OpenPSG[72]
+21.2
+19.8
+25.1
+21.4
+VL-IRM∗[42]
+25.1
+18.2
+29.3
+22.5
+FlowSG
+26.7
+22.3
+31.8
+24.2
+VG
+VS3[70]
+15.6
+6.7
+17.2
+7.4
+PGSG[35]
+15.8
+5.2
+19.1
+7.3
+OvSGTR∗[4]
+15.1
+5.3
+19.3
+7.5
+VL-IRM∗[42]
+14.1
+8.4
+20.4
+12.7
+FlowSG
+16.9
+9.7
+22.5
+14.1
+Table 3. Compared to the state-of-the-art PSG and SGG models
+on the VG and PSG dataset in the open-set [4] scenario. ∗denotes
+training with the same dataset.
+the gap further with about+2 in recall and ∼2–3 in mean-
+recall, showing better coverage of rare relations while pre-
+serving head accuracy. In the open-set scenario, FlowSG at-
+tains the highest mR@50/100, surpassing VL-IRM by about
+4 and 2 points, respectively. Overall, FlowSG consistently
+improves recall and tail robustness on both VG and PSG
+across evaluation metrics.
+5.3. Ablation Study
+In this section, we study three components: the setting of
+the denoiser, sampling strategy, and tokenization design.
+Graph Transformer Components. We ablate the proposed
+graph transformer on PSG under SGDet (Tab. 4). Removing
+the entire Flow-conditioned Message Aggregation (FMA)
+block causes a marked drop across all metrics, confirming
+that flow-aware message passing is central to our gains. The
+fine-grained variants show that both edge- and node-level
+aggregations are necessary: eliminating either yields con-
+sistent declines (3 −6 points), indicating complementary
+roles in refining relation cues and object context. Finally,
+discarding cross-attention to global visual features leads to
+the largest degradation 7 −11 points across R/mR), under-
+scoring the importance of image guidance for disambiguat-
+ing relations. Together, these studies validate our design
+choices and highlight the synergy between flow-conditioned
+aggregation and visual guidance.
+Sampling Strategies.
+We compare four initial distribu-
+tions for the discrete states at 𝑡= 0: Uniform [1] (𝑝0 =
+[ 1
+𝑍, . . . , 1
+𝑍]): probability uniformly distributed across all
+states. Masking [1] (𝑝0 = [0, . . . , 0, 1]): all mass in a spe-
+cial mask state. Marginal [36, 56, 62] (𝑝0 = [𝑚1, . . . , 𝑚𝑍]):
+𝑚𝑖is the dataset marginal probability of state 𝑖. Absorb-
+ing (𝑝0 = [0, . . . , 1, . . . , 0]): one-hot encoding of the most
+common state.
+From the results, Marginal initialization matching
+dataset priors consistently attains the best R/mR@50/100,
+with clear gains over the next-best alternatives. Absorb-
+ing yields competitive recall but noticeably lower mean-
+recall, indicating a head-class bias detrimental to tail rela-
+
+
+=== PAGE 8 ===
+
+Table 4. Ablation of graph transformer components on PSG under
+the closed-set SGDet; “MA” denotes message aggregation.
+Variant
+R@50
+mR@50
+R@100
+mR@100
+FMA Module Analysis
+w/o FMA
+40.5
+37.1
+47.2
+39.7
+w/o EdgeMA
+43.1
+38.5
+49.8
+44.2
+w/o NodeMA
+42.8
+38.9
+49.6
+42.5
+Visual Guidance
+w/o Cross-attn
+39.2
+34.3
+45.3
+36.9
+FlowSG
+46.3
+42.7
+53.3
+48.3
+Uniform
+Masking
+Marginal
+Absorbing
+35.0
+37.5
+40.0
+42.5
+45.0
+47.5
+50.0
+52.5
+55.0
+43.8
+44.2
+46.3
+45.1
+39.9
+39.5
+42.7
+40.8
+50.5
+50.1
+53.3
+52.0
+44.6
+46.3
+48.3
+45.7
+R@50
+mR@50
+R@100
+mR@100
+Figure 3. Results of four sampling strategies on closed-set PSG.
+tions. Uniform and masking underperform overall, likely
+because they either discard corpus statistics or introduce un-
+necessary mask-token complexity. The improvements are
+more pronounced on mR than R, underscoring that prin-
+cipled initialization is key for long-tail predicate recogni-
+tion. We therefore adopt marginal for categorical tokens
+and Gaussian noise for continuous boxes.
+Tokenization Design. On PSG (Tab. 5), we ablate appear-
+ance codebook capacity and slot factorization. Increasing
+the codebook from 32×256 to 64×256 yields double-digit
+gains in both recall and mean–recall, indicating that a small
+codebook is an information bottleneck. Further enlarging
+the embedding to 64×512 brings consistent improvements,
+suggesting richer codewords better capture fine-grained ap-
+pearance.
+For structure, using M=4 slots outperforms
+M=3/5. A limited number of slots may reduce the ability to
+express object features, while an excessive number signifi-
+cantly increases the difficulty of description. We therefore
+adopt the 64×512 codebook with M=4 ordered slots as our
+default.
+5.4. Visualization Results
+Figure 4 visualizes FlowSG’s image-conditioned transport
+over time. Early steps (𝑡=0.1, 0.2) establish nodes and coarse
+relations but include generic or misplaced edges. Mid steps
+refine structure, repairing relation endpoints and correct-
+Table 5. Ablation of tokenization on PSG: (top) effect of codebook
+size 𝐾×𝑑; (bottom) slot factorization levels 𝑀.
+Configuration
+R@50
+mR@50
+R@100
+mR@100
+Size (K) and Dimension (d)
+32×256
+32.7
+28.5
+39.5
+31.2
+64×256
+43.3
+41.1
+52.1
+46.6
+64×512 (Ours)
+46.3
+42.7
+53.3
+48.3
+Slots (M)
+M=3
+44.1
+38.8
+50.8
+45.5
+M=5
+35.6
+31.4
+42.3
+47.0
+M=4 (Ours)
+46.3
+42.7
+53.3
+48.3
+Figure 4. Progressive FlowSG. From the input image (bottom-left)
+and ground truth at 𝑡=0 (top-left), we show predictions refined at
+𝑡∈0.1, 0.2, 0.4, 0.6.
+ing predicates (e.g., “On” →“Drive on”). The final step
+produces a compact, semantically consistent graph close to
+ground truth. This coarse-to-fine trajectory shows that flow
+matching performs targeted, structure-aware edits, outper-
+forming one-shot prediction in stability.
+5.5. Conclusion
+In this work, we cast SGG as progressive transport on a
+hybrid state—discrete tokens (objects/predicates) and con-
+tinuous geometry (boxes).
+FlowSG couples (i) hybrid
+flow matching, where a probability-flow ODE drives boxes
+while a discrete-flow objective updates categorical tokens,
+with (ii) a graph-aware transformer equipped with Flow-
+conditioned Message Aggregation (FMA). FMA performs
+relation-modulated self-attention with FiLM gating, then
+aggregates edge- and node-level messages, and finally in-
+jects visual guidance via cross-attention to image features,
+enabling semantics–geometry co-generation. Extensive re-
+sults demonstrate FlowSG superior performance on a wide-
+range of datasets. Limitations. The few-step ODE integra-
+tion still adds inference cost compared to strictly one-shot
+models.
+In future work, We plan to (i) train end-to-end
+with detector heads, (ii) explore model compression, step-
+adaptive solvers, and early-exit policies for the denoiser.
+
+
+=== PAGE 9 ===
+
+Acknowledgments
+This
+research
+was
+partially
+supported
+by
+the
+Na-
+tional Natural Science Foundation of China (NSFC)
+(62306064), the Sichuan Science and Technology Program
+(2023ZYD0165, 2024ZDZX0011 and 2024ZHCG0009)
+and the Tianfu Jiangxi Laboratory(TFJX-ZD-2024-001).
+We appreciate all the authors for their fruitful discussions.
+References
+[1] Andrew Campbell, Jason Yim, Regina Barzilay, Tom Rain-
+forth, and Tommi Jaakkola.
+Generative flows on discrete
+state-spaces: Enabling multimodal flows with applications to
+protein co-design. In ICML, pages 5453–5512. PMLR, 2024.
+7
+[2] Boyuan Chen, Zhuo Xu, Sean Kirmani, Brain Ichter, Dorsa
+Sadigh, Leonidas Guibas, and Fei Xia. Spatialvlm: Endowing
+vision-language models with spatial reasoning capabilities. In
+CVPR, pages 14455–14465, 2024. 2
+[3] Minghan Chen, Guikun Chen, Wenguan Wang, and Yi Yang.
+Hydra-SGG: Hybrid relation assignment for one-stage scene
+graph generation. In ICLR, 2025. 7
+[4] Zuyao Chen, Jinlin Wu, Zhen Lei, Zhaoxiang Zhang, and
+Chang Wen Chen. Expanding scene graph boundaries: fully
+open-vocabulary scene graph generation via visual-concept
+alignment and retention. In ECCV, pages 108–124, 2024. 6,
+7
+[5] Bowen Cheng, Ishan Misra, Alexander G Schwing, Alexan-
+der Kirillov, and Rohit Girdhar. Masked-attention mask trans-
+former for universal image segmentation. In CVPR, pages
+1290–1299, 2022. 4, 6
+[6] Yuren Cong, Michael Ying Yang, and Bodo Rosenhahn.
+Reltr:
+Relation transformer for scene graph generation.
+TPAMI, 45(9):11169–11183, 2023. 1, 2
+[7] Gabriele Corso, Luca Cavalleri, Dominique Beaini, Pietro
+Liò, and Petar Veličković. Principal neighbourhood aggrega-
+tion for graph nets. NeurIPS, 33:13260–13271, 2020. 6
+[8] Floor Eijkelboom, Grigory Bartosh, Christian Anders-
+son Naesseth, Max Welling, and Jan-Willem van de Meent.
+Variational flow matching for graph generation. NeurIPS, 37:
+11735–11764, 2024. 2, 3
+[9] Jiawei Fu, Tiantian Zhang, Kai Chen, and Qi Dou. Hybrid
+reciprocal transformer with triplet feature alignment for scene
+graph generation. In CVPR, pages 8953–8963, 2025. 1, 2, 7
+[10] Sarthak Garg, Helisa Dhamo, Azade Farshad, Sabrina Musa-
+tian, Nassir Navab, and Federico Tombari. Unconditional
+scene graph generation. In ICCV, pages 16362–16371, 2021.
+3
+[11] Itai Gat, Tal Remez, Neta Shaul, Felix Kreuk, Ricky TQ Chen,
+Gabriel Synnaeve, Yossi Adi, and Yaron Lipman. Discrete
+flow matching. NeurIPS, 37:133345–133385, 2024. 2, 3
+[12] Xiuye Gu, Tsung-Yi Lin, Weicheng Kuo, and Yin Cui. Open-
+vocabulary object detection via vision and language knowl-
+edge distillation. In ICLR 2022, Virtual Event, April 25-29,
+2022. OpenReview.net, 2022. 2
+[13] Saurabh Gupta and Jitendra Malik.
+Visual semantic role
+labeling. arXiv preprint arXiv:1505.04474, 2015. 4
+[14] Majdi Hassan, Nikhil Shenoy, Jungyoon Lee, Hannes Stärk,
+Stephan Thaler, and Dominique Beaini. Et-flow: Equivariant
+flow-matching for molecular conformer generation. NeurIPS,
+37:128798–128824, 2024. 2
+[15] Zeeshan Hayder and Xuming He.
+Dsgg: Dense relation
+transformer for an end-to-end scene graph generation. In
+CVPR, pages 28317–28326, 2024. 7
+[16] Tao He, Lianli Gao, Jingkuan Song, Jianfei Cai, and Yuan-
+Fang Li. Learning from the scene and borrowing from the
+rich: tackling the long tail in scene graph generation. In
+AAAI, pages 587–593, 2021. 2
+[17] Tao He, Lianli Gao, Jingkuan Song, and Yuan-Fang Li. To-
+wards open-vocabulary scene graph generation with prompt-
+based finetuning. In ECCV, pages 56–73, 2022. 6
+[18] Tao He, Lianli Gao, Jingkuan Song, and Yuan-Fang Li. To-
+ward a unified transformer-based framework for scene graph
+generation and human-object interaction detection. 32:6274–
+6288, 2023. 2
+[19] Tao He, Xin Hu, Tongtong Wu, Dongyang Zhang, Ming Li,
+Yuan-Fang Li, and Fei Richard Yu. Lifelong scene graph
+generation. Pattern Recognition, page 113132, 2026. 1
+[20] Jonathan Ho, Ajay Jain, and Pieter Abbeel. Denoising dif-
+fusion probabilistic models. NeurIPS, 33:6840–6851, 2020.
+2
+[21] Xin Hu, Ke Qin, Guiduo Duan, Ming Li, Yuan-Fang Li, and
+Tao He. Spade: Spatial-aware denoising network for open-
+vocabulary panoptic scene graph generation with long-and
+local-range context reasoning. In ICCV, pages 15562–15572,
+2025. 1, 7
+[22] Wenhuan Huang, Yi JI, Guiqian Zhu, Li Ying, and Chunping
+Liu. Navigating the unseen: Zero-shot scene graph genera-
+tion via capsule-based equivariant features. In CVPR, pages
+29448–29457, 2025. 7
+[23] Jinbae Im, JeongYeon Nam, Nokyung Park, Hyungmin Lee,
+and Seunghyun Park. Egtr: Extracting graph from trans-
+former for scene graph generation. In CVPR, pages 24229–
+24238, 2024. 7
+[24] Eric Jang, Shixiang Gu, and Ben Poole. Categorical repa-
+rameterization with gumbel-softmax. In ICLR, 2017. 4
+[25] Tero Karras, Miika Aittala, Timo Aila, and Samuli Laine.
+Elucidating the design space of diffusion-based generative
+models. NeurIPS, 35:26565–26577, 2022. 6
+[26] Jongha Kim, Jihwan Park, Jinyoung Park, Jinyoung Kim, Se-
+hyung Kim, and Hyunwoo J Kim. Groupwise query special-
+ization and quality-aware multi-assignment for transformer-
+based visual relationship detection. In CVPR, pages 28160–
+28169, 2024. 7
+[27] Lingkai Kong, Jiaming Cui, Haotian Sun, Yuchen Zhuang,
+B Aditya Prakash, and Chao Zhang. Autoregressive diffusion
+model for graph generation. In ICML, pages 17391–17408.
+PMLR, 2023. 3
+[28] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A Shamma, et al. Visual genome:
+Connecting language and vision using crowdsourced dense
+image annotations. IJCV, 123:32–73, 2017. 6
+
+
+=== PAGE 10 ===
+
+[29] Li Li, Wei Ji, Yiming Wu, Mengze Li, You Qin, Lina Wei, and
+Roger Zimmermann. Panoptic scene graph generation with
+semantics-prototype learning. In AAAI, pages 3145–3153,
+2024. 2, 7
+[30] Ming Li, Xiangyu Xu, Hehe Fan, Pan Zhou, Jun Liu, Jia-Wei
+Liu, Jiahe Li, Jussi Keppo, Mike Zheng Shou, and Shuicheng
+Yan. Stprivacy: Spatio-temporal privacy-preserving action
+recognition. In ICCV, 2023. 3
+[31] Ming Li, Pan Zhou, Jia-Wei Liu, Jussi Keppo, Min Lin,
+Shuicheng Yan, and Xiangyu Xu. Instant3d: instant text-to-
+3d generation. IJCV, 2024. 3
+[32] Muquan Li, Qian Dong, Dongyang Zhang, Ke Qin, and
+Guangchun Luo. Efficient industrial dataset distillation with
+textual trajectory matching. IEEE Transactions on Industrial
+Informatics, 2026. 3
+[33] Muquan Li, Hang Gou, Yingyi Ma, Rongzheng Wang, Ke
+Qin, and Tao He. Fixed anchors are not enough: Dynamic re-
+trieval and persistent homology for dataset distillation. arXiv
+preprint arXiv:2602.24144, 2026. 3
+[34] Rongjie Li, Songyang Zhang, and Xuming He. Sgtr: End-
+to-end scene graph generation with transformer. In CVPR,
+pages 19486–19496, 2022. 7
+[35] Rongjie Li, Songyang Zhang, Dahua Lin, Kai Chen, and
+Xuming He. From pixels to graphs: Open-vocabulary scene
+graph generation with vision-language models. In CVPR,
+pages 28076–28086, 2024. 2, 7
+[36] Chenguo Lin and Yadong Mu. Instructscene: Instruction-
+driven 3d indoor scene synthesis with semantic graph prior.
+In ICLR, 2024. 4, 6, 7
+[37] Xin Lin, Changxing Ding, Jinquan Zeng, and Dacheng Tao.
+Gps-net: Graph property sensing network for scene graph
+generation. In CVPR, pages 3746–3753, 2020. 2
+[38] Yaron Lipman, Ricky TQ Chen, Heli Ben-Hamu, Maximil-
+ian Nickel, and Matthew Le. Flow matching for generative
+modeling. In ICLR, 2023. 3
+[39] Shaoyu Liu, Jianing Li, Guanghui Zhao, Yunjian Zhang, Xin
+Meng, Fei Richard Yu, Xiangyang Ji, and Ming Li. Eventgpt:
+Event stream understanding with multimodal large language
+models. In CVPR, pages 29139–29149, 2025. 1
+[40] Ilya Loshchilov and Frank Hutter. Decoupled weight decay
+regularization. In ICLR, 2018. 6
+[41] Karolis Martinkus, Andreas Loukas, Nathanaël Perraudin,
+and Roger Wattenhofer. Spectre: Spectral conditioning helps
+to overcome the expressivity limits of one-shot graph gener-
+ators. In ICML, pages 15159–15179. PMLR, 2022. 3
+[42] Yukuan Min, Muli Yang, Jinhao Zhang, Yuxuan Wang, Am-
+ing Wu, and Cheng Deng. Vision-language interactive rela-
+tion mining for open-vocabulary scene graph generation. In
+ICCV, pages 16755–16764, 2025. 1, 7
+[43] William Peebles and Saining Xie. Scalable diffusion models
+with transformers. In ICCV (ICCV), 2023. 6
+[44] William Peebles and Saining Xie. Scalable diffusion models
+with transformers. In ICCV, pages 4195–4205, 2023. 5
+[45] Ethan Perez, Florian Strub, Harm De Vries, Vincent Du-
+moulin, and Aaron Courville. Film: Visual reasoning with a
+general conditioning layer. In AAAI, 2018. 2, 5
+[46] Yiming Qin, Manuel Madeira, Dorina Thanou, and Pascal
+Frossard. Defog: Discrete flow matching for graph genera-
+tion. In ICML, 2025. 2, 3
+[47] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya
+Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry,
+Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning
+transferable visual models from natural language supervision.
+In ICML, pages 8748–8763. PMLR, 2021. 4, 5, 6
+[48] Aditya Ramesh, Mikhail Pavlov, Gabriel Goh, Scott Gray,
+Chelsea Voss, Alec Radford, Mark Chen, and Ilya Sutskever.
+Zero-shot text-to-image generation. In ICML, pages 8821–
+8831. Pmlr, 2021. 4
+[49] Jason Tyler Rolfe.
+Discrete variational autoencoders.
+In
+ICLR, 2017. 4
+[50] Martin Simonovsky and Nikos Komodakis. Graphvae: To-
+wards generation of small graphs using variational autoen-
+coders. In ICANN, pages 412–422. Springer, 2018. 3
+[51] Jingkuan Song, Tao He, Hangbo Fan, and Lianli Gao. Deep
+discrete hashing with self-supervised pairwise labels.
+In
+ECML-PKDD, pages 223–238. Springer, 2017. 1
+[52] Renato Sortino, Simone Palazzo, Francesco Rundo, and Con-
+cetto Spampinato. Transformer-based image generation from
+scene graphs. Computer Vision and Image Understanding,
+233:103721, 2023. 2
+[53] Robyn Speer, Joshua Chin, and Catherine Havasi. Conceptnet
+5.5: An open multilingual graph of general knowledge. In
+AAAI, 2017. 4
+[54] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan Luo,
+and Wei Liu. Learning to compose dynamic tree structures
+for visual contexts. In CVPR, pages 6619–6628, 2019. 1, 7
+[55] Aaron Van Den Oord, Oriol Vinyals, et al. Neural discrete
+representation learning. NeurIPS, 30, 2017. 2
+[56] Clement Vignac, Igor Krawczuk, Antoine Siraudin, Bohan
+Wang, Volkan Cevher, and Pascal Frossard. Digress: Discrete
+denoising diffusion for graph generation. In ICLR, 2023. 2,
+7
+[57] Jinghao Wang, Zhengyu Wen, Xiangtai Li, Zujin Guo,
+Jingkang Yang, and Ziwei Liu. Pair then relation: Pair-net
+for panoptic scene graph generation. TPAMI, 2024. 7
+[58] Shengqiong Wu, Hao Fei, and Tat-Seng Chua. Universal
+scene graph generation. In CVPR, pages 14158–14168, 2025.
+2, 7
+[59] Danfei Xu, Yuke Zhu, Christopher B Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing.
+In
+CVPR, pages 5410–5419, 2017. 7
+[60] Danfei Xu, Yuke Zhu, Christopher B Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing.
+In
+CVPR, pages 5410–5419, 2017. 1
+[61] Jiarui Xu, Sifei Liu, Arash Vahdat, Wonmin Byeon, Xiaolong
+Wang, and Shalini De Mello.
+Open-vocabulary panoptic
+segmentation with text-to-image diffusion models. In CVPR,
+pages 2955–2966, 2023. 5
+[62] Zhe Xu, Ruizhong Qiu, Yuzhong Chen, Huiyuan Chen, Xiran
+Fan, Menghai Pan, Zhichen Zeng, Mahashweta Das, and
+Hanghang Tong. Discrete-state continuous-time diffusion for
+graph generation. NeurIPS, 37:79704–79740, 2024. 7
+
+
+=== PAGE 11 ===
+
+[63] Weilong Yan, Ming Li, Haipeng Li, Shuwei Shao, and
+Robby T. Tan. Synthetic-to-real self-supervised robust depth
+estimation via learning with motion and structure priors. In
+CVPR, pages 21880–21890, 2025. 1
+[64] Jingkang Yang, Yi Zhe Ang, Zujin Guo, Kaiyang Zhou,
+Wayne Zhang, and Ziwei Liu. Panoptic scene graph gen-
+eration. In ECCV, pages 178–196. Springer, 2022. 1, 2, 4,
+6
+[65] Jie Yang, Bingliang Li, Ailing Zeng, Lei Zhang, and Ruimao
+Zhang. Open-world human-object interaction detection via
+multi-modal prompts. In IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, CVPR 2024, Seattle, WA,
+USA, June 16-22, 2024, pages 16954–16964. IEEE, 2024. 5
+[66] Wen Yin, Yong Wang, Guiduo Duan, Dongyang Zhang,
+Xin Hu, Yuan-Fang Li, and Tao He.
+Knowledge-aligned
+counterfactual-enhancement diffusion perception for unsu-
+pervised cross-domain visual emotion recognition. In CVPR,
+pages 3888–3898, 2025. 1
+[67] Wen Yin, Siyu Zhan, Cencen Liu, Xin Hu, Guiduo Duan,
+Xiurui Xie, Yuan-Fang Li, and Tao He. Tical: Typicality-
+based consistency-aware learning for multimodal emotion
+recognition. arXiv preprint arXiv:2511.15085, 2025. 1
+[68] Rufai Yusuf Zakari, Jim Wilson Owusu, Ke Qin, Hailin
+Wang, Zaharaddeen Karami Lawal, and Tao He. Vqa and
+visual reasoning: An overview of approaches, datasets, and
+future direction. Neurocomputing, 622:129345, 2025. 1
+[69] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin Choi.
+Neural motifs: Scene graph parsing with global context. In
+CVPR, pages 5831–5840, 2018. 2, 7
+[70] Yong Zhang, Yingwei Pan, Ting Yao, Rui Huang, Tao
+Mei, and Chang-Wen Chen. Learning to generate language-
+supervised and open-vocabulary scene graph using pre-
+trained visual-semantic space. In CVPR, pages 2915–2924,
+2023. 7
+[71] Chaofan Zheng, Xinyu Lyu, Lianli Gao, Bo Dai, and Jingkuan
+Song. Prototype-based embedding network for scene graph
+generation. In CVPR (CVPR), pages 22783–22792, 2023. 7
+[72] Zijian Zhou, Zheng Zhu, Holger Caesar, and Miaojing Shi.
+Openpsg: Open-set panoptic scene graph generation via large
+multimodal models.
+In ECCV, pages 199–215. Springer,
+2024. 1, 2, 6, 7

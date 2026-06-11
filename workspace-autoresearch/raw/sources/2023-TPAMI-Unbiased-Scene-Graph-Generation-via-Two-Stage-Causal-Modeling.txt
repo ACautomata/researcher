@@ -1,0 +1,2756 @@
+Unbiased Scene Graph Generation from Biased Training
+Kaihua Tang1,
+Yulei Niu3,
+Jianqiang Huang1,2*,
+Jiaxin Shi4,
+Hanwang Zhang1
+1Nanyang Technological University,
+2Damo Academy, Alibaba Group,
+3Renmin University of China,
+4Tsinghua University
+kaihua001@e.ntu.edu.sg,
+niu@ruc.edu.cn,
+jianqiang.jqh@gmail.com
+shijx12@163.com,
+hanwangzhang@ntu.edu.sg
+Abstract
+Today’s scene graph generation (SGG) task is still
+far from practical, mainly due to the severe training
+bias, e.g., collapsing diverse human walk on/ sit
+on/lay on beach into human on beach.
+Given
+such SGG, the down-stream tasks such as VQA can hardly
+infer better scene structures than merely a bag of objects.
+However, debiasing in SGG is not trivial because tradi-
+tional debiasing methods cannot distinguish between the
+good and bad bias, e.g., good context prior (e.g., person
+read book rather than eat) and bad long-tailed bias
+(e.g., near dominating behind/in front of). In this
+paper, we present a novel SGG framework based on causal
+inference but not the conventional likelihood. We first build
+a causal graph for SGG, and perform traditional biased
+training with the graph.
+Then, we propose to draw the
+counterfactual causality from the trained graph to infer
+the effect from the bad bias, which should be removed. In
+particular, we use Total Direct Effect as the proposed fi-
+nal predicate score for unbiased SGG. Note that our frame-
+work is agnostic to any SGG model and thus can be widely
+applied in the community who seeks unbiased predictions.
+By using the proposed Scene Graph Diagnosis toolkit1 on
+the SGG benchmark Visual Genome and several prevailing
+models, we observed significant improvements over the pre-
+vious state-of-the-art methods.
+1. Introduction
+Scene graph generation (SGG) [65] — a visual detec-
+tion task of objects and their relationships in an image —
+seems to have never fulfilled its promise: a comprehensive
+visual scene representation that supports graph reasoning
+for high-level tasks such as visual captioning [70, 68] and
+VQA [57, 15]. Once equipped with SGG, these high-level
+tasks have to abandon the ambiguous visual relationships
+*Corresponding author.
+1Our code is publicly available on GitHub: https://github.
+com/KaihuaTang/Scene-Graph-Benchmark.pytorch
+0
+0.1
+0.2
+0.3
+0.4
+Sampling Fraction
+Fraction
+(a) Input Image 
+(b) Distribution of Predicate Sampling Fraction
+wheel1
+wheel2
+helmet
+has
+man1
+man2
+street
+motorcycle
+car
+building
+near
+on
+near
+wheel1
+wheel2
+helmet
+has
+man1
+man2
+street
+motorcycle
+car
+building
+behind
+parked on
+in front of
+(c) Biased Generation
+(d) Unbiased Generation
+Figure 1. An example of scene graph generation (SGG). (a)
+An input image with bounding boxes.
+(b) The distribution of
+sample fraction for the most frequent 20 predicates in Visual
+Genome [23]. (c) SGG from re-implemented MOTIFS [72]. (d)
+SGG by the proposed unbiased prediction from the same model.
+— yet on which are our core efforts made [72, 56, 6], then
+pretend that there is a graph — nothing but a sparse object
+layout with binary links, and finally shroud it into graph
+neural networks [66] for merely more contextual object rep-
+resentations [68, 17, 57]. Although this is partly due to the
+research gap in graph reasoning [2, 52, 16], the crux lies in
+the biased relationship prediction.
+Figure 1 visualizes the SGG results from a state-of-the-
+art model [72]. We can see a frustrating scene: among al-
+most perfectly detected objects, most of their visual rela-
+tionships are trivial and less informative. For example in
+Figure 1(c), except the trivial 2D spatial layouts, we know
+little about the image from near, on, and has.
+Such
+heavily biased generation comes from the biased training
+data, more specifically, as shown in Figure 1(b), the highly-
+skewed long-tailed relationship annotations. For example,
+if a model is trained for predicting on 1,000 times more than
+standing on, then, during test, the former is more likely
+to prevail over the latter. Therefore, to perform a sensible
+graph reasoning, we need to distinguish more fine-grained
+relationships from the ostensibly probable but trivial ones,
+such as replacing near with behind/in front of,
+and on with parking on/driving on in Figure 1(d).
+1
+arXiv:2002.11949v4  [cs.CV]  26 Oct 2025
+Dog
+Surfboard
+(a) Biased Generation Based on Likelihood
+Dog
+Surfboard
+Dog
+Surfboard
+Comparing
+(b) An Intuitive Example of Counterfactual Thinking
+Figure 2. (a) The biased generation that directly predicts labels
+from likelihood. (b) An intuitive example of the proposed total di-
+rect effect, which calculates the difference between the real scene
+and the counterfactual one. Note that the “wipe-out” is only for
+the illustrative purpose but not considered as visual processing.
+However, we should not blame the biased training be-
+cause both our visual world per se and the way we describe
+it are biased: there are indeed more person carry bag
+than dog carry bag (i.e., the long-tail theory); it is eas-
+ier for us to label person beside table rather than
+eating on (i.e., bounded rationality [53]); and we pre-
+fer to say person on bike rather than person ride
+on bike (i.e., language or reporting bias [36]). In fact,
+most of the biased annotations can help the model learn
+good contextual prior [32, 72] to filter out the unnecessary
+search candidates such as apple park on table and
+apple wear hat. A promising but embarrassing find-
+ing [72] is that: by only using the statistical prior of de-
+tected object class in the Visual Genome benchmark [23],
+we can already achieved 30.1% on Recall@100 for Scene
+Graph Detection — rendering all the much more complex
+SGG models almost useless — that is only 1.1-1.5% lower
+than the state-of-the-art [5, 56, 75]. Not surprisingly, as
+we will show in Section 5, conventional debiasing methods
+who do not respect the “good bias” during training, e.g., re-
+sampling [11] and re-weighting [30], fail to generalize to
+unseen relationships, i.e., zero-shot SGG [32].
+For both machines and humans, decision making is a col-
+laboration of content (endogenous reasons) and context (ex-
+ogenous reasons) [59]. Take SGG as an example, in most
+SGG models [72, 5, 75], the content is the visual features
+of the subject and object, and the context is the visual fea-
+tures of the subject-object union regions and the pairwise
+object classes. We humans — born and raised in the biased
+nature — are ambidextrous in embracing the good while
+avoiding the bad context, and making unbiased decisions
+together with the content. The underlying mechanism is
+causality-based: the decision is made by pursuing the main
+causal effect caused by the content but not the side-effect by
+context. However, on the other hand, machines are usually
+likelihood-based: the prediction is analogous to look-up the
+(a) Unbiased Generation Based on Total Direct Effect
+𝐼
+𝑍
+𝑋
+𝑌
+𝐼
+𝑍
+ത𝑋
+Comparing
+−
+=
+𝒀𝒙,𝒛
+𝒀ഥ𝒙,𝒛
+𝑻𝑫𝑬
+0
+0.2
+0.4
+0.6
+0.8
+1
+Biased Generation
+Proposed Unbiased Generation
+Recall
+(b) Recall@100 on Predicate Classification
+𝐼
+𝑌
+: Image
+𝑋
+𝑍
+𝑌
+: Object Features
+: Object Labels
+: Predicate Logits
+Figure 3. (a) The example of total direct effect calculation and
+corresponding operations on the causal graph, where ¯
+X represents
+wiped-out X. (b) Recall@100 of Predicate Classification for se-
+lected predicates ranking by sampling fraction. The biased gen-
+eration refers to re-implemented MOTIFS [72] and the proposed
+unbiased generation is the result from the same model using TDE.
+content and its context in a huge likelihood table, interpo-
+lated by population training. We believe that the key is to
+teach machines how to distinguish between the “main ef-
+fect” and “side-effect”.
+In this paper, we propose to empower machines the abil-
+ity of counterfactual causality [42] to pursue the “main ef-
+fect” in unbiased prediction:
+If I had not seen the content, would I still make the same
+prediction?
+The counterfactual lies between the fact that “I see” and the
+imagination “I had not”, and the comparison between the
+factual and counterfactual will naturally remove the effect
+from the context bias, because the context is the only thing
+unchanged between the two alternatives.
+To better illustrate the profound yet subtle difference be-
+tween likelihood and counterfactual causality, we present
+a dog standing on surfboard example in Fig-
+ure 2(a). Due to the biased training, the model will eventu-
+ally predict the on. Note that even though the rest choices
+are not all exactly correct, thanks to the bias, they still help
+to filter out a large amount of unreasonable ones. To take a
+closer look at what relationship it is in the context bias, we
+are essentially comparing the original scene with a coun-
+terfactual scene (Figure 2(b)): only the visual features of
+the dog and surfboard are wiped out, while keeping the
+rest — the scene and the object classes — untouched, as if
+the visual features had ever existed. By doing this, we can
+focus on the main visual effects of the relationship without
+losing the context.
+2
+We propose a novel unbiased SGG method based on
+the Total Direct Effect (TDE) analysis framework in causal
+inference [60, 40, 61]. Figure 3(a) shows the underlying
+causal graphs [41, 42] of the two alternate scenes: factual
+and counterfactual. Although a formal introduction of them
+is given in Section 3-4, now you can simply understand the
+nodes as data features and the directed links as (parametric)
+data flows. For example, X →Y , Z →Y , and I →Y
+indicate that the relationship Y is a combined effect caused
+by content: the pair of object visual features X, context:
+their object classes Z, and scene: the image I; the faded
+links denote that the wiped-out ¯X is no longer caused by
+I or affects Z. These graphs offer an algorithmic formu-
+lation to calculate TDE, which exactly realizes the coun-
+terfactual thinking in Figure 2. As shown in Figure 3(b),
+the proposed TDE significantly improves most of the pred-
+icates, and impressively, the distribution of the improved
+performances is no longer long-tailed, indicating the fact
+that our improvement is indeed from the proposed method,
+but NOT from the better exploitation of the context bias. A
+closer analysis in Figure 6 further shows that the worse pre-
+dictions like on — though very few — are due to turning
+to more fine-grained results such as stand on and park
+on. We highlight that TDE is a model-agnostic prediction
+strategy and thus applicable for a variety of models and fu-
+sion tricks [74, 72, 56].
+Last but not least, we propose a new standard of SGG
+diagnosis toolkit (cf. Section 5.2) for more comprehensive
+SGG evaluations. Besides traditional evaluation tasks, it
+consists of the bias-sensitive metric: mean Recall [56, 6]
+and a new Sentence-to-Graph Retrieval for a more com-
+prehensive graph-level metric.
+By using this toolkit on
+SGG benchmark Visual Genome [23] and several prevail-
+ing baselines, we verify the severe bias in existing models
+and demonstrate the effectiveness of the proposed unbiased
+prediction over other debiasing strategies.
+2. Related Work
+Scene Graph Generation. SGG [65, 72] has received in-
+creasing attention in computer vision community, due to the
+potential revolution that would be brought to down-stream
+visual reasoning tasks [52, 68, 22, 17]. Most of the existing
+methods [65, 63, 7, 26, 71, 56, 67, 10, 44, 62] struggle for
+better feature extraction networks. Zellers et al. [72] firstly
+brought the bias problem of SGG into attention and the fol-
+lowers [56, 6] proposed the unbiased metric (mean Recall),
+yet, their approaches are still restricted to the feature extrac-
+tion networks, leaving the biased SGG problem unsolved.
+The most related work [28] just prunes those dominant and
+easy-to-predict relationships in the training set.
+Unbiased Training. The bias problem has long been inves-
+tigated in machine learning [58]. Existing debiasing meth-
+ods can be roughly categorized into three types: 1) data
+=
+−
+𝑰:    Image
+𝑿: Object Features
+𝒁: Object Labels
+Feature
+Extraction
+𝒀: Predicate Logits
+Faster R-CNN
+ℳ: Feature Map
+𝑩: Bounding Boxes
+Human
+Horse
+Label 
+Prediction
+Joint Feature
+Embedding
+Environmental 
+Context Embedding
+0
+1
+0
+0
+0
+0
+0
+0
+1
+0
+𝑓(𝑥′𝑒, 𝑣′𝑒, 𝑧′𝑒)
+Training on Likelihood
+Joint Label
+Embedding
+Environment
+Feature
+Joint Object
+Feature
+Language
+Prior
+𝐼
+𝑍
+𝑋
+𝑌
+(a) The SGG Framework Used for Biased Training
+(b) The Causal Graph of SGG
+(c) Unbiased TDE Inference
+𝐼
+𝑍
+𝑋
+𝑌
+𝐼
+𝑍
+ത𝑋
+𝑌
+human ``riding’’ horse
+Figure 4. (a) The framework used in our biased training. (b) The
+causal graph of the SGG framework. (c) An illustration of the
+proposed TDE inference.
+augmentation or re-sampling [9, 25, 27, 11, 3], 2) unbiased
+learning through elaborately designed training curriculums
+or learning losses [73, 30], 3) disentangling biased represen-
+tations from the unbiased [36, 4]. The proposed TDE anal-
+ysis can be regarded as the third category, but the main dif-
+ference is that TDE doesn’t require to train additional layers
+like [36, 4] to model the bias, it directly separates the bias
+from existing models through the counterfactual surgeries
+on causal graphs.
+Mediation Analysis.
+It is also known as effect analy-
+sis [60, 42], which is widely adopted in medical, polit-
+ical or psychological research [46, 19, 8, 33, 21] as the
+tool of studying the effect of certain treatments or poli-
+cies.
+However, it has been neglected in the community
+of computer vision for years. There are very few recent
+works [37, 24, 38, 43, 55, 13, 69] trying to endow the model
+with the capability of causal reasoning. More detailed back-
+ground knowledge can be found in [41, 42, 60].
+3. Biased Training Models in Causal Graph
+As illustrated in Figure 4, we summarize the SGG frame-
+work in the form of Causal Graph (a.k.a., structural causal
+model) [42, 39, 41]. It is a directed acyclic graph G =
+{N, E}, indicating how a set of variables N interact with
+each other through the causal links E. It provides a sketch
+of the causal relations behind the data and how variables
+obtain their values, e.g., (I, X, Z) →Y . Before we con-
+duct counterfactual analysis that deliberately manipulates
+the values of nodes and prunes the causal graph, we first
+revisit the conventional biased SGG model training in the
+graphical view.
+The causal graph in Figure 4(b) is applicable to a vari-
+ety of SGG methods, since it is highly general, imposing
+no constraints on the detailed implementations. We case-
+3
+study three representative model formulations: the classic
+VTransE [74], the state-of-the-art MOTIFS [72] and VC-
+Tree [56], using the language of nodes and links.
+Node I (Input Image&Backbone). A Faster R-CNN [45]
+is pre-trained and frozen in this node, It outputs a set of
+bounding boxes B = {bi|i = 1...n} and the feature map
+M from image I.
+Link I →X (Object Feature Extractor). It firstly ex-
+tracts RoIAlign features [12] R = {ri} and tentative object
+labels L = {li} by the object classifier on Faster R-CNN.
+Then, like MOTIFS [72] or VCTree [56], we can use the
+following module to encode visual contexts for each object:
+Input : {(ri, bi, li)} =⇒Output : {xi},
+(1)
+where MOTIFS implements it as bidirectional LSTMs (Bi-
+LSTMs) and VCTree [56] adopts bidirectional TreeLSTMs
+(Bi-TreeLSTMs) [54], early works like VTransE [74] sim-
+ply use fully connected layers.
+Node X (Object Feature). The pairwise object feature X
+takes value from {(xi, xj)|i ̸= j; i, j = 1...n}. We slightly
+abuse the notation hereinafter, denoting the combination of
+representations from i and j as subscript e: xe = (xi, xj).
+Link X →Z (Object Classification). The fine-tuned la-
+bel of each object is decoded from the corresponding xi by:
+Input : {xi} =⇒Output : {zi},
+(2)
+where MOTIFS [72] and VCTree [56] utilizes LSTM and
+TreeLSTM as decoders to capture the co-occurrence among
+object labels, respectively. The input of each LSTM/ TreeL-
+STM cell is the concatenation of feature and the previous
+label [xi; zi−1]. VTransE [74] uses the conventional fully
+connected layer as the classifier.
+Node Z (Object Class). It contains a pair of one-hot vec-
+tors for object labels ze = (zi, zj).
+Link X →Y (Object Feature Input for SGG). For rela-
+tionship classification, pairwise feature X are merged into
+a joint representation by the module:
+Input : {xe} =⇒Output : {x′
+e},
+(3)
+where another Bi-LSTMs and Bi-TreeLSTMs layers are ap-
+plied in MOTIFS [72] and VCTree [56], respectively, before
+concatenating the pair of object features. VTransE [74] uses
+fully connected layers and element-wise subtraction for fea-
+ture merging.
+Link Z →Y (Object Class Input for SGG). The lan-
+guage prior is calculated in this link through a joint embed-
+ding layer z′
+e = Wz[zi ⊗zj], where ⊗generates the one-hot
+unique vector RN×N for the pair of N-way object labels.
+Link I →Y (Visual Context Input for SGG). This
+link extracts the contextual union region features v′
+e =
+Convs(RoIAlign(M, bi ∪bj)) where bi ∪bj indicates the
+union box of two RoIs.
+𝑢
+𝑧
+𝑥
+𝑌𝑥
+(a) The Original Case of 𝒀𝒙(𝒖)
+𝑢
+ҧ𝑧
+ҧ𝑥
+𝑌ҧ𝑥
+(b) The Intervention Case of 𝒀ഥ𝒙(𝒖)
+𝑢
+𝑧
+ҧ𝑥
+𝑌ҧ𝑥,𝑧
+𝑧
+𝑥
+(c) The Counterfactual Case of 𝒀ഥ𝒙,𝒛(𝒖)
+Figure 5. The original causal graph of SGG together with two in-
+terventional and counterfactual alternates.
+Node Y (Predicate Classification).
+The final predicate
+logits Y that takes inputs from the three branches is then
+generated by using a fusion function.
+In Section 5, we
+test two general fusion functions: 1) SUM: ye = Wxx′
+e +
+Wvv′
+e + z′
+e, 2) GATE: ye = Wrx′
+e · σ(Wxx′
+e + Wvv′
+e + z′
+e),
+where · is element-wise product, σ(·) is a sigmoid function.
+Training Loss. All models are trained by using the con-
+ventional cross-entropy losses of object labels and predicate
+labels. To avoid any single link spontaneously dominating
+the generation of logits ye, especially Z →Y , we further
+add auxiliary cross-entropy losses that individually predict
+ye from each branch.
+4. Unbiased Prediction by Causal Effects
+Once the above training has been done, the causal de-
+pendencies among the variables are learned, in terms of the
+model parameters. The conventional biased prediction can
+only see the output of the entire graph given an image I = u
+without any idea about how a specific pair of objects affect
+their predicate. However, causal inference [42] encourages
+us to think out of the black box. From the graphical point
+of view, we are no longer required to run the entire graph as
+a whole. We can directly manipulate the values of several
+nodes and see what would be going on. For example, we can
+cut off the link I →X and assign a dummy value to X, then
+investigate what the predicate would be. The above opera-
+tion is termed intervention in causal inference [41]. Next,
+we will make unbiased predictions by intervention and its
+induced counterfactuals.
+4.1. Notations
+Intervention. It can be denoted as do(·). It wipes out
+all the in-coming links of a variable and demands the vari-
+able to take a certain value, e.g. do(X = ¯x) in Figure 5(b),
+meaning X is no longer affected by its causal parents.
+Counterfactual. It means “counter to the facts” [48], and
+takes one step further that assigns the “clash of worlds”
+combination of values to variables. Take Figure 5(c) as an
+4
+example, if the intervention do(X = ¯x) is conducted on X,
+the variable Z still takes the original z as if x had existed.
+Causal Effect. Throughout this section, we will use the
+pairwise object feature X as our control variable where the
+intervention is conducted, aiming to assess its effects, due
+to the fact that there wouldn’t be any valid relationship if
+the pair of objects do not exist. The observed X is denoted
+as x while the intervened unseen value is ¯x, which is set
+to either the mean feature of the training set or zero vector.
+The object label z on Figure 5(c) is calculated from Eq. (2),
+taking x as input. We denote the output logits Y after the
+intervention X = ¯x as follows (Figure 5(b)):
+Y¯x(u) = Y (do(X = ¯x)|u),
+(4)
+where u is the input image in SGG. Following the above no-
+tation, the original and counterfactual Y , i.e., Figure 5(a,c),
+can be re-written as Yx(u) and Y¯x,z(u), respectively.
+4.2. Total Direct Effect
+As we discussed in Section 1, instead of the static likeli-
+hood that tends to be biased, the unbiased prediction lies in
+the difference between the observed outcome Yx(u) and its
+counterfactual alternate Y¯x,z(u). The later one is a context-
+specific bias that we want to remove from prediction. In-
+tuitively, the unbiased prediction that we seek is the visual
+stimuli from blank to the observed real objects with spe-
+cific attributes, states, and behaviors, but not merely from
+the surroundings and language priors. Those specific visual
+cues of objects are the key to the more fine-grained and in-
+formative unbiased predictions, because even if the overall
+prediction is biased towards the relationship like dog on
+surfboard, the “straight legs” would cause more effect
+on standing on rather than sitting on. In causal
+inference [60, 61], the above prediction process can be cal-
+culated as Total Direct Effect (TDE):
+TDE = Yx(u) −Y¯x,z(u),
+(5)
+where the first term is from the original graph and the sec-
+ond one is from the counterfactual, as illustrated in Figure 5.
+Note that there is another type of effect [60], Total Effect
+(TE), which is easy to be mixed up with TDE. Instead of
+deriving counterfactual bias Y¯x,z(u), TE lets all the descen-
+dant nodes of X change with intervention do(X = ¯x) as
+shown in Figure 5(b). TE is therefore formulated as:
+TE = Yx(u) −Y¯x(u).
+(6)
+The main difference lies in the fact that Y¯x(u) is not condi-
+tioned on the original object labels (those caused by x), so
+TE only removes the general bias in the whole dataset (sim-
+ilar to the b in y = k · x + b), rather than the specific bias
+caused by the mediator we care about. The subtle difference
+between TE and TDE is further defined as Natural Indirect
+Effect (NIE) [60] or Pure Indirect Effect (PIE) [61]. More
+experimental analyses among these three types of effect are
+given in Section 5.
+Overall SGG. At last, the proposed unbiased prediction
+y†
+e is obtained by replacing the conventional one-time pre-
+diction with TDE, which essentially “thinks” twice: one
+for observational Yxe(u) = ye, the other for imaginary
+Y¯x,ze(u) = ye(¯x, ze). The unbiased logits of Y is there-
+fore defined as follows:
+y†
+e = ye −ye(¯x, ze).
+(7)
+It is also worth mentioning that the proposed TDE doesn’t
+introduce any additional parameters and is widely applica-
+ble to a variety of models.
+5. Experiments
+5.1. Settings and Models
+Dataset.
+For SGG, we used Visual Genome (VG) [23]
+dataset to train and evaluate our models, which is composed
+of 108k images across 75k object categories and 37k pred-
+icate categories. However, as 92% of the predicates have
+no more than 10 instances, we followed the widely adopted
+VG split [65, 72, 56, 5] containing the most frequent 150
+object categories and 50 predicate categories. The original
+split only has training set (70%) and test set (30%). We
+followed [72] to sample a 5k validation set from training
+set for parameter tuning. For Sentence-to-Graph Retrieval
+(cf. Section 5.2), we selected the overlapped 41,859 im-
+ages between VG and MS-COCO Caption dataset [31] and
+divided them into train/test-1k/test-5k (35,859/1,000/5,000)
+sets. The later two only contain images from VG test set in
+case of exposing to grount-truth SGs. Each image has at
+least 5 captions serving as human queries, the same as how
+we use searching engines.
+Model Zoo. We evaluated three models: VTransE [74],
+MOTIFS [72], VTree [56], and two fusion functions: SUM
+and GATE. They were re-implemented using the same
+codebase as we proposed.
+All models shared the same
+hyper-parameters and the pre-trained detector backbone.
+5.2. Scene Graph Generation Diagnosis
+Our proposed SGG diagnosis has the following three
+evaluations:
+1. Relationship Retrieval (RR). It can be further divided
+into three sub-tasks: (1) Predicate Classification (PredCls):
+taking ground truth bounding boxes and labels as inputs,
+(2) Scene Graph Classification (SGCls): using ground truth
+bounding boxes without labels, (3) Scene Graph Detec-
+tion (SGDet): detecting SGs from scratch. The conven-
+tional metric of RR is Recall@K (R@K), which was aban-
+doned in this paper due to the reporting bias [36]. As illus-
+trated in Figure 3(b), previous methods like [72] with good
+performance on R@K unfairly cater to “head” predicates,
+5
+Predicate Classification
+Scene Graph Classification
+Scene Graph Detection
+Model
+Fusion
+Method
+mR@20
+mR@50
+mR100
+mR@20
+mR50
+mR100
+mR@20
+mR50
+mR100
+IMP+ [65, 6]
+-
+-
+-
+9.8
+10.5
+-
+5.8
+6.0
+-
+3.8
+4.8
+FREQ [72, 56]
+-
+-
+8.3
+13.0
+16.0
+5.1
+7.2
+8.5
+4.5
+6.1
+7.1
+MOTIFS [72, 56]
+-
+-
+10.8
+14.0
+15.3
+6.3
+7.7
+8.2
+4.2
+5.7
+6.6
+KERN [6]
+-
+-
+-
+17.7
+19.2
+-
+9.4
+10.0
+-
+6.4
+7.3
+VCTree [56]
+-
+-
+14.0
+17.9
+19.4
+8.2
+10.1
+10.8
+5.2
+6.9
+8.0
+MOTIFS†
+SUM
+Baseline
+11.5
+14.6
+15.8
+6.5
+8.0
+8.5
+4.1
+5.5
+6.8
+Focal
+10.9
+13.9
+15.0
+6.3
+7.7
+8.3
+3.9
+5.3
+6.6
+Reweight
+16.0
+20.0
+21.9
+8.4
+10.1
+10.9
+6.5
+8.4
+9.8
+Resample
+14.7
+18.5
+20.0
+9.1
+11.0
+11.8
+5.9
+8.2
+9.7
+X2Y
+13.0
+16.4
+17.6
+6.9
+8.6
+9.2
+5.1
+6.9
+8.1
+X2Y-Tr
+11.6
+14.9
+16.0
+6.5
+8.4
+9.1
+5.0
+6.9
+8.1
+TE
+18.2
+25.3
+29.0
+8.1
+12.0
+14.0
+5.7
+8.0
+9.6
+NIE
+0.6
+1.1
+1.4
+6.1
+9.0
+10.6
+3.8
+5.1
+6.0
+TDE
+18.5
+25.5
+29.1
+9.8
+13.1
+14.9
+5.8
+8.2
+9.8
+GATE
+Baseline
+12.2
+15.5
+16.8
+7.2
+9.0
+9.5
+5.2
+7.2
+8.5
+TDE
+18.5
+24.9
+28.3
+11.1
+13.9
+15.2
+6.6
+8.5
+9.9
+VTransE†
+SUM
+Baseline
+11.6
+14.7
+15.8
+6.7
+8.2
+8.7
+3.7
+5.0
+6.0
+TDE
+17.3
+24.6
+28.0
+9.3
+12.9
+14.8
+6.3
+8.6
+10.5
+GATE
+Baseline
+13.6
+17.1
+18.6
+6.6
+8.2
+8.7
+5.1
+6.8
+8.0
+TDE
+18.9
+25.3
+28.4
+9.8
+13.1
+14.7
+6.0
+8.5
+10.2
+VCTree†
+SUM
+Baseline
+11.7
+14.9
+16.1
+6.2
+7.5
+7.9
+4.2
+5.7
+6.9
+TDE
+18.4
+25.4
+28.7
+8.9
+12.2
+14.0
+6.9
+9.3
+11.1
+GATE
+Baseline
+12.4
+15.4
+16.6
+6.3
+7.5
+8.0
+4.9
+6.6
+7.7
+TDE
+17.2
+23.3
+26.6
+8.9
+11.8
+13.4
+6.3
+8.6
+10.3
+Table 1. The SGG performances of Relationship Retrieval on mean Recall@K [56, 6]. The SGG models re-implemented under our
+codebase are denoted by the superscript †.
+e.g., on, while neglect the “tail” ones, e.g., predicates like
+parked on, laying on have embarrassingly 0.0 Re-
+call@100. To speak for the valuable “tail” rather than the
+trivial “head”, we adopted a recent replacement, mean Re-
+call@K (mR@K), proposed by Tang et al. [56] and Chen et
+al. [6]. mR@K retrieves each predicate separately and then
+averages R@K for all predicates.
+2. Zero-Shot Relationship Retrieval (ZSRR). It was in-
+troduced by Lu et al. [32] as Zero-Shot Recall@K and was
+firstly evaluated on VG dataset in this paper, which only re-
+ports the R@K of those subject-predicate-object triplets that
+have never been observed in the training set. ZSRR also has
+three sub-tasks as RR.
+3. Sentence-to-Graph Retrieval (S2GR). It uses the im-
+age caption sentence as the query to retrieve images repre-
+sented as SGs. Both RR and ZSRR are triplet-level evalu-
+ations, ignoring the graph-level coherence. Therefore, we
+design S2GR, using human descriptions to retrieve detected
+SGs. We didn’t use proxy vision-language tasks like cap-
+tioning [68, 70] and VQA [57, 15] as the diagnosis, be-
+cause their implementations have too many components un-
+related to SGG and their datasets are challenged by their
+own biases [1, 14, 34]. In S2GR, the detected SGs (using
+SGDet) are regarded as the only representations of images,
+cut off all the dependencies on black-box visual features,
+so any bias on SGG would sensitively violate the coherence
+of SGs, resulting in worse retrieval results. For example,
+if walking on was detected as the biased alternative on,
+images would be mixed up with those have sitting on
+or laying on. Note that S2GR is fundamentally different
+Zero-Shot Relationship Retrieval
+PredCls
+SGCls
+SGDet
+Model
+Fusion
+Method
+R@50/100
+R@50/100
+R@50/100
+MOTIFS†
+SUM
+Baseline
+10.9 / 14.5
+2.2 / 3.0
+0.1 / 0.2
+Focal
+10.9 / 14.4
+2.2 / 3.1
+0.1 / 0.3
+Reweight
+0.7 / 0.9
+0.1 /0.1
+0.0 / 0.0
+Resample
+11.1 / 14.3
+2.3 / 3.1
+0.1 / 0.3
+X2Y
+11.8 / 17.6
+2.3 / 3.7
+1.6 / 2.7
+X2Y-Tr
+13.7 / 17.6
+3.1 / 4.2
+1.8 / 2.8
+TE
+14.2 / 18.1
+1.4 / 2.0
+1.4 / 1.8
+NIE
+2.4 / 3.2
+0.2 / 0.4
+0.3 / 0.6
+TDE
+14.4 / 18.2
+3.4 / 4.5
+2.3 / 2.9
+GATE
+Baseline
+7.4 / 10.6
+0.9 / 1.3
+0.2 / 0.4
+TDE
+7.7 / 11.0
+1.9 / 2.6
+1.9 / 2.5
+VTransE†
+SUM
+Baseline
+11.3 / 14.7
+2.5 / 3.3
+0.8 / 1.5
+TDE
+13.3 / 17.6
+2.9 / 3.8
+2.0 / 2.7
+GATE
+Baseline
+4.2 / 5.9
+1.9 / 2.6
+1.9 / 2.6
+TDE
+5.3 / 7.9
+2.1 / 3.0
+1.9 / 2.7
+VCTree†
+SUM
+Baseline
+10.8 / 14.3
+1.9 / 2.6
+0.2 / 0.7
+TDE
+14.3 / 17.6
+3.2 / 4.0
+2.6 / 3.2
+GATE
+Baseline
+4.4 / 6.8
+2.5 / 3.3
+1.8 / 2.7
+TDE
+5.9 / 8.1
+3.0 / 3.7
+2.2 / 2.8
+Table 2. The results of Zero-Shot Relationship Retrieval.
+from the previous image retrieval with scene graph [18, 51],
+because the latter still consider the images as visual fea-
+tures but not SGs. Recall@20/100 (R@20/100) and median
+ranking indexes of retrieved results (Med) on the gallery
+size of 1,000 and 5,000 were evaluated. Note that S2GR
+should have diverse implementations as long as its spirit:
+graph-level symbolic retrieval, is fulfilled. We provide our
+implementation in the next sub-section.
+5.3. Implementation Details
+Object Detector. Following the previous works [65, 72,
+56], we pre-trained a Faster R-CNN [45] and froze it to be
+the underlying detector of our SGG models. We equipped
+the Faster R-CNN with a ResNeXt-101-FPN [29, 64] back-
+6
+Sentence-to-Graph Retrieval
+Gallery Size
+1000
+5000
+Model
+Fusion
+Method
+R@20
+R@100
+Med
+R@20
+R@100
+Med
+MOTIFS†
+SUM
+Baseline
+11.6
+39.9
+155
+3.1
+12.1
+708
+Focal
+10.9
+39.0
+163
+2.9
+11.1
+737
+Reweight
+9.7
+36.8
+159
+3.0
+11.4
+725
+Resample
+13.1
+43.6
+124
+2.5
+13.4
+593
+X2Y
+14.3
+44.8
+125
+3.5
+14.6
+556
+X2Y-Tr
+14.5
+45.6
+114
+3.9
+16.8
+525
+TE
+15.9
+49.9
+100
+4.4
+16.9
+469
+NIE
+6.7
+29.2
+202
+1.6
+8.6
+1050
+TDE
+17.0
+53.6
+91
+5.2
+18.9
+425
+GATE
+Baseline
+13.7
+45.6
+143
+4.4
+16.2
+618
+TDE
+20.8
+59.2
+72
+5.2
+21.3
+325
+VTransE†
+SUM
+Baseline
+12.3
+42.3
+129
+3.6
+15.0
+596
+TDE
+14.7
+48.4
+106
+3.6
+16.3
+483
+GATE
+Baseline
+12.9
+41.8
+136
+3.8
+14.3
+634
+TDE
+18.5
+50.4
+110
+4.5
+19.1
+486
+VCTree†
+SUM
+Baseline
+9.9
+37.4
+150
+3.1
+11.5
+745
+TDE
+19.0
+57.0
+82
+5.0
+20.0
+385
+GATE
+Baseline
+13.4
+44.1
+121
+3.7
+13.6
+583
+TDE
+19.1
+55.5
+87
+5.1
+20.3
+395
+Table 3. The results of Sentence-to-Graph Retrieval.
+bone and scaled the longer side of input images to be 1k
+pixels. The detector was trained on the training set of VG
+using SGD as optimizer. We set the batch size to 8 and the
+initial learning rate to 8 × 10−3, which was decayed by the
+factor of 10 on the 30kth and 40kth iterations. The final de-
+tector achieved 28.14 mAP on VG test set (using 0.5 IoU
+threshold). 4 2080ti GPUs were used for the pre-training.
+Scene Graph Generation. On top of the frozen detector,
+we trained SGG models using SGD as optimizer. Batch size
+and initial learning rate were set to be 12 and 12 × 10−2
+for PredCls and SGCls; 8 and 8 × 10−2 for SGDet. The
+learning rate would be decayed by 10 two times after the
+validation performance plateaus. For SGDet, 80 RoIs were
+sampled for each image and Per-Class NMS [49, 72] with
+0.5 IoU was applied in object prediction. We sampled up to
+1,024 subject-object pairs containing 75% background pairs
+during training. Different from previous works [72, 56, 5],
+we didn’t assume that non-overlapping subject-object pairs
+are invalid in SGDet, making SGG more general.
+Sentence-to-Graph Retrieval.
+We handled S2GR as a
+graph-to-graph matching problem. The query captions of
+each image were stuck together and parsed to a text-SG us-
+ing [51]. We set all the subject/object and predicates that ap-
+pear less than 5 times to “UNKNOWN” tokens, obtaining a
+dictionary of size 4,459 subject/object entities and 645 pred-
+icates, respectively. The original image SG generated from
+SGDet contains a fixed number of RoIs and forces all valid
+subject-object pairs to predict foreground relationships, to
+serve the K number in mR@K, which is inappropriate for
+S2GR. Therefore, we used a threshold of 0.1 to filter RoIs
+by the label probabilities and removed all background pred-
+icates from the graph. Recall that the vocabulary size of the
+entity and predicate for image SGs are 150 and 50 as we
+mentioned before. To match the two heterogeneous graphs:
+image SG and text SG, in a unified space, we used BAN [20]
+to encode the two graph types into fixed-dimension vectors
+to facilitate the retrieval. More details can be found in sup-
+plementary material.
+67.1
+65.2
+36.5
+35.8
+30.3
+27.2
+67.9
+66
+39.9
+39.1
+36.9
+32.1
+51.4
+46.2
+29.9
+27.7
+20.3
+16.9
+PredCls
+Recall@100
+PredCls
+Recall@50
+SGCls
+Recall@100
+SGCls
+Recall@50
+SGDet
+Recall@100
+SGDet
+Recall@50
+MOTIFS
+MOTIFS
+MOTIFS  -TDE
+on
+has
+near OTHERS
+on
+has
+near
+sitting on
+standing on
+walking on
+parked on
+……
+using
+carrying
+……
+behind
+above
+under
+in front of
+……
+OTHERS
+in →covered in
+……
+†
+†
+Figure 6. The pie chart summarizes all the relationships, that are
+correctly detected by the baseline model but considered “incor-
+rect” by TDE. The right side of the pie chart shows the corre-
+sponding labels given by the TDE. Combining with our qualitative
+examples, we believe that the drop of Recall@K is caused by two
+reasons: 1) the annotators’ preference towards simple annotations
+caused by bounded rationality [53], 2) TDE tends to predict more
+action-like relationships rather than vague prepositions.
+5.4. Ablation Studies
+Except for the models and fusion functions that we’ve
+discussed before, we also investigated three conventional
+debiasing methods, two intuitive causal graph surgeries, and
+other two types of causal effects: 1) Focal: focal loss [30]
+automatically penalizes well-learned samples and focuses
+on the hard ones. We followed the hyper-parameters (γ =
+2.0, α = 0.25) optimized in [30]. 2) Reweight: weighted
+cross-entropy is widely used in the industry for biased data.
+The inversed sample fractions were assigned to each predi-
+cate category as weights. 3) Resample [3]: rare categories
+were up-sampled by the inversed sample fraction during
+training. 4) X2Y: since we argued that the unbiased effect
+was under the effect of object features X, it directly gen-
+erated SG by the outputs of X →Y branch after biased
+training. 5) X2Y-Tr: it even cut off other branches, using
+X →Y for both training and testing. 6) TE: as we in-
+troduced in Section 4, TE is the debiasing method that not
+conditioned on the contexts. 7) NIE: it is the marginal dif-
+ference between TDE and TE, i.e., NIE = TE-TDE, which
+can be considered as the pure effect caused by introducing
+the bias Z →Y . NOTE: although zero vector can also be
+used as the wiped-out input ¯x, we chose the mean feature of
+training set for minor improvements.
+5.5. Quantitative Studies
+RR & ZSRR. The results are listed in Table 1& 2. Despite
+the fact that conventional debiasing methods: Reweight
+and Resample, directly hack the mR@K metric, they only
+gained limited advantages in RR but not in ZSRR. In con-
+trast to the high mR@K of Reweight in RR SGDet, it got
+embarrassingly 0.0/0.0 in ZSRR SGDet, indicating that
+such debiased training methods ruin the useful context prior.
+Focal loss [30] barely worked for both RR and ZSRR.
+7
+umbrella
+umbrella
+umbrella
+umbrella
+tree
+umbrella
+umbrella
+sidewalk
+car
+tree
+street 2
+near
+street 1
+sign (light)
+on
+has
+on
+sidewalk
+car
+tree
+street 2
+along
+street 1
+sign (light)
+parked on
+has
+on
+on
+behind
+woman 1
+on
+woman 2
+woman 3
+leg
+beach
+surfboard
+wave
+on
+has
+behind
+woman 1
+under
+woman 2
+woman 3
+leg
+beach
+surfboard
+wave
+walking on
+has
+behind
+Query:
+People are walking down a 
+city street with umbrellas.
+-- SG detected by Baseline
+-- SG detected by TDE
+umbrella
+bag
+building
+person
+umbrella
+person
+person
+man
+street
+umbrella
+bag
+building
+person
+umbrella
+person
+person
+man
+street
+umbrella
+umbrella
+umbrella
+woman
+man
+man
+sidewalk
+jean
+holding
+on
+on
+on
+umbrella
+umbrella
+umbrella
+woman
+man
+man
+sidewalk
+jean
+carrying
+street
+person
+man
+person
+tree
+on
+on
+on
+street
+person
+man
+person
+standing on
+… …
+… …
+people
+street
+umbrella
+down
+with
+RR Diagnosis
+ZSRR Diagnosis
+S2GR Diagnosis
+coat
+door
+door
+curtain
+table
+cat
+bowl
+on
+on
+near
+coat
+door
+door
+table
+bowl
+cat
+hanging from
+hanging from
+curtain
+Zero Shot
+door
+coat
+hanging 
+from
+kite
+shirt (jacket)
+short
+girl
+holding
+wearing
+under
+kite
+shirt (jacket)
+short
+girl
+looking at
+wearing
+under
+Zero Shot
+kite
+girl
+looking
+at
+Figure 7.
+Results of scene graphs generated from MOTIF†-SUM baseline (yellow) and corresponding TDE (green). Top: relationship
+retrieval results. Mid: zero shot relationship retrieval results. Red boxes indicate the zero shot triplets. Bottom: results of S2GR. Red boxes
+mean the correctly retrieved SGs. Part of the trivial detected objects are removed from the graphs, due to space limitation.
+Causal graph surgeries, X2Y and X2Y-Tr, both improved
+RR and ZSRR from the baseline, yet their increases were
+limited. TE had a very similar performance to TDE, but as
+we discussed, it removed the general bias rather than the
+subject-object specific bias. NIE is the marginal improve-
+ments from TE to TDE, which was even worse than base-
+line. Although R@K is not a qualified metric for RR as we
+discussed, we still reported the R@50/100 performance of
+MOTIFS†-SUM in Figure 6. We can observe a performance
+drop from baseline to TDE, but a further analysis shows
+that those considered as correct in baseline and “incor-
+rect” in TDE were mainly the “head” predicates, and they
+are classified by TDE into more fine-grained “tail” classes.
+Among all three models and two fusion functions, even the
+worst TDE performance outperforms previous state-of-the-
+art methods [56, 6] by a large margin on RR mR@K.
+S2GR. In S2GR, Focal and Reweight are even worse than
+the baseline. Among all the three conventional debiasing
+methods, Resample was the most stable one based on our
+experiments. X2Y and X2Y-Tr have minor advantages over
+baseline. TE takes the 2nd place and was only a little bit
+worse than TDE. NIE is the worst as we expected because
+it is only based on the pure context bias. It is worth high-
+lighting that all the three models and two fusion functions
+had significant improvements after we applied TDE.
+5.6. Qualitative Studies
+We visualized several SGCls examples that generated
+from MOTIFS†-SUM baseline and TDE in the top and mid
+rows of Figure 7, scene graphs generated by TDE are much
+more discriminative compared to the baseline model which
+prefers trivial predicates like on.
+The right half of the
+mid row shows that the baseline model would even gen-
+erate holding due to the long-tail bias when the girl is
+not touching the kite, implying that the biased predictions
+are easy to be “blind”, while TDE successfully predicted
+looking at.
+The bottom of Figure 7 is an example
+of S2GR, where the SGs detected by baseline model lost
+the detailed actions of people, considering both person
+walking on street and person standing on
+street as person on street, which caused worse
+retrieval results. All the examples show a clear trend that
+TDE is much more sensitive to those semantically informa-
+tive relationships instead of the trivially biased ones.
+6. Conclusions
+We presented a general framework for unbiased SGG
+from biased training, and this is the first work addressing
+the serious bias issue in SGG. With the power of coun-
+terfactual causality, we can remove the harmful bias from
+the good context bias, which cannot be easily identified
+by traditional debiasing methods such as data augmenta-
+tion [9, 11] and unbiased learning [30]. We achieved the
+unbiasedness by calculating the Total Direct Effect (TDE)
+with the help of a causal graph, which is a roadmap for train-
+ing any SGG model. By using the proposed Scene Graph
+Diagnosis toolkit, our unbiased SGG results are consider-
+ably better than their biased counterparts.
+Acknowledgments
+We’d like to thank all reviewers for
+their constructive comments. This work was partially sup-
+ported by the NTU-Alibaba JRI.
+8
+References
+[1] A. Agrawal, D. Batra, D. Parikh, and A. Kembhavi. Don’t
+just assume; look and answer: Overcoming priors for visual
+question answering. In CVPR, 2018.
+[2] P. W. Battaglia, J. B. Hamrick, V. Bapst, A. Sanchez-
+Gonzalez, V. Zambaldi, M. Malinowski, A. Tacchetti, D. Ra-
+poso, A. Santoro, R. Faulkner, et al. Relational inductive
+biases, deep learning, and graph networks. arXiv preprint
+arXiv:1806.01261, 2018.
+[3] E. Burnaev, P. Erofeev, and A. Papanov. Influence of resam-
+pling on accuracy of imbalanced classification. In ICMV,
+2015.
+[4] R. Cadene, C. Dancette, H. Ben-younes, M. Cord, and
+D. Parikh. Rubi: Reducing unimodal biases in visual ques-
+tion answering. arXiv preprint arXiv:1906.10169, 2019.
+[5] L. Chen, H. Zhang, J. Xiao, X. He, S. Pu, and S.-F. Chang.
+Counterfactual critic multi-agent training for scene graph
+generation. In ICCV, 2019.
+[6] T. Chen, W. Yu, R. Chen, and L. Lin. Knowledge-embedded
+routing network for scene graph generation. In CVPR, 2019.
+[7] B. Dai, Y. Zhang, and D. Lin. Detecting visual relationships
+with deep relational networks. In CVPR, 2017.
+[8] G. Dunn, R. Emsley, H. Liu, S. Landau, J. Green, I. White,
+and A. Pickles. Evaluation and validation of social and psy-
+chological markers in randomised trials of complex inter-
+ventions in mental health: a methodological research pro-
+gramme. 2015.
+[9] R. Geirhos, P. Rubisch, C. Michaelis, M. Bethge, F. A. Wich-
+mann, and W. Brendel. Imagenet-trained CNNs are biased
+towards texture; increasing shape bias improves accuracy
+and robustness.
+In International Conference on Learning
+Representations, 2019.
+[10] J. Gu, H. Zhao, Z. Lin, S. Li, J. Cai, and M. Ling. Scene
+graph generation with external knowledge and image recon-
+struction. In CVPR, 2019.
+[11] H. He and E. A. Garcia. Learning from imbalanced data.
+IEEE Transactions on knowledge and data engineering,
+2009.
+[12] K. He, G. Gkioxari, P. Doll´ar, and R. Girshick. Mask r-cnn.
+In ICCV, 2017.
+[13] Y. He, Y. Ding, P. Liu, L. Zhu, H. Zhang, and Y. Yang. Learn-
+ing filter pruning criteria for deep convolutional neural net-
+works acceleration. In CVPR, 2020.
+[14] L. A. Hendricks, K. Burns, K. Saenko, T. Darrell, and
+A. Rohrbach. Women also snowboard: Overcoming bias in
+captioning models. In ECCV. Springer, 2018.
+[15] D. A. Hudson and C. D. Manning. Gqa: A new dataset for
+real-world visual reasoning and compositional question an-
+swering. In CVPR, 2019.
+[16] D. A. Hudson and C. D. Manning. Learning by abstraction:
+The neural state machine. NeurIPS, 2019.
+[17] J. Johnson, A. Gupta, and L. Fei-Fei. Image generation from
+scene graphs. In CVPR, 2018.
+[18] J. Johnson, R. Krishna, M. Stark, L.-J. Li, D. Shamma,
+M. Bernstein, and L. Fei-Fei. Image retrieval using scene
+graphs. In CVPR, 2015.
+[19] L. Keele. The statistics of causal inference: A view from
+political methodology. Political Analysis, 2015.
+[20] J.-H. Kim, J. Jun, and B.-T. Zhang. Bilinear attention net-
+works. In Advances in Neural Information Processing Sys-
+tems, 2018.
+[21] B. G. King. A political mediation model of corporate re-
+sponse to social movement activism. Administrative Science
+Quarterly, 2008.
+[22] R. Krishna, I. Chami, M. Bernstein, and L. Fei-Fei. Referring
+relationships. In CVPR, 2018.
+[23] R. Krishna, Y. Zhu, O. Groth, J. Johnson, K. Hata, J. Kravitz,
+S. Chen, Y. Kalantidis, L.-J. Li, D. A. Shamma, et al. Vi-
+sual genome: Connecting language and vision using crowd-
+sourced dense image annotations. International Journal of
+Computer Vision, 2017.
+[24] M. J. Kusner, J. Loftus, C. Russell, and R. Silva. Counterfac-
+tual fairness. In Advances in Neural Information Processing
+Systems, 2017.
+[25] Y. Li, Y. Li, and N. Vasconcelos. Resound: Towards action
+recognition without representation bias. In ECCV, 2018.
+[26] Y. Li, W. Ouyang, B. Zhou, K. Wang, and X. Wang. Scene
+graph generation from objects, phrases and caption regions.
+In ICCV, 2017.
+[27] Y. Li and N. Vasconcelos. Repair: Removing representation
+bias by dataset resampling. In CVPR, 2019.
+[28] Y. Liang, Y. Bai, W. Zhang, X. Qian, L. Zhu, and T. Mei.
+Vrr-vg: Refocusing visually-relevant relationships. In ICCV,
+pages 10403–10412, 2019.
+[29] T.-Y. Lin, P. Doll´ar, R. Girshick, K. He, B. Hariharan, and
+S. Belongie. Feature pyramid networks for object detection.
+In CVPR, 2017.
+[30] T.-Y. Lin, P. Goyal, R. Girshick, K. He, and P. Doll´ar. Focal
+loss for dense object detection. In ICCV, 2017.
+[31] T.-Y. Lin, M. Maire, S. Belongie, J. Hays, P. Perona, D. Ra-
+manan, P. Doll´ar, and C. L. Zitnick. Microsoft coco: Com-
+mon objects in context. In ECCV. Springer, 2014.
+[32] C. Lu, R. Krishna, M. Bernstein, and L. Fei-Fei. Visual rela-
+tionship detection with language priors. In ECCV, 2016.
+[33] D. P. MacKinnon, A. J. Fairchild, and M. S. Fritz. Mediation
+analysis. Annu. Rev. Psychol., 2007.
+[34] V. Manjunatha, N. Saini, and L. S. Davis. Explicit bias dis-
+covery in visual question answering models. In CVPR, 2019.
+[35] F. Massa and R. Girshick. maskrcnn-benchmark: Fast, mod-
+ular reference implementation of Instance Segmentation and
+Object Detection algorithms in PyTorch, 2018.
+[36] I. Misra, C. Lawrence Zitnick, M. Mitchell, and R. Girshick.
+Seeing through the human reporting bias: Visual classifiers
+from noisy human-centric labels. In CVPR, 2016.
+[37] S. Nair, Y. Zhu, S. Savarese, and L. Fei-Fei. Causal induc-
+tion from visual observations for goal directed tasks. arXiv
+preprint arXiv:1910.01751, 2019.
+[38] Y. Niu, K. Tang, H. Zhang, Z. Lu, X. Hua, and J.-R. Wen.
+Counterfactual vqa: A cause-effect look at language bias.
+arXiv, 2020.
+[39] J. Pearl.
+Causality:
+models, reasoning and inference.
+Springer, 2000.
+9
+[40] J. Pearl.
+Direct and indirect effects.
+In Proceedings of
+the 17th conference on uncertainty in artificial intelligence.
+Morgan Kaufmann Publishers Inc., 2001.
+[41] J. Pearl, M. Glymour, and N. P. Jewell. Causal inference in
+statistics: A primer. John Wiley & Sons, 2016.
+[42] J. Pearl and D. Mackenzie. THE BOOK OF WHY: THE NEW
+SCIENCE OF CAUSE AND EFFECT. Basic Books, 2018.
+[43] J. Qi, Y. Niu, J. Huang, and H. Zhang.
+Two causal
+principles for improving visual dialog.
+arXiv preprint
+arXiv:1911.10496, 2019.
+[44] M. Qi, W. Li, Z. Yang, Y. Wang, and J. Luo. Attentive re-
+lational networks for mapping images to scene graphs. In
+CVPR, 2019.
+[45] S. Ren, K. He, R. Girshick, and J. Sun. Faster r-cnn: Towards
+real-time object detection with region proposal networks. In
+Advances in neural information processing systems, 2015.
+[46] L. Richiardi, R. Bellocco, and D. Zugna. Mediation analysis
+in epidemiology: methods, interpretation and bias. Interna-
+tional journal of epidemiology, 2013.
+[47] J. M. Robins and S. Greenland. Identifiability and exchange-
+ability for direct and indirect effects. Epidemiology, 1992.
+[48] N. J. Roese. Counterfactual thinking. Psychological bulletin,
+1997.
+[49] A. Rosenfeld and M. Thurston. Edge and curve detection
+for visual scene analysis. IEEE Transactions on computers,
+1971.
+[50] F. Schroff, D. Kalenichenko, and J. Philbin. Facenet: A uni-
+fied embedding for face recognition and clustering. In CVPR,
+2015.
+[51] S. Schuster, R. Krishna, A. Chang, L. Fei-Fei, and C. D.
+Manning.
+Generating semantically precise scene graphs
+from textual descriptions for improved image retrieval. In
+Proceedings of the fourth workshop on vision and language,
+2015.
+[52] J. Shi, H. Zhang, and J. Li. Explainable and explicit visual
+reasoning over scene graphs. In CVPR, 2019.
+[53] H. A. Simon. Bounded rationality. In Utility and probability.
+Springer, 1990.
+[54] K. S. Tai, R. Socher, and C. D. Manning. Improved semantic
+representations from tree-structured long short-term memory
+networks. In ACL, 2015.
+[55] W. Tan, H. Jianqiang, Z. Hanwang, and S. Qianru. Visual
+commonsense r-cnn. In Conference on Computer Vision and
+Pattern Recognition, 2020.
+[56] K. Tang, H. Zhang, B. Wu, W. Luo, and W. Liu. Learning
+to compose dynamic tree structures for visual contexts. In
+CVPR, 2019.
+[57] D. Teney, L. Liu, and A. van den Hengel. Graph-structured
+representations for visual question answering.
+In CVPR,
+2017.
+[58] A. Torralba, A. A. Efros, et al. Unbiased look at dataset bias.
+In CVPR, 2011.
+[59] N. Van Hoeck, P. D. Watson, and A. K. Barbey. Cognitive
+neuroscience of human counterfactual reasoning. Frontiers
+in human neuroscience, 2015.
+[60] T. VanderWeele.
+Explanation in causal inference: meth-
+ods for mediation and interaction. Oxford University Press,
+2015.
+[61] T. J. VanderWeele. A three-way decomposition of a total
+effect into direct, indirect, and interactive effects. Epidemi-
+ology (Cambridge, Mass.), 2013.
+[62] W. Wang, R. Wang, S. Shan, and X. Chen. Exploring context
+and visual pattern of relationship for scene graph generation.
+In CVPR, 2019.
+[63] S. Woo, D. Kim, D. Cho, and I. S. Kweon. Linknet: Re-
+lational embedding for scene graph. In Advances in Neural
+Information Processing Systems, 2018.
+[64] S. Xie, R. Girshick, P. Doll´ar, Z. Tu, and K. He. Aggregated
+residual transformations for deep neural networks. In CVPR,
+2017.
+[65] D. Xu, Y. Zhu, C. B. Choy, and L. Fei-Fei. Scene graph
+generation by iterative message passing. In CVPR, 2017.
+[66] S. Yan, Y. Xiong, and D. Lin. Spatial temporal graph convo-
+lutional networks for skeleton-based action recognition. In
+AAAI, 2018.
+[67] J. Yang, J. Lu, S. Lee, D. Batra, and D. Parikh. Graph r-cnn
+for scene graph generation. In ECCV, 2018.
+[68] X. Yang, K. Tang, H. Zhang, and J. Cai.
+Auto-encoding
+scene graphs for image captioning. In CVPR, 2019.
+[69] X. Yang, H. Zhang, and J. Cai. Deconfounded image cap-
+tioning: A causal retrospect, 2020.
+[70] T. Yao, Y. Pan, Y. Li, and T. Mei. Exploring visual relation-
+ship for image captioning. In ECCV, 2018.
+[71] G. Yin, L. Sheng, B. Liu, N. Yu, X. Wang, J. Shao, and
+C. Change Loy. Zoom-net: Mining deep feature interactions
+for visual relationship recognition. In ECCV, 2018.
+[72] R. Zellers, M. Yatskar, S. Thomson, and Y. Choi. Neural
+motifs: Scene graph parsing with global context. In CVPR,
+2018.
+[73] R. Zemel, Y. Wu, K. Swersky, T. Pitassi, and C. Dwork.
+Learning fair representations. In ICML, 2013.
+[74] H. Zhang, Z. Kyaw, S.-F. Chang, and T.-S. Chua. Visual
+translation embedding network for visual relation detection.
+In CVPR, 2017.
+[75] J. Zhang, K. J. Shih, A. Elgammal, A. Tao, and B. Catan-
+zaro. Graphical contrastive losses for scene graph parsing.
+In CVPR, 2019.
+10
+Abstract
+This supplementary document is organized as follows: 1)
+section A: a comprehensive review of causal effect analysis
+in causal inference; 2) section B: more details of the simpli-
+fied network structures in the original paper; 3) section C:
+more quantitative studies; 4) section D: more qualitative
+studies.
+A. Review of Causal Effect Analysis
+In this section, a comprehensive review of causal effect
+analysis is given in the form of the causal graph we pro-
+posed in Section 3, and we still follow the notations from
+the original paper. More detailed background knowledge
+about causal inference can be found in [41, 42] while the
+extension of effect analysis (a.k.a. mediation analysis) is
+given in [47, 40, 61, 60].
+A.1. Mediator
+Since the exhaustive introduction of causal inference
+would beyond the scope of this paper, we simplified or
+skipped the definitions of several concepts in the origi-
+nal paper without affecting the understanding. One of the
+skipped concepts is the mediator. In a causal graph, when
+we care about the effect of a variable X to the output vari-
+able Y , the descendant node of X that is located in the
+path between them is the mediator. For example, in the
+study of carcinogenesis by smoke (Cigarette →Nicotine →
+Cancer), nicotine is the mediator. In our case, object labels
+Z is the mediator of X to Y , which can be considered as
+the side effect of X that also affects Y .
+A.2. Total, Direct and Indirect Effects
+As we discussed in Section 4.2, without further counter-
+factual intervention on the mediator Z, the overall effect of
+X towards Y is regarded as the Total Effect (TE) of X on
+Y , which can be calculated as:
+TE = Yx(u) −Y¯x(u).
+(8)
+As illustrated in Figure 8, other than the path I →X that
+is cut off by the intervention X = ¯x, all the other variables
+will take their values through the links of causal graph. Es-
+pecially, the mediator Z will get value ¯z, which is calculated
+from Eq. (2) given ¯x as input.
+However, by only using the TE, we are still not able
+to separate the mediator-specific “causal effect” from “side
+effect”, which limits the value of causal effect analysis.
+Thanks to the development of causal inference, here comes
+the decomposition of TE [40, 61]. Generally, the TE of X
+is composed of the Direct Effect (DE) caused by the causal
+𝑢
+𝑧
+𝑥
+𝑌𝑥
+𝑢
+ҧ𝑧
+ҧ𝑥
+𝑌ҧ𝑥
+Total Effect
+Figure 8. The illustration of Total Effect on causal graph.
+path X →Y and Indirect Effect (IE) caused by the side-
+effect path X →Z →Y . Depending on whose effect we
+want to obtain, two kinds of decomposition can be applied.
+Decomposition 1: The first kind of decomposition is what
+we used in the Section 4.2, which separates the TE into the
+Total Direct Effect (TDE) and the Natural/Pure Indirect Ef-
+fect (NIE/PIE). The former one has already been defined in
+the original paper as:
+TDE = Yx(u) −Y¯x,z(u),
+(9)
+which can be regarded as the effect of X in the real situ-
+ation, i.e., Z always takes the value z as if it had seen the
+real x. Meanwhile, the NIE or PIE is the effect caused by
+the mediator Z under a pure/natural situation, i.e., X will
+not take the value x under the specific case and it’s only
+assigned to the general unactivated value ¯x. Therefore, the
+NIE of Z is denoted as:
+NIE = Y¯x,z(u) −Y¯x(u)
+(10)
+= TE −TDE,
+(11)
+where we can easily identify that NIE is the effect of Z
+when it changes from ¯z to z in a pure environment, i.e.,
+X = ¯x. The illustrations of TDE and NIE are given in
+Figure 9.
+Decomposition 2: The second type of decomposition is op-
+posite to the first one. It’s mainly adopted when the indirect
+effect of the mediator is what we are looking for. For exam-
+ple, in the study of carcinogenesis by smoke (Cigarette →
+Nicotine →Cancer), sometimes the side effect of Nico-
+tine is what researchers really care about. In this case, TE
+can be decomposed into Total Indirect Effect(TIE) and Nat-
+ural/Pure Direct Effect (NDE/PDE). The definition of the
+former one is very similar to the NIE except for the en-
+vironment being the real case X = x, which is therefore
+formulated as:
+TIE = Yx(u) −Yx,¯z(u).
+(12)
+At the same time, since direct effect is not the target, their
+pure/natural effect should be removed from the TE. The cal-
+11
+𝑢
+𝑧
+𝑥
+𝑌𝑥
+𝑢
+𝑧
+ҧ𝑥
+(a) Total Direct Effect
+𝑢
+ҧ𝑧
+ҧ𝑥
+𝑌ҧ𝑥
+𝑢
+𝑧
+ҧ𝑥
+𝑌ҧ𝑥,𝑧
+(b) Natural/Pure Indirect Effect
+𝑌ҧ𝑥,𝑧
+Figure 9. The illustration of Total Direct Effect and Pure/Natural
+Indirect Effect on causal graph.
+culation of NDE/PDE is following:
+NDE = Yx,¯z(u) −Y¯x(u)
+(13)
+= TE −TIE,
+(14)
+where NDE is the effect of X changing from ¯x to x under
+the pure environment Z = ¯z. In general, we should put the
+effect we care under the real environment, i.e. TDE or TIE,
+so we can get the results specific to each cases.
+The above two types of decomposition are both com-
+monly used in medical, political or psychological re-
+search [46, 19, 8, 33, 21], which depends on which effect
+we want to obtain, main effect or side effect. Note that, if
+the system is a pure linear system, both two types of decom-
+position would be exactly the same.
+B. Network Details
+B.1. Scene Graph Generation
+In the original paper, we simplified the feature extraction
+module in Link I →X and the visual context module in
+Link I →Y . Their details will be given in this subsection.
+Feature Extraction Module. Since we adopted ResNeXt-
+101-FPN [29, 64] as the backbone, the extracted M con-
+tains feature maps from 4 scales: (1/4, 1/8, 1/16, 1/32) →
+(M0, M1, M2, M3). Each bounding box will be assigned
+to the corresponding Mk, (k = 0, 1, 2, 3) based on their
+areas [35]. Given a bounding box bi with area ai, the corre-
+sponding index k of feature map is calculated as follows:
+k = max(2, min(5,
+
+4 + log2(ai/224 + 1 × 10−6)
+
+))−2.
+(15)
+Then ROIAlign [12] will be applied to the selected bound-
+ing box bi on the corresponding Mk for the feature ri as we
+described in Section 3.
+𝑢
+𝑧
+𝑥
+𝑌𝑥
+𝑢
+ҧ𝑧
+𝑥
+(a) Total Indirect Effect
+𝑢
+ҧ𝑧
+ҧ𝑥
+𝑌ҧ𝑥
+𝑢
+ҧ𝑧
+𝑥
+𝑌𝑥, ҧ𝑧
+(b) Natural/Pure Direct Effect
+𝑌𝑥, ҧ𝑧
+Figure
+10.
+The
+illustration
+of
+Total
+Indirect
+Effect
+and
+Pure/Natural Direct Effect on causal graph.
+Index
+Input
+Operation
+Output
+(1)
+(M0, bi ∪bj)
+ROIAlign
+(7 × 7 × 256)
+(2)
+(M1, bi ∪bj)
+ROIAlign
+(7 × 7 × 256)
+(3)
+(M2, bi ∪bj)
+ROIAlign
+(7 × 7 × 256)
+(4)
+(M3, bi ∪bj)
+ROIAlign
+(7 × 7 × 256)
+(5)
+(1-4)
+Concatenation
+(7 × 7 × 1024)
+(6)
+(5)
+Conv
+(7 × 7 × 256)
+(7)
+bi, bj
+dummy mask
+(27 × 27 × 2)
+(8)
+(7)
+Conv+ReLU+BatchNorm
+(14 × 14 × 128)
+(9)
+(8)
+MaxPool
+(7 × 7 × 128)
+(10)
+(9)
+Conv+Relu+BatchNorm
+(7 × 7 × 256)
+(11)
+(6),(10)
+Element-wise Addition
+(7 × 7 × 256)
+(12)
+(11)
+Flatten
+12,544
+(13)
+(12)
+FC+ReLU
+4,096
+(14)
+(13)
+FC+ReLU
+4,096
+Table 4. The details of Visual Context Module.
+Visual Context Module. To extract the visual context fea-
+ture v′
+e for the union box bi ∪bj, we consider all 4 feature
+maps will provide complementary contextual information
+from different levels. Therefore, we extract ROIAlign [12]
+features on all 4 feature maps before we project the visual
+context feature into a feature space of R4096. The entire
+module is summarized in the Table 4, where the dummy
+mask operation in (7) generates two masks for bi and bj in-
+dependently, assigning 1.0 to the pixels inside the bounding
+box and 0.0 for the rest.
+The Special Treatment for PredCls. In the original paper,
+we skipped a special case of causal graph, i.e., causal graph
+for Predicate Classification (PredCls), for simplification. In
+PredCls, the ground truth object labels are given, which
+means the link X →Z is blocked by assigning ground
+truth labels. It won’t affect TDE calculation, where Z takes
+the real value z. However, it’s involved in the ablation stud-
+ies of TE and NIE, where Z could be assigned to ¯z. In this
+case, ¯z will directly use to the mean vector of training set
+12
+rather than be calculated from Eq.(2). We also need to no-
+tice that, for MOTIFS [72], Eq.(3) will take ze as input too,
+which is simplified in the original paper, because ze itself is
+derived from xe and it can be considered as the interaction
+between link X →Y and Z →Y in the causal graph.
+B.2. Sentence-to-Graph Retrieval
+As we mentioned in the original paper, we treated
+Sentence-to-Graph Retrieval (S2GR) as the graph-to-graph
+matching problem, parsing query captions to text-SGs by
+[51].
+Both detected image-SGs and parsed text-SGs are
+composed of entities Ek = {ek
+i } and relationships Rk =
+{rk
+ij = (sk
+i , pk
+ij, ok
+j )}, where k ∈{text, image}, sub-
+ject and object categories (sk
+i , ok
+j ) share the same dictionary
+with ek
+i for each k, pk
+ij denotes the onehot vector of the
+predicate category.
+The image-SGs and text-SGs are equipped with different
+embedding layers, because they have different dictionaries.
+The entities and relationships are encoded as:
+Ek
+embed = W k
+e Ek,
+(16)
+Rk
+embed = [W k
+s Sk; W k
+p P k; W k
+o Ok],
+(17)
+where Ek
+embed ∈RNd×Nk
+e , Rk
+embed ∈R3Nd×Nk
+r , Nd =
+512 is the dimension of embedded feature, N k
+e , N k
+r are
+numbers of entities and relationships for each image.
+B.2.1
+Bilinear Attention Scene Graph Encoding
+Since entities and relationships are both important for SGs,
+we apply Bilinear Attention Network (BAN) [20] to encode
+their multimodal interactions into the same representation
+space. The same BAN model is used for both text-SGs and
+image-SGs, hence we remove k hereinafter for simplifica-
+tion. The original BAN involves two steps: 1) attention
+map generation, and 2) bilinear attended feature calculation.
+Because scene graph has already provides connections be-
+tween entities and relationships, we skipped the first step
+and used normalized scene graph connection as attention
+map Aij = Mij/ P
+j Mij, where A, M ∈RNe×Nr, the
+scene graph connection M is defined as follows:
+Mij =
+(
+1, if Ei in Rj,
+0, if Ei not in Rj.
+(18)
+The bilinear attended scene graph encoding is calculated by
+Table 5, where steps (4-10) are calculated 2 times, and the
+final output Egraph ∈R1024 is a feature vector representing
+the whole SG. The same BAN is used for both text-SG or
+image-SG, i.e., the parameters of the BAN are shared.
+The model was trained by the triplet loss [50] with L1
+distance. The model was trained in 30 epochs by SGD op-
+timizer and set batch size to be 12. Learning rate was set to
+Index
+Input
+Loop
+Operation
+Output
+(1)
+Eembed
+Input Shape
+(Ne × 512)
+(2)
+Rembed
+Input Shape
+(Nr × 512)
+(3)
+A
+Input Shape
+(Ne × Nr)
+(4)
+(1)
+start
+Transpose + Unsqueeze
+(512 × 1 × Ne)
+(5)
+(2)
+↓
+Transpose + Unsqueeze
+(512 × Nr × 1)
+(6)
+(3)
+↓
+Unsqueeze
+(1 × Ne × Nr)
+(7)
+(4),(6)
+↓
+Matrix Multiplication
+(512 × 1 × Nr)
+(8)
+(5),(7)
+↓
+Matrix Multiplication
+(512 × 1 × 1)
+(9)
+(8)
+↓
+Squeeze + FC
+(512)
+(10)
+(4),(9)
+end
+Unsqueeze + Element-wise Addition
+(512 × 1 × Ne)
+(11)
+(10)
+Sum Over Ne
+512
+(12)
+(11)
+FC + ReLU + FC + ReLU
+1024
+Table 5. The details of Bilinear Attention Scene Graph Encoding
+Module.
+be 12 × 10−2, which was decayed at 10th and 25th epochs
+by the factor of 10.
+C. Quantitative Studies
+The full results of Relationship Retrieval, including
+both conventional Recall@K and the adopted mean Re-
+call@K [56, 6], are given in Table 6. Although a perfor-
+mance drop on conventional Recall@k is observed on TDE,
+the detailed analysis of the “decreased” predicates in Figure
+6 of the original paper implies that it’s caused by a more
+fine-grained predicate classification.
+The detailed predicate-level Recall@100 on PredCls of
+all three models, two fusion functions and baseline vs. TDE
+are given in Figure 12 13 14. Impressively, the distribu-
+tion of the improved performances is no longer long-tailed
+while those conventional debiasing methods illustrated in
+Figure 11 can’t surpass the dataset distribution anyway. For
+TDE, very few decreased predicates are mainly due to the
+more fine-grained classification and we can observe signif-
+icant improvements on their subclass predicates. Note that,
+unlike Reweight, which blindly hurt all frequent predicates,
+the proposed TDE will even improve some of the top-10
+frequent predicates, like behind and above, which them-
+selves are the subclasses of near. It further proves that
+the improvement of the proposed TDE doesn’t come from
+hacking the distribution.
+D. Qualitative Studies
+More Relationship Retrieval (RR) and Zero-Shot Rela-
+tionship Retrieval (ZSRR) results are given in Figure 15,
+where top 10 relationships under SGCls are selected for
+each image. As we can see, other than the trivial relation-
+ship problem, conventional baseline barely distinguishes
+different entities. For example, in the left bottom image,
+the same sign is almost on every pole in the baseline
+while the TDE results are more sensitive to different enti-
+ties. However, one of the problem of TDE is that it over
+emphasizes the action predicates. It even uses holding
+for pole and sign while the predicate on used by the
+baseline is more natural in this case.
+13
+Predicate Classification
+Scene Graph Classification
+Scene Graph Detection
+Model
+Fusion
+Method
+R@20 / 50 / 100
+mR@20 / 50 / 100
+R@20 / 50 / 100
+mR@20 / 50 / 100
+R@20 / 50 / 100
+mR@20 / 50 / 100
+IMP+ [65, 6]
+-
+-
+52.7 / 59.3 / 61.3
+- / 9.8 / 10.5
+31.7 / 34.6 / 35.4
+- / 5.8 / 6.0
+14.6 / 20.7 / 24.5
+- / 3.8 / 4.8
+FREQ [72, 56]
+-
+-
+53.6 / 60.6 / 62.2
+8.3 / 13.0 / 16.0
+29.3 / 32.3 / 32.9
+5.1 / 7.2 / 8.5
+20.1 / 26.2 / 30.1
+4.5 / 6.1 / 7.1
+MOTIFS [72, 56]
+-
+-
+58.5 / 65.2 / 67.1
+10.8 / 14.0 / 15.3
+32.9 / 35.8 / 36.5
+6.3 / 7.7 / 8.2
+21.4 / 27.2 / 30.3
+4.2 / 5.7 / 6.6
+KERN [6]
+-
+-
+- / 65.8 / 67.6
+- / 17.7 / 19.2
+- / 36.7 / 37.4
+- / 9.4 / 10.0
+- / 27.1 / 29.8
+- / 6.4 / 7.3
+VCTree [56]
+-
+-
+60.1 / 66.4 / 68.1
+14.0 / 17.9 / 19.4
+35.2 / 38.1 / 38.8
+8.2 / 10.1 / 10.8
+22.0 / 27.9 / 31.3
+5.2 / 6.9 / 8.0
+MOTIFS†
+SUM
+Baseline
+59.5 / 66.0 / 67.9
+11.5 / 14.6 / 15.8
+35.8 / 39.1 / 39.9
+6.5 / 8.0 / 8.5
+25.1 / 32.1 / 36.9
+4.1 / 5.5 / 6.8
+Focal
+59.2 / 65.8 / 67.7
+10.9 / 13.9 / 15.0
+36.0 / 39.3 / 40.1
+6.3 / 7.7 / 8.3
+24.7 / 31.7 / 36.7
+3.9 / 5.3 / 6.6
+Reweight
+45.4 / 57.0 / 61.7
+16.0 / 20.0 / 21.9
+24.2 / 29.5 / 31.5
+8.4 / 10.1 / 10.9
+18.3 / 24.4 / 29.3
+6.5 / 8.4 / 9.8
+Resample
+57.6 / 64.6 / 66.7
+14.7 / 18.5 / 20.0
+34.5 / 37.9 / 38.8
+9.1 / 11.0 / 11.8
+23.2 / 30.5 / 35.4
+5.9 / 8.2 / 9.7
+X2Y
+58.3 / 65.0 / 66.9
+13.0 / 16.4 / 17.6
+35.2 / 38.6 / 39.5
+6.9 / 8.6 / 9.2
+24.8 / 32.1 / 36.7
+5.1 / 6.9 / 8.1
+X2Y-Tr
+59.0 / 65.3 / 66.9
+11.6 / 14.9 / 16.0
+35.5 / 38.9 / 39.7
+6.5 / 8.4 / 9.1
+25.5 / 32.8 / 37.2
+5.0 / 6.9 / 8.1
+TE
+34.3 / 46.7 / 51.7
+18.2 / 25.3 / 29.0
+25.5 / 32.5 / 35.4
+8.1 / 12.0 / 14.0
+14.8 / 20.1 / 23.9
+5.7 / 8.0 / 9.6
+NIE
+0.6 / 1.0 / 1.3
+0.6 / 1.1 / 1.4
+28.6 / 35.0 / 37.4
+6.1 / 9.0 / 10.6
+17.3 / 22.7 / 26.8
+3.8 / 5.1 / 6.0
+TDE
+33.6 / 46.2 / 51.4
+18.5 / 25.5 / 29.1
+21.7 / 27.7 / 29.9
+9.8 / 13.1 / 14.9
+12.4 / 16.9 / 20.3
+5.8 / 8.2 / 9.8
+GATE
+Baseline
+58.9 / 65.5 / 67.4
+12.2 / 15.5 / 16.8
+36.2 / 39.4 / 40.1
+7.2 / 9.0 / 9.5
+25.8 / 33.3 / 37.8
+5.2 / 7.2 / 8.5
+TDE
+38.7 / 50.8 / 55.8
+18.5 / 24.9 / 28.3
+21.8 / 27.2 / 29.5
+11.1 / 13.9 / 15.2
+5.9 / 7.4 / 8.4
+6.6 / 8.5 / 9.9
+VTransE†
+SUM
+Baseline
+59.0 / 65.7 / 67.6
+11.6 / 14.7 / 15.8
+35.4 / 38.6 / 39.4
+6.7 / 8.2 / 8.7
+23.0 / 29.7 / 34.3
+3.7 / 5.0 / 6.0
+TDE
+36.9 / 48.5 / 53.1
+17.3 / 24.6 / 28.0
+19.7 / 25.7 / 28.5
+9.3 / 12.9 / 14.8
+13.5 / 18.7 / 22.6
+6.3 / 8.6 / 10.5
+GATE
+Baseline
+58.7 / 65.3 / 67.1
+13.6 / 17.1 / 18.6
+34.6 / 38.1 / 38.9
+6.6 / 8.2 / 8.7
+24.5 / 31.3 / 35.5
+5.1 / 6.8 / 8.0
+TDE
+40.0 / 50.7 / 54.9
+18.9 / 25.3 / 28.4
+23.0 / 28.8 / 31.1
+9.8 / 13.1 / 14.7
+13.7 / 19.0 / 22.9
+6.0 / 8.5 / 10.2
+VCTree†
+SUM
+Baseline
+59.8 / 66.2 / 68.1
+11.7 / 14.9 / 16.1
+37.0 / 40.5 / 41.4
+6.2 / 7.5 / 7.9
+24.7 / 31.5 / 36.2
+4.2 / 5.7 / 6.9
+TDE
+36.2 / 47.2 / 51.6
+18.4 / 25.4 / 28.7
+19.9 / 25.4 / 27.9
+8.9 / 12.2 / 14.0
+14.0 / 19.4 / 23.2
+6.9 / 9.3 / 11.1
+GATE
+Baseline
+59.1 / 65.5 / 67.4
+12.4 / 15.4 / 16.6
+35.4 / 38.9 / 39.8
+6.3 / 7.5 / 8.0
+24.8 / 31.8 / 36.1
+4.9 / 6.6 / 7.7
+TDE
+39.1 / 49.9 / 54.5
+17.2 / 23.3 / 26.6
+22.8 / 28.8 / 31.2
+8.9 / 11.8 / 13.4
+14.3 / 19.6 / 23.3
+6.3 / 8.6 / 10.3
+Table 6. The SGG performances of Relationship Retrieval on both conventional Recall@K and mean Recall@K [56, 6]. The SGG models
+reimplemented under our codebase are denoted by the superscript †.
+0
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+1
+MOTIFS -SUM
+MOTIFS -SUM-Focal
+MOTIFS -SUM-Reweight
+MOTIFS -SUM-Resample
+†
+†
+†
+†
+Figure 11. Conventional Debiasing Methods:
+Recall@100 on
+Predicate Classification for the most frequent 35 predicates.
+0
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+1
+MOTIFS -SUM
+MOTIFS -SUM-TDE
+MOTIFS -GATE
+MOTIFS -GATE-TDE
+†
+†
+†
+†
+Figure 12. MOTIFS† [72]: Recall@100 on Predicate Classifica-
+tion for the most frequent 35 predicates.
+Another
+example
+of
+Sentence-to-Graph
+Retrieval
+(S2GR) is illustrated in Figure 16.
+Although we only
+reported sub-graphs of the original SGDet results, due to
+the limited space, we can still find that the conventional
+baseline model is not able to detect predicate like eating,
+which causes the detected SGs only provide the spatial re-
+0
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+1
+VCTree -SUM
+VCTree -SUM-TDE
+VCTree -GATE
+VCTree -GATE-TDE
+†
+†
+†
+†
+Figure 13. VCTree† [56]: Recall@100 on Predicate Classification
+for the most frequent 35 predicates.
+0
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+0.7
+0.8
+0.9
+1
+VTransE -SUM
+VTransE -SUM-TDE
+VTransE -GATE
+VTransE -GATE-TDE
+†
+†
+†
+†
+Figure 14. VTransE† [74]: Recall@100 on Predicate Classifica-
+tion for the most frequent 35 predicates.
+lationships, missing the most discriminative word eating
+in the query caption.
+14
+RR Diagnosis
+ZSRR Diagnosis
+person(man)
+street
+on
+car
+car
+car
+umbrella
+fence
+building
+person(man)
+street
+car
+car
+car
+umbrella
+fence
+building
+on on on
+holding
+hanging 
+from
+on
+near
+near
+behind
+parked 
+on
+behind
+in front of
+carrying
+along
+sign
+sign
+sign
+sign
+pole
+pole
+pole
+tree
+building
+near
+on
+on
+on
+on
+on
+on
+on
+on
+on
+sign
+sign
+pole
+pole
+pole
+tree
+building
+behind
+in front of
+behind
+holding
+holding
+holding
+above
+attached to
+hill
+rock
+hill
+rock
+tree
+bear neck (head)
+hill
+rock
+hill
+tree
+neck (head)
+on
+on
+of
+has
+on
+near
+on
+on
+behind
+on
+bear
+rock
+behind behind
+behind
+in front of
+behind
+𝒁𝒆𝒓𝒐𝑺𝒉𝒐𝒕: 𝒃𝒆𝒂𝒓→𝒔𝒕𝒂𝒏𝒅𝒊𝒏𝒈𝒐𝒏→𝒉𝒊𝒍𝒍
+cow
+tail
+door number
+shoe
+shirt
+man (people)
+man
+hair
+woman
+has
+has
+wearing
+wearing
+has
+has
+wearing
+wearing
+wearing
+wearing
+cow
+tail
+door number
+man (people)
+man
+woman
+shirt
+hair
+has
+watching
+wearingwearing
+has
+of
+shoe
+wearing
+𝒁𝒆𝒓𝒐𝑺𝒉𝒐𝒕: 𝒘𝒐𝒎𝒂𝒏→𝒘𝒂𝒕𝒄𝒉𝒊𝒏𝒈→𝒄𝒐𝒘
+Figure 15. Top 10 Relationship Retrieval (RR) and Zero-Shot Relationship Retrieval (ZSRR) results of SGCls for MOTIFS†+SUM baseline
+(yellow box) and corresponding TDE (green box). The red predicates indicate misclassified relationships, the purple predicates are those
+correctly classified relationships (in ground truth), the blue predicates are those not labeled in ground truth.
+15
+Sentence-to-Graph Diagnosis
+Query:
+A group of kids and adults 
+eating cake at a table.
+kids
+adults
+of
+cake
+table
+group
+eat
+at
+girl
+girl
+woman
+pizza
+pizza
+plate
+plate
+on
+on
+on
+on
+on
+on
+girl
+girl
+woman
+pizza
+pizza
+plate
+plate
+at
+at
+at
+under
+under
+on
+table
+table
+eating
+table
+woman
+woman woman
+man
+glass glass
+cup
+table
+woman
+woman woman
+man
+glass glass
+cup
+on
+on
+on
+on
+on
+on
+on
+at
+at at
+at
+under
+under
+under
+man
+man child woman girl
+table
+plate
+plate
+plate
+food
+food
+on
+on
+on
+on
+on
+on
+on
+on
+on
+on
+man
+man child woman
+table
+plate
+plate
+plate
+food
+food
+at
+at
+at
+at
+at
+under
+eating
+under
+under
+girl
+Figure 16. An example of Sentence-to-Graph Retrieval (S2GR) results for MOTIFS†+SUM baseline (yellow box) and corresponding TDE
+(green box). The red boxes indicate ground truth matching results. Note that we only draw sub-graphs containing important objects and
+predicates, because the original detected scene graphs from SGDet have too many trivial objects and predicates.
+16

@@ -1,0 +1,1300 @@
+5
+2
+0
+2
+
+p
+e
+S
+1
+
+]
+
+V
+C
+.
+s
+c
+[
+
+1
+v
+9
+0
+2
+1
+0
+.
+9
+0
+5
+2
+:
+v
+i
+X
+r
+a
+
+Measuring Image-Relation Alignment: Reference-Free Evaluation of VLMs and
+Synthetic Pre-training for Open-Vocabulary Scene Graph Generation
+
+Ma¨elic Neau1
+
+Zoe Falomir 1
+
+C´edric Buche2,3
+
+Akihiro Sugimoto4
+
+1Computing Science Department, Ume˚a University, Sweden
+2CNRS IRL 2010 CROSSING, Australia
+3IMT Atlantique, France
+4National Institute of Informatics, Japan
+{maelic.neau,zoe.falomir}@umu.se, cedric.buche@cnrs.fr, sugimoto@nii.ac.jp
+
+Abstract
+
+Scene Graph Generation (SGG) encodes visual relation-
+ships between objects in images as graph structures. Thanks
+to the advances of Vision-Language Models (VLMs), the task
+of Open-Vocabulary SGG has been recently proposed where
+models are evaluated on their functionality to learn a wide
+and diverse range of relations. Current benchmarks in SGG,
+however, possess a very limited vocabulary, making the eval-
+uation of open-source models inefficient. In this paper, we
+propose a new reference-free metric to fairly evaluate the
+open-vocabulary capabilities of VLMs for relation prediction.
+Another limitation of Open-Vocabulary SGG is the reliance
+on weakly supervised data of poor quality for pre-training.
+We also propose a new solution for quickly generating high-
+quality synthetic data through region-specific prompt tuning
+of VLMs. Experimental results show that pre-training with
+this new data split can benefit the generalization capabilities
+of Open-Voc SGG models1.
+
+1. Introduction
+
+The task of Scene Graph Generation (SGG) has gained grow-
+ing interest in recent years. SGG aims at generating a struc-
+tured abstract representation of image content as a directed
+acyclic graph composed of < subject, predicate, object >
+triplets, where each subject and object is traditionally
+grounded to an image region through 2D coordinates (bound-
+ing boxes). Applications of such representations include
+Visual-Question Answering (VQA) [22], Image Captioning
+[29], or even Robotics [19]. While a considerable amount
+of work has tackled the task of SGG in a closed-vocabulary
+fashion [24, 27, 32], approaches targeting the task in open-
+vocabulary settings are scarce [5, 8]. Open-Vocabulary SGG
+
+1Code and data available at https : / / github . com / Maelic /
+OpenVocSGG
+
+(OV-SGG) is a critical task to enable a new range of appli-
+cations in robotics [1] or embodied agent perception [16],
+where high-quality annotated data can be difficult to acquire.
+Similar to other Open-Vocabulary tasks [7], OV-SGG ap-
+proaches are evaluated on closed-vocabulary benchmarks
+(Visual Genome [13], PSG [27]) in a zero-shot manner. How-
+ever, current benchmarks only evaluate models on a small
+number of relations (i.e., < 50), which limits our under-
+standing of the generalization capabilities of such models.
+This paper aims to extend the metrics used in OV-SGG with
+the introduction of a reference-free evaluation to grade the
+efficiency of models where there is a lack of groundtruth for
+data annotations.
+
+OV-SGG approaches often rely on a large amount of
+data for pre-training. Recent work proposes to generate pre-
+training data for OV-SGG through caption-image regions
+alignment [30] or directly through the use of state-of-the-art
+Vision-Language Models (VLMs) [26]. This paper shows
+that the former approaches results in low-quality coarse an-
+notations, which may hinder the pre-training of OV-SGG
+models. Regarding the latter approach, the current literature
+is missing a comprehensive review of the abilities of VLMs
+to generate high-quality, consistent, and diverse visual re-
+lations. This paper proposes an extensive investigation of
+the performance of different VLMs for the prediction of
+fine-grained visual relationships. We apply the results of our
+investigation to generate high-quality synthetic relationship
+annotations for 200K images. We call this new dataset the
+Fine-Grained Open-Vocabulary SGG dataset (FG-OV SGG).
+In a series of experiments, we show that our generated data
+is of better quality than the existing previous data in the
+literature.
+
+This paper describes the following contributions:
+
+1. A new reference-free metric, the RelCLIPScore, to evalu-
+ate OV-SGG models and VLMs in unconstrained settings
+(Section 3);
+
+ 
+ 
+ 
+ 
+ 
+ 
+2. A quantitave evaluation on the VLM performance for
+region-specific relation prediction, highlighting their
+strengths and weaknesses for the task (Section 4); and
+3. A qualitative evaluation providing a new dataset, FG-
+OV SGG, generated using VLMs evaluated using Rel-
+CLIPScore metrics, which can be beneficial to Open-
+Vocabulary SGG models (Section 5).
+
+2. Related Work
+
+This section presents the most recent works regarding open-
+vocabulary SGG metrics and weakly annotated data.
+
+Open-Vocabulary SGG Metrics. Traditional approaches
+evaluate Open-Vocabulary Relationship Detection and Open-
+Vocabulary Scene Graph Generation using mean Average
+Precision (mAP) [30] or Recall@K/meanRecall@K [8, 11]
+metrics on standard SGG benchmarks [13, 27] in a zero-
+shot manner. The Recall@K evaluates the performance of
+a model on the top predictions (i.e. top 20/50/100) for each
+image, independent of the class. The meanRecall@K evalu-
+ates the performance on the average of all predicate classes,
+which is more significant for long-tail learning such as in
+the task of SGG. However, using ground truth references
+to evaluate Open-Vocabulary models is not optimal for the
+following reasons:
+
+i. Relations-based datasets are not extensively annotated,
+leaving a considerable amount of true relations unan-
+notated (i.e. miss positive samples [34])
+
+ii. The SGG task includes a multi-label classification
+paradigm since multiple predicates can be correct for a
+given < subject, object > pair [24].
+
+iii. Evaluating the task of SGG with ranking metrics does
+not give a good overview of the model performance.
+For instance, a true positive predicted at rank 1 and 99
+will lead to the exact same Recall@100 score.
+
+In a recent work [4], the SGScore has been proposed to
+evaluate the alignment of Image Generation models with
+complex scenes. The SGScore computes the similarity be-
+tween an image and a graph by asking multiple-choice ques-
+tions to an ”oracle” VLM (such as: What is the relationship
+between the person and the sports ball in the image? A)
+kicking; B) throwing; C) holding; D) no visible relationship.
+[4]). The authors of SGScore do not give any details on the
+choice of negative examples for the question-answer pairs
+which hindered reproducibility. Also, multiple-choice ques-
+tions can not account for multi-label instances, which are
+overly present in Open-Vocabulary settings.
+
+In order to solve these challenges, we propose to tackle
+the task of Open-Vocabulary SGG in a reference-free manner,
+similar to what has been done in the task of Image Captioning
+[10]. By taking advantage of Vision-Language Models such
+as CLIP [20], we propose to evaluate the alignment between
+relation triplets and corresponding image regions formed by
+the union of subject and object.
+
+Weakly Annotated Data. In contrast to other tasks, such
+as Object Detection [7, 23], the task of SGG has not yet seen
+the emergence of large-scale, high-quality datasets with a
+large vocabulary. As a result, the main approaches in OV-
+SGG are using image caption supervision for pre-training
+[9, 21] and then evaluating zero-shot transfer on closed-
+source datasets such as Visual Genome [13] or PSG [27].
+However, captions-only supervision can limit the understand-
+ing of SGG models of fine-grained relations. Several recent
+approaches have been proposed to alleviate this bias: (i) the
+RLIPv2 [30] was proposed to generate weakly annotated
+data by grounding captions to image regions using a dedi-
+cated R-TAGGER model; and (ii) the All-Seeing Project V2
+(ASv2) [26] proposed to use Vision-Language Models (i.e.
+GPT4) to generate open-vocabulary objects and relations
+annotations on new images.
+
+Specifically RLIPv2 [30] proposed to generate pseudo-
+annotations for relations by matching visual regions to pred-
+icates in image captions. This strategy comes with a few
+drawbacks: (i) captions are biased toward certain types of
+relations (e.g. human actions); (ii) captions are limited in
+number of relations and typically only contain information
+about a subpart of the image (e.g. foreground/background);
+and (iii) the association of relations and image region can
+fail in images where a lot of similar < subject, object >
+pairs are present. We detail these biases later in Section 4.
+
+In ASv2 [30], GPT4 was asked to generate object co-
+ordinates, pairs, and predicates in new images on a single
+prompt. In this strategy, the VLM determines how many and
+which object pairs to annotate on the image. This can lead
+to biases since the VLM will be prone to select easy pairs,
+leaving out rare or difficult relations (e.g. relations between
+distant objects in the foreground/background). The present
+paper proposes to use region-specific prompting to ensure
+global and unbiased coverage of the image content, leading
+to a more diverse and larger dataset, which can benefit the
+pre-training of OV-SGG models. We also propose to bench-
+mark the performance of open-source models, in addition to
+closed-source models such as GPT4.
+
+3. New Metrics for Open-Vocabulary SGG
+
+Evaluating the relevance of a relation to a particular image
+region is related to Image-Text Alignment and the task of
+Image-Text Retrieval. The most popular approach to Image-
+Text Retrieval is the CLIP model[20]. CLIP is a trained
+image-text pair encoder to align embeddings in a shared
+space, enabling zero-shot classification and broad general-
+ization across visual and textual tasks. This paper uses CLIP
+to measure the quality of generated relations.
+
+3.1. The RelCLIPScore
+
+Inspired by the CLIPScore metric [10], this paper proposes
+a new reference-free metric, the RelationCLIPScore met-
+
+ric (abbreviated RelCLIPScore) for the Open-Vocabulary
+SGG task. The CLIPScore metric evaluates the seman-
+tic similarity between a generated text (e.g. a caption)
+and a reference image by using the shared embedding
+space of the CLIP model [20], which aligns visual and
+textual representations. We extend this definition to the
+prediction of relationships by evaluating the similarity of
+a predicted < subject, predicate, object > triplet and the
+corresponding image region defined by the union of the
+< subject, object > bounding boxes. For an image I, first
+the set of predicted union regions that match groundtruth
+bounding boxes annotations are extracted. Then, for each
+matching region, the cosine similarity is calculated between
+CLIP visual embedding and CLIP textual embeddings of the
+triplet:
+
+CLIPScore(c, t) = max(cos(c, t), 0)
+
+(1)
+
+where c is the visual embedding and t the textual embedding.
+Then, the RelCLIPScore is averaged at the image level:
+
+RelCLIPScore(I) =
+
+1
+k
+
+k
+(cid:88)
+
+n=1
+
+CLIPScore(cn, tn)
+
+(2)
+
+where k is the number of relations for the image I. Note
+that a model could attain a high RelCLIPScore by only pre-
+dicting one relation per image, which is not desirable. To
+solve this problem, the RelCLIPScore adds a penalty based
+on the number of predicted relations compared to the maxi-
+mal number of possible relations to predict given annotated
+groundtruth objects. Thus, the final RelCLIPScore is calcu-
+lated as follows:
+
+RelCLIPScore(I) =
+
+1
+k
+
+(cid:80)k
+
+n=1 CLIPScore(cn, tn)
+log(p − k) + α
+
+(3)
+
+where p the number of possible relations in the image and
+α = 1e−5.
+
+Note also that, given a set vocabulary of predicates, it
+is unlikely that every object in the image has at least one
+relation to every other. Thus, this paper proposes to refine p
+as follows:
+
+p =
+
+(m ∗ (m − 1))
+2
+
+(4)
+
+where m is the number of objects.
+
+If references (i.e. ground truth relations) are provided,
+the Reference RelCLIPScore (Ref-RelCLIPScore) can be
+computed as follows [10]:
+
+Ref-RelCLIPScore(I) =
+
+2 ∗ CLIPScore(cn, tn) ∗ SimText(tgt, tpred)
+CLIPScore(cn, tn) ∗ SimText(tgt, tpred)
+
+(5)
+
+with
+
+SimText(t1, t2) = max(cos(t1, t2), 0)
+
+(6)
+
+where tgt, tpred are textual embeddings of the target and
+prediction, respectively. Note that differences between the
+original CLIPScore [10] and the proposed RelCLIPScore
+are introduced with equations (2), (3), and (4).
+
+Recently several new approaches to Image-Text Retrieval
+have been proposed such as BLIP-2 [15] and SIGLIP [33].
+Similar to CLIP, these approaches can be used for image-text
+alignment. In addition to image-text distances, BLIP-2 com-
+putes probabilities as an Image-Text Matching (ITM) score
+to learn fine-grained alignment between textual and visual
+representation. Yuksekgonul et. al. [31] proposed NegCLIP,
+a revised version of CLIP trained with hard negatives for
+better image-text alignment in challenging scenarios.
+
+In order to complement the RelCIPScore, this paper pro-
+poses also the RelBLIPScore and RelSIGLIPScore to bench-
+mark relations generation. These scores are not computed
+using cosine similarity but rather by taking the ITM score of
+BLIP or the probabilities computed by the Sigmoid function
+for SIGLIP.
+
+In the following, we present an evaluation of these dif-
+ferent metrics and their respective alignment with human
+annotations in leading datasets.
+
+3.2. Alignment with Ground truth Annotations
+
+In order to evaluate the usage of the new RelCLIPScore
+metric proposed in this paper, we computed its alignment
+with groundtruth annotations in the PSG [27] and VG [13]
+datasets. For each groundtruth relation, we computed the
+CLIPScore (or BLIPScore / SIGLIPScore) of the triplet as
+well as the score of any other possible triplet with the same <
+subject, object > pair but with a different predicate. In this
+case, we only took predicates that are annotated at least once
+in the dataset for the corresponding < subject, object >
+pair. In order to take into account the ambiguity of predicate
+annotations [18, 24], we used the rank of the groundtruth
+predicate score to compute a matching score θ:
+
+θ(p) = 1 −
+
+rank(0)
+L (p)
+|L|
+
+(7)
+
+where p is the score of the groundtruth predicate and L the
+list of scores of all possible predicates for the given pair.
+
+Note that, if the score of the groundtruth predicate is close
+to the highest score but not the highest because of a similar
+predicate (for instance with the confused pair on / on top of ),
+then its matching score θ will still be high.
+
+Tab. 1 compares the different models and their alignment
+with ground truth data, reporting precision as the proportion
+of groundtruth predicates with top score over all samples.
+
+Note that this metric is less representative than the match-
+ing score (θ) because of confused predicates. We observed
+
+Table 1. Comparison of the different image-text alignment metrics
+for visual relationship prediction on the PSG [27] and VG [13]
+datasets.
+
+D
+
+G
+S
+P
+
+G
+V
+
+Model
+NegCLIP B-32 [31]
+CLIP L-14 [20]
+SIGLIP [33]
+BLIP2 [15]
+
+NegCLIP B-32 [31]
+CLIP L-14 [20]
+SIGLIP [33]
+BLIP2 [15]
+
+Method
+Cosine
+Cosine
+Sigmoid
+ITM
+
+Cosine
+Cosine
+Sigmoid
+ITM
+
+Score
+24.47
+23.64
+17.78
+67.38
+
+18.84
+20.73
+23.69
+65.20
+
+Prec.
+30.18
+27.77
+25.23
+24.19
+
+22.75
+23.80
+17.55
+9.38
+
+θ
+66.10
+63.14
+62.36
+62.29
+
+64.98
+61.85
+58.66
+53.49
+
+Table 2. Top confused triplets in the PSG dataset.
+
+Groundtruth Triplet
+person in front of person
+person talking to person
+person looking at person
+person holding baseball bat
+book on shelf
+
+Confused triplet
+person beside person
+person beside person
+person beside person
+person swinging baseball bat
+book in shelf
+
+that the NegCLIP model is the most performant for image
+region-visual relationship alignment with a matching score
+(θ) of 66.10 on the PSG dataset and 64.98 on VG. Despite
+being more recent, approaches with dedicated image-text
+alignment scores (i.e. sigmoid and ITM), SIGLIP and BLIP2
+are worse at ranking candidate relations for a specific image
+region.
+
+Table 2 shows the top 5 confused triplets in the PSG
+dataset from the CLIP model (the confused triplets have a
+higher Score than the groundtruth). Note that, due to the fact
+that predicates are not exclusive in the dataset, the confused
+triplets are likely not false positives but ambiguous true
+positives (for instance person talking to person and person
+beside person are likely both valid relations).
+
+3.3. Limitations
+
+After further analysis, we identified different failing cases
+when evaluating the performance of the CLIP, SIGLIP, and
+BLIP models for image-relations alignment.
+
+First, these models can struggle to identify the correct
+predicate when the subject or the object of the relation
+is extensively bigger in the image than its pair. Figure 1
+shows an example: the image contains two cows, but the
+first one is significantly bigger than the second, so the CLIP
+model is asked to assign a confidence score for each possible
+predicates between the two animals, it generates that top
+score is < cow, eating, cow > with 0.38, where the second
+highest < cow, over, cow > (which is more realistic) is only
+given a score of 0.16. One could hypothesize that the model
+might be biased by the action that the first cow is doing (i.e.
+
+(a)
+
+(b)
+
+Figure 1. (a) is the original image and (b) the CLIP ranking of all
+possible predicates for the pair <cow 1, cow 2>.
+
+eating) and overlooking the relation with the other cow.
+
+In our analysis, we also observed similar difficulties when
+the models intend to rank predicates when the subject and
+object are two distant objects in the image. Figure 2 displays
+an example with the pair < person, wall > where the cor-
+rect predicate is in front of, but the top score predicates are
+holding, touching, or jumping over which not describing the
+real image content. This shows the difficulty of the model
+to focus on the correct regions of the image when there is
+a significant distance between the subject and object of the
+relation.
+
+4. Evaluating Vision-Language Models for
+Region-Specific Relationship Prediction
+
+In this section, the introduced RelCLIPScore metric is used
+to evaluate the performance of a selection of VLMs on the
+task of relationship prediction on image regions. VLMs are
+traditionally evaluated at the image level on downstream
+tasks such as Image Captioning [29], VQA [22], or Visual
+Reasoning [25]. In these tasks, the evaluation of relations is
+implicit, either contained in captions or questions. The per-
+formance of Vision-Language Models for relation prediction
+at the triplet level (i.e. given only the < subject, object >
+pair and associated image region) remains unknown.
+
+As a result, we present an analysis of the performance of
+VLMs for relationship predictions on regions of interest with
+subject-object prompting. By prompting VLMs per region
+of images, we can measure their limitations in challenging
+scenarios, for instance with small or distant objects.
+
+(a)
+
+(b)
+
+Figure 2. (a) is the original image and (b) the CLIP ranking of all
+possible predicates for the pair <person 1, wall 2>.
+
+4.1. Method
+
+Models. We selected a set of Open-Source and closed-source
+models for our comparison. For Open Source models, we
+used the LlaVa-OneVision 7B variant [14], InterVL3-8B [36]
+and Qwen-2.5VL 7B [2]. We compared these models against
+the closed-source GPT4o-mini and GPT4o from OpenAI 2.
+
+Datasets. The PSG dataset was used [27] to evaluate the
+different models, which contains 46K images in the training
+set and 2K images in the test set. These images were selected
+from the COCO dataset and carefully annotated by humans
+with bounding boxes and relations. This dataset is deemed
+of better quality than other SGG datasets such as Visual
+Genome or GQA [27]. We evaluated each model in zero-
+shot settings on the test set of PSG.
+
+Relation Prediction. For relation prediction, we em-
+ployed the Set-of-Mark prompting strategy [28] by anno-
+tating the subject and object masks on the image before
+feeding it to the model. We used the Segment-Anything
+Model (SAM) [12] to generate masks, with a consistent
+color for subject (blue) and object (red). In addition, images
+are cropped on the union of the subject-object boxes, ex-
+tended by 20% to provide context to the model. The subject
+of the relation is referred to as “Object 1” in the prompt, and
+the object of the relation is “Object 2”.
+
+2https://openai.com/index/gpt-4o-system-card/
+
+4.2. Results
+
+We measured the CLIPScore, RefCLIPScore and overall
+precision on the PSG dataset. Table 3 provides the results
+obtained. Note that the LlaVa-OneVision model is the best
+by a small margin with respect to the NegCLIP score, out-
+performing even closed-source models such as GTP4o. Note
+also that there is a high variation in precision for all models.
+However, other metrics (reference-free or not) show less vari-
+ations, which indicate that precision is not a good indicator
+to evaluate VLMs in Open-Vocabulary SGG. Some models,
+such as InternVL, are more aligned with ground-truth anno-
+tations (see Precision column in Table 3), whereas others
+(LlaVa, GPT4o-mini) are more aligned with the visual con-
+tent, if we refer to the NegCLIP, CLIP, and SIGLIP scores,
+for instance. If we compare these results with scores com-
+puted on groundtruth annotations (see Table 1), we can see
+that the best model in NegCLIP score (24.02) is still behind
+the NegCLIP score of groundtruth (24.47), and similarly for
+other metrics, which shows the current limitations of VLMs.
+In the following, we analyse further these limitations in a
+series of ablation studies.
+
+4.3. Ablation Studies
+
+Pair size imbalance. As we have seen in the previous sec-
+tion, Vision-Language Models can easily struggle to find
+the correct relation when there is a significant imbalance
+between the respective sizes of the subject and object in the
+image. To quantify this limitation, we ran a new experiment
+by selecting a subset of 1,000 pairs in the PSG dataset where
+the boxes ratio is > 1 : 5. We compared performance on this
+subset with a second subset of 1,000 pairs, where the boxes
+ratio is < 1 : 5. Table 4 summarizes the results of our exper-
+iments. Note that there is a consistent decline in RelSCORE
+and Precision metrics for pairs with size imbalance (low
+ratio settings) compared to pairs of similar size (high ratio
+settings). These findings highlight the struggle of VLMs to
+perceive smaller objects with good accuracy [31]. Figure 3
+provides an example of a relation generated with pair imbal-
+ance (boxes ratio = 0.04). Note that the VLM is not able
+to focus on the object of the relation (2 person) and instead
+only describes an attribute of the subject (1 building).
+
+Distant objects. SGG benchmarks [13, 27] contain
+mostly annotations of object pairs that intersect. However, in
+real-world applications [1, 22], describing relations between
+distant objects can be critical. Generating relations between
+distant objects can also be important to augment the robust-
+ness of the pre-training in Open-Vocabulary SGG. In these
+experiments, we extracted a subset of 1,000 pairs of objects
+separated by at least 20% of the image size and compared
+the performance of VLMs with another subset of 1,000 pairs
+that intersect (i.e. IoU > 0). Table 5 shows the results of
+these experiments. Note that there is a significant drop in all
+metrics for pairs that do not intersect compared with pairs
+
+Table 3. Comparison of the different image-text alignment metrics for Visual Relationships prediction on the PSG dataset [27].
+
+Model
+
+LlaVa-OneVision 7B [14]
+InternVL-3 8B [36]
+Gwen2.5VL 7B [2]
+
+Score
+
+NegCLIP RefNegCLIP CLIP
+19.52
+19.60
+19.55
+
+24.02
+23.94
+23.88
+
+47.75
+47.73
+47.98
+
+SIGLIP
+10.02
+11.26
+9.90
+
+Precision
+16.07
+30.97
+14.01
+
+GPT4o-mini
+GPT4o
+
+24.00
+23.97
+
+47.88
+47.76
+
+19.81
+19.82
+
+11.27
+10.38
+
+16.23
+18.05
+
+Table 4. Box ratio experiments, Low Ratio corresponds to < 1 : 5
+ratio between subject and object whereas High Ratio corresponds
+to > 1 : 5.
+
+Model
+
+Ratio
+
+Score
+NegCLIP RefNegCLIP
+
+InternVL3-8B
+
+LlaVa-OV-7B
+
+Low
+High
+Low
+High
+
+23.91
+24.15
+23,89
+24,11
+
+47.45
+47.97
+47.46
+48.01
+
+Prec.
+
+29.22
+40.86
+10,65
+23.88
+
+Figure 3. Example of the pair imbalance problem. Relation gener-
+ated using the LlaVa-OV-7B model [14].
+
+that do.
+
+Inverse Relations. We also observed that for certain
+types of relations (mainly human actions), VLMs can
+be confused by the directionality of the relation. Fig-
+the pair <
+ure 4 provides an example of this issue:
+surf board, person > is prompted in a direction which
+is unusual (i.e. < person, riding, surf board > is more
+likely to appear in the training data of VLMs than <
+surf board, being ridden by, person >), resulting in a fail-
+ure from the LlaVa model. However, quantifying this issue
+is complex because not all < human, object > pairs are
+biased toward one direction. However, even with these short-
+comings, we believe that VLMs can be useful for generating
+pre-training data for the task of Open-Vocabulary SGG. In
+the next section, we evaluate this hypothesis with the intro-
+duction of the FG-OV dataset.
+
+(a) Predictions from LlaVa.
+
+(b) Groundtruth.
+
+Figure 4. The inverse relationship bias: some pairs are used to be
+seen in mono-directional relations. VLMs can then struggle to pay
+attention to the directionality of the relation.
+
+Table 5. Experiments with distant objects: Intersect corresponds to
+IoU >= 0 and Non-Intersect to IoU < 0.
+
+Model
+
+Intersect
+
+Score
+NegCLIP RefNegCLIP
+
+InternVL3-8B
+
+LlaVa-OV-7B
+
+Yes
+No
+Yes
+No
+
+23.78
+23.01
+24.01
+22.98
+
+47.27
+45.53
+47.34
+45.65
+
+Prec.
+
+36.13
+30.08
+11.67
+3.7
+
+5. The FG-OV SG Dataset
+
+This section presents our new method for generating syn-
+thetic data for the Open-Vocabulary SGG task. Inspired by
+previous work [30], we used images from the COCO and Ob-
+jects365 datasets. The COCO dataset [17] contains 122,218
+images annotated with bounding boxes for 80 object classes.
+The Objects365 dataset [23] contains more than 1M images
+annotated with bounding boxes for 365 object classes. Our
+goal is to generate high-quality synthetic relation annotations
+between object pairs to create a new SGG dataset. To do so,
+we used a combination of all images from COCO and 80K
+images from the train set of OBJ365, for a total of 200,218
+
+Table 6. Data mixture comparison.
+
+Mixture Dataset
+
+RLIPv2
+
+Ours
+
+VG
+COCO
+VG
+COCO
+
+Images
+108,077
+122,218
+108,077
+122,218
+
+Triplets
+1,987,331
+902,278
+1,987,331
+819,111
+
+Predicates
+36,515
+388
+36,515
+1,121
+
+Table 7. Comparison of the region-triplet alignment of data used
+in RLIPv2 and our generation with the LlaVa model. Scores are
+computed on the test set of the COCO dataset.
+
+Data Split
+
+RLIPv2 [30]
+FG-OV (ours)
+
+Score
+NegCLIP CLIP
+22.22
+22.81
+
+25.41
+25.97
+
+SIGLIP
+18.50
+20.72
+
+images.
+An
+
+is
+
+In fact,
+
+creating
+
+important
+
+concern when
+Scene
+the diversity of predicates per
+Graph datasets
+< subject, object > pair.
+if a pair of ob-
+jects is mainly associated with a single predicate, then it is
+easy for a neural network to overfit to this single predicate,
+hindering generalization capabilities [32]. Empirically, we
+experienced a high recall for pairs associated with a low
+number of predicates and a low recall for the opposite. In
+Open-Vocabulary settings, every object can possibly have
+at least one relation with every other object, leading to
+a complexity of m ∗ (m − 1). For datasets with a large
+number of object classes, such as COCO or Objects365,
+annotating all pairs will be too resource-intensive. As we
+have seen in the previous section, VLMs can struggle to
+generate relations with distant objects; thus, we selected
+pairs of objects that intersect (i.e. IoU > 0) as valid
+candidates for our approach. Finally, we randomly selected
+50% of those pairs for relation prediction with a maximum
+of 50 per image. For the COCO dataset, this process results
+in an average of 9 relations generated per image; for the
+Objects365, the average is 17.
+
+Figure 5. Predicate distribution of RLIPv2 (OBJ365 images), we
+can observe that the top-5 predicates are not fine-grained.
+
+We used the LlaVa-OneVision 7B model [14] to generate
+the data, using the region prompting strategy introduced in
+Section 4. We post-processed generations by removing pred-
+icates with a length greater than 5 words. In the prompt, we
+also indicated that generating vague predicates (e.g. next to)
+was not desirable. In the next sections, we compare this ap-
+proach with previous work.
+
+5.1. Data quality
+
+In comparison with RLIPv2 [30], both data mixtures are
+very similar in size; the main difference is the quality and
+diversity of relations, as shown in Table 6. Note that our split
+generated on the COCO dataset contains 3x more predicates.
+The high number of predicates in the VG dataset comes from
+the fact that the raw data is used, containing a high number
+of noisy annotations [35] (e.g. <person, has a small light
+blue handbag attached to, hand> is a triplet in VG).
+
+Figure 5 and Figure 6 compare the predicate distribution
+of both data splits. One important concern with SGG is the
+long-tail distribution of predicates, which can significantly
+hurt the training of neural networks [24]. Figure 6 shows that
+the predicates in our data split are more diverse and balanced
+than those from RLIPv2 (see Figure 5). For RLIPv2, note
+
+Figure 6. Predicate distribution of the FG-OV dataset (100K images
+from OBJ365). Compared to RLIPv2, we can observe a better
+balance of the distribution as well as more fine-grained predicates.
+
+that the top predicates are not fine-grained (e.g. “with”, “on”,
+“next to”). Pre-training Open-Vocabulary SGG models on
+coarse data may hurt the generalization of such models [24].
+Table 7 presents the quality of annotations generated us-
+ing our method in contrsat to the data generated in RLIPv2
+[30]. We observed higher NegCLIP, CLIP, and SIGLIP
+scores with our data split, when evaluated on the same set
+of images. These results demonstrate better region-triplet
+alignment in the data generated using our region prompting
+strategy.
+
+Figure 7 compares annotations from the RLIPv2 dataset
+and our split generated using the LlaVa model. Due to am-
+biguous captions (i.e. a person with an umbrella on the
+beach), the relations from RLIPv2 are coarse and uninfor-
+
+(a) Original image.
+
+(b) Data from RLIPv2 [30].
+
+Table 8. Comparisons on HICO-DET under UC-RF and UC-NF
+settings. Results are reported on Unseen/Seen/Full sets.
+
+Data Mixture
+
+UC-RF
+
+UC-NF
+
+RLIPv2
+FG-OV (ours)
+
+15.88 / 26.00 / 23.98
+16.99 / 25.92 / 24.12
+
+18.87 / 19.87 / 19.67
+18.77 / 21.27 / 20.77
+
+pre-trained the model for 5 epochs instead of 20. For rare
+combinations (UC-RF), we see an important gain for the
+Unseen set (full zero-shot) from 15.88 to 16.99%. The av-
+erage relative improvement for all metrics is +3.5%. This
+demonstrates the importance of the diversity of pretraining
+data for Open-Vocabulary SGG.
+
+(c) Data from FG-OV (ours).
+
+6. Conclusion
+
+Figure 7. Comparison between data from the baseline RLIPv2 and
+our method using region-specific prompting with LlaVa-OneVision.
+
+mative in this example. Our data split is more fine-grained
+and contains a precise description of both the topological
+layout of the scene (e.g. < umbrella, next to, person >,
+< umbrella, above, person >) and the functional layout
+(e.g. < person, holding, umbrella >). By comparing this
+example with the distribution of relations in Figure 5, we
+can observe that spurious annotations (as in this previous ex-
+ample) are present to a significant extent in the data because
+the with predicate class is overly represented.
+
+5.2. Open-Vocabulary SGG Results
+
+In addition to evaluating the data quality, we evaluated the
+benefit of using the FG-OV dataset for pre-training of OV-
+SGG models. We replicated the training of the RLIPv2
+model in two settings:
+
+i. Original pre-training [30], using a data mixture com-
+posed of Visual Genome and COCO, where the annota-
+tions for COCO were generated by the RLIP method
+(R-PARSER).
+
+ii. Our pre-training, using the same data mixture but
+with COCO annotations generated by region-specific
+prompting with LlaVa (i.e. part of our FG-OV dataset).
+We pre-trained the RLIPv2 model for 5 epochs for each
+data mixture using the codebase and parameters given by the
+original authors [30]. Then, we evaluated our pre-training
+strategy for transfer learning on the HICO-DET dataset [3].
+Similar to previous work [30], we report results for zero-
+shot on the Unknown Combination (UC) settings UC-RF
+and UC-NF. UC-RF refers to rare combinations, and UC-NF
+refers to non-rare combinations. Table 8 shows that pre-
+training the model with our data split consistently increases
+the performance. The performance of RLIPv2 data mixture
+is different from the original work [30] because we only
+
+This paper presented threefold contributions to the Open-
+Vocabulary SGG task. First, we defined a new reference-free
+metric, the RelCLIPScore, which can be used with different
+models (NegCLIP, CLIP, or SIGLIP) to evaluate image-text
+alignment at the relation level. Second, we proposed a review
+and evaluation of a selection of VLMs on the task of relation
+prediction from image regions, showing the shortcomings of
+current state-of-the-art models in challenging scenarios. We
+especially witnessed limitations for pairs with size imbalance
+or distant repartition at the image level. Then, we used
+our findings to create an efficient prompting strategy for
+generating synthetic relations data for the task of Open-
+Vocabulary SGG. After further analysis, we showed that
+data generated by our method can be beneficial for the pre-
+training of SGG models in the Open-Vocabulary SGG, with
+an overall improvement of 3.5% on the HICO-DET dataset.
+Our findings mainly illustrate the current limitations of
+Vision-Language Models to learn fine-grained visual rela-
+tionship representations [31]. In addition, we showed the
+opportunity of using synthetic data generated by VLMs for
+Open-Vocabulary SGG, instead of traditional captions-based
+approaches [30].
+
+As future work, we intend to implement a dedicated sub-
+ject and object region embedding to boost the performance
+of Vision Language Models in relation prediction. Recent
+work [6] has proposed a region-specific training for VLMs,
+such approach can be extended to the context of relation
+prediction with a dedicated feature refinement module for
+subject and object. We believe such a strategy can help the
+model to (1) focus on the correct regions of the image and
+(2) focus on the directionality of the relation.
+
+Acknowledgments
+
+Zoe Falomir and Ma¨elic Neau acknowledge the Knut and
+Alice Wallenberg foundation and the Wallenberg AI, Au-
+tonomous Systems and Software Program (WASP).
+
+References
+
+[1] Fernando Amodeo, Fernando Caballero, Natalia D´ıaz-
+Rodr´ıguez, and Luis Merino. OG-SGG: Ontology-Guided
+Scene Graph Generation—A Case Study in Transfer Learning
+for Telepresence Robotics. IEEE Access, 10:132564–132583,
+2022. 1, 5
+
+[2] Shuai Bai, Keqin Chen, Xuejing Liu, Jialin Wang, Wenbin Ge,
+Sibo Song, Kai Dang, Peng Wang, Shijie Wang, Jun Tang,
+Humen Zhong, Yuanzhi Zhu, Mingkun Yang, Zhaohai Li,
+Jianqiang Wan, Pengfei Wang, Wei Ding, Zheren Fu, Yiheng
+Xu, Jiabo Ye, Xi Zhang, Tianbao Xie, Zesen Cheng, Hang
+Zhang, Zhibo Yang, Haiyang Xu, and Junyang Lin. Qwen2.5-
+VL Technical Report, 2025. 5, 6
+
+[3] Yu-Wei Chao, Yunfan Liu, Xieyang Liu, Huayi Zeng, and Jia
+Deng. Learning to detect human-object interactions. In 2018
+IEEE Winter Conference on Applications of Computer Vision
+(WACV), pages 381–389, 2018. 8
+
+[4] Zuyao Chen, Jinlin Wu, Zhen Lei, and Chang Wen Chen.
+What Makes a Scene ? Scene Graph-based Evaluation and
+Feedback for Controllable Generation, 2025. 2
+
+[5] Zuyao Chen, Jinlin Wu, Zhen Lei, Zhaoxiang Zhang, and
+Chang Wen Chen. Expanding Scene Graph Boundaries:
+Fully Open-Vocabulary Scene Graph Generation via Visual-
+In Computer Vision –
+Concept Alignment and Retention.
+ECCV 2024, pages 108–124, 2025. 1
+
+[6] Qiushan Guo, Shalini De Mello, Hongxu Yin, Wonmin Byeon,
+Ka Chun Cheung, Yizhou Yu, Ping Luo, and Sifei Liu.
+Regiongpt: Towards region understanding vision language
+model. In Proceedings of the IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition, pages 13796–13806,
+2024. 8
+
+[7] Agrim Gupta, Piotr Dollar, and Ross Girshick. Lvis: A dataset
+for large vocabulary instance segmentation. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 5356–5364, 2019. 1, 2
+
+[8] Tao He, Lianli Gao, Jingkuan Song, and Yuan-Fang
+Li. Towards Open-Vocabulary Scene Graph Generation
+with Prompt-Based Finetuning. In Computer Vision – ECCV
+2022, pages 56–73, . 1, 2
+
+[9] Tao He, Lianli Gao, Jingkuan Song, and Yuan-Fang Li.
+Towards Open-Vocabulary Scene Graph Generation with
+Prompt-Based Finetuning. In Computer Vision – ECCV 2022,
+pages 56–73. . 2
+
+[10] Jack Hessel, Ari Holtzman, Maxwell Forbes, Ronan Le Bras,
+and Yejin Choi. CLIPScore: A Reference-free Evaluation
+Metric for Image Captioning. In Proceedings of the 2021
+Conference on Empirical Methods in Natural Language Pro-
+cessing, pages 7514–7528. 2, 3
+
+[11] Kibum Kim, Kanghoon Yoon, Jaehyeong Jeon, Yeonjun
+In, Jinyoung Moon, Donghyun Kim, and Chanyoung Park.
+LLM4SGG: Large Language Models for Weakly Supervised
+Scene Graph Generation. In 2024 IEEE/CVF Conference
+on Computer Vision and Pattern Recognition (CVPR), pages
+28306–28316. 2
+
+[12] Alexander Kirillov, Eric Mintun, Nikhila Ravi, Hanzi Mao,
+Chloe Rolland, Laura Gustafson, Tete Xiao, Spencer White-
+head, Alexander C Berg, Wan-Yen Lo, et al. Segment any-
+
+thing. In Proceedings of the IEEE/CVF International Confer-
+ence on Computer Vision, pages 4015–4026, 2023. 5
+[13] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A Shamma, et al. Visual genome:
+Connecting language and vision using crowdsourced dense
+image annotations. International Journal of Computer Vision,
+123:32–73, 2017. 1, 2, 3, 4, 5
+
+[14] Bo Li, Yuanhan Zhang, Dong Guo, Renrui Zhang, Feng Li,
+Hao Zhang, Kaichen Zhang, Peiyuan Zhang, Yanwei Li, Zi-
+wei Liu, et al. Llava-onevision: Easy visual task transfer.
+arXiv preprint arXiv:2408.03326, 2024. 5, 6, 7
+
+[15] Junnan Li, Dongxu Li, Silvio Savarese, and Steven Hoi. BLIP-
+2: Bootstrapping Language-Image Pre-training with Frozen
+Image Encoders and Large Language Models. In Proceedings
+of the 40th International Conference on Machine Learning,
+pages 19730–19742, 2023. 3, 4
+
+[16] Xinghang Li, Di Guo, Huaping Liu, and Fuchun Sun. Em-
+bodied Semantic Scene Graph Generation. In Proceedings
+of the 5th Conference on Robot Learning, pages 1585–1594,
+2022. 1
+
+[17] Tsung-Yi Lin, Michael Maire, Serge Belongie, James Hays,
+Pietro Perona, Deva Ramanan, Piotr Doll´ar, and C Lawrence
+Zitnick. Microsoft coco: Common objects in context. In
+Computer Vision–ECCV 2014, pages 740–755, 2014. 6
+[18] Ma¨elic Neau, Paulo E. Santos, Anne-Gwenn Bosser, and
+C´edric Buche. Fine-Grained is Too Coarse: A Novel Data-
+Centric Approach for Efficient Scene Graph Generation. In
+Proceedings of the IEEE/CVF International Conference on
+Computer Vision, pages 11–20, 2023. 3
+
+[19] Ma¨elic Neau, Paulo Santos, Anne-Gwenn Bosser, and C´edric
+Buche. In Defense of Scene Graph Generation for Human-
+Robot Open-Ended Interaction in Service Robotics.
+In
+RoboCup 2023: Robot World Cup XXVI, pages 299–310.
+2024. 1
+
+[20] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya
+Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry,
+Amanda Askell, Pamela Mishkin, Jack Clark, Gretchen
+Krueger, and Ilya Sutskever. Learning Transferable Visual
+Models From Natural Language Supervision. In Proceedings
+of the 38th International Conference on Machine Learning,
+pages 8748–8763. 2, 3, 4
+
+[21] Tim Salzmann, Markus Ryll, Alex Bewley, and Matthias
+Minderer. Scene-Graph ViT: End-to-End Open-Vocabulary
+Visual Relationship Detection. In Computer Vision – ECCV
+2024, pages 195–213, 2025. 2
+
+[22] Noel Sch¨afer, Sebastian K¨unzel, Tanja Munz-K¨orner, Pascal
+Tilli, Sandeep Vidyapu, Ngoc Thang Vu, and Daniel Weiskopf.
+Visual Analysis of Scene-Graph-Based Visual Question An-
+swering. In Proceedings of the 16th International Symposium
+on Visual Information Communication and Interaction, pages
+1–8, 2023. 1, 4, 5
+
+[23] Shuai Shao, Zeming Li, Tianyuan Zhang, Chao Peng, Gang
+Yu, Xiangyu Zhang, Jing Li, and Jian Sun. Objects365: A
+large-scale, high-quality dataset for object detection. In Pro-
+ceedings of the IEEE/CVF international conference on com-
+puter vision, pages 8430–8439, 2019. 2, 6
+
+AAAI conference on artificial intelligence, pages 9185–9194,
+2019. 7
+
+[36] Jinguo Zhu, Weiyun Wang, Zhe Chen, Zhaoyang Liu, Shen-
+glong Ye, Lixin Gu, Hao Tian, Yuchen Duan, Weijie Su,
+Jie Shao, et al. Internvl3: Exploring advanced training and
+test-time recipes for open-source multimodal models. arXiv
+preprint arXiv:2504.10479, 2025. 5, 6
+
+[24] Kaihua Tang, Yulei Niu, Jianqiang Huang, Jiaxin Shi, and
+Hanwang Zhang. Unbiased Scene Graph Generation From
+Biased Training. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 3716–
+3725, 2020. 1, 2, 3, 7
+
+[25] Tristan Thrush, Ryan Jiang, Max Bartolo, Amanpreet
+Singh, Adina Williams, Douwe Kiela, and Candace Ross.
+Winoground: Probing vision and language models for visio-
+linguistic compositionality. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 5238–5248, 2022. 4
+
+[26] Weiyun Wang, Yiming Ren, Haowen Luo, Tiantong Li,
+Chenxiang Yan, Zhe Chen, Wenhai Wang, Qingyun Li,
+Lewei Lu, Xizhou Zhu, Yu Qiao, and Jifeng Dai. The All-
+Seeing Project V2: Towards General Relation Comprehension
+of the Open World. In Computer Vision – ECCV 2024, pages
+471–490. 1, 2
+
+[27] Jingkang Yang, Yi Zhe Ang, Zujin Guo, Kaiyang Zhou,
+Wayne Zhang, and Ziwei Liu. Panoptic Scene Graph Genera-
+tion. In Computer Vision - ECCV 2022, pages 178–196, 2022.
+1, 2, 3, 4, 5, 6
+
+[28] Jianwei Yang, Hao Zhang, Feng Li, Xueyan Zou, Chunyuan
+Li, and Jianfeng Gao. Set-of-Mark Prompting Unleashes
+Extraordinary Visual Grounding in GPT-4V. arXiv preprint
+arXiv:2310.11441, 2023. 5
+
+[29] Xu Yang, Jiawei Peng, Zihua Wang, Haiyang Xu, Qinghao
+Ye, Chenliang Li, Songfang Huang, Fei Huang, Zhangzikang
+Li, and Yu Zhang. Transforming Visual Scene Graphs to
+Image Captions. In Proceedings of the 61st Annual Meeting
+of the Association for Computational Linguistics (Volume 1:
+Long Papers), pages 12427–12440, 2023. 1, 4
+
+[30] Hangjie Yuan, Shiwei Zhang, Xiang Wang, Samuel Albanie,
+Yining Pan, Tao Feng, Jianwen Jiang, Dong Ni, Yingya Zhang,
+and Deli Zhao. RLIPv2: Fast Scaling of Relational Language-
+Image Pre-Training. In Proceedings of the IEEE/CVF Interna-
+tional Conference on Computer Vision, pages 21649–21661,
+2023. 1, 2, 6, 7, 8
+
+[31] Mert Yuksekgonul, Federico Bianchi, Pratyusha Kalluri, Dan
+Jurafsky, and James Zou. When and Why Vision-Language
+Models Behave like Bags-Of-Words, and What to Do About
+It? In The Eleventh International Conference on Learning
+Representations, 2022. 3, 4, 5, 8
+
+[32] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin Choi.
+Neural Motifs: Scene Graph Parsing with Global Context. In
+2018 IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 5831–5840, 2018. 1, 7
+
+[33] Xiaohua Zhai, Basil Mustafa, Alexander Kolesnikov, and
+Lucas Beyer. Sigmoid Loss for Language Image Pre-Training.
+In Proceedings of the IEEE/CVF International Conference
+on Computer Vision, pages 11975–11986, 2023. 3, 4
+[34] Ao Zhang, Yuan Yao, Qianyu Chen, Wei Ji, Zhiyuan Liu,
+Maosong Sun, and Tat-Seng Chua. Fine-Grained Scene Graph
+Generation with Data Transfer. In Computer Vision – ECCV
+2022, pages 409–424, 2022. 2
+
+[35] Ji Zhang, Yannis Kalantidis, Marcus Rohrbach, Manohar
+Paluri, Ahmed Elgammal, and Mohamed Elhoseiny. Large-
+scale visual relationship understanding. In Proceedings of the
+
+

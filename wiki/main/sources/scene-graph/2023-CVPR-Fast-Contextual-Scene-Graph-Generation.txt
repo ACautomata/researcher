@@ -1,0 +1,1514 @@
+Fast Contextual Scene Graph Generation with Unbiased Context Augmentation
+
+Tianlei Jin1
+
+Fangtai Guo1
+Wen Wang1
+Wei Song1*
+Zonghao Mu1
+1Research Center for Intelligent Robotics, Zhejiang Lab
+{jtl,guofangtai,mengqw,zhusq,xxm21,wangwen,muzonghao,weisong}@zhejianglab.com
+
+Shiqiang Zhu1
+
+Qiwei Meng1
+
+Xiangming Xi1
+
+Abstract
+
+Scene graph generation (SGG) methods have histori-
+cally suffered from long-tail bias and slow inference speed.
+In this paper, we notice that humans can analyze relation-
+ships between objects relying solely on context descriptions,
+and this abstract cognitive process may be guided by expe-
+rience. For example, given descriptions of cup and table
+with their spatial locations, humans can speculate possible
+relationships < cup, on, table > or < table, near, cup >.
+Even without visual appearance information, some impossi-
+ble predicates like f lying in and looking at can be empiri-
+cally excluded. Accordingly, we propose a contextual scene
+graph generation (C-SGG) method without using visual in-
+formation and introduce a context augmentation method.
+We propose that slight perturbations in the position and size
+of objects do not essentially affect the relationship between
+objects. Therefore, at the context level, we can produce di-
+verse context descriptions by using a context augmentation
+method based on the original dataset. These diverse context
+descriptions can be used for unbiased training of C-SGG
+to alleviate long-tail bias. In addition, we also introduce
+a context guided visual scene graph generation (CV-SGG)
+method, which leverages the C-SGG experience to guide
+vision to focus on possible predicates. Through extensive
+experiments on the publicly available dataset, C-SGG al-
+leviates long-tail bias and omits the huge computation of
+visual feature extraction to realize real-time SGG. CV-SGG
+achieves a great trade-off between common predicates and
+tail predicates.
+
+1. Introduction
+
+SGG is a challenging technology that identifies triplet
+relationships < subject, predicate, object > between ob-
+jects from images. With the development of artificial intel-
+ligence, SGG has gradually become a bridge from image
+recognition to image understanding. Scene graphs are an
+
+*Corresponding Author
+
+indispensable part of complex visual understanding tasks,
+such as visual question answering [24], visual grounding
+[21] and visual-language navigation [40]. However, the re-
+searches [3, 19, 36]on SGG suffer from two insurmount-
+able obstacles. The first is the long-tail bias derived from
+datasets. More common predicates such as on and near
+have more samples than tail predicates such as from and
+above, causing the model to prefer to classify the common
+predicates. The second is the low-speed inference in prac-
+tical applications. Analyzing the predicate between each
+objects-pair to generate a scene graph is a quadratic time
+complexity problem, making real-time inference difficult.
+
+On the one hand, some SGG methods [3, 26, 31, 34] are
+dedicated to solving the long-tail bias. Tang [26] and Chiou
+[2] introduce the causal graph and the label frequency to
+reason tail predicates and attempt unbiased SGG inference
+based on biased training. Li [11] and Desai [3] propose
+to optimize label distribution and rebalance category sam-
+pling, which realize unbiased SGG training. However, these
+methods increase the recall of tail predicates, but inevitably
+reduce the recall of common predicates. The current SGG
+methods are difficult to consider and balance the recall of
+common predicates and tail predicates simultaneously. We
+think the internal reason is that there are not enough data
+samples for each predicate.
+
+On the other hand, some SGG methods [18, 33] focus
+on improving the inference speed of the SGG task. In de-
+tail, Yang [33] designs all objects in a fully connected graph
+structure and prunes the connections between objects.
+It
+can reduce the time complexity of SGG inference. Liu [18]
+transforms the predicate inference into an integral on rela-
+tionship affinity fields. Although the time complexity is not
+reduced, the computation amount of integral operation is
+much less than that of deep learning calculation of visual
+features. These methods improve the inference speed, but
+sacrifice the recall performance.
+
+We reflect on the human cognitive process of predicate
+analysis between objects and discover two overlooked phe-
+nomena. First, humans can roughly infer the predicate be-
+tween objects based on the context descriptions only includ-
+
+ThisCVPRpaperistheOpenAccessversion,providedbytheComputerVisionFoundation.Exceptforthiswatermark,itisidenticaltotheacceptedversion;thefinalpublishedversionoftheproceedingsisavailableonIEEEXplore.6302Figure 1. A. The example of human speculate predicates based on the context description. B. (a) Use software to change objects in the
+image to produce fake images; (b) Project object pairs in the fake image to the context level. C. Examples of C-SGG outputs in different
+context descriptions. D. Examples of CV-SGG to further analyze high-confidence relationships and possible predicates.
+
+ing categories and positions. In other words, humans can
+speculate and analyze possible relationships through con-
+text descriptions even without seeing objects. As shown in
+Fig.1 A, when humans know the subject man and the ob-
+ject bike, they can speculate and analyze which predicates
+are possible (’riding’, ’sitting on’ , ’near’) and which predi-
+cates are impossible (’wears’, ’flying in’, ’eating’) based on
+past experience. Second, when humans analyze the predi-
+cate between the objects-pair, the apparent features of the
+objects themself are not important. As shown in Fig.1 B
+(a), we use adobe photoshop software to move the human
+body and replace the style of the glasses, but the relation-
+ship < man, wears, glass > remains the same. Therefore,
+we argue that context features may be more important than
+visual features in rough predicates judgment.
+
+Based on this thought, we weaken the role of vision
+in the SGG task and propose a contextual SGG (C-SGG)
+method with context augmentation. As we did in Fig.1 B
+(a), software such as photoshop can be used to modify the
+image by moving the position and replacing the like objects
+without changing the predicate. Different from traditional
+image augmentation, HSV variation and size scale chang-
+ing the entire image, this kind of image modification will
+change the shape and position of a certain object. However,
+using software to modify images is an extremely complex
+task. We project the modified image to the context level,
+as shown in Fig.1 B (b), which is the slight translation and
+scale of the object position with a cheap cost, and we named
+it context augmentation. In our C-SGG method, we only
+use context descriptions to predict predicates, and context
+augmentation can increase context description samples of
+any tail predicate for unbiased training. To some extent,
+through the context augmentation, during our training for
+
+C-SGG, there are no two identical context descriptions. In
+addition, since there are no visual image features, we do not
+need complex computational models. Although it is still
+a quadratic time complexity task, the computation amount
+per object pair is extremely cheap.
+
+Certainly, the C-SGG lacks the analysis of the visual in-
+teraction information between objects. We also propose a
+context guided visual SGG method (CV-SGG) to confirm
+truth predicates between object pairs further. As shown
+in Fig.1 C, C-SGG can roughly analyze the confidence in
+the existence of relationships between objects-pairs and the
+possible types of predicates. Our CV-SGG focuses on those
+high-confidence relationships and the high possible predi-
+cates. We use a simple visual model to extract visual fea-
+tures and fuse them with contextual features. During the
+training, we apply a ReLuL1 function and only calculate
+the loss on high possible predicates. In this way, CV-SGG
+only pays attention to possible predicates from C-SGG and
+ignores impossible predicates. As shown in Fig.1 D, con-
+text guided visual SGG is used to boost the truth predicate
+and suppress other possible but false predicates.
+
+We validate our methods on the most common SGG
+dataset VG [10] and the latest SGG dataset PSG [32]. Our
+methods achieve the best balance between common pred-
+icates and tail predicates, and accomplish real-time SGG.
+The contributions of this paper can be summarized as:
+
+1) Inspired by the human cognitive process, we propose
+context augmentation to produce diverse context de-
+scriptions at the context level for unbiased training,
+which weakens the role of vision.
+
+2) We propose two methods for SGG: C-SGG which only
+uses context descriptions and CV-SGG which guides vi-
+
+6303sual attention based on C-SGG results.
+
+3) Based on extensive experiments on two SGG datasets
+VG and PSG, our methods have obvious advantages in
+dealing with long-tail bias and inference speed.
+
+2. Related Works
+
+Traditional research about SGG is also called visual re-
+lationship detection. VRD [19] first proposes the SGG task
+based on visual object proposals from RCNN [4, 25]. Re-
+searchers have gradually realized the importance of SGG
+in image understanding, and many subsequent works in-
+cluding IMP [30], Motifs [36], VCTree [27] follow this
+task. These works respectively introduce message pass-
+ing structures, such as IMP [30], MSDN [14], GPS-Net
+[17], GB-Net [35], CISC [29], tree structures including VC-
+Tree [27] and CogTree [34], graph structures including G-
+RCNN [33], KERN [1] and GCN-SGG [39]. Pixels2Graphs
+[22] and FCSGG [18] directly predict object pairs and rela-
+tionships from images, without relying on RCNN results.
+Seq2Seq-RL [20] introduces using the global context and
+the seq2seq transformer to estimate the scene graph. SS-
+RCNN [28] achieves one-stage SGG through triple query
+based on Sparse R-CNN. OpenPSG [32] combines the
+panoptic segmentation and the SGG, and uses the trans-
+former structure to simultaneously predict panoptic masks
+and relationships. However, in these methods, visual fea-
+tures always play a dominant role in SGG and context fea-
+tures are often used as auxiliary information. For exam-
+ple, RelDN [38] predicts the predicate in the spatial, seman-
+tics and visual three channels respectively, and designs the
+contrastive losses. GPS-Net [17] concats visual features,
+class scores and spatial features as node features and pre-
+dicts predicates between nodes based on node features. Mo-
+tifs [36] has proposed to use the global bounding boxes and
+labels for edge prediction, but global context information
+cannot effectively deal with long-tail bias, and the infer-
+ence speed of bidirectional LSTM is slow. In our methods,
+we only use local context and visual features are discarded.
+Our methods extract object pairs for contextual augmenta-
+tion training, and uses the results of the contextual scene
+graph results to guide visual SGG.
+
+In recent years, due to the extreme imbalance of pred-
+icate categories in the SGG dataset, some works have fo-
+cused on the long-tail bias to improve the performance of
+tail predicate predictions. These works can be divided ac-
+cording to whether the training is biased or not. For bi-
+ased SGG training, extra information is often learned to
+help remove bias during inference. TDE [26] proposes the
+causal graph and tries to make the model recognize the deep
+mean of object features. Cogtree [34] proposes a coarse-to-
+fine method and debris from biased predictions, while BPL-
+SA [6] introduces the confusion matrix. DLFE [2] proposes
+
+the label frequency estimation and learns the label frequen-
+cies in biased training to remove reporting bias.
+
+For unbiased SGG training, additional data processing
+steps help the model to train unbiased. PCPL [31] pro-
+poses the predicate correlation and enables the model to
+distinguish similar predicates, such as ’on’ and ’parked on’.
+GFAL [9] introduces the graph density-aware losses for un-
+biased training. DT2-ACBS [3] introduces rebalanced sam-
+pling strategy and discusses the impact of different sam-
+pling strategy on the SGG task. NICE [11] analyzes the
+samples in the dataset to optimize more accurate labels and
+generate pseudo-labels that are not labeled. IETrans [37]
+proposes internal transfer and external transfer to enhance
+SGG dataset. BGNN [13] introduces a bipartite graph net-
+work with bi-level data sampling that can account for the
+overall recall and the mean recall of predicates. We believe
+small changes in objects for producing fake images do not
+change predicates between objects, so we project fake im-
+ages to the context level to increase the number of context
+samples. Then we can obtain diverse context samples for
+unbiased training of the contextual SGG.
+
+3. Method
+
+Notation. Given an SGG dataset χ, we donate its corre-
+sponding images I, bounding box locations B, objects O,
+and relationships R. For SGG, giving an image Ii, we can
+get a graph Gi, which is made up of a set of bounding box
+locations Bi = {bi1, bi2, ...bin}, bij ∈ R4, objects Oi =
+{oi1, oi2, ...oin}, relationships Ri = {ri1, ri2, ..., rim}.
+Therefore, the task of SGG can be expressed as:
+
+P r(B, O, R|I) = P r(B, O|I)P r(R|B, O, I),
+
+(1)
+
+Following previous works [35, 36, 38], P r(B, O|I) is al-
+ways realized with the help of object detection methods
+[25], and the SGG task pays more attention to relationships
+generation P r(R|B, O, I).
+
+3.1. Contextual SGG
+
+In our C-SGG, contextual relationships are learned only
+from context descriptions. The context descriptions include
+objects O and bounding box locations B, and the learned
+possible predicate knowledge, which we donate Rc. The
+process of SGG from the context descriptions can be ex-
+pressed as follows:
+
+P r(Rc|B, O).
+
+(2)
+
+Before C-SGG training, we preprocess the context to
+augment the context description. Traditional image aug-
+mentation enriches the color and size of the entire image,
+but the size and relative position of objects stay unchanged.
+For the prediction of predicates between objects, we believe
+that the apparent features of the image are not important, but
+
+6304Figure 2. Illustration of our C-SGG and CV-SGG methods. We employ other object detection models to obtain categories and bounding
+boxes as the context description. For C-SGG, our context augmentation method is used to generate diverse context descriptions and these
+context descriptions are input into the simple CKN network to estimate possible predicates. For CV-SGG, the image with masks are input
+into the VDN network, then the contextual mask Rmask guide the VDN focus on those possible predicates.
+
+the size of the objects themselves and the positional rela-
+tionship between objects are more critical. For example, in
+Fig.2, the relationship is < man, wearing, glasses >. The
+body of the man may be tall or short, fat or thin. The style
+of the glasses may be large or small, and the location of the
+glasses may move with the head. However, the predicate
+wearing between the man and glasses has never changed.
+Therefore, we attempt to produce fake images by changing
+the position of the object and replacing the style of the ob-
+ject, but it is extremely labor-intensive. At the context level,
+the process of producing fake images can be viewed as per-
+turbing the position of the bounding box of objects with a
+cheap cost.
+
+As shown in Fig.2, we obtain the category and bound-
+ing box of the object
+in the image through the com-
+mon object detection algorithm. For the j object in the
+i image, the normalized location can be represented as:
+bij = [x1ij, y1ij, x2ij, y2ij]. Then we add random con-
+text augmentations to the position, denoted as (cid:102)bij =
+[(cid:102)x1ij, (cid:102)y1ij, (cid:102)x2ij, (cid:102)y2ij] = [x1ij + ε1, y1ij + ε2, x2ij +
+ε3, y2ij + ε4], ε is random augment factor. For the category
+of the object oij, we use the glove word2vector model [23]
+to convert the category of object oij into semantic word vec-
+tor ⃗oij, ⃗oij ∈ R50. The location vector ⃗bij consists of (cid:101)bij,
+⃗bij = [(cid:102)x1ij, (cid:102)y1ij, (cid:102)x2ij, (cid:102)y2ij, (cid:102)xcij, (cid:101)ycij]×5,⃗bij ∈ R30. (cid:102)xcij
+and (cid:101)ycij are the center of the bounding box, and we repeat
+the location by 5 times to enhance location features. For the
+
+two objects j1 and j2, the final vector of context description
+can be expressed:
+
+⃗D = [⃗oij1 ,⃗bij1, ⃗oij2 ,⃗bij2,⃗bij1 − ⃗bij2], ⃗D ∈ R190.
+
+(3)
+
+the confidence loss Lckn
+
+We construct a simple and effective context knowledge
+network (CKN) to generate possible contextual predicates
+based on context description vectors ⃗D. In detail, we use
+three fully connected network layers with a sigmoid layer.
+The output dimension of the CKN corresponds to the num-
+ber of predicates in the dataset. The loss consists of two
+parts,
+conf and the predicate loss
+Lckn
+rel . Both two loss are calculated by Binary Cross Entropy
+(BCE) function. The CKN predicts the likelihood and pos-
+sible predicates of relationships between two contextually
+described objects. In this way, based on raw data samples
+in the dataset, we generate diverse context descriptions for
+each predicate through random context augmentations, and
+achieve C-SGG through CKN without vision.
+
+3.2. Context Guided Visual SGG
+
+We are able to pick out possible predicates through the
+C-SGG, but since no visual information is used, the predic-
+tion is empirical. We further propose a CV-SGG, combining
+visual and contextual. The process of learning relationships
+from CV-SGG can be expressed as:
+
+P r(Rv|B, O, I, Rc).
+
+(4)
+
+6305Based on object detection results, we can get the loca-
+tion of objects. We make the subject mask and the object
+mask according to the location of the object pair. We com-
+press the subject mask, the original image and the object
+mask together to form visual pair information, and feed it
+to the vision differentiation network (VDN). The VDN is
+constructed by a ResNet [7] for extracting visual features,
+followed by a flattened layer and a fully connected layer
+with a sigmoid for predicate prediction.
+
+From C-SGG, the CKN predicts the confidence scores
+and possible predicates. We expect that VDN can focus
+on possible predicates, ignore impossible predicates (e.g.
+< human, above, glass >), and differentiate the truth
+predicate relationship Rv based on vision. Based on Rc,
+we generate an Rmask for the most possible Nmask predi-
+cates. Then we design a ReLuL1 loss including Lvdn
+boost and
+Lvdn
+
+suppress to boost or suppress Rv.
+
+RTX2070 SUPER with 256 batch size, which only takes up
+1.8G GPU memory without visual information. The epoch
+is 2000 for 8 hours of training. The initial learning rate is
+set to 0.04 and drops during training.
+
+For CV-SGG, the inputs size of VDN are resized to
+224×224×5, including two masks and an image. As for
+the Rmask, we count the output of C-SGG and find that in
+the test samples of the VG dataset, the probability of the
+truth predicate being included in the top 3, 5, and 10 possi-
+bilities is 89%, 95%, and 98%, respectively, so we set the
+Nmask = 10. The boost factor η is set to 0.1, and the em-
+pirical factor α is set to 0.7 for balance context experience
+and vision analysis. We trained it on an RTX3090Ti with 64
+batch size. The epoch is 100 for 60 hours of training. The
+initial learning rate is set to 0.002 and drops during training.
+
+4. Experiments
+
+Lvdn
+
+boost = ReLu(Rc
+
+p=pt − Rv
+
+(5)
+
+4.1. Dataset and Metrics
+
+p=pt + η),
+p̸=pt + η) × Rmask,
+
+(6)
+
+Lvdn
+
+suppress = ReLu(Rv
+p̸=pt − Rc
+For the truth predicate pt in eq.5, we suppose that visual
+understanding Rv can further boost contextual probability
+Rc. For the false predicate in eq.6, we suppose the visual
+understanding Rv can suppress contextual probability Rc,
+and only high possible predicates based on contextual mask
+Rmask will be calculated, η is a boost factor. For exam-
+ple, in Fig.2, the model learns from the C-SGG that has,
+near, wears are high possible predicates under the current
+context description which can generate a Rmask. During
+CV-SGG, the visual information only focuses on and ana-
+lyzes these possible predicates. Just like analysis pattern of
+human beings, relationships that are beyond the scope of
+empirical cognition are not considered.
+
+During the final inference, context and vision are both
+
+considered:
+
+R = (αRc + (1 − α)Rv) × Rmask,
+
+(7)
+
+Where α is an empirical factor. The larger α is, the model
+more believes in the inherent context experience. The
+smaller α is, the model more believes in the visual analysis.
+Similarly, only high possible predicates can be imagined in
+inference through Rmask.
+
+3.3. Implementation detail
+
+For C-SGG, we perform context description augments
+during training. We set the context augmentation factor ε
+below 0.05. We also adopt a similar alternating class bal-
+anced sampling [3] strategy to make the samples of each
+predicate as equal as possible, the difference is that our
+samples are enhanced by context descriptions. Even for the
+same sample, the context description of the input model af-
+ter context augmentation is different. We trained it on an
+
+We train and evaluate our method on the challenging
+SGG dataset VG [10, 26]. VG contains approximately 108k
+images, with 70% for training and 30% for testing from the
+Visual Genome dataset [10]. The relationships include the
+most frequent 150 object categories and 50 predicate cate-
+gories. In total, the number of original object pair context
+descriptions in the VG training set is 342,363. There are
+101,843 and 54,317 samples for the common predicates on
+and has, while only 121 and 260 samples for the tail predi-
+cates playing and across. The task requires outputting the
+results of object detection and the scene graph.
+
+We also evaluate our method on the latest SGG dataset
+PSG [32]. PSG contains 46697 images for training, and
+1989 images for validation and testing from the COCO
+dataset [16]. Each image has a corresponding panoptic seg-
+mentation label. For relationships, it includes 133 objects
+(i.e., things plus stuff) and 56 predicates with appropriate
+granularity and minimal overlaps. The number of original
+object pair context descriptions in the PSG training set is
+261,666. There are 52,974 and 45,032 samples for the most
+common predicates on and beside, while only 7 and 8 sam-
+ples for the tail predicates f alling of f and picking. The
+task requires outputting the results of panoptic segmentation
+and the scene graph.
+
+This paper focuses on the scene graph. We evaluate
+our method on two standard SGG tasks: Predicate Clas-
+sification (PredCls) and Scene Graph Generation (SGGen).
+For PredCls, given the ground-truth objects Ot and loca-
+tions Bt (or panoptic segmentation mask M t), we only
+need to predict the predicate category of relationships,
+P (R|Bt(M t), Ot, I). For SGGen, only given the image
+I, we need to generate the scene graph, P (B(M ), O, R|I).
+The metrics of SGG including Recall@K (R@K) [19],
+mean Recall@K (mR@K) [27], Mean@K [11], F@K
+
+6306Method
+
+IMP [30]CVPR’2017
+FREQ [36]CVPR’2018
+G-RCNN [33]ECCV’2018
+KERN [1]CVPR’2019
+GB-NET [35]ECCV’2020
+BGNN [13]CVPR’2021
+DT2-ACBS [3]ICCV’2021
+PCPL [31]ACM MM’2021
+FCSGG [18]CVPR’2021
+SGTR [12]CVPR’2022
+SS-RCNN [28]CVPR’2022
+Motifs [36]CVPR’2018
++TDE [26]CVPR’2020
++CogTree [34]IJCAI’2021
++DLFE [2]ACM MM’2021
++BPL-SA [6]ICCV’2021
++NICE [11]CVPR’2022
++IETrans [37]ECCV’2022
+
+VCTree [27]CVPR’2019
++TDE [26]CVPR’2020
++CogTree [34]IJCAI’2021
++DLFE [2]ACM MM’2021
++BPL-SA [6]ICCV’2021
++NICE [11]CVPR’2022
++IETrans [37]ECCV’2022
+
+C-SGG(Ours)
+CV-SGG(Ours)
+
+PredCls
+
+SGGen
+
+R@50/100 mR@50/100 Mean@50/100
+61.1/63.1
+60.6/62.2
+64.8/66.7
+65.8/67.6
+66.6/68.2
+59.2/61.3
+23.3/25.6
+50.8/52.6
+41.0/45.0
+-
+-
+65.5/67.2
+46.2/51.4
+35.6/36.8
+52.5/54.2
+50.7/52.5
+55.1/57.2
+48.6/50.5
+65.9/67.5
+47.2/51.6
+44.0/45.4
+51.8/53.5
+50.0/51.8
+55.0/56.9
+48.0/49.9
+55.2/59.2
+58.2/62.4
+
+11.0/11.8
+13.0/16.0
+16.4/17.2
+17.7/19.2
+22.1/24.0
+30.4/32.9
+35.9/39.7
+35.2/37.8
+6.3/7.1
+-
+-
+16.5/17.8
+25.5/29.1
+26.4/29.0
+26.9/28.8
+29.7/31.7
+29.9/32.3
+35.8/39.1
+17.1/18.4
+25.4/28.7
+27.6/29.7
+25.3/27.1
+30.6/32.6
+30.7/33.0
+37.0/39.7
+32.9/36.0
+32.6/36.2
+
+36.1/37.4
+36.8/39.1
+40.6/42.0
+41.2/43.4
+44.4/46.1
+44.8/47.1
+29.6/32.7
+43.0/45.2
+23.7/26.1
+-
+-
+41.0/42.5
+35.9/40.3
+31.0/32.9
+39.7/41.5
+40.2/42.1
+42.5/44.8
+42.2/44.8
+41.5/43.0
+36.3/40.2
+35.8/37.6
+38.6/40.2
+40.3/42.2
+42.9/45.0
+42.5/44.8
+44.1/47.6
+45.4/49.3
+
+F@50/100 R@50/100 mR@50/100 Mean@50/100
+18.6/19.9
+21.4/25.5
+26.2/27.4
+27.9/29.9
+33.2/35.5
+40.2/42.8
+28.3/31.1
+41.6/44.0
+10.9/12.3
+-
+-
+26.4/28.1
+32.9/37.2
+30.3/32.4
+35.6/37.6
+37.5/39.5
+38.7/41.3
+41.2/44.1
+27.2/28.9
+33.0/36.9
+33.9/35.9
+34.0/35.9
+38.0/40.0
+39.4/41.8
+41.8/44.2
+41.2/44.7
+41.8/45.8
+
+15.1/18.3
+16.2/18.6
+17.8/19.7
+16.8/18.6
+16.7/19.2
+20.9/24.2
+18.5/20.4
+12.1/15.2
+12.4/14.7
+18.3/21.8
+21.0/24.4
+18.8/21.9
+12.6/15.1
+15.2/16.9
+18.6/21.6
+18.3/21.3
+20.0/23.1
+19.5/22.6
+19.6/22.3
+14.4/17.2
+14.3/16.3
+17.3/20.1
+17.6/20.6
+19.5/22.5
+17.4/21.4
+20.8/23.8
+21.2/24.5
+
+4.2/5.3
+6.1/7.1
+5.8/6.6
+6.4/7.3
+7.1/8.5
+10.7/12.6
+22.0/24.4
+9.5/11.7
+3.6/4.2
+12.0/15.2
+8.6/10.3
+5.5/6.8
+8.2/9.8
+10.4/11.8
+11.7/13.8
+13.5/15.6
+12.2/14.4
+15.5/18.0
+7.2 / 8.4
+9.3/11.1
+10.4/12.1
+11.8/13.8
+13.5/15.7
+11.9/14.1
+12.0/14.9
+14.8/17.1
+14.6/17.0
+
+25.9/31.2
+26.2/30.1
+29.7/32.8
+27.1/29.8
+26.3/29.9
+31.0/35.8
+15.0/16.3
+14.6/18.6
+21.3/25.1
+24.6/28.4
+33.5/38.4
+32.1/36.9
+16.9/20.3
+20.0/22.1
+25.4/29.4
+23.0/26.9
+27.8/31.8
+23.5/27.2
+32.0/36.2
+19.4/23.2
+18.2/20.4
+22.7/26.3
+21.7/25.5
+27.0/30.8
+23.6/27.8
+26.7/30.5
+27.8/32.0
+
+F@50/100
+7.2/9.1
+9.9/11.5
+9.7/11.0
+10.4/11.7
+11.2/13.2
+15.9/18.6
+17.8/19.5
+11.5/14.4
+6.0/7.2
+16.1/19.8
+13.7/16.2
+9.4/11.5
+11.0/13.2
+13.7/15.4
+16.0/18.8
+17.0/19.8
+17.0/19.8
+18.7/21.7
+11.8/13.6
+12.6/15.0
+13.2/15.2
+15.5/18.1
+16.6/19.4
+16.5/19.3
+15.2/19.4
+19.0/21.9
+19.2/22.2
+
+Table 1. Comparison results of SOTA SGG methods on the VG dataset. The excellent result of each group has been marked in blue, while
+the best result is marked in red.
+
+[37]. R@K calculates the proportion of top-K confident
+triplets contained in the ground truth, and each triplet only
+counts the highest score predicate. mR@K calculates the
+R@K for each predicate category separately. Mean@K is
+the arithmetic average of R@K and mR@K. F@K is the
+harmonic average of R@K and mR@K. Since there are
+more common predicate samples in the dataset, R@K is
+more suitable for evaluating the recall of common predi-
+cates. While a few tail predicate samples lead to dramatic
+influence on mR@K, mR@K is more concerned with the
+recall of tail predicates. Mean@K and F@K are proposed to
+analyze the balance performance of R@K and mR@K. For
+fairness, we use the same evaluation system as TDE [26].
+
+4.2. Evaluation on VG dataset
+
+We first compare our results with the previous SOTA
+methods on the VG dataset in Table 1. We roughly divide
+previous methods into 3 groups. The first group methods
+do not depend on the previous SGG methods, the second
+group methods are modifications based on Motifs, and the
+third group methods are improvements based on VCTree.
+
+We pay more attention to achieving the balance between
+recall R@K and mean recall mR@K, and want to optimize
+long-tail bias while maintaining a high overall recall. So
+Mean@K and F@K metrics are more critical. The Pred-
+
+Cls task only focuses on predicates based on known objects.
+Although our method is not the best in the metrics of R@K
+and mR@K, our method can find the optimal balance and
+achieve the SOTA result on Mean@K and F@K. Our C-
+SGG method has achieved excellent performance without
+using vision, while CV-SGG method has further improved
+the R@K without reducing the mR@K by using visual in-
+formation. FREQ from [36] is a method of generating re-
+lationships by statistical frequency without visual informa-
+tion. Compared with it, our C-SGG method has obvious ad-
+vantages. The SGGen task needs to detect objects and gen-
+erate predicates, forming triple relationships. Our method
+still achieves SOTA results on balanced metrics Mean@K
+and F@K. Our method is based on local context for reason-
+ing, and it can flexibly combine different object detection
+models to achieve the SGGen task.
+
+For the SGG task, we verify that the apparent features
+of objects are not important, and the contextual description
+of object categories and locations is sufficient to infer pred-
+icates between objects.
+In Figure 3, we manifest the re-
+call for each predicate on the SGGen task by the results
+from our CV-SGG and Motifs. From the trend, due to the
+long-tail bias, as the occurrences of the predicate category
+in the training set decrease, the corresponding recall in the
+test set decreases. Motifs with biased training performs bet-
+
+6307Method
+
+IMP [30]CVPR’2017
+MOTIFS [36]CVPR’2018
+VCTree [27]CVPR’2019
+GPSNet [17]CVPR’2020
+C-SGG(Ours)
+PSGTR [32]ECCV’2022
+PSGFormer [32]ECCV’2022
+C-SGG*(Ours)
+CV-SGG*(Ours)
+
+PQ
+
+40.2
+40.2
+40.2
+40.2
+40.2
+13.9
+36.8
+55.4
+55.4
+
+PredCls
+
+SGGen
+
+R@20/100 mR@20/100 Mean@20/100
+31.9/38.9
+44.9/52.4
+45.3/52.7
+31.5/44.7
+36.5/46.5
+-
+-
+36.5/46.5
+38.0/49.1
+
+9.55/11.6
+20.2/22.9
+20.5/23.3
+13.2/18.4
+32.5/36.4
+-
+-
+32.5/36.4
+30.0/33.8
+
+20.7/25.3
+32.6/37.7
+32.9/38.0
+22.4/31.5
+34.5/41.5
+-
+-
+34.5/41.5
+34.0/41.5
+
+F@20/100 R@20/100 mR@20/100 Mean@20/100
+14.7/17.9
+27.9/31.9
+28.2/32.9
+18.6/26.0
+34.4/40.8
+-
+-
+34.4/40.8
+33.5/40.0
+
+11.5/12.9
+14.6/15.8
+15.2/16.4
+12.4/13.9
+17.4/19.7
+22.5/29.2
+16.4/18.9
+24.0/27.7
+24.2/27.8
+
+6.52/7.23
+9.10/9.69
+9.70/10.2
+7.03/7.67
+16.6/17.8
+16.6/22.1
+14.8/17.6
+24.1/26.3
+23.0/25.8
+
+16.5/18.6
+20.0/22.0
+20.6/22.5
+17.8/20.1
+18.1/21.6
+28.4/36.3
+18.0/20.1
+24.0/29.0
+25.3/29.8
+
+F@20/100
+9.3/10.4
+12.5/13.5
+13.1/14.0
+10.1/11.1
+17.3/19.5
+20.9/27.5
+16.2/18.8
+24.0/27.6
+24.1/27.7
+
+Table 2. Comparison results of SOTA SGG methods on the PSG dataset. The excellent results based on the same panoptic segmentation
+model has been marked in blue, and the best results has been marked in red. * indicates that using the newer panoptic segmentation
+results [15].
+
+ter in common predicates but falls off a cliff in tail predi-
+cates. For these tail predicates, our context augmentation
+method can evolve different context description samples for
+conducting unbiased training, which eliminates long-tailed
+bias. In addition, for tail predicate categories, such as says
+and f lying in, the recall performs well.
+It is due to the
+strong correlation between predicates and object categories,
+and our method may learn some fixed collocation from con-
+text. For example, the tail predicate f lying in always ap-
+pears with airplane, and says always appears with sign at
+the same time.
+
+4.3. Evaluation on PSG Dataset
+
+We also perform our method on the PSG dataset and the
+results are shown in Table 2. For a fair comparison, we di-
+vide the previous methods into two groups. The first group
+used the same panoptic segmentation results from [32] for
+the SGG task. In the second group we substitute the newer
+panoptic segmentation results [15] to generate scene graphs
+and compare with recent end-to-end models.
+
+Panoptic quality (PQ) [8] is an evaluation metric for
+panoptic segmentation, and in the first group, the two-
+stage SGG methods all make predictions based on the same
+panoptic segmentation results. Due to the PSG dataset be-
+ing relatively new, there is almost no research on the long-
+tailed bias in the PSG dataset. Our method with cheap con-
+text augmentation is optimal on the mR@K, Mean@K and
+F@K metrics on the PSG dataset. As for the second group,
+the end-to-end methods PSGTR [32] and PSGFormer [32]
+estimate panoramic segmentation results and scene graphs
+directly from images. Our method is a flexible two-stage
+method, in the first stage, we can utilize the SOTA panoptic
+segmentation method [15], and the second stage uses our
+methods for scene graph inference. From the results, our
+CV-SGG can improve on the R@K while slightly decreas-
+ing on the mR@K, which is similar to the VG results. In
+fact, PSGTR and PSGFormer output both panoramic seg-
+mentation and scene graph, and it is difficult to both account
+for the PQ of panoptic segmentation and the recall of SGG.
+
+4.4. Model Size and Speed
+
+In our opinion, inference speed is also an important eval-
+uation metric for the SGG task. Although current deep-
+learning algorithms can achieve object detection in real-
+time (FPS>30), no SGG algorithm that can infer in real-
+time due to the quadratic time complexity. Our CSGG
+method does not need to extract visual features and can be
+embedded into the backend of any real-time object detec-
+tion method to achieve real-time SGG. Here we choose the
+yolov5l [5] model to cooperate with our method for real-
+time SGG, and the comparison with the previous method is
+shown in Table 3. For a fair comparison in inference speed
+[18], we also test these mentioned methods on a RTX2070
+SUPER GPU device based on open codes [18, 26, 32].
+
+In terms of model size, C-SGG merely has three fully
+connected layers with few model parameters, while yolov5l
+has more parameters. As for FPS, C-SGG has great advan-
+tages, with the floating point operations (FLOPs) for each
+object pair only 0.2M. Even if there are 10000 object pairs
+(100 objects) in the image to be detected, only 2 GFLOPs
+are required, far less than once image feature extraction.
+Our C-SGG method may be the first high-performance SGG
+method capable of running in real-time. In table 3, based
+on C-SGG, only the most possible 100 object pairs are se-
+lected for CV-SGG, which greatly reduces the time com-
+plexity and accelerates CV-SGG inference.
+
+4.5. Ablation study
+
+We perform extensive ablation studies to explore in de-
+tail the impact of hyperparameter factors in C-SGG and CV-
+SGG. For our proposed context augmentation method, we
+have studied the influence of the random context augmen-
+tation factor ε in Table 4. The larger the ε is, the greater
+the change of context description. Too large ε may cause
+the model to learn some unreal predicates. We also show
+the performance of different boost factors η about ReLuL1
+loss in Table 5. For our CV-SGG, ReLuL1 loss can bring
+substantial improvement compared with BCE loss, but ex-
+tremely large η causes CV-SGG to lose performance on
+
+6308Method
+
+IMP
+VCTree
+Motifs
+FCSGG-W32-1S
+FCSGG-W48-5S-FPN×2
+PSGFormer
+PSGTR
+Yolov5l+C-SGG
+Yolov5l+CV-SGG
+
+#Param
+(M)
+293.9
+341.8
+349.8
+31.8
+83.0
+50.4
+42.4
+45+0.2
+45+10
+
+Input Size
+
+FPS
+
+600×1000
+600×1000
+600×1000
+512×512
+640×1024
+800×1333
+800×1333
+640×640
+640×640
+
+4.05
+4.24
+4.00
+10.3
+5.89
+4.52
+3.2
+33.5
+6.4
+
+Table 3. Comparisons of Inference Efficiency.
+
+Model
+
+ReLuL1
+
+-
+
+CV-SGG
+CV-SGG η = 0.05
+η = 0.1
+CV-SGG
+η = 0.2
+CV-SGG
+
+PredCls
+R@50/100 mR@50/100
+60.2/62.5
+57.9/61.5
+58.2/62.4
+59.3/63.2
+
+23.1/26.4
+31.8/35.1
+32.6/36.2
+27.7/30.1
+
+Table 5. Ablation study about ReLuL1 loss and
+boost factor η on the VG dataset. − indicates that
+the BCE loss is used.
+
+Model
+
+Rmask
+
+(C)V-SGG* Nmask = 0
+Nmask = 3
+CV-SGG*
+Nmask = 5
+CV-SGG*
+CV-SGG* Nmask = 10
+CV-SGG* Nmask = 20
+
+SGGen
+R@20/100 mR@20/100
+26.0/30.4
+24.4/29.2
+24.9/29.8
+25.3/29.8
+25.6/30.0
+
+16.5/18.2
+22.8/25.9
+23.2/25.8
+23.0/25.8
+21.6/23.7
+
+Table 7. Ablation study about the contextual mask
+Rmask on the PSG dataset. Nmask = 0 means no
+context Rmask guidance in the training, CV-SGG
+degenerates to visual SGG.
+
+Figure 3. SGGen predicate analysis on the VG dataset. The predicate categories are
+ordered by the number of samples in the training set. Dotted lines represent trends.
+
+Model Augment
+
+C-SGG
+C-SGG
+C-SGG
+C-SGG
+C-SGG
+
+-
+ε = 0
+ε = 0.01
+ε = 0.05
+ε = 0.1
+
+PredCls
+
+R@50/100 mR@50/100 Mean@50/100
+43.8/48.0
+59.2/61.9
+59.3/62.4
+55.2/59.2
+52.2/56.4
+
+37.2/41.8
+42.7/45.7
+43.6/46.3
+44.1/47.6
+43.6/45.1
+
+31.2/35.6
+26.3/29.5
+27.8/30.2
+32.9/36.0
+33.8/37.2
+
+F@50/100
+36.4/40.9
+36.4/40.0
+37.9/40.7
+41.2/44.7
+41.4/45.0
+
+Table 4. Ablation study about augment factor ε on the VG dataset. − indicates no
+bounding box locations in C-SGG, and ε = 0 indicates the bounding box locations is
+used, but no context augmentation is done.
+
+Model
+
+Experience
+
+CV-SGG*
+CV-SGG*
+CV-SGG*
+CV-SGG*
+CV-SGG*
+CV-SGG*
+
+α = 0
+α = 0.1
+α = 0.3
+α = 0.5
+α = 0.7
+α = 0.9
+
+SGGen
+
+R@20/100 mR@20/100 Mean@20/100
+25.0/30.1
+26.2/31.2
+26.3/31.1
+25.7/30.2
+25.3/29.8
+24.0/28.4
+
+18.8/22.1
+20.5/23.8
+21.3/24.7
+24.0/27.5
+24.2/27.8
+23.7/27.3
+
+12.6/13.1
+14.8/16.3
+16.3/18.2
+22.3/24.8
+23.0/25.8
+23.3/26.2
+
+F@20/100
+16.8/19.2
+18.9/21.4
+20.1/23.0
+23.8/27.1
+24.1/27.7
+23.6/27.3
+
+Table 6. Ablation study about empirical factor α on the PSG dataset. When α=1,
+CV-SGG is equal to C-SGG.
+
+tail predicates. Our CV-SGG considers the final predicate
+comprehensively through an empirical factor α. In Table
+6, when α is equal to 0, the model only believes in visual
+analysis. As α increases, the model more believes in context
+experience to judge predicates. We introduce a contextual
+mask Rmask to guide visual attention to possible predicates
+in CV-SGG. In Table 7, we show the effect of different mask
+size Nmask on the performance of CV-SGG. CV-SGG using
+Rmask guidance performs better in each predicate recall.
+
+5. Conclusion
+
+In this paper, we consider that visual appearance features
+may have an unessential effect on SGG and accordingly
+propose a C-SGG method solely using context descriptions.
+We notice that slight changes in the size and position of ob-
+jects do not dramatically affect predicates between object
+pairs. Based on the local context samples of the dataset,
+we introduce the context augmentation method to produce
+diverse training samples at the context level, realizing unbi-
+
+ased training for C-SGG. Due to removing visual features,
+low computational cost allows C-SGG to achieve real-time
+SGG. Additionally, we also introduce a CV-SGG method
+that guides visual attention to possible predicates based on
+C-SGG results. Experiments demonstrate that our context-
+focused methods to SGG can alleviate long-tail bias and
+improve inference speed. We hope this phenomenon can
+inspire the following SGG research.
+
+Limitations. Since our our method significantly weak-
+ens the visual information, it is still difficult to discern those
+complex predicates such as against and belong to. Be-
+sides, we use the local context description of object pairs,
+which may cause SGG to lack consideration of the global
+scene.
+
+Acknowledgement
+
+This research is supported by Key Research Project of
+Zhejiang Lab (No. G2021NB0AL03) and Young Scientists
+Fund of Zhejiang Lab (No. K2023NB0AA02).
+
+6309References
+
+[1] Tianshui Chen, Weihao Yu, Riquan Chen, and Liang Lin.
+Knowledge-embedded routing network for scene graph gen-
+In Proceedings of the IEEE/CVF Conference on
+eration.
+Computer Vision and Pattern Recognition, CVPR, 2019. 3, 6
+[2] Meng-Jiun Chiou, Henghui Ding, Hanshu Yan, Changhu
+Wang, Roger Zimmermann, and Jiashi Feng. Recovering the
+unbiased scene graphs from the biased ones. In Proceedings
+of the ACM International Conference on Multimedia, ACM
+MM, 2021. 1, 3, 6
+
+[3] Alakh Desai, Tz-Ying Wu, Subarna Tripathi, and Nuno Vas-
+concelos. Learning of visual relations: The devil is in the
+tails. In Proceedings of the IEEE/CVF International Confer-
+ence on Computer Vision, ICCV, 2021. 1, 3, 5, 6
+
+[4] Ross Girshick, Jeff Donahue, Trevor Darrell, and Jitendra
+Malik. Rich feature hierarchies for accurate object detection
+and semantic segmentation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+CVPR, 2014. 3
+
+[5] Glenn-jocher, AyushExel,
+
+al.
+https://github.com/ultralytics/yolov5, 2022. 7
+
+and
+
+et
+
+yolov5.
+
+[6] Yuyu Guo, Lianli Gao, Xuanhan Wang, Yuxuan Hu, Xing
+Xu, Xu Lu, Heng Tao Shen, and Jingkuan Song. From gen-
+eral to specific: Informative scene graph generation via bal-
+ance adjustment. In Proceedings of the IEEE/CVF Interna-
+tional Conference on Computer Vision, CVPR, 2021. 3, 6
+[7] Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun.
+Deep residual learning for image recognition. In Proceed-
+ings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, CVPR, 2016. 5
+
+[8] Alexander Kirillov, Kaiming He, Ross Girshick, Carsten
+In Pro-
+Rother, and Piotr Doll´ar. Panoptic segmentation.
+ceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, CVPR, 2019. 7
+
+[9] Boris Knyazev, Harm de Vries, C˘at˘alina Cangea, Graham W
+Taylor, Aaron Courville, and Eugene Belilovsky. Graph
+density-aware losses for novel compositions in scene graph
+generation. arXiv preprint arXiv:2005.08230, 2020. 3
+[10] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A Shamma, et al. Visual genome:
+Connecting language and vision using crowdsourced dense
+International Journal of Computer Vi-
+image annotations.
+sion, 2017. 2, 5
+
+[11] Lin Li, Long Chen, Yifeng Huang, Zhimeng Zhang,
+Songyang Zhang, and Jun Xiao. The devil is in the labels:
+Noisy label correction for robust scene graph generation. In
+Proceedings of the IEEE/CVF Conference on Computer Vi-
+sion and Pattern Recognition, CVPR, 2022. 1, 3, 5, 6
+[12] Rongjie Li, Songyang Zhang, and Xuming He. Sgtr: End-to-
+end scene graph generation with transformer. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, pages 19486–19496, 2022. 6
+
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, CVPR, 2021. 3, 6
+
+[14] Yikang Li, Wanli Ouyang, Bolei Zhou, Kun Wang, and Xi-
+aogang Wang. Scene graph generation from objects, phrases
+In Proceedings of the IEEE Interna-
+and region captions.
+tional Conference on Computer Vision, ICCV, 2017. 3
+[15] Zhiqi Li, Wenhai Wang, Enze Xie, Zhiding Yu, Anima
+Anandkumar, Jose M Alvarez, Ping Luo, and Tong Lu.
+Panoptic segformer: Delving deeper into panoptic segmen-
+tation with transformers. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+CVPR, 2022. 7
+
+[16] Tsung-Yi Lin, Michael Maire, Serge Belongie, James Hays,
+Pietro Perona, Deva Ramanan, Piotr Doll´ar, and C Lawrence
+In
+Zitnick. Microsoft coco: Common objects in context.
+Proceedings of the European Conference on Computer Vi-
+sion, ECCV, 2014. 5
+
+[17] Xin Lin, Changxing Ding, Jinquan Zeng, and Dacheng Tao.
+Gps-net: Graph property sensing network for scene graph
+generation. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, CVPR, 2020. 3, 7
+[18] Hengyue Liu, Ning Yan, Masood Mortazavi, and Bir Bhanu.
+Fully convolutional scene graph generation. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, CVPR, 2021. 1, 3, 6, 7
+
+[19] Cewu Lu, Ranjay Krishna, Michael Bernstein, and Li Fei-
+Fei. Visual relationship detection with language priors. In
+Proceedings of the European Conference on Computer Vi-
+sion, ECCV, 2016. 1, 3, 5
+
+[20] Yichao Lu, Himanshu Rai, Jason Chang, Boris Knyazev,
+Guangwei Yu, Shashank Shekhar, Graham W Taylor, and
+Maksims Volkovs. Context-aware scene graph generation
+with seq2seq transformers. In Proceedings of the IEEE/CVF
+International Conference on Computer Vision, CVPR, 2021.
+3
+
+[21] Zongshen Mu, Siliang Tang, Jie Tan, Qiang Yu, and Yueting
+Zhuang. Disentangled motif-aware graph learning for phrase
+grounding. In Proceedings of the AAAI Conference on Arti-
+ficial Intelligence, AAAI, 2021. 1
+
+[22] Alejandro Newell and Jia Deng. Pixels to graphs by associa-
+tive embedding. Advances in Neural Information Processing
+Systems, NIPS, 2017. 3
+
+[23] Jeffrey Pennington, Richard Socher, and Christopher D Man-
+ning. Glove: Global vectors for word representation. In Pro-
+ceedings of the Conference on Empirical Methods in Natural
+Language Processing, EMNLP, 2014. 4
+
+[24] Tianwen Qian, Jingjing Chen, Shaoxiang Chen, Bo Wu, and
+Yu-Gang Jiang. Scene graph refinement network for vi-
+sual question answering. IEEE Transactions on Multimedia,
+2022. 1
+
+[25] Shaoqing Ren, Kaiming He, Ross Girshick, and Jian Sun.
+Faster r-cnn: Towards real-time object detection with region
+proposal networks. Advances in Neural Information Pro-
+cessing Systems, NIPS, 2015. 3
+
+[13] Rongjie Li, Songyang Zhang, Bo Wan, and Xuming He.
+Bipartite graph network with adaptive message passing for
+In Proceedings of the
+unbiased scene graph generation.
+
+[26] Kaihua Tang, Yulei Niu, Jianqiang Huang, Jiaxin Shi, and
+Hanwang Zhang. Unbiased scene graph generation from bi-
+ased training. In Proceedings of the IEEE/CVF Conference
+
+6310[40] Fengda Zhu, Xiwen Liang, Yi Zhu, Qizhi Yu, Xiaojun
+Chang, and Xiaodan Liang. Soon: Scenario oriented object
+navigation with graph-based exploration. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, CVPR, 2021. 1
+
+on Computer Vision and Pattern Recognition, CVPR, 2020.
+1, 3, 5, 6, 7
+
+[27] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan Luo,
+and Wei Liu. Learning to compose dynamic tree structures
+for visual contexts. In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition, CVPR,
+2019. 3, 5, 6, 7
+
+[28] Yao Teng and Limin Wang. Structured sparse r-cnn for direct
+In Proceedings of the IEEE/CVF
+scene graph generation.
+Conference on Computer Vision and Pattern Recognition,
+pages 19437–19446, 2022. 3, 6
+
+[29] Wenbin Wang, Ruiping Wang, Shiguang Shan, and Xilin
+Chen. Exploring context and visual pattern of relationship
+for scene graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+CVPR, 2019. 3
+
+[30] Danfei Xu, Yuke Zhu, Christopher B Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing. In Pro-
+ceedings of the IEEE/CVF conference on Computer Vision
+and Pattern Recognition, CVPR, 2017. 3, 6, 7
+
+[31] Shaotian Yan, Chen Shen, Zhongming Jin, Jianqiang Huang,
+Rongxin Jiang, Yaowu Chen, and Xian-Sheng Hua. Pcpl:
+Predicate-correlation perception learning for unbiased scene
+graph generation. In Proceedings of the ACM International
+Conference on Multimedia, ACM MM, 2020. 1, 3, 6
+
+[32] Jingkang Yang, Yi Zhe Ang, Zujin Guo, Kaiyang Zhou,
+Wayne Zhang, and Ziwei Liu. Panoptic scene graph gener-
+ation. In Proceedings of the European Conference on Com-
+puter Vision, ECCV, 2022. 2, 3, 5, 7
+
+[33] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi
+In Pro-
+Parikh. Graph r-cnn for scene graph generation.
+ceedings of the European Conference on Computer Vision,
+ECCV, 2018. 1, 3, 6
+
+[34] Jing Yu, Yuan Chai, Yujing Wang, Yue Hu, and Qi Wu.
+Cogtree: Cognition tree loss for unbiased scene graph gen-
+eration. In Proceedings of the Thirtieth International Joint
+Conference on Artificial Intelligence, IJCAI, 2021. 1, 3, 6
+
+[35] Alireza Zareian, Svebor Karaman, and Shih-Fu Chang.
+Bridging knowledge graphs to generate scene graphs. In Pro-
+ceedings of the European Conference on Computer Vision,
+ECCV, 2020. 3, 6
+
+[36] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin
+Choi. Neural motifs: Scene graph parsing with global con-
+text. In Proceedings of the IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition, CVPR, 2018. 1, 3, 6,
+7
+
+[37] Ao Zhang, Yuan Yao, Qianyu Chen, Wei Ji, Zhiyuan Liu,
+Maosong Sun, and Tat-Seng Chua. Fine-grained scene graph
+In Proceedings of the Euro-
+generation with data transfer.
+pean Conference on Computer Vision, ECCV, 2022. 3, 6
+[38] Ji Zhang, Kevin J Shih, Ahmed Elgammal, Andrew Tao,
+and Bryan Catanzaro. Graphical contrastive losses for scene
+graph parsing. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, CVPR, 2019.
+3
+
+[39] Jingyi Zhang, Yong Zhang, Baoyuan Wu, Yanbo Fan, Fumin
+Shen, and Heng Tao Shen. Dual resgcn for balanced scene
+graphgeneration. arXiv preprint arXiv:2011.04234, 2020. 3
+
+6311

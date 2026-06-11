@@ -1,0 +1,1552 @@
+Incremental 3D Semantic Scene Graph Prediction from RGB Sequences
+
+Shun-Cheng Wu1 Keisuke Tateno2 Nassir Navab1
+
+1Technische Universit¨at M¨unchen
+
+Federico Tombari1,2
+2Google
+
+Abstract
+
+3D semantic scene graphs are a powerful holistic rep-
+resentation as they describe the individual objects and de-
+pict the relation between them. They are compact high-level
+graphs that enable many tasks requiring scene reasoning.
+In real-world settings, existing 3D estimation methods pro-
+duce robust predictions that mostly rely on dense inputs.
+In this work, we propose a real-time framework that incre-
+mentally builds a consistent 3D semantic scene graph of
+a scene given an RGB image sequence. Our method con-
+sists of a novel incremental entity estimation pipeline and
+a scene graph prediction network. The proposed pipeline
+simultaneously reconstructs a sparse point map and fuses
+entity estimation from the input images. The proposed net-
+work estimates 3D semantic scene graphs with iterative
+message passing using multi-view and geometric features
+extracted from the scene entities. Extensive experiments
+on the 3RScan dataset show the effectiveness of the pro-
+posed method in this challenging task, outperforming state-
+of-the-art approaches. Our implementation is available at
+https://shunchengwu.github.io/MonoSSG.
+
+1. Introduction
+
+Scene understanding is a cornerstone in many computer
+vision applications requiring perception, interaction, and
+manipulation, such as robotics, AR/VR and autonomous
+systems [17, 54–56]. Semantic Scene Graphs (SSGs) go
+beyond recognizing individual entities (objects and stuff)
+by reasoning about the relationships among them [61, 66].
+They also proved to be a valuable representation for com-
+plex scene understanding tasks, such as image caption-
+ing [26, 67], generation [13, 24], scene manipulation [10,
+11], task planning [27], and surgical procedure estima-
+tion [42, 43]. Given the benefits of such representations,
+scene graph estimation received increasing attention in the
+computer vision community.
+
+While earlier methods mainly estimate SSGs from im-
+ages [18, 19, 33, 66, 72], recent approaches have also in-
+vestigated estimating them from 3D data. Compared to
+2D scene graphs, which describe a single image, 3D scene
+
+Figure 1. We propose a real-time 3D semantic scene graph estima-
+tion method that relies on an abstract understanding of a scene ge-
+ometry built with RGB input. Our method estimates scene graphs
+incrementally by continuously estimating scene graphs and fusing
+local predictions into a global 3D scene graph.
+
+graphs depict the entire 3D scenes, enabling applications
+requiring a holistic understanding of the whole scene, such
+as path planning [47], camera localization, and loop clo-
+sure detection [23]. However, existing 3D methods either
+require dense 3D geometry of the scenes to estimate 3D
+scene graphs [1, 23, 61, 64], which limits the use case since
+dense geometry is not always available, or constraints the
+scene graph estimation at the image-level [15,27,66], which
+tend to fail inferring relationships among objects beyond the
+individual viewpoints. A method that estimates 3D scene
+graphs relies on sparse scene geometry and reasoning about
+relationships globally has not been explored yet.
+
+In this work, we propose a real-time framework that in-
+crementally estimates a global 3D SSG of a scene simply
+requiring an RGB sequence as input. The process is illus-
+trated in Fig. 1. Our method simultaneously reconstructs
+a segmented point cloud while estimating the SSGs of the
+current map. The estimations are bound to the point map,
+which allows us to fuse them into a consistent global scene
+
+input: RGB+Poseoutput: 3D boxes of instances (obj.+struc.)Sparse Entity FusionPer-frameEntity estimationtemporal label consistencyglobal label mergingMappingInstance-level Segmentation3DBBox extractionLabelingInSeg[3]++?ORBSLAM [1]ApproxMVBB [2]weighted inheritanceLocal graph: 3Dbbox. covis graph (green). neighbor braph (yellow)Global graph: 3Dbbox. covis graph (green). neighbor braph (yellow)FloorSofaclose byTableCushionclose byTableCushionstanting onstanding onsupported byRGB sequenceSparse Reconstruction and Scene Graph Prediction at frame: 7frame: 93frame: 7Incremental entity estimation and 3D scene graph estimationThisCVPRpaperistheOpenAccessversion,providedbytheComputerVisionFoundation.Exceptforthiswatermark,itisidenticaltotheacceptedversion;thefinalpublishedversionoftheproceedingsisavailableonIEEEXplore.5064graph. The segmented map is constructed by fusing en-
+tity estimation from images to the points estimated from
+a sparse Simultaneous Localization and Mapping (SLAM)
+method [3]. Our network takes the entities and other proper-
+ties extracted from the segmented map to estimate 3D scene
+graphs. Fusing entities across frames is non-trivial. Exist-
+ing methods often rely on dense inputs [38,58] and struggle
+with sparse inputs since the points are not uniformly dis-
+tributed. Estimating scene graphs with sparse input points
+is also challenging. Sparse and ambiguous geometry ren-
+ders the node representations unreliable. On the other hand,
+directly estimating scene graphs from 2D images ignores
+the relationship beyond visible viewpoints. We aim to over-
+come the aforementioned issues by proposing two novel
+approaches. First, we propose a confidence-based fusion
+scheme which is robust to variations in the point distribu-
+tion. Second, we present a scene graph prediction network
+that mainly relies on multi-view images as the node feature
+representation. Our approach overcomes the need for exact
+3D geometry and is able to estimate relationships without
+view constraints. In addition, our network is flexible and
+generalizable as it works not only with sparse inputs but
+also with dense geometry.
+
+We comprehensively evaluate our method on the 3D SSG
+estimation task from the public 3RScan dataset [60]. We ex-
+periment and compare with three input types, as well as 2D
+and 3D approaches. Moreover, we provide a detailed abla-
+tion study on the proposed network. The results show that
+our method outperforms all existing approaches by a signif-
+icant margin. The main contributions of this work can be
+summarized as follows: (1) We propose the first incremen-
+tal 3D scene graph prediction method using only RGB im-
+ages. (2) We introduce an entity label association method
+that works on sparse point maps. (3) We propose a novel
+network architecture that generalizes with different input
+types and outperforms all existing methods.
+
+2. Related Work
+
+2.1. 3D Object Localization from Images
+
+Localizing 3D objects from images aims to predict the
+position and orientation of objects. Existing methods can
+be broadly divided into two categories: without and with
+explicit geometrical reasoning.
+
+In the former category, many works focus on estimating
+3D bounding boxes by extending 2D detectors with learned
+priors [28, 37, 41, 70]. When sequential input is available,
+single view estimations can be fused to estimate a consis-
+tent object map [2, 22, 29, 30]. However, the fused results
+may not fulfill the multi-view geometric constraints. Multi-
+view approaches estimate oriented 3D bounding boxes from
+the given 2D detection of views. They mainly focus on min-
+imizing the discrepancies between the projected 3D repre-
+
+sentation and the detected 2D bounding boxes.
+
+In the latter category, 3D objects are localized with
+the help of explicit geometric information. Many exist-
+ing methods treat object detection as spatial landmarks in
+a map [21, 35, 40, 53, 65, 69], also known as object-level
+SLAM. Others focus on fusing dense per-pixel predictions
+to a reconstructed map [6,16,36,38,44,71], which is known
+as semantic mapping or semantic SLAM.
+
+A major difference between object-level and seman-
+tic SLAM is that the former focuses only on foreground
+objects, while the latter also considers the structural and
+background information. Specifically, SemanticFusion [36]
+fuses dense semantic segments from images to a consistent
+dense 3D map with Bayesian updates. Its map representa-
+tion provides a dense semantic understanding of a scene ig-
+noring individual instances. PanopticFusion [38] proposes
+to combine the instance and semantic segmentation from
+images to a panoptic map. Their approach considers fore-
+ground object instances and non-instance semantic informa-
+tion from the background. SceneGraphFusion [64] relies on
+3D geometric segmentation [59] and scene graph reasoning
+to achieve instance understanding of all entities in a scene.
+One significant difficulty in instance estimation for se-
+mantic SLAM is associating the instances across frames.
+Existing approaches mainly rely on a dense map to associate
+predictions by calculating the intersection-over-union (IoU)
+or the overlapping ratio between the input and the rendered
+image from the map. However, these methods produce sub-
+optimal results when the map representation is sparse due
+to the non-uniform distribution of the map points. We over-
+come this problem by proposing a confidence-based associ-
+ation.
+
+2.2. 3D Semantic Scene Graph
+
+Estimating 3D scene graphs methods can be divided ac-
+cording to various criteria. From the perspective of the
+scene graph structure, some methods focus on hierarchical
+scene graphs [1, 23, 48, 50]. These approaches mainly ad-
+dress the problem of relationship estimation between enti-
+ties from different hierarchical levels, e.g. object, and room
+level. The other methods focuses on pairwise relationships,
+e.g. support and comparative relationships, between nodes
+within a scene [27, 61, 64, 66]. From the perspective of in-
+put data, some previous methods rely on RGB input [15,27]
+by fusing 2D scene graph predictions to a consistent 3D
+map. On the other hands, other methods rely on 3D in-
+put [1, 23, 48, 50, 61, 64] by using known 3D geometries.
+Nevertheless, most of the existing methods estimate scene
+graphs offline [1, 15, 48, 49], while a few works [23, 27, 64]
+predict scene graph in real-time.
+
+Among all existing work, the pioneering work in 3D
+scene graph estimation is proposed by [15]. The authors ex-
+tend the 2D scene graph estimation method from [66] with
+
+5065Figure 2. Given a sequence of RGB images, we use every frame to reconstruct a sparse point map (a) and every keyframe to estimate the
+2D entities (b). (a) and (b) are associated and merged into a single 3D map (c). We asynchronously extract graph properties from the entity
+map (d) to estimate SSG. Our network computes the geometric, multi-view, and edge features (e). These features are propagated to each
+other with message passing (f), then used to predict a SSG (g). Then, periodic SSGs are fused to a global 3D SSG (h).
+
+temporal consistency across frames and use geometric fea-
+tures from ellipsoids. Kim et al. [27] propose an incremen-
+tal framework to estimate 3D scene graphs from 2D estima-
+tions. Armeni et al. [1] are the first work to estimate 3D
+scene graphs through the hierarchical understanding of the
+scene. Rosinol et al. [48] build on top of [1] to capture mov-
+ing agents. This work is subsequently extended to a SLAM
+system [50]. Wald et al. [61] propose the first 3D scene
+graph method based on the relationship between objects at
+the same level, along with 3RScan: a richly annotated 3D
+scene graph dataset. Wu et al. [64] extend [61] to real-
+time scene graph estimation with a novel feature aggrega-
+tion mechanism. Hughes et al. [23] propose to reconstruct
+a 3D hierarchical scene graph in real-time incrementally.
+Our method incrementally estimates a flat scene graph with
+multi-view RGB input and a sparse 3D geometry, which dif-
+ferentiates our work from the previous methods relying on
+3D input [61,64], and approaches without geometric under-
+standing [15, 27].
+
+3. Method
+
+The proposed framework is illustrated in Fig. 2, which
+shows how, given a sequence of RGB images, it can es-
+timate a 3D semantic scene graph incrementally. The In-
+cremental Entity Estimation (IEE) front end makes use of
+the images to generate segmented sparse points. Those are
+merged into 3D entities and used to generate both an entity
+visibility graph and a neighbour graph. The Semantic Scene
+Graph Prediction (SSGP) network uses the entities and both
+graphs to estimate multiple scene graphs and then fuse them
+into a consistent 3D SSG.
+
+We define a SSG as Gs = (V, E), where V and E de-
+note a set of entity nodes and directed edges. Each node
+vi ∈ V is assigned an entity label li ∈ L, a set of points Pi,
+an Oriented Bounding Box (OBB) bi and a node category
+∈ Cnode. Each edge ei→j ∈ E, connecting node vi to
+cnode
+i
+vj where i ̸= j, consists of an edge category cedge
+i→j ∈ Cedge.
+
+L, Cnode, and Cedge denote all entity labels, a node category
+set, and an edge category set, respectively. An OBB bi is a
+gravity-aligned 3D bounding box consisting of a boundary
+dimension bi ∈ R3, a center oi ∈ R3, and an angle that
+encodes the rotation along the gravity axis. The OBBs are
+used to build both graphs and features. The entity visibility
+graph models the visibility relationship of the entities as a
+bipartite graph Gc = (V, K, Ec) where K, Ec denote a set
+of keyframes and visibility edges, respectively. Gc gives the
+knowledge of the visibility of entity nodes in keyframes,
+which is used in computing multi-view visual features in
+SSGP. The neighbour graph encodes the proximity relation-
+ship of the entities as an undirected graph Gp = (V, Ep),
+where Ep is the set of proximity edges. The neighbour graph
+also serves as the initial graph for the message propagation
+step in SSGP.
+
+3.1. Incremental Entity Estimation
+
+During the first step of the IEE front end pipeline, a set of
+labeled 3D points are estimated from the sequence of RGB
+images (Sec. 3.1.1). The entity labels are determined us-
+ing an entity segmentation method on selected keyframes
+(Sec. 3.1.2). Then, they are associated and fused into a
+sparse point map (Sec. 3.1.3). Finally, the entities and
+their properties are extracted using the labeled 3D points
+(Sec. 3.1.4).
+
+3.1.1 Sparse Point Mapping
+
+We use ORB-SLAM3 [3] to simultaneously estimate the
+camera poses and build a sparse point map by matching es-
+timated keypoints from sequential RGB frames. To guaran-
+tee real-time performance, an independent thread is used to
+run the local mapping process using the stored keyframes.
+The same thread additionally takes care of running the en-
+tity detector and performing the label mapping process. For
+each point pm ∈ P in the map, we store its 3D coordinates,
+an entity label lm, and its confidence score wm ∈ R≥0.
+
+FloorTablee) Feature encodingobject 3D rough oriented bounding boxadjacency graphMVEncnode featureEdgeEncedge feature3DSSGGNNsupported bystanding onInput: RGB sequenceIncremental Entity Estimation (IEE): Entity: Keyframe: Neighbor Graph Edge: Visibility Graph Edged) Graph ExtractionSemantic Scene Graph Prediction (SSGP)c) 3D Entity Associationb) 2D Entity Predictiona) SLAM Recon.Every frameEvery KeyframeGNNEdge featureEdgeEnc.FloorTableDresserCushionstanding onMV Enc.Node feature: Entity: Keyframe: Neighbour graph edge: Visibility graph edge: PropertiesPoint Enc.Geometric featureMV Enc.Image featureEdge featureEdgeEnc.FloorTableDresserCushionstanding onPoint Enc.Geometric featureMV Enc.Image featureEdge Enc.Edge featureSemantic Scene Graph Prediction (SSGP)Incremental Entity Estimation (IEE)g) SSG Predictionf) Message Passingd) Graph Extractionc) 3D Entity Associationb) 2D Entity Predictiona) SLAM Recon.Every KeyframeEvery frameh) FusionDresserCushionstanding on: Geometric feature: Image feature feature: Edge featurePoint Enc.Shape featureMV Enc.Image featureEdge Enc.Edge featureShape Enc.Shape feature50663.1.2 2D Entity Detection
+We estimate an entity label mask ˜Mt(u) ∈ ˜Lt and a confi-
+dence mask ˜Wt(u) ∈ [0, 1] ⊂ R with every given keyframe
+kt ∈ K, where u ∈ R2 denotes the image coordinates and
+˜Lt all entity labels in kt. Both masks are estimated using
+a class-agnostic segmentation network which further im-
+proves other instance segmentation methods [4, 7, 31] by
+enabling the discovery of unseen entities [14, 25, 46]. Al-
+though segmentation networks provide accurate masks, the
+estimations are independent across frames. Thus, a label
+association stage is required to build a consistent label map.
+
+3.1.3 Label Association and Fusion
+
+Inspired by [35, 38, 51, 58], we use the reference map ap-
+proach to handle the label inconsistency. It relies on a map
+reconstruction to solve label consistency by comparing in-
+put label mask to rendered mask. Then fuse the associated
+mask to the global point map.
+Label Association. We start by building a reference entity
+mask Mt(u) ∈ L by projecting point entity labels from the
+sparse point map using the pose of kt. The consistency-
+resolved entity mask ˆM ′
+t(u) is estimated by evaluating the
+corresponding labels on the image mask ˜Mt(u) and the
+reference mask Mt(u). This evaluation can be performed
+by different methods such as using intersection over union
+statistics [38] or the maximum overlapping ratio between la-
+bel masks [58]. However, both methods assume that points
+are uniformly distributed; a premise that fails in most sparse
+point reconstruction tasks. In such cases, these methods be-
+come unstable, as shown in the example provided in the
+supplementary material. To overcome this problem, we pro-
+pose to use the maximum mean confidence as the criteria to
+find the best candidate. First, a confidence mask Wt(u) is
+built by projecting the point label confidence using the pose
+of kt, then the mean confidence score of a label ˜l ∈ ˜Mt(u)
+and a reference label l ∈ Mt(u) is computed by
+
+¯M(˜l, l) =
+
+(cid:80)
+
+u′∈Π(˜l,l) Wt(u′)
+(cid:17)
+Π(˜l, l)
+#
+
+(cid:16)
+
+,
+
+(1)
+
+where Π(˜l, l) gives a set of image coordinates u′ ∈ R2
+where ˜l and l overlap: {u′ | ( ˜Mt(u′) = ˜l) ∧ (Mt(u′) = l)},
+and # (·) is the cardinality operator. Then, the mask ˆM ′
+t(u)
+is generated by replacing the per-pixel entity label ˜l ∈
+˜Mt(u) with either a reference label l or a new label lnew /∈ L
+depending on:
+
+˜l =
+
+(cid:40)
+
+arg maxl
+lnew
+
+¯M(˜l, l)
+
+#(Π(˜l,l))
+#(Mt(u)=l) > τ
+
+if maxl
+otherwise
+
+,
+
+(2)
+
+where we filter out a match if the number of overlapped
+pixel has a low coverage over the total number of label l on
+
+the reference mask with a threshold τ . In addition, similar
+to [38], a reference entity label is assigned to only one input
+entity label. If a reference label has been assigned, we use
+descending order to search for the next best candidate.
+Label Fusion. After the association process, the associated
+entity labels ˆM ′
+t(u) are fused to the sparse point map P.
+Since each label on ˆM ′
+t(u) sources from a map point, the
+label and confidence value of a point are updated by
+
+(cid:40)
+
+wψ(u) =
+
+wψ(u) + ˜Wt (u)
+wψ(u) − ˜Wt (u) otherwise
+
+if Mt (u) = ˆM ′
+
+t (u)
+
+,
+
+(3)
+
+where ψ(u) is the corresponding point index that is pro-
+jected on the pixel location u on both Mt(u) and Wt(u). In
+particular, when wψ(u) < 0, we set the entity label lψ(u) to
+ˆM ′
+
+t(u), and the weight wψ(u) to ˜Wt(u).
+
+3.1.4 Extraction
+
+We use the points belonging to each entity label to com-
+pute the 3D OBB bi of an entity vi ∈ V. We perform sta-
+tistical outlier removal (from PCL [52]) to filter out points
+that could lead to distorted boxes. For the computation, we
+make use of the minimum volume estimation method [5]
+assuming gravity alignment.
+
+The entity visibility graph Gc = (V, K, Ec) consists of all
+nodes V and keyframes K connected by visibility edges Ec.
+A visibility edge eij ∈ Ec exists if entity vi ∈ V is visible in
+keyframe kj ∈ K. Specifically, the visibility is determined
+by checking if any point in node vi is visible at kj.
+
+The neighbour graph Gp = (V, Ep) consists of nodes V
+and its proximity edges Ep. A proximity edge ei→j ∈ Ep |
+vi, vj ∈ V, i ̸= j exists if nodes vi, vj are close in space,
+which is determined using a bounding box collision detec-
+tion method. Since the size of the OBBs is not precise, we
+extend their dimensions by a margin τ C to include addi-
+tional potential neighbours.
+
+3.2. Semantic Scene Graph Prediction
+
+For every of the scene extractions obtained by the IEE
+front end, SSGP estimates 3D semantic scene graphs using
+message passing to jointly update initial feature represen-
+tations and relationships [15, 61, 64, 66]. In the last step,
+the network fuses all of them into a consistent global 3D
+SSG. The initial node features are computed with multi-
+view image features (Sec. 3.2.1), while the initial edge
+feature is computed with the relative geometric properties
+of its connected two nodes (Sec. 3.2.2). Both initial fea-
+tures are jointly updated with a GNN along the connectiv-
+ity given by the neighbour graph (Sec. 3.2.3). The updated
+node and edge are used to estimate their class distribution
+(Sec. 3.2.4). We apply a temporal scene graph fusion pro-
+cedure to combine the predictions into a global 3D SSG
+(Sec. 3.2.5).
+
+5067Our network architecture combines the benefits of 2D
+and 3D scene graph estimation methods by using 2D image
+features and 3D edge embedding. Image features are gen-
+erally a better scene representation than 3D features, while
+using edge embedding in 3D allows performing relationship
+estimation without the constraint of the field of view. The
+effects of 2D and 3D features are compared in Sec. 4.2.
+
+3.2.1 Node Feature
+
+For each node vi ∈ V, we compute a multi-view image
+feature vi and a geometric feature gi. We use the former as
+the initial node feature f v
+i = vi and include the latter with a
+learnable gate in the message passing step (Sec. 3.2.3).
+
+The multi-view image feature is computed by aggregat-
+ing multiple observations of vi on images given by the en-
+tity visibility graph. For each view, an image feature is ex-
+tracted with an image encoding network given the Region-
+of-Interest (ROI) of the node. The image features are aggre-
+gated using a mean operation to the multi-view image fea-
+ture vi. Although there are sophisticated methods to com-
+press multi-view image features, such as using gated aver-
+aging [15] and learning a canonical representation [63], we
+empirically found that averaging all the input features [57]
+yields the best result (see supplementary material). The
+mean operation also allows incrementally computing the
+multi-view image feature with a simple moving average.
+The geometric feature gi is computed from the point set
+Pi using a simple point encoder [45].
+
+3.2.2 Edge Feature
+
+For each edge ei→j ∈ Ep, an edge feature f e
+i→j is computed
+using the node properties from its connected two nodes vi
+and vj by
+
+f e
+i→j = gs ([oj − oi, bj − bi, Ri→j]) ,
+
+(4)
+
+where gs (·) is a Multilayer Perceptron (MLP), [·] denotes a
+concatenation function, and Ri→j is a relative pose descrip-
+tor which encodes the relative angle between two entities.
+
+The relative pose descriptor is designed to implicitly en-
+code relative angles between two nodes. Using an explicit
+one is not optimal since OBB estimations do not return
+the exact pose of an object, which makes explicit pose de-
+scriptor not applicable. We instead use the relative geome-
+try properties on a reference frame constructed by the two
+nodes to implicitly encode the relative pose, as illustrated in
+Fig. 3. First, we construct a reference frame with the ori-
+gin the midpoint of the center of two nodes, the x-axis to
+oj, the y-axis to the inverse of the gravity direction, and the
+z-axis the cross product of the x-axis and y-axis. Second,
+we take maximum and minimum values on each axis of the
+
+Figure 3. An illustration of our relative pose descriptor. The de-
+scriptor describe the relative maximum and minimum value of
+given two bounding boxes on a reference frame.
+
+reference frame to compute the relative pose descriptor as
+
+Ri→j = log (cid:0)(cid:12)
+(cid:12)
+
+(cid:2)pmax
+
+i ⊘ pmax
+
+j
+
+, pmin
+
+i ⊘ pmin
+
+j
+
+(cid:3)(cid:12)
+(cid:1) ,
+(cid:12)
+
+(5)
+
+□ ∈ R3 are the
+where ⊘ is the Hadamard division, pmax
+maximum and minimum points on the reference frame for
+□ ∈ (i, j). We use an absolute logarithm ratio to improve
+the numerical stability.
+
+□ , pmin
+
+3.2.3 Message Passing
+
+i and an edge feature f e
+
+Given an initial node feature f v
+i→j,
+we aggregate the messages from the neighbors for both
+nodes and edges to enlarge the receptive field and leverage
+the spatial understanding composition of the environment.
+We follow [66] by aggregating the messages with a respec-
+tive GRU unit shared for all nodes and edges. Following,
+we explain the process taking place in each of the message-
+passing layers.
+
+First, we incorporate the geometric feature to each node
+
+feature using a learnable gate:
+
+ˆf v
+i = f v
+
+i + σ (cid:0)wT [f v
+
+i , gi](cid:1) σ(gi),
+
+(6)
+
+where ˆf v
+i is the enhanced node feature, σ denotes a sigmoid
+function, and wT are learnable parameters. The geometric
+feature may be unreliable, especially when the input geom-
+etry is ambiguous or unstable. Thus, we use the learnable
+gate to learn if the feature should be included. A node mes-
+sage mi and an edge message mi→j are computed by
+
+mi = gv
+
+(cid:18)(cid:20)
+
+ˆf v
+i , max
+j∈N (i)
+
+(cid:16)
+
+FAN
+
+(cid:16)ˆf v
+
+i , f e
+
+mi→j = ge
+
+(cid:16)
+
+[ˆf v
+i , f e
+
+i→j, ˆf v
+j ]
+
+,
+
+j
+
+i→j, ˆf v
+(cid:17)
+
+(cid:17)(cid:17)(cid:21)(cid:19)
+
+,
+
+(7)
+
+(8)
+
+where gv (·) and ge (·) are MLPs, N (i) is the set of in-
+dices representing the neighbouring nodes of i, FAN is
+the feature-wise attention network [64] which weights all
+neighbour node feature ˆf v
+i , and key
+f e
+i→j given j ∈ N (i).
+
+j using input query ˆf v
+
+y-axisz-axisx-axis50683.2.4 Class Prediction and Loss Functions
+
+We use the softmax function to estimate the class distribu-
+tion on both nodes and edges. For multiple predicate esti-
+mations, we use the sigmoid function (with a threshold of
+0.5) to estimate whether a predicate exists. The network is
+trained with a cross-entropy loss for classifying both enti-
+ties and edges. The loss for the edge class is replaced with
+binary cross entropy for multiple predicates estimation [61].
+
+3.2.5 Fusion
+
+Multiple predictions on the same nodes and edges are fused
+to ensure temporal consistency. We use the running average
+approach [8] to fuse predictions [64]. For each entity and
+edge, we store the full estimated probability estimation µt
+and a weight ρt ∈ R≥0 at time t. Given a new prediction,
+we update the previously stored µt−1 and ρt−1 as
+
+µt · ρt + µt−1 · ρt−1
+ρt + ρt−1
+
+µt =
+,
+ρt = min (cid:0)ρmax, ρt + ρt−1(cid:1) ,
+
+(9)
+
+(10)
+
+where ρmax is the maximum weight value.
+
+4. Evaluation
+
+We evaluate our method on the task of 3D semantic scene
+graph estimation (Sec. 4.2) and incremental label associa-
+tion (Sec. 4.3). In addition, we provide ablation studies on
+the proposed network (Sec. 4.4), and a runtime analysis of
+our pipeline (Sec. 4.5).
+
+4.1. Implementation Details
+
+In all experiments, we use the default ORB-SLAM3 [3]
+setup provided by the authors1 for our IEE front end. For
+the 2D entity detection, we use EntitySeg [46] with a
+ResNet50 [20] backbone pretrained on COCO [32] and
+fine-tuned on the 3RScan [60] training split. For multi-
+view feature extraction, we use a ResNet18 [20] pretrained
+on ImageNet [9] without fine-tuning. The point encoder
+is the vanilla PointNet without learned feature transforma-
+tion [45]. Regarding hyperparameters, we set τ to 0.2, τ C to
+0.5 meters, ρmax to 100, and the number of message passing
+layers to 2.
+
+We use the ground truth pose to guide the scene recon-
+struction because (i) our focus lands on entity detection
+and scene graph estimation, and (ii) the provided image se-
+quence from 3RScan [60] has a low frame rate (10 Hz),
+severe image blur, and jittery motion.
+
+4.2. 3D Semantic Scene Graph estimation
+
+For the input types, we compare all methods with the in-
+put of ground truth segmentation [61] (GT), geometric seg-
+
+1https://github.com/UZ-SLAMLab/ORB_SLAM3.git
+
+Method
+
+Recall(%)
+
+mRecall(%)
+Rel. Obj. Pred. Obj. Pred.
+
+T
+G
+
+e
+s
+n
+e
+D
+
+e
+s
+r
+a
+p
+S
+
+49.8 70.1
+IMP [66]
+VGfM [15]
+49.3 69.4
+3DSSG [61] 34.6 58.0
+41.8 63.8
+SGFN [64]
+66.1 81.2
+Ours
+
+IMP [66]
+25.8 51.8
+28.3 53.3
+VGfM [15]
+3DSSG [61] 17.5 41.4
+31.4 56.7
+SGFN [64]
+34.1 58.1
+Ours
+
+IMP [66]
+VGfM [15]
+3DSSG [61]
+SGFN [64]
+Ours
+Ours (i)
+
+7.9 27.5
+8.2 26.9
+0.9
+9.7
+1.7 12.6
+9.9 29.5
+10.7 30.2
+
+94.3 53.0
+94.8 57.5
+95.2 46.8
+94.3 57.7
+95.6 77.4
+
+90.4 30.0
+90.7 31.6
+88.2 31.9
+89.6 38.3
+89.9 43.0
+
+90.7 20.6
+90.8 17.6
+5.9
+87.9
+8.3
+88.9
+90.4 23.5
+90.4 24.5
+
+38.1
+44.6
+58.7
+65.5
+71.5
+
+23.0
+24.4
+26.6
+30.5
+33.3
+
+14.0
+15.4
+15.1
+14.4
+16.5
+15.9
+
+Table 1. We compare our method with four baseline methods on
+the task of scene graph prediction on 3RScan [60] dataset with 20
+objects and 8 predicate classes. The results from Ours are obtained
+by using our network to obtain predictions, while Ours (i) contains
+the results from using the incremental pipeline.
+
+Method
+
+Recall(%)
+
+mRecall(%)
+Rel. Obj. Pred. Obj. Pred.
+
+9.0
+
+18.7
+44.5 35.9
+IMP [66]
+VGfM [15]
+44.5 37.9 14.7 17.9
+3DSSG [61] 46.8 29.6 68.8 11.7
+45.2 29.4 42.8 11.8
+SGFN [64]
+52.7 56.7 50.4 27.2
+Ours
+
+4.9
+6.5
+25.5
+13.5
+23.9
+
+Table 2. Evaluation on scene graph prediction with 160 object
+and 26 predicate classes using ground truth segmentation and fully
+connected neighbor graph.
+
+mentation [59] (Dense) and sparse segmentation (Sparse).
+For the baseline methods, we compare ours with two 2D
+methods (IMP [66], and VGfM [15]), and two 3D methods
+(3DSSG [61] and SGFN [64]).
+Baseline Methods. We will briefly discuss baseline
+methods here. Check supplementary for further details.
+IMP [66] computes a node feature using the image feature
+cropped from the ROI of the node in an image and com-
+putes an edge feature using the union of two ROIs from
+its connected nodes. Both features are jointly updated with
+prime-dual message passing and learnable message pool-
+ing. VGfM [15] extends IMP by adding geometric features
+and temporal message passing to handle sequential estima-
+tion. 3DSSG [61] extends the ROI concept in IMP [66] in
+
+5069[61], we report two evaluations in Tbl. 1 and Tbl. 2, respec-
+tively. The former one maps the node classes to 20 NYUv2
+labels [39] to suppress the severe class imbalance in the data
+as discussed in [62] and estimates a single predicate out of
+seven support relationship types plus the “same part” rela-
+tionship to handle over-segmentation. The latter uses 160
+node and 26 edge classes with multiple predicate estima-
+tion.
+
+In Tbl. 1, overall, it can be seen that all image-based
+methods (IMP, VGfM, Ours) outperforms points-based
+methods (3DSSG, SGFN) in almost all object prediction
+metrics, while the methods based on 3D edge descriptor
+(3DSSG, SGFN, Ours) tend to have better predicate esti-
+mation. This suggests that the 2D representations from im-
+ages are more representative than 3D, and 3D edge descrip-
+tors are more suitable for estimating support types of pred-
+icates. By comparing IMP [66] and VGfM [15], it can be
+seen that the effect of the geometric feature and the tem-
+poral message passing is mainly reflected in the mRecall
+metrics. However, it deteriorates the performance when the
+input is sparse. A possible reason is that the geometric fea-
+ture is relatively unstable, which decreases the network per-
+formance. It is also reflected in the two 3D methods, i.e.
+3DSSG and SGFN, where they failed to perform in classi-
+fying objects with sparse segmentation while giving a sim-
+ilar performance in the predicate classification. Among all
+methods, our method outperforms all baselines among all
+input types and all metrics, apart from the predicate estima-
+tion, which has a slightly worse result on some input types.
+In addition, we report ours using the proposed incremental
+estimation pipeline, denoted as Ours(i). The incremental es-
+timation process improves slightly in object estimation. The
+same behavior is also reported in [64]. We show a qualita-
+tive result using our full pipeline in Fig. 4.
+
+In Tbl. 2, our method outperforms all other methods in
+the relationship and object estimation in Recall and object
+estimation in mRecall. 3DSSG [61] has the best results in
+predicate estimations. This suggests that union 3D bound-
+ing boxes are more suitable when estimating multiple pred-
+icates.
+
+4.3. Incremental Label Association
+
+We evaluate our label association method in the task of
+incremental entity segmentation, which aims to estimate ac-
+curate class-agnostic segmentation given sequential sensor
+input, with two baseline methods, i.e. InSeg [58] and Panop-
+ticFusion [38].
+Baseline Methods. Both baseline methods use reference
+map approaches as mentioned in Sec. 3.1.3.
+InSeg [58]
+considers only the overlapping ratio between labels on an
+estimated mask and a reference mask. PanopticFusion uses
+IoU [38] as the evaluation method and limits one reference
+label can only be assigned to one query label.
+
+Figure 4. Qualitative evaluation of our scene graph prediction
+framework. Each 3D bounding box represents a detected entity
+on the left, and the color is the predicted label. On the right side,
+we visualize the estimated scene graph on this scene. We only
+select representative entities on the scene graph visualization for
+visualization purposes.
+
+3D by replacing ROIs to 3D bounding boxes. The node and
+edge features are computed with PointNet [45]. Both fea-
+tures are jointly updated with a graph neural network with
+average message pooling. SGFN [64] improves 3DSSG by
+replacing the initial edge descriptor with the relative geom-
+etry properties between two nodes and introducing an atten-
+tion method to handle dynamic message aggregation, which
+enables incremental scene graph estimation.
+Implementation. For all methods, we follow their imple-
+mentation details and train on 3RScan dataset [60] from
+scratch until converge, using a custom training and test split
+since the scenes in the original test do not have ground truth
+scene graphs provided. For IMP [66], since it is a single
+image prediction method, we adopt the voting mechanism
+as in [27] to average the prediction over multiple frames.
+Since ours and other 2D baseline methods rely on image
+input, we generate a set of keyframes by sampling all in-
+put frames using their poses for the GT and Dense inputs
+(check supplementary material for further details). To en-
+sure diversity in the viewpoint, we filter out a frame if its
+pose is too similar to any selected frames with the threshold
+values of 5 degrees in rotation and 0.3 meters in translation.
+Evaluation Metric. We report the overall recall (Recall) as
+used in many scene graph work [34, 61, 64, 66, 68] but with
+the strictest top-k metric with k = 1 as in [62]. In addition,
+we report the mean recall (mRecall) which better indicates
+model performance when the input dataset has a severe data
+imbalance issue (see supplementary material for the class
+distribution). Moreover, since different segmentation meth-
+ods may result in different number of segments, we map all
+predictions on estimated segmentation back to ground truth.
+This allows us to compare the reported numbers across dif-
+ferent segmentation methods. We report the Recall of re-
+lationship triplet estimation (Rel.), object class estimation
+(Obj.) and predicate estimation (Pred.), and the mRecall of
+object class estimation and predicate estimation.
+Results. Following the evaluation scheme in [64] and in
+
+deskcabinetFloorTableattached toSofaChairstanding onstanding onWallotherfurniturepicturefloorwallattached tostanding onCurtainhandingonPictureFloorWallCabinetCurtainCabinetDeskDeskstanding onattached to5070Method
+InSeg [58]
+PanopticFusion [38]
+Ours
+
+AOS (%)
+38.6
+35.9
+39.6
+
+Table 3. Evaluation of different label association methods in the
+task of incremental entity estimation in 3RScan dataset [60].
+
+Implementation. For all methods, we use our IEE pipeline
+with different label association methods on all training
+scenes in the 3RScan dataset [60].
+Evaluation Metric. We use the Average Overlap Score
+(AOS) as the evaluation metric [59].
+It measures the ra-
+tio of the dominant segment of its corresponding ground
+truth instance. We use the nearest neighbour search to find
+the ground truth instance label of a reconstructed point.
+Since our method reconstructs a sparse point map, using the
+ground truth points as the denominator does not reflect the
+performance. We instead calculate the score over the sum
+of all estimated points within the ground truth instance as:
+
+AOS =
+
+(cid:88)
+
+i
+
+maxj Overlap(Si, Pj)
+# (Si)
+
+,
+
+(11)
+
+where Si is the set of all estimated points with ground truth
+instance label i.
+Results. The evaluation result is reported in Tbl. 3. Our ap-
+proach achieves the highest AOS, which is 1 % higher than
+InSeg [58] and 3.7% higher than PanopticFusion [38]. The
+use of a confidence-based approach handles better the la-
+bel consistency and thus improves the final AOS score. We
+provide an example of how our method improves tempo-
+ral consistency under non-uniform distributed points in the
+supplementary material.
+
+4.4. Ablation Study
+
+We ablate our network with two components, i.e. geo-
+metric descriptor gi and relative pose descriptor Ri→j. The
+experiment setup is the same as in [64], which makes the ab-
+lation comparable to Tbl. 1. The result is reported in Tbl. 4.
+More ablation studies are in the supplementary material.
+
+Our vanilla network without gi and Ri→j outperform
+baselines in most of the metrics. With gi, there is a con-
+sistent improvement on all metrics except the Pred. in mRe-
+call. Compared to VGfM [15] in Tbl. 1, VGfM [15] fails
+to improve the performance of IMP [66] with sparse input.
+Our gated geometric feature aggregation improves its base-
+line with sparse input, bringing a more consistent perfor-
+mance gain than VGfM [15]. The Ri→j improves the mRe-
+call performance with GT and Dense inputs but decreases
+the model Recall performance. This behavior suggests that
+Ri→j helps handle class imbalance issues. The combina-
+tion of both components achieves the best Recall. However,
+the model tends to focus on dominant classes, resulting in
+slightly worse performance in mRecall.
+
+Recall(%)
+Method
+gi Ri→j Rel. Obj. Pred. Obj. Pred.
+
+mRecall
+
+T
+G
+
+e
+s
+n
+e
+D
+
+e
+s
+r
+a
+p
+S
+
+✓
+
+61.9 76.4
+62.9 77.9
+✓ 60.4 76.3
+✓ ✓ 66.1 81.2
+
+✓
+
+30.2 54.0
+33.9 56.4
+✓ 28.7 52.7
+✓ ✓ 34.1 58.1
+
+✓
+
+✓
+✓ ✓
+
+9.6 28.6
+9.8 28.5
+9.6 28.1
+9.9 29.5
+
+95.6 74.3
+95.9 74.2
+95.0 75.3
+95.6 77.4
+
+88.5 44.9
+89.7 45.7
+88.2 47.5
+89.9 43.0
+
+90.0 25.6
+90.0 25.7
+90.2 23.3
+90.4 23.5
+
+69.2
+64.3
+73.2
+71.5
+
+33.2
+33.8
+34.3
+33.3
+
+17.7
+18.1
+16.9
+16.5
+
+Table 4. Ablation study on the proposed network. We ablate the
+proposed gated geometric feature (gi) and the relative pose de-
+scriptor (Ri→j) using the same experiment setup as in Tbl. 1.
+
+Front end
+
+Back end
+
+Sparse Mapping 2D Entity Est. Label Fusion Scene Graph Est.
+
+Mean [ms]
+
+14.7
+
+124.6
+
+14.2
+
+52.5
+
+Table 5. Runtime [ms] of the different components of our method.
+4.5. Runtime
+
+We report the runtime of our system on 3RScan [60] se-
+quence 4acaebcc-6c10-2a2a-858b-29c7e4fb410d in Tbl. 5.
+The analysis is done with a machine equipped with an Intel
+Core i7-8700 3.2GHz CPU with 12 threads and a NVidia
+GeForce RTX 2080ti GPU.
+
+5. Conclusion
+
+We present a novel method that estimates 3D scene
+graphs from RGB images incrementally. Our method
+runs in real-time and does not rely on depth inputs,
+which could benefit other tasks, such as robotics and
+that have hardware limitations and real-time de-
+AR,
+mand. The experiment results indicate that our method
+outperforms others in three different input types. The
+provided ablation study demonstrates the effectiveness of
+our design. Our vanilla network, without any geometric
+input and relative pose descriptor, still outperforms other
+baselines. Our method provides a novel architecture
+for estimating scene graphs with only RGB input. The
+multiview feature is proven to be more powerful than
+existing 3D methods. Our method can be further improved
+in many directions. In particular, using semi-direct SLAM
+methods such as SVO [12] might improve the handling
+of untextured regions where feature-based methods often
+fail.
+the multiview image encoder could
+be replaced with a more powerful encoder to improve
+the scene graph estimation with a computational penalty.
+
+In addition,
+
+5071References
+
+[1] Iro Armeni, Zhi-Yang He, JunYoung Gwak, Amir R Zamir,
+Martin Fischer, Jitendra Malik, and Silvio Savarese. 3D
+SceneGgraph: A Structure for Unified Semantics, 3D Space,
+and Camera. In ICCV, 2019. 1, 2, 3
+
+[2] Garrick Brazil, Gerard Pons-Moll, Xiaoming Liu, and Bernt
+Schiele. Kinematic 3d object detection in monocular video.
+In European Conference on Computer Vision, pages 135–
+152. Springer, 2020. 2
+
+[3] Carlos Campos, Richard Elvira, Juan J G´omez Rodr´ıguez,
+Jos´e MM Montiel, and Juan D Tard´os. Orb-slam3: An accu-
+rate open-source library for visual, visual–inertial, and mul-
+IEEE Transactions on Robotics, 37(6):1874–
+timap slam.
+1890, 2021. 2, 3, 6
+
+[4] Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas
+Usunier, Alexander Kirillov, and Sergey Zagoruyko. End-to-
+end object detection with transformers. In European confer-
+ence on computer vision, pages 213–229. Springer, 2020. 4
+[5] Chia-Tche Chang, Bastien Gorissen, and Samuel Melchior.
+Fast oriented bounding box optimization on the rotation
+group SO(3, R). ACM Trans. Graph., 30(5):122:1–122:16,
+Oct. 2011. 4
+
+[6] Xieyuanli Chen, Andres Milioto, Emanuele Palazzolo,
+Jens Behley, and Cyrill Stachniss.
+Philippe Giguere,
+In 2019
+Suma++: Efficient lidar-based semantic slam.
+IEEE/RSJ International Conference on Intelligent Robots
+and Systems (IROS), pages 4530–4537. IEEE, 2019. 2
+[7] Bowen Cheng, Alex Schwing, and Alexander Kirillov. Per-
+pixel classification is not all you need for semantic segmen-
+tation. Advances in Neural Information Processing Systems,
+34, 2021. 4
+
+[8] Brian Curless and Marc Levoy. A Volumetric Method for
+In Pro-
+Building Complex Models from Range Images.
+ceedings Conference on Computer Graphics and Interactive
+Techniques, 1996. 6
+
+[9] Jia Deng, Wei Dong, Richard Socher, Li-Jia Li, Kai Li,
+and Li Fei-Fei. Imagenet: A large-scale hierarchical image
+database. In 2009 IEEE conference on computer vision and
+pattern recognition, pages 248–255. Ieee, 2009. 6
+
+[10] Helisa Dhamo, Azade Farshad, Iro Laina, Nassir Navab,
+Gregory D Hager, Federico Tombari, and Christian Rup-
+precht. Semantic Image Manipulation Using Scene Graphs.
+In CVPR, 2020. 1
+
+[11] Helisa Dhamo, Fabian Manhardt, Nassir Navab, and Fed-
+erico Tombari. Graph-to-3d: End-to-end generation and ma-
+nipulation of 3d scenes using scene graphs. In Proceedings
+of the IEEE/CVF International Conference on Computer Vi-
+sion, pages 16352–16361, 2021. 1
+
+[12] Christian Forster, Zichao Zhang, Michael Gassner, Manuel
+Werlberger, and Davide Scaramuzza. Svo: Semidirect visual
+IEEE
+odometry for monocular and multicamera systems.
+Transactions on Robotics, 33(2):249–265, 2016. 8
+
+[13] Sarthak Garg, Helisa Dhamo, Azade Farshad, Sabrina Musa-
+tian, Nassir Navab, and Federico Tombari. Unconditional
+scene graph generation. In Proceedings of the IEEE/CVF In-
+ternational Conference on Computer Vision, pages 16362–
+16371, 2021. 1
+
+[14] Stefano Gasperini, Frithjof Winkelmann, Alvaro Marcos-
+Ramiro, Micheal Schmidt, Nassir Navab, Benjamin Busam,
+and Federico Tombari. Holistic segmentation. arXiv preprint
+arXiv:2209.05407, 2022. 4
+
+[15] Paul Gay, James Stuart, and Alessio Del Bue. Visual Graphs
+from Motion (VGfM): Scene Understanding with Object Ge-
+ometry Reasoning. In ACCV. Springer, 2018. 1, 2, 3, 4, 5, 6,
+7, 8
+
+[16] M. Grinvald, F. Furrer, T. Novkovic, J. J. Chung, C. Cadena,
+R. Siegwart, and J. Nieto. Volumetric Instance-Aware Se-
+mantic Mapping and 3D Object Discovery. IEEE Robotics
+and Automation Letters, 2019. 2
+
+[17] Markus Grotz, Peter Kaiser, Eren Erdal Aksoy, Fabian Paus,
+and Tamim Asfour. Graph-based visual semantic percep-
+In 2017 IEEE-RAS 17th Inter-
+tion for humanoid robots.
+national Conference on Humanoid Robotics (Humanoids),
+pages 869–875. IEEE, 2017. 1
+
+[18] Jiuxiang Gu, Shafiq Joty, Jianfei Cai, Handong Zhao, Xu
+Yang, and Gang Wang. Unpaired image captioning via scene
+graph alignments. In Proceedings of the IEEE/CVF Interna-
+tional Conference on Computer Vision, pages 10323–10332,
+2019. 1
+
+[19] Jiuxiang Gu, Handong Zhao, Zhe Lin, Sheng Li, Jianfei Cai,
+and Mingyang Ling. Scene Graph Generation with External
+Knowledge and Image Reconstruction. In CVPR, 2019. 1
+
+[20] Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun.
+Deep residual learning for image recognition. In Proceed-
+ings of the IEEE conference on computer vision and pattern
+recognition, pages 770–778, 2016. 6
+
+[21] Mehdi Hosseinzadeh, Yasir Latif, Trung Pham, Niko Suen-
+derhauf, and Ian Reid. Structure aware slam using quadrics
+and planes. In Asian Conference on Computer Vision, pages
+410–426. Springer, 2018. 2
+
+[22] Hou-Ning Hu, Qi-Zhi Cai, Dequan Wang, Ji Lin, Min Sun,
+Philipp Krahenbuhl, Trevor Darrell, and Fisher Yu.
+Joint
+monocular 3d vehicle detection and tracking. In Proceedings
+of the IEEE/CVF International Conference on Computer Vi-
+sion, pages 5390–5399, 2019. 2
+
+[23] N. Hughes, Y. Chang, and L. Carlone. Hydra: A real-time
+spatial perception system for 3D scene graph construction
+and optimization. In Robotics: Science and Systems (RSS),
+2022. 1, 2, 3
+
+[24] Justin Johnson, Agrim Gupta, and Li Fei-Fei. Image Gener-
+
+ation from Scene Graphs. In CVPR, 2018. 1
+
+[25] KJ Joseph, Salman Khan, Fahad Shahbaz Khan, and Vi-
+neeth N Balasubramanian. Towards open world object detec-
+tion. In Proceedings of the IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition, pages 5830–5840,
+2021. 4
+
+[26] Andrej Karpathy and Li Fei-Fei. Deep Visual-Semantic
+In CVPR,
+
+Alignments for Generating Image Descriptions.
+2015. 1
+
+[27] Ue-Hwan Kim, Jin-Man Park, Taek-Jin Song, and Jong-
+Hwan Kim. 3-d scene graph: A sparse and semantic rep-
+resentation of physical environments for intelligent agents.
+IEEE transactions on cybernetics, 50(12):4921–4933, 2019.
+1, 2, 3, 7
+
+5072[28] Chi Li, Jin Bai, and Gregory D Hager. A unified frame-
+work for multi-view multi-class object pose estimation. In
+Proceedings of the european conference on computer vision
+(ECCV), pages 254–269, 2018. 2
+
+[29] Kejie Li, Daniel DeTone, Yu Fan Steven Chen, Minh Vo,
+Ian Reid, Hamid Rezatofighi, Chris Sweeney, Julian Straub,
+and Richard Newcombe. Odam: Object detection, associ-
+ation, and mapping using posed rgb video. In Proceedings
+of the IEEE/CVF International Conference on Computer Vi-
+sion, pages 5998–6008, 2021. 2
+
+[30] Kejie Li, Hamid Rezatofighi, and Ian Reid. Moltr: Mul-
+tiple object localization, tracking and reconstruction from
+monocular rgb videos. IEEE Robotics and Automation Let-
+ters, 6(2):3341–3348, 2021. 2
+
+[31] Yanwei Li, Hengshuang Zhao, Xiaojuan Qi, Liwei Wang,
+Zeming Li, Jian Sun, and Jiaya Jia. Fully convolutional
+In Proceedings of
+networks for panoptic segmentation.
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 214–223, 2021. 4
+
+[32] Tsung-Yi Lin, Michael Maire, Serge Belongie, James Hays,
+Pietro Perona, Deva Ramanan, Piotr Doll´ar, and C Lawrence
+Zitnick. Microsoft coco: Common objects in context.
+In
+European conference on computer vision, pages 740–755.
+Springer, 2014. 6
+
+[33] Hengyue Liu, Ning Yan, Masood Mortazavi, and Bir Bhanu.
+Fully convolutional scene graph generation. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, pages 11546–11556, 2021. 1
+
+[34] Cewu Lu, Ranjay Krishna, Michael Bernstein, and Li Fei-
+Fei. Visual relationship detection with language priors. In
+European conference on computer vision, pages 852–869.
+Springer, 2016. 7
+
+[35] John McCormac, Ronald Clark, Michael Bloesch, Stefan
+Leutenegger, and Andrew Davison. Fusion++: Volumetric
+Object-Level SLAM. In Int. Conf. on 3D Vis., 2018. 2, 4
+[36] John McCormac, Ankur Handa, Andrew Davison, and Ste-
+fan Leutenegger. SemanticFusion: Dense 3D Semantic Map-
+In Int. Conf.
+ping with Convolutional Neural Networks.
+Robotics and Automation, 2017. 2
+
+[37] Arsalan Mousavian, Dragomir Anguelov, John Flynn, and
+Jana Kosecka. 3d bounding box estimation using deep learn-
+In Proceedings of the IEEE conference
+ing and geometry.
+on Computer Vision and Pattern Recognition, pages 7074–
+7082, 2017. 2
+
+[38] Gaku Narita, Takashi Seno, Tomoya Ishikawa, and Yohsuke
+Kaji. PanopticFusion: Online Volumetric Semantic Mapping
+at the Level of Stuff and Things. In IEEE Conf. Intelligent
+Robots and Syst., 2019. 2, 4, 7, 8
+
+[39] Pushmeet Kohli Nathan Silberman, Derek Hoiem and Rob
+Indoor Segmentation and Support Inference from
+
+Fergus.
+RGBD Images. In ECCV, 2012. 7
+
+[40] Lachlan Nicholson, Michael Milford, and Niko S¨underhauf.
+Quadricslam: Dual quadrics from object detections as land-
+marks in object-oriented slam. IEEE Robotics and Automa-
+tion Letters, 4(1):1–8, 2018. 2
+
+[41] Yinyu Nie, Xiaoguang Han, Shihui Guo, Yujian Zheng, Jian
+Chang, and Jian Jun Zhang. Total3dunderstanding: Joint lay-
+out, object pose and mesh reconstruction for indoor scenes
+
+from a single image. In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition, pages
+55–64, 2020. 2
+
+[42] Ege ¨Ozsoy, Evin Pınar ¨Ornek, Ulrich Eck, Tobias Czempiel,
+Federico Tombari, and Nassir Navab. 4d-or: Semantic scene
+graphs for or domain modeling. In International Conference
+on Medical Image Computing and Computer-Assisted Inter-
+vention. Springer, 2022. 1
+
+[43] Ege ¨Ozsoy, Evin Pınar ¨Ornek, Ulrich Eck, Federico Tombari,
+and Nassir Navab. Multimodal semantic scene graphs for
+holistic modeling of surgical procedures. In Arxiv, 2021. 1
+
+[44] Quang-Hieu Pham, Binh-Son Hua, Thanh Nguyen, and Sai-
+Kit Yeung. Real-time Progressive 3D Semantic Segmenta-
+tion for Indoor Scene. In IEEE Winter Conf. Appli. Comput.
+Vis., 2019. 2
+
+[45] Charles Ruizhongtai Qi, Hao Su, Kaichun Mo, and Leonidas
+Guibas. PointNet: Deep Learning on Point Sets for 3D Clas-
+sification and Segmentation. In CVPR, 2017. 5, 6, 7
+[46] Lu Qi, Jason Kuen, Yi Wang, Jiuxiang Gu, Hengshuang
+Zhao, Zhe Lin, Philip Torr, and Jiaya Jia. Open-world en-
+tity segmentation. arXiv preprint arXiv:2107.14228, 2021.
+4, 6
+
+[47] Zachary Ravichandran, Lisa Peng, Nathan Hughes, J Daniel
+Griffith, and Luca Carlone. Hierarchical representations and
+explicit memory: Learning effective navigation policies on
+3d scene graphs using graph neural networks. In 2022 In-
+ternational Conference on Robotics and Automation (ICRA),
+pages 9272–9279. IEEE, 2022. 1
+
+[48] Antoni Rosinol, Arjun Gupta, Marcus Abate, Jingnan Shi,
+and Luca Carlone. 3D Dynamic Scene Graphs: Actionable
+Spatial Perception with Places, Objects, and Humans. Com-
+put. Res. Repository, 2020. 2, 3
+
+[49] Antoni Rosinol, Arjun Gupta, Marcus Abate, Jingnan Shi,
+and Luca Carlone. 3d dynamic scene graphs: Actionable
+spatial perception with places, objects, and humans. arXiv
+preprint arXiv:2002.06289, 2020. 2
+
+[50] Antoni Rosinol, Andrew Violette, Marcus Abate, Nathan
+Hughes, Yun Chang, Jingnan Shi, Arjun Gupta, and Luca
+Carlone. Kimera: From slam to spatial perception with 3d
+dynamic scene graphs. The International Journal of Robotics
+Research, 40(12-14):1510–1546, 2021. 2, 3
+
+[51] Martin Runz, Maud Buffier, and Lourdes Agapito. Maskfu-
+sion: Real-time recognition, tracking and reconstruction of
+multiple moving objects. In 2018 IEEE International Sym-
+posium on Mixed and Augmented Reality (ISMAR), pages
+10–20. IEEE, 2018. 4
+
+[52] Radu Bogdan Rusu and Steve Cousins. 3D is here: Point
+Cloud Library (PCL). In IEEE International Conference on
+Robotics and Automation (ICRA), Shanghai, China, May 9-
+13 2011. 4
+
+[53] Renato F. Salas-Moreno, Richard A. Newcombe, Hauke
+Strasdat, Paul H. J. Kelly, and Andrew J. Davison. SLAM++:
+Simultaneous Localisation and Mapping at the Level of Ob-
+jects. In CVPR, 2013. 2
+
+[54] Raluca Scona, Simona Nobili, Yvan R Petillot, and Maurice
+Fallon. Direct visual slam fusing proprioception for a hu-
+manoid robot. In 2017 IEEE/RSJ International Conference
+
+5073[67] Kelvin Xu, Jimmy Ba, Ryan Kiros, Kyunghyun Cho, Aaron
+Courville, Ruslan Salakhudinov, Rich Zemel, and Yoshua
+Bengio. Show, Attend and Tell: Neural Image Caption Gen-
+In Int. Conf. Mach. Learn.,
+eration with Visual Attention.
+2015. 1
+
+[68] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi
+Parikh. Graph R-CNN for Scene Graph Generation.
+In
+ECCV, 2018. 7
+
+[69] Shichao Yang and Sebastian Scherer. Cubeslam: Monocular
+3-d object slam. IEEE Transactions on Robotics, 35(4):925–
+938, 2019. 2
+
+[70] Cheng Zhang, Zhaopeng Cui, Yinda Zhang, Bing Zeng,
+Marc Pollefeys, and Shuaicheng Liu. Holistic 3d scene un-
+derstanding from a single image with implicit representation.
+In Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, pages 8833–8842, 2021. 2
+
+[71] Jiazhao Zhang, Chenyang Zhu, Lintao Zheng, and Kai Xu.
+Fusion-Aware Point Convolution for Online Semantic 3D
+Scene Segmentation. In CVPR, 2020. 2
+
+[72] Yiwu Zhong, Jing Shi, Jianwei Yang, Chenliang Xu, and Yin
+Li. Learning to generate scene graph from natural language
+supervision. In Proceedings of the IEEE/CVF International
+Conference on Computer Vision, pages 1823–1834, 2021. 1
+
+on Intelligent Robots and Systems (IROS), pages 1419–1426.
+IEEE, 2017. 1
+
+[55] Philipp Seiwald, Shun-Cheng Wu, Felix Sygulla, Tobias FC
+Berninger, Nora-Sophie Staufenberg, Moritz F Sattler, Nico-
+las Neuburger, Daniel Rixen, and Federico Tombari. Lola v1.
+1–an upgrade in hardware and software design for dynamic
+multi-contact locomotion. In 2020 IEEE-RAS 20th Interna-
+tional Conference on Humanoid Robots (Humanoids), pages
+9–16. IEEE, 2021. 1
+
+[56] Olivier Stasse, Andrew J Davison, Ramzi Sellaouti, and
+Kazuhito Yokoi. Real-time 3d slam for humanoid robot con-
+In 2006 IEEE/RSJ
+sidering pattern generator information.
+International Conference on Intelligent Robots and Systems,
+pages 348–355. IEEE, 2006. 1
+
+[57] Hang Su, Subhransu Maji, Evangelos Kalogerakis, and Erik
+Learned-Miller. Multi-view convolutional neural networks
+In Proceedings of the IEEE in-
+for 3d shape recognition.
+ternational conference on computer vision, pages 945–953,
+2015. 5
+
+[58] Keisuke Tateno, Federico Tombari, and Nassir Navab. Real-
+Time and Scalable Incremental Segmentation on Dense
+In IEEE Conf. Intelligent Robots and Syst., 2015.
+SLAM.
+2, 4, 7, 8
+
+[59] Keisuke Tateno, Federico Tombari, and Nassir Navab. Large
+scale and long standing simultaneous reconstruction and seg-
+mentation. Computer Vision and Image Understanding,
+157:138–150, 2017. 2, 6, 8
+
+[60] Johanna Wald, Armen Avetisyan, Nassir Navab, Federico
+Tombari, and Matthias Nießner. RIO: 3D Object Instance
+Re-Localization in Changing Indoor Environments.
+In
+ICCV, 2019. 2, 6, 7, 8
+
+[61] Johanna Wald, Helisa Dhamo, Nassir Navab, and Federico
+Tombari. Learning 3D Semantic Scene Graphs from 3D In-
+door Reconstructions. In CVPR, 2020. 1, 2, 3, 4, 6, 7
+[62] Johanna Wald, Nassir Navab, and Federico Tombari. Learn-
+ing 3d semantic scene graphs with instance embeddings. In-
+ternational Journal of Computer Vision, pages 1–22, 2022.
+7
+
+[63] Xin Wei, Yifei Gong, Fudong Wang, Xing Sun, and Jian Sun.
+Learning canonical view representation for 3d shape recog-
+nition with arbitrary views. In Proceedings of the IEEE/CVF
+International Conference on Computer Vision, pages 407–
+416, 2021. 5
+
+[64] Shun-Cheng Wu, Johanna Wald, Keisuke Tateno, Nassir
+Navab, and Federico Tombari. Scenegraphfusion: Incremen-
+tal 3d scene graph prediction from rgb-d sequences. In Pro-
+ceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, pages 7515–7525, 2021. 1, 2, 3, 4,
+5, 6, 7, 8
+
+[65] Yanmin Wu, Yunzhou Zhang, Delong Zhu, Yonghui Feng,
+Sonya Coleman, and Dermot Kerr. Eao-slam: Monocular
+semi-dense object slam based on ensemble data association.
+In 2020 IEEE/RSJ International Conference on Intelligent
+Robots and Systems (IROS), pages 4966–4973. IEEE, 2020.
+2
+
+[66] Danfei Xu, Yuke Zhu, Christopher Choy, and Li Fei-Fei.
+Scene Graph Generation by Iterative Message Passing.
+In
+CVPR, 2017. 1, 2, 4, 5, 6, 7, 8
+
+5074

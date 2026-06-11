@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # benchmarks/paper-ingest/env.sh
-# Stages a tiny test paper into the autoresearch workspace's raw/inbox so the
-# autoresearch agent can be told to ingest it.
+# Stages a tiny test paper into the ingest workspace's raw/inbox.
+# qa.jsonl is read by run_bench.py on the host — no need to stage it.
 set -euo pipefail
 
 : "${BENCH_CONTAINER:?must be exported by env_setup.sh}"
@@ -11,20 +11,18 @@ set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 log() { printf '\n[paper-ingest.env] %s\n' "$*"; }
 
-# Bring up a fresh openclaw-bench container for this benchmark so fixtures
-# and runtime state from a previous benchmark cannot leak in.
+# Bring up a fresh container.
 if [[ -f "${BENCH_ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
   . "${BENCH_ENV_FILE}"
   bench_force_recreate
 fi
 
-log "staging inbox paper"
-TARGET="${BENCH_MOUNT}/workspace-autoresearch/raw/inbox/bench-${BENCH_RUN_ID}"
+# Stage a synthetic paper into the ingest inbox.
+TARGET="${BENCH_MOUNT}/workspace/ingest/raw/inbox/bench-${BENCH_RUN_ID}"
+log "staging inbox paper at ${TARGET}"
 docker exec "${BENCH_CONTAINER}" mkdir -p "${TARGET}"
 
-# The benchmark carries a fixture string rather than a real PDF; the agent's
-# wiki-organizer must handle text-only inputs gracefully.
 FIXTURE='---
 title: "BenchIngest: A Synthetic Note For Pipeline Testing"
 authors: ["Bench Author"]
@@ -33,16 +31,11 @@ venue: "BenchConf"
 arxiv: "0000.00000"
 ---
 This is a synthetic paper fixture used by the CI benchmark to verify that
-the autoresearch agent can ingest a new paper, produce a wiki page at
+the ingest agent can process a new paper, produce a wiki page at
 wiki/domains/bench/papers/benchingest.md, update wiki/index.md, and append
 to wiki/log.md.
 '
 echo "${FIXTURE}" | docker exec -i "${BENCH_CONTAINER}" bash -lc \
   "cat > ${TARGET}/benchingest.md"
-
-log "staging qa.jsonl"
-docker exec "${BENCH_CONTAINER}" mkdir -p \
-  "${BENCH_MOUNT}/workspace-autoresearch/bench-fixtures"
-docker cp "${HERE}/qa.jsonl" "${BENCH_CONTAINER}:${BENCH_MOUNT}/workspace-autoresearch/bench-fixtures/qa.jsonl"
 
 log "env ready"

@@ -1,0 +1,1767 @@
+Context-aware Scene Graph Generation with Seq2Seq Transformers
+
+Yichao Lu1* Himanshu Rai1∗
+
+Jason Chang1∗ Boris Knyazev2,3
+
+Guangwei Yu1
+
+Shashank Shekhar2,3 Graham W. Taylor2,3 Maksims Volkovs1
+
+1Layer 6 AI
+
+2School of Engineering, University of Guelph 3Vector Institute for Artiﬁcial Intelligence
+
+Abstract
+
+Scene graph generation is an important task in com-
+puter vision aimed at improving the semantic understand-
+ing of the visual world. In this task, the model needs to de-
+tect objects and predict visual relationships between them.
+Most of the existing models predict relationships in paral-
+lel assuming their independence. While there are differ-
+ent ways to capture these dependencies, we explore a con-
+ditional approach motivated by the sequence-to-sequence
+(Seq2Seq) formalism. Different from the previous research,
+our proposed model predicts visual relationships one at
+a time in an autoregressive manner by explicitly condi-
+tioning on the already predicted relationships. Drawing
+from translation models in NLP, we propose an encoder-
+decoder model built using Transformers where the en-
+coder captures global context and long range interactions.
+The decoder then makes sequential predictions by condi-
+tioning on the scene graph constructed so far.
+In addi-
+tion, we introduce a novel reinforcement learning-based
+training strategy tailored to Seq2Seq scene graph genera-
+tion. By using a self-critical policy gradient training ap-
+proach with Monte Carlo search we directly optimize for
+the (mean) recall metrics and bridge the gap between train-
+ing and evaluation. Experimental results on two public
+benchmark datasets demonstrate that our Seq2Seq learn-
+ing approach achieves strong empirical performance, out-
+performing previous state-of-the-art, while remaining efﬁ-
+cient in terms of training and inference time. Full code
+for this work is available here: https://github.com/
+layer6ai-labs/SGG-Seq2Seq.
+
+1. Introduction
+
+Analyzing natural images containing multiple objects
+and complex interactions between them is a challenging
+task. We consider a common formulation of this task, scene
+graph generation (SGG) [51], in which given an image, we
+
+*Authors contributed equally and order is determined randomly
+
+Figure 1: The top row shows predictions when the model is not
+conditioned on any (cid:104)subject, predicate, object(cid:105) triplets, and the
+model incorrectly predicts (cid:104)man, on, surfboard(cid:105).
+In the bottom
+row, as neighboring relevant triplets are revealed to the model
+(non-shaded regions), the predictions shift to the correct predicate
+(cid:104)man, holding, surfboard(cid:105).
+
+need to detect and predict objects and relationships between
+them in the form of a scene graph [18]. SGG is important
+for many applications at the intersection of computer vision
+and language, such as VQA [61, 16, 39, 15, 10, 26], image
+captioning [56, 14], retrieval [18, 2, 43] and others [1, 53].
+Humans successfully understand images by alternating
+between two primary steps: sequentially attending to dif-
+ferent regions of the image and applying high-level reason-
+ing about these regions [47]. The two steps are recurrent
+until the image is understood, so the overall process is in-
+herently both sequential and conditional. The beneﬁt of
+sequential conditioning also translates to machine learning
+models for the SGG task as demonstrated by the example
+in Figure 1. Given an image of a beach scene, we aim to
+predict the correct relationship (predicate) between “man”
+and “surfboard”. At the start, when the model is not shown
+any other relationships (grayed out portion in the top im-
+age) and hence there is no conditioning, the model predicts
+“on” with high likelihood, as this is one of the most com-
+mon predicates occurring with “man” and “surfboard” in
+
+15931In the next step we reveal neighboring rela-
+the dataset.
+tionships to the model and condition on them (non-shaded
+regions in the bottom image). After seeing relationships
+(cid:104)man, wear, shoe(cid:105) and (cid:104)man, on, beach(cid:105), the model infers
+that since the man is wearing shoes and there is an adja-
+cent man on the beach, the more appropriate relationship is
+“holding”. Consequently the probabilities of “on” and “rid-
+ing” drop. This example illustrates how sequential condi-
+tioning can help resolve ambiguities and reduce bias learned
+from the training data.
+
+The majority of SGG methods, except for a few notable
+exceptions such as Neural Motifs (NM) [60], predict the
+ﬁnal relationship labels in parallel making a severely lim-
+In
+iting assumption of independence among the triplets.
+NM, global context from detected objects is encoded via
+an LSTM, but the ﬁnal relationship prediction is still done
+independently for each pair of objects and no conditioning
+is applied. In contrast, we quantitatively analyze the impor-
+tance of incorporating both the sequential and conditional
+properties (§ 2). Based on that analysis and inspired by
+the Transformer architecture showing strong results both in
+neural machine translation [45] and computer vision [11, 4],
+we propose a Seq2Seq model that exploits sequential condi-
+tioning. We design a conditional Transformer decoder that
+sequentially leverages already predicted relationships to ad-
+just its beliefs about future predictions.
+
+Another important limitation of the previous SGG works
+is related to the way the models are trained and evaluated.
+In particular, common evaluation metrics, recall [51] and
+mean recall (mRecall) [6, 44], are not directly tied to the
+training objective of the SGG models, which typically min-
+imize the cross-entropy loss [60]. The problem is exacer-
+bated by the fact that these metrics focus on different and
+often conﬂicting properties, so training a single model that
+maximizes both metrics is challenging [43, 22]. For ex-
+ample, recall is dominated by frequent relationships [60],
+while mRecall assigns an equal weight to both frequent and
+rare relationships [6, 64]. A common method to improve
+the model on the target metric is to introduce an induc-
+tive bias favouring the metric via a carefully designed loss
+function [23, 29, 41] or features [60, 64]. To improve the
+model on the target metric, we take a different approach and
+leverage a reinforcement learning (RL)-based training strat-
+egy that enables the direct optimization of the target metric,
+bridging the gap between training and evaluation. The RL
+approach also aligns well with our Seq2Seq model as we
+train our RL policy to make sequential relationship predic-
+tions in an optimal order w.r.t. to the target metric (reward).
+In summary, this paper makes the following contribu-
+
+tions:
+• Inspired by neural machine translation and our con-
+ditional SGG analysis (§ 2), we propose an encoder-
+decoder model based on Transformers with a sequential
+
+autoregressive decoder (§ 4).
+
+• We introduce an RL training strategy that enables the
+direct optimization of the target metrics, bridging the
+gap between training and evaluation (§ 4.4.2). by re-
+In particular, we employ a
+moving the exposure bias.
+Monte Carlo search self-critical policy gradient training
+approach to accurately estimate the action-value function
+for our model (§ 4.4.2).
+
+• We obtain state-of-the-art results on both recall and mRe-
+call metrics while maintaining computational efﬁciency
+during training and inference (§ 5).
+
+2. Conditional Scene Graph Generation
+
+A scene graph [18] is deﬁned as a set of objects and the
+relationships between them. We deﬁne a categorical triplet
+using a subject, object and their relationship. For instance
+ym = (cid:104)man, on, surfboard(cid:105), is the mth triplet in the image.
+The scene graph can be viewed as a set of M such triplets
+{ym}M
+1 . We further assume some canonical order of triplets
+(e.g. from the left of the image to the right [60]) and deﬁne
+an ordered triplet set Y1:M = {y1, ..., yM }. Applying the
+chain rule, we deﬁne the conditional SGG as a task of se-
+quentially inferring the relationship triplets conditioned on
+all previously predicted triplets:
+M
+(cid:89)
+
+m−1
+(cid:92)
+
+p(Y1:M ) =
+
+p(ym|
+
+yj)
+
+(1)
+
+m=1
+
+j=1
+
+= p(yM |Y1:M −1)p(yM −1|Y1:M −2)...p(y2|y1)p(y1).
+In the above formulation we ignore visual features as-
+suming that all predictions are conditioned on the image in
+the way speciﬁc to a particular method (see § 4). The ma-
+jority of SGG methods assume conditional independence of
+triplets and predict all triplets in parallel. To demonstrate
+that this assumption is limiting we analyse the relationship
+co-occurrence in the Visual Genome (VG) dataset [25]. We
+follow a setup similar to [60], and ﬁrst compute the co-
+occurrence likelihoods between pairs of relationship triplets
+p(y2|y1) using the training set of VG. We observe a strong
+co-occurrence bias, with most p(y2|y1) distributions being
+highly peaked (Figure 2, top). For example, for (cid:104)man, on,
+beach(cid:105) there are only a few triplets such as (cid:104)man, wear-
+ing, shorts(cid:105) and (cid:104)man, holding, surfboard(cid:105) that co-occur
+frequently in the dataset (Figure 2, top left). By extending
+this example to three triplets p(y3|y1, y2), the distribution
+remains steep but the top co-occurring triplets change. For
+example, by conditioning on (cid:104)man, on, beach(cid:105) and (cid:104)horse,
+on, beach(cid:105) the top triplet changes to (cid:104)person, riding, horse(cid:105)
+clearly demonstrating the effect of knowing that both “man”
+and “horse” are on the beach (Figure 2, top right).
+
+We can expand the sequence of conditioning triplets to
+arbitrary size m. To avoid the prohibitive cost of com-
+puting joint probabilities we use a simple approximation:
+
+15932tangle object detection error from relationship detection
+and focus on reasoning over the relationships. Recent re-
+search [64, 6, 44, 43, 29, 54, 8] address the long-tail is-
+sue by improving mean recall as opposed to simple recall
+dominated by most frequent relationships. Several recent
+works [43, 41, 23, 22, 30, 20] focus on compositional gen-
+eralization metrics in SGG, which is an interesting avenue
+to apply our method in the future.
+
+Contextual Models. Context has been shown to be
+useful in generating better predictions in several recent
+works [17, 7, 48]. Our work is closest to Neural Motifs
+(NM) [60]. In NM, the Bi-LSTMs model is used to cap-
+ture the global context and structural regularities in scene
+graphs. NM constructs the global context from all detected
+objects in a given image. NM then leverages the global con-
+text to reﬁne feature-level representations for individual ob-
+jects and possible relationships between them. In contrast,
+our approach ﬁrst encodes global context and then sequen-
+tially updates it by leveraging information from triplets that
+have been decoded so far. This is achieved by applying a
+Transformer architecture that enables joint conditioning on
+all predicted history which we demonstrate to be important
+for maximizing SGG performance.
+
+Attention. Prior work [55, 35] that applies attention
+in visual relationship detection start by deﬁning a near-
+est neighbor graph. Attention is used to capture infor-
+mation about the graph structure by encoding it similar
+to graph attention networks (GAT) [46].
+In particular,
+Graph R-CNN[55] applies GAT over visual similarity while
+graph self-attention [35] additionally embeds a pair of ob-
+ject features and linguistic relationships jointly. Transform-
+ers [45] have been successfully adopted in computer vi-
+sion [36, 11, 12, 13]. We use Transformers in an encoder
+decoder based architecture. However, unlike other atten-
+tion based methods in this domain, our decoder makes se-
+quential predictions conditioned on previous outputs and
+the model is trained in an auto regressive way. In a parallel
+work [24] Relational Transformers were applied to visual
+relationship detection. However, our model is explicitly
+conditioned on triplet predictions and uses Reinforcement
+Learning (RL) to optimize for the speciﬁc metric.
+
+Reinforcement Learning. Using RL for SGG has re-
+mained under explored. [28] built a semantic action graph
+using language priors and formulated SGG as a single
+agent decision-making process. CMAT [5] proposed a
+counterfactual critic model using multi agent policy. DG-
+PGNN [19] proposed a probabilistic model together with
+Q-learning to infer a scene graph in a sequential node-by-
+node fashion. In contrast to [28, 5, 19], our model works on
+subject-predicate-object triplets and leverages Transformers
+to capture global context. In addition, our work explores the
+use of mean recall as a reward to tackle the long-tail distri-
+bution on SGG datasets.
+
+Figure 2: VG analysis based on scene graph annotations with-
+(top) Triplet co-
+out considering images or bounding boxes.
+occurrence in scene graphs has a peaked distribution. The top
+candidates can be selected reasonably well when conditioned on a
+single triplet (left) and two triplets (right), including rare relation-
+ships (in red). (bottom) Conditioning allows us to accurately pre-
+dict a triplet given other (already predicted or ground truth) triplets
+in the image. This motivates our conditional inference pipeline.
+
+p(ym+1|Y1:m) = (cid:80)m
+i p(ym+1|yi). For small m we veri-
+ﬁed that this approximation closely matches the target dis-
+tribution, particularly when it is used to rank the top co-
+occurring relationships. We then simulate a sequential pre-
+diction process and use these probabilities to predict triplets
+in a given test image while conditioning on increasingly
+larger set of ground truth triplets (i.e. assuming a perfect
+model): p(ˆym+1|Y1:m), where m is the history size. At
+each step we sample one ground truth triplet per test im-
+age and check if it is in the top-100 triplets co-occurring
+with triplets predicted from Y1:m, we then average this ac-
+curacy across all test images. To imitate the effect of the re-
+cently introduced mRecall metric [6, 44], we also compute
+the per-predicate accuracy for all images and then average
+over all predicate classes. We found that conditioning on
+more triplets (longer history m) substantially improves both
+accuracies (Figure 2, bottom). Our ﬁnding indicates that the
+model is able to make an increasingly better prediction by
+leveraging the information from the revealed relationships.
+This motivates our Seq2Seq model described in the follow-
+ing sections.
+
+3. Related Work
+
+SGG. Scene graphs were proposed as a visually
+grounded graphical structure of an image with localized ob-
+jects as nodes and pairwise predicates as the edges [18, 52].
+The visual relationship detection/scene graph generation
+task was formalized ﬁrst by [31]. The standard relation-
+ship detection pipeline [31] comprises object detection with
+off-the-shelf ﬁne-tuned weights to predict objects, and pair-
+wise predicate classiﬁcation [31, 65, 62, 58, 9, 63, 27,
+51, 60, 57, 32, 33]. We follow this protocol to disen-
+
+0500030000triplet y2100101102103Unnorm. p(y2|y1)y1=man on beachman on beachman wearing shortperson on beachman holding surfboardman carrying surfboardman wearing shirtumbrella on beachchild on beachtop y2=0500030000triplet y3100101102103Unnorm. p(y3|y1,y2)y1,y2=man on beach, horse on beachman on beachhorse on beachwoman riding horseperson riding horseman wearing shortumbrella on beachperson on horseperson on beachtop y3=0246810History size, m0204060Accuracy (%)Top-100 accuracyMean top-100 accuracy15933Figure 3: Seq2Seq model architecture. Each image is ﬁrst passed through an object detector to obtain object bounding boxes and
+representations X. X are fed into the Transformer encoder to obtain contextualised object embeddings XB. During decoding, at each
+m + 1-th time step, the decoder takes all of the previously predicted relationship triplets Y1:m and forms the history embedding that
+summarizes the current prediction history. All possible pairs of contextualised object embeddings (excluding already predicted pairs) are
+then concatenated with the history embedding to predict the relationships. Object pair with the highest predicted relationship probability
+is then taken as the next output triplet and the decoding process is repeated.
+
+4. Our Approach
+
+In this section we describe our encoder-decoder ap-
+proach. First, we brieﬂy overview the multi-head self-
+attention (MSA) block and the encoder architecture. Then
+we describe our novel relationship decoder and optimiza-
+tion approach. We employ the Transformer architecture [45,
+11] due to its effectiveness in capturing long-term depen-
+dencies and the ability to train in parallel. At the core of the
+Transformer is the multi-head self-attention:
+
+MSA(Q, K, V ) = Concat(SA1, SA2, ..., SAh)W O (2)
+
+tations X are obtained based on spatial, semantic and vi-
+sual features following [64]. X are treated the same way as
+text tokens in natural language processing, and we apply an
+encoder-decoder architecture to predict the relationships Y .
+Objects representations are passed through the Transformer
+encoder to produce contextualised embeddings that contain
+both object speciﬁc information and global scene context.
+The decoder then operates in an autoregressive manner, at
+each time step consuming the previously generated relation-
+ship triplets to generate the next triplet. The full architecture
+diagram is shown in Figure 3.
+
+SAi = Softmax(
+
+QiK T
+i√
+d
+
+)Vi,
+
+(3)
+
+4.2. Object Encoder
+
+where SA refers to a single attention head; Q, K and V refer
+to Query, Key and Value vectors, whose meaning depends
+on the particular component of our pipeline where it is used.
+MSA concatenates the outputs from all attention heads fol-
+lowed by the projection by trainable parameters W O.
+
+4.1. Overall Pipeline
+
+First, given an image, the object detector (e.g. Faster-
+RCNN [37]) returns a set of bounding boxes of N ob-
+ject instances X = {x1, ..., xN }. The goal of our vi-
+sual relationship prediction model is to learn the mapping
+f : Y = f (X), where Y = {y1, ..., yM } refers to the or-
+dered set of M relationship triplets in the image. Represen-
+
+To capture the global context of a scene, we follow the
+standard Transformer encoder architecture and form a cas-
+cade of B identical blocks, where each block applies multi-
+head self-attention. Formally, the new object embeddings
+produced by the (b + 1)-th Transformer block are given by:
+Xb+1 = FFN(MSA(Xb, Xb, Xb)) + Xb
+(4)
+where Xb is the output from the b-th Transformer block and
+FFN consists of two linear transformations with a ReLU ac-
+tivation in between, with X1 = X. The ﬁnal output embed-
+dings XB from the last block encode both object speciﬁc
+information and global context information from other ob-
+jects in the visual scene. These embeddings are consumed
+by the decoder to generate the relationship predictions.
+
+All possible combinations.........manmanbeachshoeSurfboardonObject DetectorMSADecoder Block Encoder Block X...............wear......Add & NormalizeFFN...OutputwearcarryonAdd & NormalizeMSACross AttentionFFNAdd & Normalize......<SOS>X15934Table 1: VG mRecall results.
+
+Table 2: VRD recall results.
+
+mRecall@:
+
+MOTIFS+TDE(GATE) [43]
+GB-NET [59]
+VTransE+TDE(GATE) [43]
+VCTree+TDE(SUM) [43]
+Seq2Seq - RL (ours)
+
+Seq2Seq - encoder only
+Seq2Seq - teacher forcing
+Seq2Seq - scheduled sampling
+
+PRDCLS
+50
+24.9
+22.1
+25.3
+25.4
+26.1
+
+100
+28.3
+24.0
+28.4
+28.7
+30.5
+
+Ablation Results
+
+25.2
+25.7
+25.9
+
+28.6
+29.3
+30.2
+
+SGCLS
+50
+13.9
+12.7
+13.1
+12.2
+14.7
+
+11.9
+13.2
+13.5
+
+100
+15.2
+13.4
+14.7
+14.0
+16.2
+
+13.7
+15.1
+15.4
+
+20
+11.1
+-
+9.8
+8.9
+11.9
+
+8.7
+10.5
+10.7
+
+20
+18.5
+-
+18.9
+18.4
+21.3
+
+18.1
+19.6
+21.0
+
+SGDET
+50
+8.5
+7.1
+8.5
+9.3
+9.6
+
+100
+9.9
+8.5
+10.2
+11.1
+12.1
+
+8.9
+9.1
+9.2
+
+10.2
+10.8
+11.0
+
+20
+6.6
+-
+6.3
+6.9
+7.5
+
+6.8
+7.0
+7.2
+
+4.3. Relationship Decoder
+
+Our proposed relationship decoder predicts visual rela-
+tionships one at a time in an autoregressive manner. Given
+the contextualized object features XB ∈ RN ×D and m al-
+ready predicted visual relationships ˆY1:m, the goal of the
+relationship decoder is to learn the conditional probability
+of the (m+1)-th visual relationship p(ˆym+1|XB, ˆY1:m) that
+maximizes the probability of (m+1)-th triplet in the ground
+truth sequence. Note that during training, the predicted se-
+quence ˆY1:m can be replaced with the ground truth sequence
+Y1:m, but during inference the model conditions only on its
+own predictions.
+
+Decoder input. Given the predicted visual relationships
+sequence ˆY1:m, we ﬁrst convert this sequence to vector rep-
+resentations to be used as input into the decoder model. For
+each predicted triplet ˆy ∈ ˆY1:m, we concatenate the em-
+beddings of (XB[i], E[r], XB[j]), where i and j are object
+and subject indices in ˆy. E is the learned embeddings for
+all predicates in the training set, and r is the predicate in-
+dex in ˆy. The concatenated embeddings is then fed into
+a fully-connected layer and projected into D-dimensional
+triplet representations. At the beginning of the decoding,
+we use a learned D-dimensional vector as the ﬁrst input
+embedding to start the decoding. This is equivalent to the
+special <SOS> (start of sequence) token in traditional se-
+quence transduction tasks, where the <SOS> token informs
+the decoder to start generating the output sequence.
+
+The projected D-dimensional triplet representations are
+fed into a stack of K identical Transformer decoder blocks.
+Each Transformer decoder block consists of MSA (Equa-
+tion 5) followed by cross-attention between contextualized
+object embeddings XB and the intermediate triplet repre-
+sentations H (Equation 6):
+
+Hk+1 = MSA(Yk, Yk, Yk) + Yk
+
+Yk+1 = FFN(Hk+1 + MSA(Hk+1, XB, XB))
+
+(5)
+
+(6)
+
+where Hk+1 is the intermediate output from the (k + 1)-th
+self-attention block. The cross-attention enables the model
+to correlate the current relationship predictions in ˆY1:m with
+all detected objects in the visual scene, and update its beliefs
+about what other relationships present. After K blocks, the
+ﬁnal representation YK is used to predict the next relation-
+ship triplet. We concatenate the history embedding in YK
+
+Recall@:
+
+ViP-CNN [27]
+VRL [28]
+CAI [65]
+KL-Distill [58]
+ZoomNet [57]
+CAI + SCA-M [57]
+HetH [49]
+RelDN [64]
+Seq2Seq - RL (ours)
+
+Seq2Seq - encoder only
+Seq2Seq - teacher forcing
+Seq2Seq - scheduled sampling
+
+Relationship Detection
+free k
+k = 1
+
+Phrase Detection
+
+k = 1
+
+free k
+
+50
+17.3
+18.1
+-
+19.1
+18.9
+19.5
+22.4
+25.2
+26.1
+
+100
+20.0
+20.7
+-
+21.3
+21.4
+22.3
+24.8
+28.6
+30.2
+
+50
+17.3
+18.1
+20.1
+22.6
+21.3
+22.3
+26.8
+28.1
+29.9
+Ablation Results
+24.4
+27.1
+27.5
+
+27.9
+29.0
+29.8
+
+22.6
+24.0
+24.5
+
+100
+20.0
+20.7
+23.3
+31.8
+27.3
+28.5
+31.6
+33.9
+35.9
+
+31.6
+34.4
+34.7
+
+50
+22.7
+21.3
+-
+23.1
+24.8
+25.2
+30.6
+31.3
+33.4
+
+29.2
+30.7
+31.5
+
+100
+27.9
+22.6
+-
+24.0
+28.0
+28.8
+35.5
+36.4
+39.1
+
+34.1
+37.2
+37.7
+
+50
+22.7
+21.3
+23.8
+26.4
+29.0
+29.6
+35.4
+34.4
+36.8
+
+31.8
+33.0
+34.2
+
+100
+27.9
+22.6
+25.2
+29.7
+37.3
+38.3
+43.0
+42.1
+46.2
+
+39.9
+43.9
+44.3
+
+with all possible remaining object pairs that can have a rela-
+tionship, predict the relationship for each pair, and take the
+triplet with the highest probability:
+
+p(ˆy|XB, Y1:m)
+
+= Softmaxr(Concat(XB[i], YK[m], XB[j]) ∗ Wr)
+
+(7)
+
+ˆym+1 = arg max
+
+ˆy
+
+p(ˆy|XB, Y1:m)
+
+Here, i and j are subject and object indices in ˆy and r is
+the predicate between them. YK[m] is the m’th embedding
+in the m × D output YK of the decoder, and represents the
+contextualised embedding of the last predicted relationship
+triplet at step m. The triplet with the highest probability
+ˆym+1 is taken as the decoder prediction at step m + 1, and
+the process is repeated until termination criteria is reached.
+
+4.4. Model Optimization
+
+We consider two approaches for training our model. One
+leverages the standard “teacher forcing” framework, while
+the other is our proposed strategy based on reinforcement
+learning.
+
+4.4.1 Teacher Forcing
+
+Sequence-to-sequence models are typically trained with the
+teacher forcing strategy [50]. At each time step, instead
+of conditioning on the model’s own predictions in an au-
+toregressive fashion, the model is provided with the ground
+truth from the previous step to learn the conditional proba-
+bility of the next ground truth triplet p(ym+1|XB, Y1:m). To
+remove the bias from introducing a particular order during
+training, we randomly shufﬂe the ground truth relationship
+triplets for each image to form the input sequence, and this
+shufﬂing is repeated for each batch. The teacher forcing ob-
+jective only maximizes the probability of positive examples,
+i.e., pairs of objects that have a relationship. However, in
+the task of visual relationship prediction, learning to predict
+which objects do not have a relationship is equally critical
+to model performance [60]. To incorporate negative exam-
+ples, at each decoding step, we randomly sample L object
+pairs that do not have relationships, and train the model to
+
+15935Table 3: VG Recall results for the SGDET, SGCLS and PRDCLS tasks with and without graph constraints. *We omit RelDN results on
+SGCLS and PRDCLS where they evaluate using subject and object pairs from the ground truth, which is inconsistent with other work.
+
+Recall@:
+
+Associative Embedding[34]
+Message Passing[51]
+Graph R-CNN[55]
+Message Passing+[60]
+Frequency+Overlap[60]
+MotifNet-LeftRight[60]
+RelDN[64]
+VCTree[44]
+HetH[49]
+GB-Net[59]
+Seq2Seq - RL (ours)
+
+Seq2Seq - encoder only
+Seq2Seq - teacher forcing
+Seq2Seq - scheduled sampling
+
+SGDET
+50
+8.1
+3.4
+11.4
+20.7
+26.2
+27.2
+28.3
+27.9
+27.5
+26.4
+30.9
+
+28.5
+29.6
+30.1
+
+20
+6.5
+-
+-
+14.6
+20.1
+21.4
+21.1
+22.0
+21.6
+-
+22.1
+
+21.0
+21.4
+21.7
+
+100
+8.2
+4.2
+13.7
+24.5
+30.1
+30.3
+32.7
+31.3
+30.9
+30.0
+34.4
+
+31.9
+33.0
+34.1
+
+20
+18.2
+-
+-
+31.7
+29.3
+32.9
+-*
+35.2
+33.8
+-
+34.5
+
+100
+22.6
+24.4
+31.6
+35.4
+32.9
+36.5
+-*
+38.8
+37.3
+38.8
+39.0
+
+Graph Constraint
+SGCLS
+50
+21.8
+21.7
+29.6
+34.6
+32.3
+35.8
+-*
+38.1
+36.6
+38.0
+38.3
+Ablation Results
+35.4
+36.9
+37.6
+
+32.8
+33.1
+33.6
+
+36.2
+37.4
+38.4
+
+20
+47.9
+-
+-
+52.7
+53.6
+58.5
+-*
+60.1
+59.8
+-
+60.3
+
+59.2
+59.4
+59.6
+
+PRDCLS
+50
+54.1
+44.8
+54.2
+59.3
+60.6
+65.2
+-*
+66.4
+66.3
+66.6
+66.4
+
+64.8
+65.3
+65.8
+
+100
+55.4
+53.0
+59.1
+61.3
+62.2
+67.1
+-*
+68.1
+68.1
+68.2
+68.5
+
+67.1
+67.2
+67.9
+
+SGDET
+50
+9.7
+-
+-
+22.0
+28.6
+30.5
+30.4
+-
+-
+29.4
+30.9
+
+100
+11.3
+-
+-
+27.4
+34.4
+35.8
+36.7
+-
+-
+35.1
+37.0
+
+No Graph Constraint
+SGCLS
+50
+26.5
+-
+-
+43.4
+39.0
+44.5
+-*
+-
+-
+47.7
+46.9
+
+100
+30.0
+-
+-
+47.2
+43.4
+47.7
+-*
+-
+-
+51.1
+51.2
+
+PRDCLS
+100
+50
+75.2
+68.0
+-
+-
+-
+-
+83.6
+75.2
+82.9
+75.7
+88.3
+81.1
+-*
+-*
+-
+-
+-
+-
+90.5
+83.6
+90.8
+83.6
+
+30.2
+30.5
+30.7
+
+36.2
+36.3
+36.8
+
+45.1
+45.7
+46.0
+
+47.8
+49.2
+49.8
+
+81.2
+82.4
+83.1
+
+88.2
+89.9
+90.2
+
+predict the “no relationship” predicate for these pairs. De-
+noting the l-th sampled negative triplet as y−
+l , the teacher
+forcing objective for our model can be formulated as:
+
+L = −
+
+(cid:34)
+
+M
+(cid:88)
+
+m=1
+
+log p(ym+1|XB, Y1:m) +
+
+L
+(cid:88)
+
+l=1
+
+log p(y−
+
+l |XB, Y1:m)
+
+(cid:35)
+
+(8)
+
+4.4.2 Reinforcement Learning
+
+The teacher forcing objective generally leads to stable and
+fast learning. However, optimizing with maximum likeli-
+hood does not necessarily translate to optimal performance
+on the target metric such as recall. There are two main rea-
+sons for this. First, during training the model is provided
+with the ground truth as input history, while during infer-
+ence the model has to rely on its own predictions. Second,
+the maximum likelihood objective does not directly opti-
+mize for the target metric, resulting in the discrepancy be-
+tween training and evaluation. We address both of these
+problems by proposing an RL optimization approach. RL
+enables the model to explore different policies during train-
+ing to learn the one that yields maximum reward at infer-
+ence time. We deﬁne rewards based on the target metric
+which allows for direct optimization of non-differentiable
+metrics and reduces the gap between training and inference.
+We focus on two common metrics, recall and mRecall,
+but analogous approach may be extended to other metrics.
+Previous works noted a trade-off between recall and mRe-
+call [43, 59, 22]. Therefore, we design our reward func-
+tion as a convex combination of recall and mRecall scores,
+and use a hyperparameter α ∈ [0, 1] to control their relative
+importance. Suppose that ˆY1:M (cid:48) is the model’s predicted
+triplets for a given image, where M (cid:48) is the length of pre-
+dicted sequence. We denote the recall and mRecall scores
+
+for ˆY1:M (cid:48) as r( ˆY1:M (cid:48)) and mr( ˆY1:M (cid:48)) respectively. The re-
+ward is then deﬁned as:
+
+(9)
+
+R( ˆY1:M (cid:48)) = α · r( ˆY1:M (cid:48)) + (1 − α) · mr( ˆY1:M (cid:48))
+A major challenge in applying RL to the SGG task is the
+lack of intermediate reward, since the reward can only be
+computed on the ﬁnal predicted triplet set, while we aim
+for the model to learn the optimal action at each decoding
+step. Following [42], the RL objective with no intermediate
+reward can be deﬁned as:
+(cid:104)
+R( ˆY1:M (cid:48))|s0
+LRL = E
+
+p(ˆy1|s0)Q(s0, ˆy1) (10)
+
+(cid:88)
+
+=
+
+(cid:105)
+
+ˆy1∈Y
+
+where s0 is the initial state, and Q(s, a) is the action-value
+function deﬁned as the expected accumulative reward start-
+ing from state s, taking action a, and then following the
+policy speciﬁed by the model. Y is the set of all possible
+triplets that the model can predict in the ﬁrst decoding step.
+
+To estimate Q(s, a), we note that in the ﬁnal M (cid:48)-th step
+the model outputs ˆyM (cid:48) so we have Q(s = ˆY1:M (cid:48)−1, a =
+ˆyM (cid:48)) = R( ˆY1:M (cid:48)). However, to evaluate the intermediate
+step, the action-value should reﬂect not only the quality of
+the already predicted relationships, but also the quality of
+the predictions that the model can potentially generate in the
+future. To this end we apply a Monte Carlo search [40] with
+roll-out to sample the remaining predictions. For each inter-
+mediate state s = ˆY1:m, we sample the remaining M (cid:48) − m
+visual relationships T times. The sampling is done accord-
+ing to the Softmax probabilities (Equation 7) at each de-
+coding step from m + 1 to M (cid:48). We then concatenate each
+sample ˆYm+1:M (cid:48) with the already predicted visual relation-
+ships ˆY1:m to form the complete prediction and compute the
+reward. The action-value Q(s = ˆY1:m, a = ˆym+1) for an
+intermediate state s = ˆY1:m where m < M (cid:48) can thus be
+
+15936Figure 4: VG recall vs mRecall performance for different
+values of α.
+
+deﬁned as:
+
+Q(s = ˆY1:m, a = ˆym+1) =
+
+1
+T
+
+T
+(cid:88)
+
+t=1
+
+R( ˆY (t)
+
+1:M (cid:48))
+
+(11)
+
+where ˆY (t)
+1:M (cid:48) refers to the t-th sampled sequence starting
+from ˆY1:m. It can be observed that the action-value function
+is iteratively deﬁned as the next-state value starting from
+ˆY1:m and rolling out to the end.
+
+The gradient of the objective function LRL with re-
+spect to the model parameters is derived using policy gradi-
+ent [42] as:
+M (cid:48)
+(cid:88)
+
+(cid:88)
+
+∇p(ˆym+1| ˆY1:m) · Q( ˆY1:m, ˆym+1)
+
+∇LRL ≈
+
+m=1
+
+ˆym+1∈Y
+
+M (cid:48)
+(cid:88)
+
+=
+
+(cid:88)
+
+m=1
+
+ˆym+1∈Y
+
+p(ˆym+1| ˆY1:m)∇ log p(ˆym+1| ˆY1:m) · Q( ˆY1:m, ˆym+1)
+
+(12)
+Note that if we directly use the weighted sum of recall and
+mRecall in Equation 9, most sequences will get a positive
+reward even if they are highly sub-optimal. To provide a
+stronger signal to the model, we instead use self-critical
+training [38], and take the difference between rewards for
+sampled and greedily decoded sequences as the reward.
+This encourages the model to explore policies that lead to
+better samples than greedy decoding.
+
+5. Experiments
+
+We evaluate our model on two public SGG bench-
+marks, Visual Relationship Detection (VRD) [31] and Vi-
+sual Genome (VG) [25]. On both datasets we compare our
+approach to an extensive set of leading baselines described
+in the Related Work section.
+
+VRD. We use the dataset split from [58] and report re-
+call@50 and 100. Following [58], we benchmark our model
+on two standard tasks, Relationship Detection and Phrase
+Detection, with and without the graph constraint denoted as
+k = 1 and free-k respectively. The graph constraint lim-
+its prediction to one relationship predicate for each object
+pair, while no graph constraint accepts an arbitrary number
+of predicates.
+
+VG. We use the dataset split from [51] and the VGG de-
+
+Figure 5: Comparison of training and inference times. For
+inference we show results for different prediction block
+sizes. Instead of predicting visual relationship one at a time,
+we take multiple top predicted relationship triplets (block
+size) at each decoding step.
+
+tection model weights from [64]. Following the evaluation
+protocol from [51], we compute recall and mRecall on three
+tasks: scene graph detection (SGDET), scene graph classi-
+ﬁcation (SGCLS), and predicate classiﬁcation (PRDCLS).
+As in VRD we benchmark performance with and without
+the graph constraint.
+
+We train our model using the Adam optimizer [21] with
+β1 = 0.9, β2 = 0.999, batch size of 4096, and learning rate
+of 1e − 3. We apply linear learning rate warmup over the
+ﬁrst 1K steps, and cosine learning rate decay afterwards.
+We use the standard Transformer blocks for both encoder
+and decoder [45], with four encoder blocks and two decoder
+blocks. All blocks have embedding size of 128 and 4 atten-
+tion heads. The model is trained for 500 epochs on VRD
+and 2K epochs on VG. We train the model with teacher
+forcing over the ﬁrst half of the epochs, and alternate be-
+tween teacher forcing and reinforcement learning over the
+second half of the epochs. We set the number of playout
+samples T to be 16 for the reinforcement learning loss.
+
+5.1. Results and Analysis
+
+mRecall results on VG are shown in Table 1, and recall
+results on the VRD and VG datasets are shown in Tables 2
+and 3 respectively. We observe that our approach, denoted
+as Seq2Seq, outperforms the baselines on most tasks and
+recall thresholds. We improve over the prior state-of-the-
+art by 4.6% (+1.6) on all metrics on average, with most
+improvements observed on the VG SGDet task.
+
+To investigate the contribution from each component of
+our model we conduct extensive ablation experiments, and
+ablation results are shown at the bottom of each table. We
+ﬁrst remove the sequential decoder and ablate the non-
+sequential architecture (Seq2Seq-encoder only) where we
+only use the Transformer encoder to obtain the contextual-
+ized bounding box representations. For each pair of objects,
+we concatenate their contextualized representations, and
+use an FNN layer followed by a Softmax layer over the pos-
+
+15937sible relationship predicates (including the no relationship
+predicate) to obtain the relationship probabilities. Next, we
+keep the encoder-decoder architecture but remove the RL
+objective, and only train the model with teacher forcing
+(Seq2Seq-teacher forcing). In addition to teacher forcing,
+we include the results for the Seq2Seq approach trained
+with the scheduled sampling strategy (Seq2Seq-scheduled
+sampling) [3]. The scheduled sampling randomly replaces
+the ground-truth with the model’s predictions from the pre-
+vious step, which adapts the model the consume its own
+predictions instead of ground truth.
+
+We observe in Tables 1 and 2 that on both VRD and VG
+datasets removing the sequential decoder from the model
+leads to considerable performance degradation on all tasks
+and recall thresholds. This demonstrates the effectiveness
+of conditional sequential decoding for scene graph genera-
+tion. Similarly, training with teacher forcing also hurts per-
+formance relative to the full RL training. Scheduled sam-
+pling partially closes the gap between teacher forcing and
+RL but doesn’t eliminate it completely, and performance
+still drops by over a point on some tasks. These results
+indicate that optimizing for the target metric while simul-
+taneously learning to condition on predictions instead of
+ground truth is highly beneﬁcial for the SGG task. Lastly,
+to estimate the effect that training sequence sampling has on
+performance, we repeated SGDET Seq2Seq-RL training 10
+times with different seeds. We observed that the variation
+in performance across training runs was very small with a
+standard deviation of 0.13.
+
+Recall vs mRecall. We perform a hyperparameter sen-
+sitivity analysis for α in our reward function in Equation 9.
+We vary α from 0 to 1, and report recall and mRecall @100
+results on the VG SGDet task shown in Figure 4. We ob-
+serve that the recall and mRecall metrics are inversely cor-
+related, i.e., improvement in recall results in degradation of
+mRecall, and vice versa. This is consistent with previously
+reported ﬁndings by other works in this area [43, 59, 22].
+An additional advantage of our RL approach is that it al-
+lows to directly control the degree to which each metric con-
+tributes to the reward, and thus directly optimize the model
+to achieve the desired balance between the two metrics.
+
+Training and Inference Speed. We evaluate and com-
+pare the average per image training and inference time for
+our Seq2Seq approach and several leading baseline mod-
+els, results are shown in Figure 5. For fair comparison
+all models are trained and timed on the same server. For
+our Seq2Seq approach, we report training times for the
+three ablation architectures described above and the full RL
+model. When the model is trained with teacher forcing only,
+the Transformer architecture enables parallel decoding via
+causal masking which signiﬁcantly accelerates forward and
+backward passes. Training with scheduled sampling or RL
+requires sampling the predicted relationship triplets one at a
+
+Figure 6: VG qualitative examples. For each image we
+show the decoded relationship triplet sequence produced by
+our model.
+
+time, and is thus less efﬁcient. At inference time, we bench-
+mark block decoding where multiple top predicted triplets
+(block size) are taken at each decoding step. Block decod-
+ing can signiﬁcantly accelerate inference by requiring fewer
+forward passes through the model. But, as seen in Figure 5,
+it can also lead to accuracy degradation by reducing the ef-
+fectiveness of sequential conditioning. In all cases, even de-
+coding one triplet at a time (block size = 1), inference time
+in our model is highly competitive with leading baselines
+while we also substantially improve recall performance.
+
+Qualitative Results. Figure 6 shows two scenes with
+motorcycles.
+In both scenes, independent prediction has
+difﬁculty distinguishing “riding” vs “near” relationships be-
+tween “person” and “motorcycle”. On the right we show
+a conditional decoding sequence. In both cases our model
+ﬁrst identiﬁes easier grounding relationships for motorcycle
+and person, which then enables it to correctly predict “rid-
+ing” and “near” for the top and bottom images respectively.
+We see a very substantial increase in probability relative to
+the independent prediction (15% → 59% for “riding” and
+31% → 58% for “near”).
+
+6. Conclusion
+
+We explored contextual models showing that they are
+highly effective for the scene graph generation task. We
+analyzed the relationships statistics in the training data
+demonstrating strong conditional dependence. Leveraging
+this result, we proposed a Seq2Seq model that makes pre-
+dictions by explicitly conditioning on the already predicted
+relationships in an autoregressive way.
+In addition, we
+introduced a reinforcement learning based training strat-
+egy that enables the direct optimization of the target non-
+differentiable metrics.
+
+Step: Decoded Tripletm=1: <tire, on, motorcycle>m=2: <car, near, motorcycle>m=3: <motorcycle, on, street>m=4: <person, wearing, helmet> m=5: <seat, under, person>m=6: <person, riding, motocycle>(Riding increases 15% -> 59%)Step: Decoded Tripletm=1: <motorcycle, has, tire>m=2: <tree, behind, motorcycle>m=3: <tree, behind, person>m=4: <helmet, on, motorcycle>m=5: <person, near, motorcycle>(Near increases 31% -> 58%)15938References
+
+[1] Aniket Agarwal, Ayush Mangal, and Vipul. Visual relation-
+ship detection using scene graphs: A survey. arXiv preprint
+arXiv:2005.08045, 2020. 1
+
+[2] Eugene Belilovsky, Matthew Blaschko, Jamie Ryan Kiros,
+Raquel Urtasun, and Richard Zemel. Joint embeddings of
+scene graphs and images. In Proceedings ICLR 2017 work-
+shop track, pages 1–5. OpenReview. net, 2017. 1
+
+[3] Samy Bengio, Oriol Vinyals, Navdeep Jaitly, and Noam
+Shazeer. Scheduled sampling for sequence prediction with
+In Proceedings of the 28th In-
+recurrent neural networks.
+ternational Conference on Neural Information Processing
+Systems-Volume 1, pages 1171–1179, 2015. 8
+
+[4] Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas
+Usunier, Alexander Kirillov, and Sergey Zagoruyko. End-to-
+end object detection with transformers. In European Confer-
+ence on Computer Vision, pages 213–229. Springer, 2020.
+2
+
+[5] Long Chen, Hanwang Zhang, Jun Xiao, Xiangnan He, Shil-
+iang Pu, and Shih-Fu Chang. Counterfactual critic multi-
+In Proceedings
+agent training for scene graph generation.
+of the IEEE/CVF International Conference on Computer Vi-
+sion, pages 4613–4623, 2019. 3
+
+[6] Tianshui Chen, Weihao Yu, Riquan Chen, and Liang Lin.
+Knowledge-embedded routing network for scene graph gen-
+eration. In Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition, pages 6163–6171, 2019. 2,
+3
+
+[7] Yunian Chen, Yanjie Wang, Yang Zhang, and Yanwen Guo.
+Panet: A context based predicate association network for
+In 2019 IEEE International Con-
+scene graph generation.
+ference on Multimedia and Expo (ICME), pages 508–513.
+IEEE, 2019. 3
+
+[8] Meng-Jiun Chiou, Henghui Ding, Hanshu Yan, Changhu
+Wang, Roger Zimmermann, and Jiashi Feng. Recovering the
+unbiased scene graphs from the biased ones. arXiv preprint
+arXiv:2107.02112, 2021. 3
+
+[9] Bo Dai, Yuqi Zhang, and Dahua Lin. Detecting visual rela-
+tionships with deep relational networks. In Proceedings of
+the IEEE conference on computer vision and Pattern recog-
+nition, pages 3076–3086, 2017. 3
+
+[10] Vinay Damodaran, Sharanya Chakravarthy, Akshay Ku-
+mar, Anjana Umapathy, Teruko Mitamura, Yuta Nakashima,
+Noa Garcia, and Chenhui Chu. Understanding the role of
+scene graphs in visual question answering. arXiv preprint
+arXiv:2101.05479, 2021. 1
+
+[11] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov,
+Dirk Weissenborn, Xiaohua Zhai, Thomas Unterthiner,
+Mostafa Dehghani, Matthias Minderer, Georg Heigold, Syl-
+vain Gelly, et al. An image is worth 16x16 words: Trans-
+formers for image recognition at scale. In International Con-
+ference on Learning Representations, 2020. 2, 3, 4
+
+[12] Brendan Duke, Abdalla Ahmed, Christian Wolf, Parham
+Aarabi, and Graham W Taylor. Sstvos: Sparse spatiotem-
+In Pro-
+poral transformers for video object segmentation.
+ceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, pages 5912–5921, 2021. 3
+
+[13] Alaaeldin El-Nouby, Natalia Neverova, Ivan Laptev, and
+Herv´e J´egou. Training vision transformers for image re-
+trieval. arXiv preprint arXiv:2102.05644, 2021. 3
+
+[14] Jiuxiang Gu, Shaﬁq Joty, Jianfei Cai, Handong Zhao, Xu
+Yang, and Gang Wang. Unpaired image captioning via scene
+graph alignments. In Proceedings of the IEEE International
+Conference on Computer Vision, pages 10323–10332, 2019.
+1
+
+[15] Marcel Hildebrandt, Hang Li, Rajat Koner, Volker Tresp, and
+Stephan G¨unnemann. Scene graph reasoning for visual ques-
+tion answering. arXiv preprint arXiv:2007.01072, 2020. 1
+
+[16] Drew A Hudson and Christopher D Manning. Learning by
+abstraction: the neural state machine. In Proceedings of the
+33rd International Conference on Neural Information Pro-
+cessing Systems, pages 5903–5916, 2019. 1
+
+[17] Zih-Siou Hung, Arun Mallya, and Svetlana Lazebnik. Con-
+textual translation embedding for visual relationship detec-
+tion and scene graph generation. IEEE Transactions on Pat-
+tern Analysis and Machine Intelligence, 2020. 3
+
+[18] Justin Johnson, Ranjay Krishna, Michael Stark, Li-Jia Li,
+David Shamma, Michael Bernstein, and Li Fei-Fei. Image
+retrieval using scene graphs. In Proceedings of the IEEE con-
+ference on computer vision and pattern recognition, pages
+3668–3678, 2015. 1, 2, 3
+
+[19] Mahmoud Khademi and Oliver Schulte. Deep generative
+probabilistic graph neural networks for scene graph gener-
+ation. In Proceedings of the AAAI Conference on Artiﬁcial
+Intelligence, volume 34, pages 11237–11245, 2020. 3
+[20] Siddhesh Khandelwal, Mohammed Suhail, and Leonid Si-
+gal. Segmentation-grounded scene graph generation. arXiv
+preprint arXiv:2104.14207, 2021. 3
+
+[21] Diederik P Kingma and Jimmy Ba. Adam: A method for
+
+stochastic optimization. In ICLR (Poster), 2015. 7
+
+[22] Boris Knyazev, Harm de Vries, C˘at˘alina Cangea, Graham W
+Taylor, Aaron Courville, and Eugene Belilovsky. Genera-
+tive compositional augmentations for scene graph prediction.
+arXiv preprint arXiv:2007.05756, 2020. 2, 3, 6, 8
+
+[23] Boris Knyazev, Harm de Vries, C˘at˘alina Cangea, Graham W
+Taylor, Aaron Courville, and Eugene Belilovsky. Graph
+density-aware losses for novel compositions in scene graph
+generation. arXiv preprint arXiv:2005.08230, 2020. 2, 3
+
+[24] Rajat Koner,
+
+Poulami Sinhamahapatra,
+
+Tresp.
+arXiv:2004.06193, 2020. 3
+
+Relation transformer network.
+
+and Volker
+arXiv preprint
+
+[25] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A Shamma, et al. Visual genome:
+Connecting language and vision using crowdsourced dense
+image annotations. International journal of computer vision,
+123(1):32–73, 2017. 2, 7
+
+[26] Soohyeong Lee,
+
+Ju-Whan Kim, Youngmin Oh,
+
+and
+Joo Hyuk Jeon. Visual question answering over scene graph.
+In 2019 First International Conference on Graph Computing
+(GC), pages 45–50. IEEE, 2019. 1
+
+[27] Yikang Li, Wanli Ouyang, Xiaogang Wang, and Xiao’ou
+Tang. Vip-cnn: Visual phrase guided convolutional neu-
+In Proceedings of the IEEE conference on
+ral network.
+
+15939computer vision and pattern recognition, pages 1347–1356,
+2017. 3, 5
+
+[28] Xiaodan Liang, Lisa Lee, and Eric P Xing. Deep variation-
+structured reinforcement learning for visual relationship and
+attribute detection. In Proceedings of the IEEE conference
+on computer vision and pattern recognition, pages 848–857,
+2017. 3, 5
+
+[29] Xin Lin, Changxing Ding, Jinquan Zeng, and Dacheng Tao.
+Gps-net: Graph property sensing network for scene graph
+In Proceedings of the IEEE/CVF Conference
+generation.
+on Computer Vision and Pattern Recognition, pages 3746–
+3753, 2020. 2, 3
+
+[30] Hengyue Liu, Ning Yan, Masood Mortazavi, and Bir Bhanu.
+Fully convolutional scene graph generation. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, pages 11546–11556, 2021. 3
+
+[31] Cewu Lu, Ranjay Krishna, Michael Bernstein, and Li Fei-
+Fei. Visual relationship detection with language priors. In
+European conference on computer vision, pages 852–869.
+Springer, 2016. 3, 7
+
+[32] Yichao Lu, Cheng Chang, Himanshu Rai, Guangwei Yu, and
+Maksims Volkovs. Learning effective visual relationship de-
+tector on 1 gpu. arXiv preprint arXiv:1912.06185, 2019. 3
+
+[33] Yichao Lu, Cheng Chang, Himanshu Rai, Guangwei Yu, and
+Maksims Volkovs. Multi-view scene graph generation in
+videos. International Challenge on Activity Recognition (Ac-
+tivityNet) CVPR 2021 Workshop, 2021. 3
+
+[34] Alejandro Newell and Jia Deng. Pixels to graphs by as-
+In Proceedings of the 31st Interna-
+sociative embedding.
+tional Conference on Neural Information Processing Sys-
+tems, pages 2168–2177, 2017. 6
+
+[35] Mengshi Qi, Weijian Li, Zhengyuan Yang, Yunhong Wang,
+and Jiebo Luo. Attentive relational networks for mapping
+In Proceedings of the IEEE/CVF
+images to scene graphs.
+Conference on Computer Vision and Pattern Recognition,
+pages 3957–3966, 2019. 3
+
+[36] Prajit Ramachandran, Niki Parmar, Ashish Vaswani, Irwan
+Bello, Anselm Levskaya, and Jonathon Shlens. Stand-alone
+self-attention in vision models. In Proceedings of the 33rd
+International Conference on Neural Information Processing
+Systems, pages 68–80, 2019. 3
+
+[37] Shaoqing Ren, Kaiming He, Ross Girshick, and Jian Sun.
+Faster r-cnn: Towards real-time object detection with region
+proposal networks. Advances in neural information process-
+ing systems, 28:91–99, 2015. 4
+
+[38] Steven J Rennie, Etienne Marcheret, Youssef Mroueh, Jerret
+Ross, and Vaibhava Goel. Self-critical sequence training for
+image captioning. In Proceedings of the IEEE Conference
+on Computer Vision and Pattern Recognition, pages 7008–
+7024, 2017. 7
+
+[39] Jiaxin Shi, Hanwang Zhang, and Juanzi Li. Explainable and
+explicit visual reasoning over scene graphs. In Proceedings
+of the IEEE Conference on Computer Vision and Pattern
+Recognition, pages 8376–8384, 2019. 1
+
+[40] David Silver, Aja Huang, Chris J Maddison, Arthur Guez,
+Laurent Sifre, George Van Den Driessche, Julian Schrit-
+twieser, Ioannis Antonoglou, Veda Panneershelvam, Marc
+
+Lanctot, et al. Mastering the game of go with deep neural
+networks and tree search. nature, 529(7587):484–489, 2016.
+6
+
+[41] Mohammed Suhail, Abhay Mittal, Behjat Siddiquie, Chris
+Broaddus, Jayan Eledath, Gerard Medioni, and Leonid Si-
+gal. Energy-based learning for scene graph generation. arXiv
+preprint arXiv:2103.02221, 2021. 2, 3
+
+[42] Richard S Sutton, David A McAllester, Satinder P Singh, and
+Yishay Mansour. Policy gradient methods for reinforcement
+learning with function approximation. In Advances in neural
+information processing systems, pages 1057–1063, 2000. 6,
+7
+
+[43] Kaihua Tang, Yulei Niu, Jianqiang Huang, Jiaxin Shi, and
+Hanwang Zhang. Unbiased scene graph generation from bi-
+In Proceedings of the IEEE Conference on
+ased training.
+Computer Vision and Pattern Recognition, 2020. 1, 2, 3, 5,
+6, 8
+
+[44] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan Luo,
+and Wei Liu. Learning to compose dynamic tree structures
+for visual contexts. In Proceedings of the IEEE Conference
+on Computer Vision and Pattern Recognition, pages 6619–
+6628, 2019. 2, 3, 6
+
+[45] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszko-
+reit, Llion Jones, Aidan N Gomez, Łukasz Kaiser, and Illia
+Polosukhin. Attention is all you need. In Advances in neural
+information processing systems, pages 5998–6008, 2017. 2,
+3, 4, 7
+
+[46] Petar Veliˇckovi´c, Guillem Cucurull, Arantxa Casanova,
+Adriana Romero, Pietro Li`o, and Yoshua Bengio. Graph at-
+tention networks. In International Conference on Learning
+Representations, 2018. 3
+
+[47] Melissa Le-Hoa V˜o, Sage EP Boettcher, and Dejan
+Draschkow. Reading scenes: how scene grammar guides at-
+tention and aids perception in real-world environments. Cur-
+rent opinion in psychology, 29:205–210, 2019. 1
+
+[48] Wenbin Wang, Ruiping Wang, Shiguang Shan, and Xilin
+Chen. Exploring context and visual pattern of relationship
+for scene graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 8188–8197, 2019. 3
+
+[49] Wenbin Wang, Ruiping Wang, Shiguang Shan, and Xilin
+Chen. Sketching image gist: Human-mimetic hierarchical
+In Computer Vision–ECCV 2020:
+scene graph generation.
+16th European Conference, Glasgow, UK, August 23–28,
+2020, Proceedings, Part XIII 16, pages 222–239. Springer,
+2020. 5, 6
+
+[50] Ronald J Williams and David Zipser. A learning algorithm
+for continually running fully recurrent neural networks. Neu-
+ral computation, 1(2):270–280, 1989. 5
+
+[51] Danfei Xu, Yuke Zhu, Christopher B Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing. In Pro-
+ceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition, pages 5410–5419, 2017. 1, 2, 3, 6, 7
+
+[52] D. Xu, Y. Zhu, C. B. Choy, and L. Fei-Fei. Scene graph gen-
+eration by iterative message passing. In 2017 IEEE Confer-
+ence on Computer Vision and Pattern Recognition (CVPR),
+pages 3097–3106, 2017. 3
+
+15940tional conference on computer vision, pages 589–598, 2017.
+3, 5
+
+[53] Pengfei Xu, Xiaojun Chang, Ling Guo, Po-Yao Huang, Xi-
+aojiang Chen, and Alexander G Hauptmann. A survey of
+scene graph: Generation and application. IEEE Trans. Neu-
+ral Netw. Learn. Syst, 2020. 1
+
+[54] Shaotian Yan, Chen Shen, Zhongming Jin, Jianqiang Huang,
+Rongxin Jiang, Yaowu Chen, and Xian-Sheng Hua. Pcpl:
+Predicate-correlation perception learning for unbiased scene
+graph generation. In Proceedings of the 28th ACM Interna-
+tional Conference on Multimedia, pages 265–273, 2020. 3
+
+[55] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi
+Parikh. Graph r-cnn for scene graph generation. In Proceed-
+ings of the European conference on computer vision (ECCV),
+pages 670–685, 2018. 3, 6
+
+[56] Xu Yang, Kaihua Tang, Hanwang Zhang, and Jianfei Cai.
+Auto-encoding scene graphs for image captioning. In Pro-
+ceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition, pages 10685–10694, 2019. 1
+
+[57] Guojun Yin, Lu Sheng, Bin Liu, Nenghai Yu, Xiaogang
+Wang, Jing Shao, and Chen Change Loy. Zoom-net: Mining
+deep feature interactions for visual relationship recognition.
+In Proceedings of the European Conference on Computer Vi-
+sion (ECCV), pages 322–338, 2018. 3, 5
+
+[58] Ruichi Yu, Ang Li, Vlad I Morariu, and Larry S Davis. Vi-
+sual relationship detection with internal and external linguis-
+tic knowledge distillation. In Proceedings of the IEEE inter-
+national conference on computer vision, pages 1974–1982,
+2017. 3, 5, 7
+
+[59] Alireza Zareian, Svebor Karaman, and Shih-Fu Chang.
+Bridging knowledge graphs to generate scene graphs.
+In
+European Conference on Computer Vision, pages 606–623.
+Springer, 2020. 5, 6, 8
+
+[60] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin
+Choi. Neural motifs: Scene graph parsing with global con-
+text. In Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition, pages 5831–5840, 2018. 2,
+3, 5, 6
+
+[61] Cheng Zhang, Wei-Lun Chao, and Dong Xuan. An empirical
+study on leveraging scene graphs for visual question answer-
+ing. arXiv preprint arXiv:1907.12133, 2019. 1
+
+[62] Hanwang Zhang, Zawlin Kyaw, Shih-Fu Chang, and Tat-
+Seng Chua. Visual translation embedding network for visual
+relation detection. In Proceedings of the IEEE conference on
+computer vision and pattern recognition, pages 5532–5540,
+2017. 3
+
+[63] Hanwang Zhang, Zawlin Kyaw, Jinyang Yu, and Shih-Fu
+Chang. Ppr-fcn: Weakly supervised visual relation detection
+via parallel pairwise r-fcn. In Proceedings of the IEEE Inter-
+national Conference on Computer Vision, pages 4233–4241,
+2017. 3
+
+[64] Ji Zhang, Kevin J Shih, Ahmed Elgammal, Andrew Tao,
+and Bryan Catanzaro. Graphical contrastive losses for scene
+In Proceedings of the IEEE Conference on
+graph parsing.
+Computer Vision and Pattern Recognition, pages 11535–
+11543, 2019. 2, 3, 4, 5, 6, 7
+
+[65] Bohan Zhuang, Lingqiao Liu, Chunhua Shen, and Ian Reid.
+Towards context-aware interaction recognition for visual re-
+In Proceedings of the IEEE interna-
+lationship detection.
+
+15941

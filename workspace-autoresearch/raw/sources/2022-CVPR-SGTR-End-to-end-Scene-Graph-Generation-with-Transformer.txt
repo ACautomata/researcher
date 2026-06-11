@@ -1,0 +1,2155 @@
+SGTR: End-to-end Scene Graph Generation with Transformer
+Rongjie Li1,3,4
+Songyang Zhang 1,3,4
+Xuming He1,2
+1School of Information Science and Technology, ShanghaiTech University
+2Shanghai Engineering Research Center of Intelligent Vision and Imaging
+3Shanghai Institute of Microsystem and Information Technology, Chinese Academy of Sciences
+4University of Chinese Academy of Sciences
+{lirj2, zhangsy1, hexm}@shanghaitech.edu.cn
+Abstract
+Scene Graph Generation (SGG) remains a challenging
+visual understanding task due to its compositional property.
+Most previous works adopt a bottom-up two-stage or a point-
+based one-stage approach, which often suffers from high
+time complexity or sub-optimal designs. In this work, we
+propose a novel SGG method to address the aforementioned
+issues, formulating the task as a bipartite graph construction
+problem. To solve the problem, we develop a transformer-
+based end-to-end framework that ﬁrst generates the entity
+and predicate proposal set, followed by inferring directed
+edges to form the relation triplets. In particular, we de-
+velop a new entity-aware predicate representation based on
+a structural predicate generator that leverages the compo-
+sitional property of relationships. Moreover, we design a
+graph assembling module to infer the connectivity of the
+bipartite scene graph based on our entity-aware structure,
+enabling us to generate the scene graph in an end-to-end
+manner. Extensive experimental results show that our design
+is able to achieve the state-of-the-art or comparable perfor-
+mance on two challenging benchmarks, surpassing most of
+the existing approaches and enjoying higher efﬁciency in
+inference. We hope our model can serve as a strong baseline
+for the Transformer-based scene graph generation. 1
+1. Introduction
+Inferring structural properties of a scene, such as the
+relationship between entities, is a fundamental visual under-
+standing task. The visual relationship between two entities
+can be typically represented by a triple <subject entity, pred-
+icate, object entity>. Based on the visual relationships, a
+scene can be modeled as a graph structure, with entities as
+nodes and predicates as edges, referred to as scene graph.
+The scene graph provides a compact structural representation
+1This work was supported by Shanghai Science and Technology Pro-
+gram 21010502700.
+Code is available: https://github.com/
+Scarecrow0/SGTR
+Scene Graph
+Man-1
+Man-2
+Man-3
+Horse-1
+Man-1
+Man-2
+Man-3
+Horse-1
+Man-1
+Man-2
+Man-3
+Horse-1
+Bipartite Scene Graph
+Graph
+Assembling
+Predicate
+Entity-aware 
+Predicate Proposal
+Horse-1
+Entity Proposal
+Entity 
+Indicators
+Hold
+Next
+Ride
+None
+Hold
+Ride
+Next
+Hold
+Next
+Ride
+Hold
+None
+Figure 1. The illustration of SGTR pipeline paradigm. We
+formulate SGG as a bipartite graph construction process. First, the
+entity and predicate nodes are generated, respectively. Then we
+assemble the bipartite scene graph from two types of nodes.
+for a visual scene, which has potential applications in many
+vision tasks such as visual question answering [8, 28, 34],
+image captioning [46,47] and image retrieval [9].
+Different from the traditional vision tasks (e.g., object
+detection) that focus on entity instances, the main challenge
+of scene graph generation (SGG) lies in building an effective
+and efﬁcient model for the relations between the entities. The
+compositional property of visual relationships induces high
+complexity in terms of their constituents, which makes it
+difﬁcult to learn a compact representation of the relationship
+concept for localization and/or classiﬁcation.
+Most previous works attempt to tackle this problem using
+two distinct design patterns: bottom-up two-stage [1,4,5,7,
+15,19,44,48] and point-based one-stage design [6,24]. The
+former typically ﬁrst detects N entity proposals, followed by
+predicting the predicate categories of those entity combina-
+tions. While this strategy achieves high recalls in discovering
+relation instances, its O(N 2) predicate proposals not only
+incur considerable computation cost but also produce sub-
+stantial noise in context modeling. In the one-stage methods,
+entities and predicates are often extracted separately from
+arXiv:2112.12970v3  [cs.CV]  31 Mar 2022
+the image in order to reduce the size of relation proposal set.
+Nonetheless, they rely on a strong assumption of the non-
+overlapping property of interaction regions, which severely
+restricts their application in modeling complex scenes2.
+In this work, we aim to tackle the aforementioned lim-
+itation by leveraging the compositional property of scene
+graphs. To this end, as illustrated in Fig. 1, we ﬁrst formulate
+the SGG task as a bipartite graph construction problem, in
+which each relationship triplet is represented as two types of
+nodes (entity and predicate) linked by directed edges. Such a
+bipartite graph allows us to jointly generate entity/predicate
+proposals and their potential associations, yielding a rich
+hypothesis space for inferring visual relations. More impor-
+tantly, we propose a novel entity-aware predicate represen-
+tation that incorporates relevant entity proposal information
+into each predicate node. This enriches the predicate repre-
+sentations and therefore enables us to produce a relatively
+small number of high-quality predicate proposals. More-
+over, such a representation encodes potential associations
+between each predicate and its subject/object entities, which
+can facilitate predicting the graph edges and lead to efﬁcient
+generation of the visual relation triplets.
+Speciﬁcally, we develop a new transformer-based end-to-
+end SGG model, dubbed Scene graph Generation TRans-
+former (SGTR), for constructing the bipartite graph. Our
+model consists of three main modules, including an entity
+node generator, a predicate node generator and a graph
+assembling module. Given an image, we ﬁrst introduce two
+CNN+Transformer sub-networks as the entity and predicate
+generator to produce a set of entity and predicate nodes,
+respectively. To compute the entity-aware predicate repre-
+sentations, we design a structural predicate generator con-
+sisting of three parallel transformer decoders, which fuses
+the predicate feature with an entity indicator representation.
+After generating entity and predicate node representations,
+we then devise a differentiable graph assembling module
+to infer the directed edges of the bipartite graph, which ex-
+ploits the entity indicator to predict the best grouping of the
+entity and predicate nodes. With end-to-end training, our
+SGTR learns to infer a sparse set of relation proposals from
+both input images and entity proposals adaptively, which can
+mitigate the impact of noisy object detection.
+We validate our method by extensive experiments on
+two SGG benchmarks: We validate our method by exten-
+sive experiments on two SGG benchmarks: Visual Genome
+and OpenImages-V6 datasets, with comparisons to previous
+state-of-the-art methods. The results show that our method
+outperforms or achieves comparable performance on both
+benchmarks and with high efﬁciency during inference.
+The main contribution of our work has three-folds:
+• We propose a novel transformer-based end-to-end scene
+2e.g., two different relationships cannot have largely overlapped area –
+a phenomenon also discussed in the recent works on (HOI) [3,31]
+graph generation method with a bipartite graph con-
+struction process that inherits the advantages of both
+two-stage and one-stage methods.
+• We develop an entity-aware structure for exploiting the
+compositional properties of visual relationships.
+• Our method achieves the state-of-the-art or comparable
+performance on all metrics w.r.t the prior SGG methods
+and with more efﬁcient inference.
+2. Related Works
+We categorize the related work of SGG/HOI according
+to three research directions: Two-stage Scene Graph Gener-
+ation, One-stage Scene Graph Generation, and One-stage
+Human-Object Interaction.
+Two-stage Scene Graph Generation
+Two-stage SGG
+methods predict the relationships between densely con-
+nected entity pairs. Based on dense relationship propos-
+als, many previous works focus on modeling contextual
+structure [11, 19–21, 23, 27, 33, 38, 39, 41, 42, 45, 50–55].
+Recent studies develop logit adjustment and other training
+strategies to address the long-tail recognition in the SGG
+task [1,4,5,7,14,15,19,29,32,38,43,44,48]. The two-stage
+design is capable of handling complex scenarios encountered
+in SGG.
+However, as discussed in Sec. 1, the dense relation
+proposal generation often leads to high time complexity
+and unavoidable noise in context modeling. Many two-
+stage works propose heuristic designs to address these is-
+sues (e.g., proposal generation [45], efﬁcient context model-
+ing [19,20,27,33,39,47]). However, these sophisticated de-
+signs often rely on the speciﬁc properties of the downstream
+tasks, which limits the ﬂexibility of their representation learn-
+ing and is difﬁcult to achieve end-to-end optimization.
+One-stage Scene Graph Generation Inspired by the fully
+convolutional one-stage object detection methods [2,30,36],
+the SGG community starts to explore the one-stage de-
+sign. The fully convolutional network [24, 35] or CNN-
+Transformer [6] architecture is used in the one-stage methods
+to detect the relationship from image features directly. These
+one-stage frameworks typically can perform efﬁciently due
+to their sparse proposal set. Nonetheless, without explicit
+entity modeling, those designs may struggle to capture the
+complex visual relationships associated with real-world sce-
+narios. Moreover, the majority of one-stage methods ignore
+entity-relation consistency as they predict each relationship
+independently rather than a valid graph structure with con-
+sistent node-edge constraint.
+One-stage Human-Object Interaction Our work is also re-
+lated to the Human-Object Interaction (HOI) task. There has
+been a recent trend toward studying the one-stage framework
+for Human-Object Interaction [3,12,13,22,31,37,56,62]. In
+particular, [3,13] introduce an intriguing framework based on
+a dual decoder structure that simultaneously extracts the hu-
+man, object, and interaction and then groups the components
+into ﬁnal triplets. This decoding-grouping approach provides
+a divide-and-conquer strategy for detecting the human and
+interacted object. Inspired by this design, we propose the bi-
+partite graph construction method in our SGTR for the more
+general SGG task. To further improve the association mod-
+eling between entity and predicate, we propose a predicate
+node generator with an entity-aware structure and a graph
+assembling mechanism. With such a design, the SGTR is
+able to handle the complex composition of relationships and
+achieve strong performance on SGG benchmarks.
+3. Preliminary
+In this section, we ﬁrst introduce the problem setting
+of scene graph generation in Sec. 3.1, and then present an
+overview of our approach in Sec. 3.2.
+3.1. Problem Setting
+The task of scene graph generation aims to parse an input
+into a scene graph Gscene = {Ve, Er}, where Ve is the node
+set denoting noun entities and Er is the edge set that repre-
+sents predicates between pairs of subject and object entities.
+Speciﬁcally, each entity vi ∈Ve has a category label from
+a set of entity classes Ce and a bounding box depicting its
+location in the image, while each edge ei→j ∈Er between a
+pair of nodes vi and vj is associated with a predicate label
+from a set of predicate classes Cp in this task.
+One possible way to generate the scene graph Gscene is by
+extracting the relationship triplet set from the given image.
+In this work, we formulate the relationship triplet generation
+process as a bipartite graph construction task [19]. Specif-
+ically, our graph consists of two groups of nodes Ve, Vp,
+which correspond to entity representation and predicate
+representation, respectively. These two groups of nodes
+are connected by two sets of directed edges Ee→p, Ep→e
+representing the direction from the entities to predicates
+and vice versa. Hence the bipartite graph has a form as
+Gb = {Ve, Vp, Ee→p, Ep→e}.
+3.2. Model Overview
+Our model deﬁnes a differentiable function Fsgg that
+takes an image I as the input and outputs the bipartite graph
+Gb, denoted as Gb = Fsgg(I), which allows end-to-end train-
+ing. We propose to explicitly model the bipartite graph con-
+struction process by leveraging the compositional property
+of relationships. The bipartite graph construction consists of
+two steps: a) node (entity and predicate) generation, and b)
+directed edge connection.
+In the node generation step, we extract the entity nodes
+and predicate nodes from the image with an entity node
+generator and a predicate node generator, respectively. The
+predicate node generator augments the predicate proposals
+with entity information based on three parallel sub-decoders.
+In the directed edge connection step, we design a graph
+assembling module to generate the bipartite scene graph
+from the entity and predicate proposals. An overview of
+our method is illustrated in Fig. 2 and we will start with a
+detailed description of our model architecture below.
+4. Our Approach
+Our model consists of four main submodules: (1) a back-
+bone network for generating feature representation of the
+scene (Sec. 4.1); (2) a transformer-based entity node gener-
+ator for predicting entity proposals (Sec. 4.1); (3) a structural
+predicate node generator for decoding predicate nodes
+(Sec. 4.2); (4) a bipartite graph assembling module for
+constructing ﬁnal bipartite graph via connecting entity nodes
+and entity-aware predicate nodes (Sec. 4.3). The model
+learning and inference are detailed in Sec. 4.4.
+4.1. Backbone and Entity Node Generator
+We adopt a ResNet as the backbone network, which ﬁrst
+produces a convolutional feature representation for the sub-
+sequent modules. Motivated by the Transformer-based de-
+tector, DETR [2], we then use a multi-layer Transformer
+encoder to augment the convolutional features. The result-
+ing CNN+transformer feature is denoted as Z ∈Rw×h×d,
+where w, h, d are the width, height, and channel of the fea-
+ture map, respectively.
+For the entity node generator, we adopt the decoder of
+DETR to produce Ne entity nodes from a set of learnable
+entity queries. Formally, we deﬁne the entity decoder as
+a mapping function Fe, which takes initial entity query
+Qe ∈RNe×d and the feature map Z as inputs, and out-
+puts the entity locations Be ∈RNe×4 and class scores
+Pe ∈RNe×(Ce+1), along with their associated feature repre-
+sentations He ∈RNe×d as follows,
+Be, Pe, He = Fe(Z, Qe)
+(1)
+where Be = {b1, · · · , bNe}, b = (xc, yc, wb, hb), xc, yc
+are the normalized center coordinates of the instance, wb, hb
+are the normalized width and height of each entity box.
+4.2. Predicate Node Generator
+Our predicate node generator aims to generate an entity-
+aware predicate representation by incorporating relevant en-
+tity proposal information into each predicate node. Such a
+design enables us to encode potential associations between
+each predicate and its subject/object entities, which can fa-
+cilitate predicting the graph edges and lead to efﬁcient gen-
+eration of the visual relation triplets.
+As shown in Fig. 2, the predicate node generator is com-
+posed of three components: (1) a predicate query initializa-
+tion module for initializing the entity-aware predicate query
+(in Sec. 4.2.2), (2) a predicate encoder for image feature
+extraction (in Sec. 4.2.1), and (3) a structural predicate
+decoder for decoding a set of entity-aware predicate nodes.
+(in Sec. 4.2.3).
+Entity Node
+Generator
+CNN
+Feature
+Transformer
+Encoder
+Predicate Node
+Generator
+Entity Queries
+Entity Feature
+Predicate Queries
+Entity Nodes
+Entity-aware
+Predicate Nodes
+Positional
+Encoding
+Graph
+Assembling
+Feature Extraction
+Node Generation
+Graph Construction
+Entity Location
+Entity Feature
+Predicate Queries
+Predicate Query
+Initialization
+Predicate
+Sub-decoder
+Predicate-Indicator
+Fusion
+Entity-aware Predicate Nodes
+Entity
+Feature
+Encoder Feature
+× 𝐿
+Predicate Node Generator
+Predicate 
+Encoder
+Indicator
+Sub-decoder
+Structural
+Predicate Decoder
+Figure 2. An illustration of overall pipeline of our SGTR model. Left) We use a CNN backbone together with a transformer encoder for
+image feature extraction. The entity and predicate node generators are introduced to produce the entity node and entity-aware predicate node.
+A graph assembling mechanism is developed to construct the ﬁnal bipartite scene graph. Right) The predicate node generator consists of
+three parts: a) predicate query initialization, b) a predicate encoder, and c) a structural predicate decoder, which is designed to generate
+entity-aware predicate nodes.
+4.2.1
+Predicate Encoder
+Based on the CNN+transformer features Z, we introduce a
+lightweight predicate encoder to extract predicate-speciﬁc
+image features. Our predicate encoder, which has a similar
+structure to the backbone Transformer encoder, employs a
+form of multi-layer multi-head self-attention via the skip-
+connected feed-forward network. The resulting predicate-
+speciﬁc feature is denoted as Zp ∈Rw×h×d.
+4.2.2
+Predicate Query Initialization
+A simple strategy for initializing the predicate queries is to
+adopt a set of learnable vectors as in the DETR [2]. However,
+such a holistic vector-based query design ignores not only
+the compositional property of the visual relationships but
+also the entity candidate information. The resulting represen-
+tations are not expressive enough for capturing the structured
+and diverse visual relationships.
+To cope with this challenge, we introduce a com-
+positional query representation that decouples predicate
+queries, denoted as Qe
+p ∈RNr×3d, into three compo-
+nents {Qis; Qio; Qp}, where subject/object entity indica-
+tor Qis, Qio ∈RNr×d 3 and predicate representation
+Qp ∈RNr×d. Concretely, we generate the predicate query
+Qe
+p in an entity-aware and scene-adaptive manner using a
+set of initial predicate queries Qinit ∈RNr×d and enti-
+ties representation Be, He. To achieve this, we ﬁrst build
+a geometric-aware entity representation as in [49], which
+deﬁnes a set of key and value vectors ∈RNe×d as follows:
+Kinit = Vinit = (He + Ge), Ge = ReLU(BeWg), (2)
+where Ge ∈RNe×d is a learnable geometric embedding
+3The subscripts ’s’, ’o’ stand for the subject and object entity, respec-
+tively.
+of entity proposals, Wg ∈R4×d is a transformation from
+bounding box locations to the embedding space.
+Given the augmented entity representations, we then com-
+pute the predicate queries Qe
+p using a multi-head cross-
+attention operation on the initial predicate queries Qinit and
+Kinit. For clarity, we use A(q, k, v) = FFN(MHA(q, k, v))
+to denote the multi-head attention operation.
+As such,
+we have Qe
+p = A(Qinit, Kinit, Vinit)We, where We ∈
+Rd×3d = [Wis
+e , Wio
+e , Wp
+e] are the transformation matrices
+for the three sub-queries Qis, Qio, Qp, respectively. In this
+way, we obtain a structural query that incorporates the en-
+tity information into the predicate query. The sub-queries
+Qis, Qio are referred to as entity indicators as they will be
+used to capture predicate-entity associations below.
+4.2.3
+Structural Predicate Node Decoder
+Given the predicate query Qe
+q, we now develop a structural
+predicate node decoder that leverages the compositional
+property and decodes all the predicate triplets from the en-
+tity/predicate feature maps.
+Our structural decoder consists of three modules: a) pred-
+icate sub-decoder; b) entity indicator sub-decoders; c) pred-
+icate indicator fusion. The two types of decoders take the
+encoder feature map Zp and entity features He, respectively
+and update the three components of the predicate query
+independently. Based on the updated predicate query com-
+ponents, the predicate-indicator fusion reﬁnes the entire
+predicate queries, aiming to improve the entity-predicate
+association within each compositional query.
+Speciﬁcally, we adopt the standard transformer decoder
+structure below. For notation clarity, we focus on a single de-
+coder layer and omit layer number l within each sub-decoder,
+as well as the notation of the self-attention operation.
+Predicate Sub-decoder. The predicate sub-decoder is de-
+signed to reﬁne the predicate representation from the im-
+age feature map Zp, which utilizes the spatial context in
+the image for updating predicate representation. We imple-
+ment this decoding process using the cross-attention mecha-
+nism: eQp = A(q = Qp, k = Zp, v = Zp), where eQp is the
+updated predicate representation.
+Entity Indicator Sub-Decoders. The entity indicator sub-
+decoders reﬁne the entity indicators associated with the pred-
+icate queries. Instead of relying on image features, we
+leverage more accurate entity features in the given scene.
+Speciﬁcally, we perform cross-attention operation between
+entity indicators Qis, Qio and entity proposal features He
+from the entity node generator, aiming to enhance the repre-
+sentation of the entity associations.We denote the updated
+representation of the entities indicator as eQis, eQio, which
+are generated with standard cross-attention operation:
+eQis = A(Qis, He, He),
+eQio = A(Qio, He, He)
+(3)
+Predicate-Indicator Fusion
+To encode the contextual
+relation between each predicate query and its entity in-
+dicators, we perform a predicate-indicator fusion to cal-
+ibrate the features of three components in the query.
+We explicitly fuse the current l-th decoder layer outputs
+eQl
+p, eQl
+is, eQl
+io to update each component of as the query for
+next layer Ql+1
+p
+, Ql+1
+is , Ql+1
+io . Speciﬁcally, we adopt fully
+connected layers for updating the predicate by fusing entity
+indicator representations as Eq. 4:
+Ql+1
+p
+=
+
+eQl
+p +
+
+eQl
+is + eQl
+io
+
+· Wi
+
+· Wp
+(4)
+where Wi, Wp ∈Rd×d are the transformation parameters
+for update. For the entity indicators, we simply adopt the
+previous layer output as input: Ql+1
+is
+= eQl
+is, Ql+1
+io
+= eQl
+io.
+Based on the reﬁned predicate queries, we are able to gen-
+erate the geometric and semantic predictions of the predicate
+node, as well as the location and category of its associated
+entity indicator as follows,
+Pp = Softmax( eQp · Wp
+cls) ∈RNr×(Cp+1),
+(5)
+Bp = σ( eQp · Wp
+reg) = {(xs
+c, ys
+c, xo
+c, yo
+c)} ∈RNr×4
+(6)
+where Pp are the class predictions of predicates, and Bp =
+{(xs
+c, ys
+c, xo
+c, yo
+c)} are the box center coordinates of its sub-
+ject and object entities. The entity indicators are also trans-
+lated as location prediction of entities Bs, Bo ∈RNr×4
+and their classiﬁcation predictions Ps, Po ∈RNr×(Ce+1),
+which are similar to the entity generator.
+Overall, each predicate decoder layer produces the loca-
+tions and classiﬁcations for all the entity-aware predicate
+queries. Using the multi-layer structure, the predicate de-
+coder is able to gradually improve the quality of predicate
+and entity association.
+Distance 
+Function
+1
+2
+3
+4
+5
+a
+1
+2
+3
+4
+5
+b
+c
+d
+3
+5
+4
+1
+c
+d
+b
+Subject
+Correspondence
+Object
+Correspondence
+Entity Nodes
+Entity-aware
+Predicate Nodes
+Scene Graph
+Bipartite Graph Assembling
+Figure 3. The illustration of Bipartite Graph Assembling.
+4.3. Bipartite Graph Assembling
+In our formulation, we convert the original scene graph
+into a bipartite graph structure which consists of Ne entity
+nodes and Nr predicate nodes, as shown in Fig. 3. The
+main goal of the graph assembling is to link the entity-aware
+predicate nodes to the proper entity node.
+To achieve this, we need to obtain the adjacency matrix
+between the Ne entity nodes and Nr predicate nodes, which
+can be encoded into a correspondence matrix M ∈RNr×Ne.
+Concretely, we deﬁne the correspondence matrix by the dis-
+tance between the entity indicators of predicate nodes and
+the entity nodes. Taking the subject entity indicator as ex-
+ample, we have: Ms = dloc(Bs, Be) · dcls(Ps, Pe), where
+dloc(·) and dcls(·) are the distance function to measure the
+matching quality from different dimensions4. The correspon-
+dence matrix of object entity Mo ∈RNr×Ne is obtained
+following the same strategy. The empirical analysis of dif-
+ferent distance metrics will be discussed in the experiment
+section. Based on the correspondence matrix, we keep the
+top-K links according to the matching scores as the edge
+links for each predicate node:
+Rs = Ftop(Ms, K) ∈RNr×K
+(7)
+Ro = Ftop(Mo, K) ∈RNr×K
+(8)
+where Ftop is the top-K index selection operation, Rs and
+Ro are the index matrix of entities kept for each triplet from
+the two relationship roles of subject and object, respectively.
+Using the index matrix Rs and Ro, we are able
+to generate the ﬁnal relationship triplets as T
+=
+{(bs
+e, ps
+e, bo
+e, po
+e, pp, bp)}.
+Here bs
+e, bo
+e
+∈
+R1×4 and
+ps
+e, po
+e ∈R1×(Ce+1) are bounding boxes and class pre-
+dictions of its subject and object entity respectively, pp ∈
+R1×(Cp+1) is the class prediction of each predicate Pp, and
+bp ∈Bp are the centers of the predicate’s entities. In the
+end, the graph assembling module generates the ﬁnal scene
+graph as the output of our SGTR model.
+4e.g., cosine distance between the classiﬁcation distribution, GIOU and
+L1 distance between the bounding box predictions, detailed illustration is
+presented in the supplementary.
+4.4. Learning and Inference
+Learning To train our SGTR model, we design a multi-task
+loss that consists of two components, including Lenc for
+the entity generator and Lpre for predicate generator. The
+overall loss function is formulated as:
+L = Lenc + Lpre,
+Lpre = Lpre
+i
++ Lpre
+p
+(9)
+As we adopt a DETR-like detector, the Lenc follows a similar
+form as [2], and the detailed loss equation is reported in the
+supplementary material. We mainly focus on Lpre in the
+remaining parts of this section. To calculate the loss for the
+predicate node generator, we ﬁrst obtain the matching matrix
+between the prediction and the ground truth by adopting the
+Hungarian matching algorithm [17]. We then convert the
+ground-truth of the visual relationships into a set of triplet
+representations in as similar form as T , denoted as T gt. The
+cost of the set matching is deﬁned as:
+C = λpCp + λeCe
+(10)
+The two components in the total cost correspond to the costs
+of predicate and subject/object entity, respectively 5. The
+matching index Itri between triplet predictions and ground
+truths is produced by: Itri = argminT ,T gtC, which is used
+for following loss calculation of predicate node generator.
+The two terms of Lpre, that is, Lpre
+i
+, Lpre
+p
+, are used
+to supervise two types of sub-decoder in predicate node
+generator. For the entity indicator sub-decoder, we have
+Lpre
+i
+= Li
+box + Li
+cls, where Li
+box and Li
+cls are the local-
+ization loss (L1 and GIOU loss) and cross-entropy loss for
+entities indicator Ps, Bs, Po, Bo. Similarly, for the predi-
+cate sub-decoder, we have Lpre
+p
+= Lp
+ent + Lp
+cls. The Lp
+ent is
+the L1 loss of the location of predicate’s associated entities
+Bp. The Lp
+cls is the cross entropy of predicate category Pp.
+Inference During model inference, we generate K · Nr
+visual relationship predictions after the assembling stage.
+We further remove the invalid self-connection edges during
+inference. We adopt a post-processing operation to ﬁlter out
+the self-connected triplets (subject and object entities are
+identical). Then, we rank the remaining predictions by the
+triplet score St and take the top N relationship triplet as ﬁnal
+outputs. We denote the output as St = {(st
+s ·st
+o ·st
+p)}, where
+st
+s, st
+o and st
+p are the classiﬁcation probability of subject
+entity, object entity and predicate, respectively.
+5. Experiments
+5.1. Experiments Conﬁguration
+We evaluate our methods on Openimage V6 datasets [18]
+and Visual Genome [16]. We mainly adopt the data splits
+and evaluation metrics from the previous work [19,42,55].
+For the Openimage benchmark, the weighted evaluation
+5We utilize the location and classiﬁcation predictions to calculate cost
+for each component. Detailed formulations are presented in supplementary.
+#
+EPN
+SPD
+GA
+mR@50
+mR@100
+R@50
+R@100
+1
+
+
+
+13.9
+17.3
+24.2
+28.2
+2
+
+
+12.0
+15.9
+22.9
+26.3
+3
+
+
+11.4
+15.1
+21.9
+24.9
+4
+
+11.3
+14.8
+21.2
+24.1
+5
+
+
+4.6
+7.0
+10.6
+13.3
+Table 1. Ablation study on model components. EPN: Entity-
+aware Predicate Node; SPD: Structural Predicate Decoder, GA:
+Graph Assembling.
+metrics (wmAPphr, wmAPrel, scorewtd) are used for more
+class-balanced evaluation. For the Visual Genome dataset,
+we adopt the evaluation metric recall@K (R@K) and mean
+recall@K (mR@K) of SGDet, and also report the mR@100
+on each long-tail category groups: head, body and tail as
+same as [19].
+We use the ResNet-101 and DETR [2] as backbone net-
+works and entity detector, respectively. To speedup train-
+ing convergence, we ﬁrst train entity detector on the tar-
+get dataset, followed by joint training with predicate node
+generator. The predicate node generator uses 3 layers of
+transformer encoder for predicate encoders and 6 layers of
+transformer decoder for predicate and entity indicator sub-
+decoders, whose hidden dimensions d is 256. Our predicate
+decoder uses Nr=150 queries. We set K=40 in training and
+K=3 during test for graph assembling module. For more
+implementation details please refer to the supplementary.
+5.2. Ablation Study
+Model Components As shown in Tab. 1, we ablate each
+module to demonstrate the effectiveness of our design on the
+validation set of Visual Genome.
+• We ﬁnd that using the holistic query for predicate rather
+than the proposed structural form decreases the performance
+by a margin of R@100 and mR@100 at 1.9 and 1.4 in line-2.
+• Adopting the shared cross-attention between the image fea-
+tures and predicate/entity indicator instead of the structural
+predicate decoder leads to the sub-optimal performance as
+reported in line-3
+• We further remove both entity indicators and directly de-
+code the predicate node from the image feature. The result
+is reported in line-4, which decreases the performance by a
+margin of 4.2 and 2.5 on R@100 and mR@100.
+• We also investigate the graph assembling mechanism by
+directly adopting the prediction of entity indicators as entity
+nodes for relationship prediction. The poor results shown in
+line-5 demonstrate that the model struggles to tackle such
+complex multi-tasks within a single structure, while pro-
+posed entity-prediction association modeling and graph as-
+sembling reduce the difﬁculty of optimization.
+Graph Assembling Design We further investigate the ef-
+fectiveness of our graph assembling design. Speciﬁcally,
+we adopt the differentiable entity-predicate pair matching
+function proposed by recent HOI methods [3,13], as shown
+NPD
+NED
+mR@50
+mR@100
+R@50
+R@100
+3
+3
+10.6
+13.3
+23.4
+27.4
+6
+6
+13.9
+17.3
+24.2
+28.2
+12
+12
+13.7
+17.0
+24.0
+28.4
+Table 2. Ablation study on number of predicate decoder layers.
+NPD: number of predicate sub-decoder layers; NED: number of
+entity indicator sub-decoder layers;
+GA
+mR@50
+mR@100
+R@50
+R@100
+S
+10.6
+11.8
+24.4
+27.7
+F
+13.3
+16.1
+23.7
+27.5
+Ours
+13.9
+17.3
+24.2
+28.2
+Table 3. Ablation study on graph assembling, S: spatial distance
+between the predicate and entity-based matching function proposed
+by AS-Net [3]; F: feature similarity-based matching function pro-
+posed by HOTR [13].
+in Tab. 3. Comparison experiments are conducted on the
+validation set of Visual Genome by using different distance
+functions for the assembling module. In AS-Net [3], the
+grouping is conducted based on the distance between en-
+tity bounding box and entity center predicted by interac-
+tion branch, which lacks the entity semantic information.
+The HOTR [13] introduces a cosine similarity measurement
+between the predicate and entity in feature space. We im-
+plement this form for calculation the distance between the
+entity indicator eQis, eQio and entity nodes He. Compared
+with location-only [3] similarity and feature-based [13] sim-
+ilarity, our proposed assembling mechanism, taking both
+semantic and spatial information into the similarity measure-
+ment, is preferable. We also empirically observe that the
+feature-based [13] similarity design has a slower and more
+unstable convergence process.
+Model Size To investigate the model complexity of the struc-
+tural predicate node decoder, we incrementally vary the num-
+ber of layers L in the predicate and entity indicator decoder.
+The quantitative results are shown in Tab. 2. The results
+indicate that our model achieves the best performance while
+L = 6. We observe that the performance improvement is
+considerable when increasing the number of decoder layers
+from 3 to 6, and performance will be saturated when L = 12.
+Entity Detector As we adopt different entity detectors com-
+pared to previous two-stage designs, we conduct experiments
+to analyze the inﬂuence of detectors on the SGTR. The de-
+tailed results are presented in the supplementary.
+5.3. Comparisons with State-of-the-Art Methods
+We conduct experiments on Openimage-V6 benchmark
+and VG dataset to demonstrate the effectiveness of our de-
+sign. We compare our method with several state-of-the-art
+two-stage(e.g., VCTree-PCPL, VCTree-DLFE, BGNN [19],
+VCTree-TDE, DT2-ACBS [5]) and one-stage methods(e.g.
+AS-Net, HOTR, FCSGG) on Visual Genome dataset. Since
+our backbone is different from what they reported, we re-
+B
+Models
+mR@50
+R@50
+wmAP
+scorewtd
+rel
+phr
+X101-F
+RelDN
+37.20
+75.40
+33.21
+31.31
+41.97
+GPS-Net
+38.93
+74.74
+32.77
+33.87
+41.60
+BGNN
+40.45
+74.98
+33.51
+34.15
+42.06
+R101
+BGNN∗†
+39.41
+74.93
+31.15
+31.37
+40.00
+RelDN†
+36.80
+72.75
+29.87
+30.42
+38.67
+HOTR†
+40.09
+52.66
+19.38
+21.51
+26.88
+AS-Net†
+35.16
+55.28
+25.93
+27.49
+32.42
+Ours
+42.61
+59.91
+36.98
+38.73
+42.28
+Table 4. The Performance on Openimage V6. † denotes results
+reproduced with the authors’ code. The performance of ResNeXt-
+101 FPN is borrow from [19]. * means using resampling strategy.
+produced the SOTA methods BGNN and its baseline RelDN
+with the same ResNet-101 backbone for more fair compar-
+isons. Furthermore, since FCSGG [24] is the only pub-
+lished one-stage method for SGG, we reproduce the result
+of several strong one-stage HOI methods with similar entity-
+predicate pairing mechanisms (AS-Net [3], HOTR [13])
+using their released code for a more comprehensive compar-
+ison.
+OpenImage V6 The performance on the OpenImage V6
+dataset is reported in Tab. 4. We re-implement the SOTA
+one-stage and two-stage methods with the same ResNet-101
+backbone. Our method outperforms the two-stage SOTA
+method BGNN with an improvement of 2.28. Speciﬁcally,
+our design has a signiﬁcant improvement on weighted mAP
+metrics of relationship detection (wmAPrel) and phrase de-
+tection (wmAPphr) sub-tasks of 5.83 and 7.36 respectively,
+which indicates that leveraging the compositional property
+of the visual relationship is beneﬁcial for the SGG task.
+Visual Genome As shown in Tab. 5, with the same ResNet-
+101 backbone, we compare our method with the two-stage
+method BGNN [19], and the one-stage methods HOTR [13],
+AS-Net [3]. It shows that our method outperforms HOTR
+with a signiﬁcant margin of 4.9 and 3.2 on mRecall@100.
+Furthermore, our method achieves considerable improve-
+ment when compared with the two-stage methods, and the
+detailed performance is presented in the supplementary.
+• Beneﬁtting from the sparse proposal set, SGTR has a
+more balanced foreground/background proposal distribution
+than the traditional two-stage design, where there exists a
+large number of negative samples due to exhausted entity
+pairing. Thus, when equipped with the same backbone and
+learning strategy as before, our method achieves competitive
+performance in mean recall. We also list several newly
+proposed works, which develops various training strategies
+for long-tailed recognition. Our method achieves higher
+mR@100 performance with less overall performance drop
+when using the resampling strategy proposed in [19]. We
+refer the reader to the supplementary for more experiments
+on our model using advanced long-tail training strategies.
+• We ﬁnd that the performance of our model in the head
+B
+D
+Method
+mR@50/100
+R@50/100
+Head
+Body
+Tail
+Time/Sec
+⋆
+⋆
+FCSGG [24]
+3.6 / 4.2
+21.3 / 25.1
+-
+-
+-
+0.12
+X101-FPN
+Faster-RCNN
+RelDN [19]
+6.0 / 7.3
+31.4 / 35.9
+-
+-
+-
+0.65
+Motifs [32]
+5.5 / 6.8
+32.1 / 36.9
+-
+-
+-
+1.00
+VCTree [32]
+6.6 / 7.7
+31.8 / 36.1
+-
+-
+-
+1.69
+BGNN∗† [19]
+10.7 / 12.6
+31.0 / 35.8
+34.0
+12.9
+6.0
+1.32
+VCTree-TDE [32]
+9.3 / 11.1
+19.4 / 23.2
+-
+-
+-
+≥1.69
+VCTree-DLFE [4]
+11.8 / 13.8
+22.7 / 26.3
+-
+-
+-
+≥1.69
+VCTree-EBM [29]
+9.7 / 11.6
+20.5 / 24.7
+-
+-
+-
+≥1.69
+VCTree-BPLSA [7]
+13.5 / 15.7
+21.7 / 25.5
+-
+-
+-
+≥1.69
+DT2-ACBS [5]
+22.0 / 24.4
+15.0 / 16.3
+-
+-
+-
+∼0.63
+R101
+BGNN∗†
+8.6 / 10.3
+28.2 / 33.8
+29.1
+12.6
+2.2
+1.32
+RelDN†
+4.4 / 5.4
+30.3 / 34.8
+31.3
+2.3
+0.0
+0.65
+DETR
+AS-Net† [3]
+6.12 / 7.2
+18.7 / 21.1
+19.6
+7.7
+2.7
+0.33
+HOTR† [13]
+9.4 / 12.0
+23.5 / 27.7
+26.1
+16.2
+3.4
+0.25
+Ours⋄
+12.0 / 14.6
+25.1 / 26.6
+27.1
+17.2
+6.9
+0.35
+Ours
+12.0 / 15.2
+24.6 / 28.4
+28.2
+18.6
+7.1
+0.35
+Ours∗
+15.8 / 20.1
+20.6 / 25.0
+21.7
+21.6
+17.1
+0.35
+Table 5. The SGDet performance on test set of Visual Genome dataset. † denotes results reproduced with the authors’ code. ∗denotes
+the bi-level resampling [19] is applied for this model. ⋄denotes that our model uses K = 1 for top-K matching in graph assembling
+(more ablative experiments for K are presented in the supplementary). ⋆denotes the special backbone HRNetW48-5S-FPN×2-f and entities
+detector, CenterNet [59].
+category is lower than the two-stage methods with the same
+backbone. The main reason is that the DETR detector per-
+forms weaker on small entities than the traditional Faster-
+RCNN. Since the visual genome has a large proportion of
+relationships involving small objects, our method performs
+sub-optimal in recognizing those relationships. The detailed
+limitation analysis is presented in the supplementary.
+• We compare the efﬁciency of SGTR with previous meth-
+ods according to the inference time (seconds/image) on the
+NVIDIA GeForce Titan XP GPU with a batch size of 1 and
+an input size of 600 x 1000. Our design obtains compara-
+ble inference time as the one-stage methods using the same
+backbone, which demonstrates the efﬁciency of our method.
+5.4. Qualitative Results
+As shown in Fig. 4, we visualize the attention weight of
+the predicates sub-decoder and entity sub-decoder on images
+from the validation set of the Visual Genome dataset. By
+comparing the heatmaps in Fig. 4 (a) and Fig. 4 (b), we note
+that for the same triplet prediction, the predicate sub-decoder
+focuses more on the contextual regions around the entities of
+triplets while the entity sub-decoders put more attention on
+the entity regions. Therefore, our design allows the model
+to learn the compositional property of visual relationships
+more effectively, which improves prediction accuracy. More
+visualization results are reported in the supplementary (in-
+cluding analysis of graph assembling, comparison between
+two-stage methods, etc.).
+6. Conclusions
+In this work, we propose a novel end-to-end CNN-
+Transformer-based scene graph generating approach (SGTR).
+Cup  on Table
+Man walking on Street
+(a) The attention maps of predicate sub-decoder
+(b) The attention maps of entitie sub-decoder
+Person Sitting-on
+Sidewalk
+Figure 4. The visualization on attention heatmap of structural
+predicate decoder. The predicate sub-decoder focus on contextual
+representation around the entities of triplets. Entity indicator sub-
+decoders focus on relationship-based entity regions.
+In comparison to the prior approaches, our major contribu-
+tion consists of two components: We formulate the SGG as
+a bipartite graph construction with three steps: entity and
+predicate nodes generation and directed edge connection.
+We develop the entity-aware representation for modeling the
+predicate nodes, which is integrated with the entity indica-
+tors by the structural predicate node decoder. Finally, the
+scene graph is constructed by the graph assembling module
+in an end-to-end manner. Extensive experimental results
+show that our SGTR outperforms or is competitive with pre-
+vious state-of-the-art methods on the Visual Genome and
+Openimage V6 datasets.
+Potential Negative Societal Impact One possible negative
+impact is that SGG may serve as a base module for surveil-
+lance abuse and collecting private information.
+References
+[1] Sherif Abdelkarim, Aniket Agarwal, Panos Achlioptas, Jun
+Chen, Jiaji Huang, Boyang Li, Kenneth Church, and Mo-
+hamed Elhoseiny. Exploring long tail visual relationship
+recognition with large vocabulary. In Proceedings of the
+IEEE/CVF International Conference on Computer Vision,
+pages 15921–15930, 2021. 1, 2
+[2] Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas
+Usunier, Alexander Kirillov, and Sergey Zagoruyko. End-to-
+end object detection with transformers. In European Confer-
+ence on Computer Vision, pages 213–229. Springer, 2020. 2,
+3, 4, 6
+[3] Mingfei Chen, Yue Liao, Si Liu, Zhiyuan Chen, Fei Wang,
+and Chen Qian. Reformulating hoi detection as adaptive set
+prediction. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, pages 9004–9013,
+2021. 2, 6, 7, 8
+[4] Meng-Jiun Chiou, Henghui Ding, Hanshu Yan, Changhu
+Wang, Roger Zimmermann, and Jiashi Feng. Recovering the
+unbiased scene graphs from the biased ones. arXiv preprint
+arXiv:2107.02112, 2021. 1, 2, 8
+[5] Alakh Desai, Tz-Ying Wu, Subarna Tripathi, and Nuno Vas-
+concelos. Learning of visual relations: The devil is in the
+tails. arXiv preprint arXiv:2108.09668, 2021. 1, 2, 7, 8
+[6] Qi Dong, Zhuowen Tu, Haofu Liao, Yuting Zhang, Vijay
+Mahadevan, and Stefano Soatto. Visual relationship detection
+using part-and-sum transformers with composite queries. In
+Proceedings of the IEEE/CVF International Conference on
+Computer Vision, pages 3550–3559, 2021. 1, 2
+[7] Yuyu Guo, Lianli Gao, Xuanhan Wang, Yuxuan Hu, Xing Xu,
+Xu Lu, Heng Tao Shen, and Jingkuan Song. From general
+to speciﬁc: Informative scene graph generation via balance
+adjustment. In Proceedings of the IEEE/CVF International
+Conference on Computer Vision, pages 16383–16392, 2021.
+1, 2, 8
+[8] Marcel Hildebrandt, Hang Li, Rajat Koner, Volker Tresp,
+and Stephan Günnemann. Scene graph reasoning for visual
+question answering. arXiv preprint arXiv:2007.01072, 2020.
+1
+[9] Justin Johnson, Ranjay Krishna, Michael Stark, Li-Jia Li,
+David Shamma, Michael Bernstein, and Li Fei-Fei. Image
+retrieval using scene graphs. In Proceedings of the IEEE
+conference on computer vision and pattern recognition, pages
+3668–3678, 2015. 1
+[10] Bingyi Kang, Saining Xie, Marcus Rohrbach, Zhicheng Yan,
+Albert Gordo, Jiashi Feng, and Yannis Kalantidis. Decoupling
+representation and classiﬁer for long-tailed recognition. In In-
+ternational Conference on Learning Representations(ICLR),
+2019.
+[11] Siddhesh Khandelwal, Mohammed Suhail, and Leonid Si-
+gal. Segmentation-grounded scene graph generation. arXiv
+preprint arXiv:2104.14207, 2021. 2
+[12] Bumsoo Kim, Taeho Choi, Jaewoo Kang, and Hyunwoo J
+Kim.
+Uniondet: Union-level detector towards real-time
+human-object interaction detection. In European Conference
+on Computer Vision, pages 498–514. Springer, 2020. 2
+[13] Bumsoo Kim, Junhyun Lee, Jaewoo Kang, Eun-Sol Kim, and
+Hyunwoo J Kim. Hotr: End-to-end human-object interaction
+detection with transformers. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 74–83, 2021. 2, 6, 7, 8
+[14] Boris Knyazev, Harm de Vries, C˘at˘alina Cangea, Graham W.
+Taylor, Aaron Courville, and Eugene Belilovsky.
+Graph
+Density-Aware Losses for Novel Compositions in Scene
+Graph Generation. In Proceedings of the European Con-
+ference on Computer Vision(ECCV), 2017. 2
+[15] Boris Knyazev, Harm de Vries, Catalina Cangea, Graham W
+Taylor, Aaron Courville, and Eugene Belilovsky. Generative
+compositional augmentations for scene graph prediction. In
+Proceedings of the IEEE/CVF International Conference on
+Computer Vision, pages 15827–15837, 2021. 1, 2
+[16] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A Shamma, et al. Visual genome:
+Connecting language and vision using crowdsourced dense
+image annotations. International journal of computer vision,
+123(1):32–73, 2017. 6
+[17] Harold W Kuhn. The hungarian method for the assignment
+problem. Naval research logistics quarterly, 2(1-2):83–97,
+1955. 6
+[18] Alina Kuznetsova, Hassan Rom, Neil Alldrin, Jasper Uijlings,
+Ivan Krasin, Jordi Pont-Tuset, Shahab Kamali, Stefan Popov,
+Matteo Malloci, Alexander Kolesnikov, Tom Duerig, and Vit-
+torio Ferrari. The open images dataset v4: Uniﬁed image
+classiﬁcation, object detection, and visual relationship detec-
+tion at scale. International Journal of Computer Vision(IJCV),
+2020. 6
+[19] Rongjie Li, Songyang Zhang, Bo Wan, and Xuming He. Bi-
+partite graph network with adaptive message passing for unbi-
+ased scene graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 11109–11119, 2021. 1, 2, 3, 6, 7, 8
+[20] Yikang Li, Wanli Ouyang, Bolei Zhou, Jianping Shi, Chao
+Zhang, and Xiaogang Wang. Factorizable net: an efﬁcient
+subgraph-based framework for scene graph generation. In
+Proceedings of the European Conference on Computer Vision
+(ECCV), pages 335–351, 2018. 2
+[21] Yikang Li, Wanli Ouyang, Bolei Zhou, Kun Wang, and Xi-
+aogang Wang. Scene graph generation from objects, phrases
+and region captions. In Proceedings of the IEEE International
+Conference on Computer Vision, pages 1261–1270, 2017. 2
+[22] Yue Liao, Si Liu, Fei Wang, Yanjie Chen, Chen Qian, and
+Jiashi Feng. Ppdm: Parallel point detection and matching for
+real-time human-object interaction detection. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 482–490, 2020. 2
+[23] Xin Lin, Changxing Ding, Jinquan Zeng, and Dacheng Tao.
+Gps-net: Graph property sensing network for scene graph
+generation. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, pages 3746–3753,
+2020. 2
+[24] Hengyue Liu, Ning Yan, Masood Mortazavi, and Bir Bhanu.
+Fully convolutional scene graph generation. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 11546–11556, 2021. 1, 2, 7, 8
+[25] Depu Meng, Xiaokang Chen, Zejia Fan, Gang Zeng,
+Houqiang Li, Yuhui Yuan, Lei Sun, and Jingdong Wang. Con-
+ditional detr for fast training convergence. In Proceedings of
+the IEEE/CVF International Conference on Computer Vision,
+pages 3651–3660, 2021.
+[26] Adam Paszke, Sam Gross, Francisco Massa, Adam Lerer,
+James Bradbury, Gregory Chanan, Trevor Killeen, Zeming
+Lin, Natalia Gimelshein, Luca Antiga, Alban Desmaison, An-
+dreas Kopf, Edward Yang, Zachary DeVito, Martin Raison,
+Alykhan Tejani, Sasank Chilamkurthy, Benoit Steiner, Lu
+Fang, Junjie Bai, and Soumith Chintala. Pytorch: An im-
+perative style, high-performance deep learning library. In H.
+Wallach, H. Larochelle, A. Beygelzimer, F. d'Alché-Buc, E.
+Fox, and R. Garnett, editors, Advances in Neural Information
+Processing Systems 32, pages 8024–8035. Curran Associates,
+Inc., 2019.
+[27] Mengshi Qi, Weijian Li, Zhengyuan Yang, Yunhong Wang,
+and Jiebo Luo. Attentive relational networks for mapping
+images to scene graphs. In Proceedings of the IEEE Con-
+ference on Computer Vision and Pattern Recognition, pages
+3957–3966, 2019. 2
+[28] Jiaxin Shi, Hanwang Zhang, and Juanzi Li. Explainable and
+explicit visual reasoning over scene graphs. In Proceedings
+of the IEEE Conference on Computer Vision and Pattern
+Recognition, pages 8376–8384, 2019. 1
+[29] Mohammed Suhail, Abhay Mittal, Behjat Siddiquie, Chris
+Broaddus, Jayan Eledath, Gerard Medioni, and Leonid Sigal.
+Energy-based learning for scene graph generation. In Pro-
+ceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, pages 13936–13945, 2021. 2, 8
+[30] Peize Sun, Rufeng Zhang, Yi Jiang, Tao Kong, Chenfeng
+Xu, Wei Zhan, Masayoshi Tomizuka, Lei Li, Zehuan Yuan,
+Changhu Wang, et al.
+Sparse r-cnn: End-to-end object
+detection with learnable proposals. In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 14454–14463, 2021. 2
+[31] Masato Tamura, Hiroki Ohashi, and Tomoaki Yoshinaga.
+Qpic: Query-based pairwise human-object interaction detec-
+tion with image-wide contextual information. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 10410–10419, 2021. 2
+[32] Kaihua Tang, Yulei Niu, Jianqiang Huang, Jiaxin Shi, and
+Hanwang Zhang. Unbiased scene graph generation from
+biased training. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 3716–
+3725, 2020. 2, 8
+[33] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan Luo,
+and Wei Liu. Learning to compose dynamic tree structures for
+visual contexts. In Proceedings of the IEEE Conference on
+Computer Vision and Pattern Recognition, pages 6619–6628,
+2019. 2
+[34] Damien Teney, Lingqiao Liu, and Anton van Den Hengel.
+Graph-structured representations for visual question answer-
+ing. In Proceedings of the IEEE conference on computer
+vision and pattern recognition, pages 1–9, 2017. 1
+[35] Yao Teng and Limin Wang. Structured sparse r-cnn for direct
+scene graph generation. arXiv preprint arXiv:2106.10815,
+2021. 2
+[36] Zhi Tian, Chunhua Shen, Hao Chen, and Tong He. Fcos: Fully
+convolutional one-stage object detection. In Proceedings of
+the IEEE/CVF international conference on computer vision,
+pages 9627–9636, 2019. 2
+[37] Tiancai Wang, Tong Yang, Martin Danelljan, Fahad Shahbaz
+Khan, Xiangyu Zhang, and Jian Sun. Learning human-object
+interaction detection using interaction points. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 4116–4125, 2020. 2
+[38] Tzu-Jui Julius Wang, Selen Pehlivan, and Jorma Laaksonen.
+Tackling the unannotated: Scene graph generation with bias-
+reduced models. In Proceedings of the 28th ACM Interna-
+tional Conference on Multimedia, 2020. 2
+[39] Wenbin Wang, Ruiping Wang, Shiguang Shan, and Xilin
+Chen. Exploring context and visual pattern of relationship
+for scene graph generation.
+In Proceedings of the IEEE
+Conference on Computer Vision and Pattern Recognition,
+pages 8188–8197, 2019. 2
+[40] Yingming Wang, Xiangyu Zhang, Tong Yang, and Jian Sun.
+Anchor detr: Query design for transformer-based detector.
+arXiv preprint arXiv:2109.07107, 2021.
+[41] Sanghyun Woo, Dahun Kim, Donghyeon Cho, and In So
+Kweon. Linknet: Relational embedding for scene graph. In
+Advances in Neural Information Processing Systems, pages
+560–570, 2018. 2
+[42] Danfei Xu, Yuke Zhu, Christopher B Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing. In Pro-
+ceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition(CVPR), pages 5410–5419, 2017. 2,
+6
+[43] Shaotian Yan, Chen Shen, Zhongming Jin, Jianqiang Huang,
+Rongxin Jiang, Yaowu Chen, and Xian-Sheng Hua. Pcpl:
+Predicate-correlation perception learning for unbiased scene
+graph generation. In Proceedings of the 28th ACM Inter-
+national Conference on Multimedia, pages 265–273, 2020.
+2
+[44] Gengcong Yang, Jingyi Zhang, Yong Zhang, Baoyuan Wu,
+and Yujiu Yang. Probabilistic modeling of semantic ambiguity
+for scene graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 12527–12536, 2021. 1, 2
+[45] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi
+Parikh. Graph r-cnn for scene graph generation. In Proceed-
+ings of the European conference on computer vision (ECCV),
+pages 670–685, 2018. 2
+[46] Xuewen Yang, Yingru Liu, and Xin Wang. Reformer: The
+relational transformer for image captioning. arXiv preprint
+arXiv:2107.14178, 2021. 1
+[47] Xu Yang, Kaihua Tang, Hanwang Zhang, and Jianfei Cai.
+Auto-encoding scene graphs for image captioning. In Pro-
+ceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition, pages 10685–10694, 2019. 1, 2
+[48] Yuan Yao, Ao Zhang, Xu Han, Mengdi Li, Cornelius Weber,
+Zhiyuan Liu, Stefan Wermter, and Maosong Sun. Visual
+distant supervision for scene graph generation. arXiv preprint
+arXiv:2103.15365, 2021. 1, 2
+[49] Zhuyu Yao, Jiangbo Ai, Boxun Li, and Chi Zhang. Efﬁcient
+detr: Improving end-to-end object detector with dense prior.
+arXiv preprint arXiv:2104.01318, 2021. 4
+[50] Guojun Yin, Lu Sheng, Bin Liu, Nenghai Yu, Xiaogang Wang,
+Jing Shao, and Chen Change Loy. Zoom-net: Mining deep
+feature interactions for visual relationship recognition. In
+Proceedings of the European Conference on Computer Vision
+(ECCV), pages 322–338, 2018. 2
+[51] Cong
+Yuren,
+Hanno
+Ackermann,
+Wentong
+Liao,
+Michael Ying Yang, and Bodo Rosenhahn.
+Nodis:
+Neural ordinary differential scene understanding.
+arXiv
+preprint arXiv:2001.04735, 2020. 2
+[52] Alireza Zareian, Svebor Karaman, and Shih-Fu Chang. Bridg-
+ing knowledge graphs to generate scene graphs. In Proceed-
+ings of the European Conference on Computer Vision(ECCV),
+2020. 2
+[53] Alireza Zareian, Svebor Karaman, and Shih-Fu Chang.
+Weakly supervised visual semantic parsing. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 3736–3745, 2020. 2
+[54] Alireza Zareian, Haoxuan You, Zhecan Wang, and Shih-Fu
+Chang. Learning visual commonsense for robust scene graph
+generation. In Proceedings of the European Conference on
+Computer Vision(ECCV), 2020. 2
+[55] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin Choi.
+Neural motifs: Scene graph parsing with global context. In
+Proceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition, pages 5831–5840, 2018. 2, 6
+[56] Aixi Zhang, Yue Liao, Si Liu, Miao Lu, Yongliang Wang,
+Chen Gao, and Xiaobo Li. Mining the beneﬁts of two-stage
+and one-stage hoi detection. arXiv preprint arXiv:2108.05077,
+2021. 2
+[57] J. Zhang, M. Elhoseiny, S. Cohen, W. Chang, and A. Elgam-
+mal. Relationship proposal networks. In 2017 IEEE Confer-
+ence on Computer Vision and Pattern Recognition (CVPR),
+pages 5226–5234, 2017.
+[58] Songyang Zhang, Zeming Li, Shipeng Yan, Xuming He, and
+Jian Sun. Distribution alignment: A uniﬁed framework for
+long-tail visual recognition. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+(CVPR), pages 2361–2370, June 2021.
+[59] Xingyi Zhou, Dequan Wang, and Philipp Krähenbühl. Objects
+as points. arXiv preprint arXiv:1904.07850, 2019. 8
+[60] Benjin Zhu*, Feng Wang*, Jianfeng Wang, Siwei Yang,
+Jianhu Chen, and Zeming Li. cvpods: All-in-one toolbox
+for computer vision research, 2020.
+[61] Xizhou Zhu, Weijie Su, Lewei Lu, Bin Li, Xiaogang
+Wang, and Jifeng Dai. Deformable detr: Deformable trans-
+formers for end-to-end object detection.
+arXiv preprint
+arXiv:2010.04159, 2020.
+[62] Cheng Zou, Bohan Wang, Yue Hu, Junqi Liu, Qian Wu, Yu
+Zhao, Boxun Li, Chenguang Zhang, Chi Zhang, Yichen Wei,
+et al. End-to-end human object interaction detection with hoi
+transformer. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 11825–
+11834, 2021. 2
+SGTR: End-to-end Scene Graph Generation with Transformer
+Supplementary Material
+Overview of Appendixes
+In this supplementary material, we present implemen-
+tation details and more experiments results. First, more
+experiments and analysis (e.g., analysis of overall recall
+performance, experiments using stronger long-tail learning
+strategy, and extra qualitative results) are described in Sec. 1.
+We provides the implementation details in Sec. 2. Moreover,
+we also present the details of graph assembling mechanism
+and loss function in Sec. 3 and Sec. 4.
+In this supplementary material, we present implementa-
+tion details and more experimental results. First, more ex-
+periments and analysis (e.g., analysis of overall recall perfor-
+mance, experiments using stronger long-tail learning strate-
+gies, and extra qualitative results) are described in Sec. 1. We
+provide the implementation details in Sec. 2. Moreover, we
+also present the details of the graph assembling mechanism
+and loss function in Sec. 3 and Sec. 4.
+1. More Experimental Results
+1.1. Overall Recall Analysis
+0
+5
+10
+15
+20
+25
+30
+35
+Both small One small
+Both big
+R@100
+SGTR
+BGNN
+0
+20000
+40000
+60000
+80000
+100000
+120000
+140000
+160000
+Both small One small Both big
+# of instance
+Figure 1. Left) The statistics of entity sizes in visual relationship
+based on the training set of Visual Genome. Right) The perfor-
+mance (Recall@100) of relationship detection with respect to dif-
+ferent entity sizes. We deﬁne an entity as "small" if the area of its
+box is smaller than 64 × 64 pixels.
+First, we analyze why our SGTR achieves lower overall
+recall performance than the traditional two-stage design. One
+potential reason is that the SGTR uses an ResNet-101 back-
+bone (like DETR) for entity detection rather than the Faster-
+RCNN with an ResNet-101 FPN backbone. According to
+the experimental results of DETR [?], using the ResNet-101
+backbone achieves lower performance than Faster-RCNN
+with the ResNet-101 FPN on small objects (21.9 versus 27.2
+APs on the COCO dataset).
+To conﬁrm that, we further study how small entities in-
+ﬂuence visual relationship detection. We categorize the rela-
+tionship instances in the Visual Genome dataset into three
+disjoint sets according to their entity sizes, and plot the statis-
+tics of the sets in Fig. 1. The result shows that more than
+half of the relationships consist of small entities. We also
+compare the performance of our method (R@100) on three
+relationship sub-sets with the two-stage approach BGNN [?]
+and report the performance in Fig. 1. The BGNN with the
+two-stage design outperforms the SGTR on the relationships
+with small entities by a large margin due to the inherent
+limitation of DETR on small entity detection.
+The issue of recognizing small objects efﬁciently and
+effectively is still under active study [?,?,?,?]. With more
+sophisticated transformer-based detectors, the overall recall
+of our method can be further improved.
+1.2. Inﬂuence of Object Detector
+We ﬁrst compare the performances of DETR and faster
+RCNN on the head (H), body (B) and tail (T) predicates
+in Tab.1, which also groups the detector results into H/B/T
+object classes. The result indicates that DETR achieves a
+similar detection performance as Faster R-CNN for tail pred-
+icates. Moreover, we equip BGNN with DETR and as shown
+in Tab.2, its performance is on par with its Faster R-CNN
+counterparts. Finally, we also combine DETR optimized in
+SGTR with a ﬁnetuned BGNN. The results in Tab.2 clearly
+show the SGTR outperforms this baseline, demonstrating
+the beneﬁt of our design.
+Recall (S-DETR / RCNN)
+Rel Head
+Rel Body
+Rel Tail
+Ent Head
+49.3 / 50.5
+49.2 / 50.3
+59.7 / 57.1
+Ent Body
+39.5 / 41.3
+46.2 / 43.1
+44.9 / 43.7
+Ent Tail
+44.3 / 41.7
+47.6 / 44.5
+45.1 / 38.5
+Table 1. The entity detection performances of DETR and faster
+RCNN on the head (H), body (B) and tail (T) predicates.
+1
+arXiv:2112.12970v3  [cs.CV]  31 Mar 2022
+M
+mR@50/100
+R@50/100
+H
+B
+T
+AP@det
+mR@det
+BGNN
+8.4 / 9.8
+29.0 / 33.7
+30.0
+11.2
+2.2
+29.9
+41.1
+BGNND
+6.3 / 7.7
+25.4 / 29.5
+28.5
+7.2
+1.5
+30.7
+41.2
+BGNNS
+6.7 / 8.3
+25.6 / 29.7
+28.5
+7.2
+3.0
+31.2
+41.0
+SGTR†
+14.4 / 17.7
+24.8 / 28.5
+21.7
+21.6
+17.1
+31.2
+41.0
+Table 2. ’D’ means DETR. ’S’ means DETR optimized in SGTR.
+† means bi-level resampling, ’AP’: mAP50, and ’mR’: mRecall
+(a) Pre-class Instance frequency of entity
+(b) Per-class Detection AP of entity
+Figure 2. The frequency statistics and per-class detection per-
+formance of entities on the VG dataset. (a): The frequency of
+each entity category; (b) The per-class entity detection performance
+(AP).
+1.3. Experiments with Long-tail Learning Strategy
+Method
+mR@50/100
+R@50/100
+Head
+Body
+Tail
+Ours
+12.0 / 15.2
+24.6 / 28.4
+28.2
+18.6
+7.1
+Ours∗
+15.8 / 20.1
+20.6 / 25.0
+21.7
+21.6
+17.1
+Ours-P
+18.9 / 22.0
+22.1 / 24.8
+26.0
+20.9
+15.2
+OursDisAlign
+13.7 / 16.8
+24.1 / 28.0
+26.8
+21.7
+8.9
+OursACBS
+16.5 / 19.8
+20.8 / 23.6
+23.4
+21.6
+17.5
+OurscRT
+18.8 / 21.6
+22.0 / 24.8
+24.1
+22.1
+18.1
+Table 3. The performance of SGTR by adopting the advanced
+long-tail learning strategy on the VG dataset. "*" denotes the
+bi-level sampling proposed in [?]; "P" denotes the modiﬁed bi-level
+sampling; The "cRT" denotes the decoupled retraining strategy
+on predicate classiﬁer proposed by [?]; the "DisAlign" denotes
+the retraining strategy for logits adjustment proposed by [?]; the
+"ACBS" refers to the alternative class balanced retraining strategy
+proposed by [?].
+Long-tail data distribution is a challenging issue in the
+SGG. To achieve better performance on the SGG task, we
+further apply several recent long-tail learning strategies in
+our model. [?,?,?], and report the performance in Tab. 3. We
+ﬁnd that there exists a trade-off between overall and mean
+recall in the comprehensive experimental results. The ad-
+vanced learning strategies enable our model to either achieve
+a higher mean recall or maintain a better trade-off between
+overall and mean recall.
+• We adopt the retraining strategy, DisAlign [?], to adjust the
+predicate prediction logits via loss re-weighting with respect
+to the instance distribution of relationships. This method
+improves the performance trade-off between mR@100 and
+R@100 by increasing mean recall by 1.6 and achieving only
+a 0.4 performance drop on R@100.
+• Moreover, we re-implement the alternative class-balanced
+retraining strategy (ACBS) [?], which achieves the SOTA on
+mean recall with the two-stage SGG model. The ACBS re-
+trains both entity and predicate classiﬁers using class-based
+sampling. This method achieves high mean recall perfor-
+mance while sacriﬁcing the performance of the overall per-
+formance.
+• Finally, we apply the decoupled retraining strategy [?]
+on the predicate classiﬁer of SGTR. We observe that using
+additional balanced-sampling retraining results in 6.4 perfor-
+mance gain on mR@100 with a 3.6 drop on R@100. This
+strategy outperforms the aforementioned methods in terms
+of mean recall performance.
+We also observe that using the re-balance idea on en-
+tity classiﬁer does not bring too much performance beneﬁt.
+To investigate this phenomenon, we report the relationship
+between the per-class instance frequency and the perfor-
+mance of entity detection in Fig. 2. Despite the fact that the
+distribution of entity instances obeys the long-tail distribu-
+tion, SGTR’s entity detection performance is quite balanced,
+which means that the transformer-based detector is capable
+of tackling the data imbalanced scenario to some degree, and
+the additional re-balancing strategy is unnecessary.
+1.4. Zero-shot Recall
+We compare our method with VCTree-TDE in Tab.4,
+achieving a gain of 2.6 on zR@100. The result shows the
+generalization capability of SGTR to unseen relationships.
+We greatly appreciate R2’s suggestions and will leave the
+further exploration to future work.
+zR
+BGNN†
+BGNN†
+D
+DT2-ACBS†
+VCTree-TDE
+SGTR
+@50
+0.4
+0.5
+0.3
+2.6
+2.4
+@100
+0.9
+0.7
+0.5
+3.2
+5.8
+Table 4. The performance of zero-shot relationship retrieval.
+1.5. Model Selection
+We present experiments for selecting the hyper-
+parameters (Nr, K) on validation set of VG in Tab.5. The
+performance saturates at Nr = 160 and K = 3 .
+Nr
+mR@100
+R@100
+K
+mR@100
+R@100
+100
+16.1
+27.5
+1
+16.4
+26.2
+130
+16.3
+27.3
+2
+17.3
+28.2
+160
+17.7
+28.5
+3
+17.7
+28.5
+190
+16.1
+27.0
+4
+17.5
+28.2
+Table 5. The performance of different choices of hyper-parameters
+Nr.
+Bowl on table
+Entity indicator
+Entity 
+node
+Entity 
+Node
+Entity indicator
+Tree Standing-on Snow
+People  Watching  Airplane
+Entity indicator
+Entity node
+Figure 3. Comparison of entity indicator of predicate node and entity node. We use the different colored bounding boxes of entities to
+distinguish between the entity node (red) and the entity indicator (pink). The yellow arrow indicates the predicate between the entities. (best
+viewed in color)
+Images
+GT
+BGNN
+Ours
+Tree
+Bike
+Bench
+Person
+Tree
+Sign
+Pole
+Motorcycle
+Parked on
+near
+near
+near
+Street
+Bike
+Bench
+Sign
+Pole
+Motorcycle
+Parked on
+On
+On
+On
+Near
+Street
+Bike
+Bench
+Sign
+Pole Motorcycle
+Parked on
+Walking on
+Along
+Attached 
+to
+Street
+Tree
+Person
+Tree
+Tree
+Person
+Tree
+On
+Near
+Parked on
+Along
+Pants
+Woman
+Woman
+Jacket
+Bowl
+Hand
+Woman
+Desk
+Desk
+Sitting on
+Wearing
+Pants
+Woman
+Woman
+Jacket
+Bowl
+Hand
+Woman
+Desk
+at
+Wearing
+hand
+hand
+Desk
+Wearing
+has
+at
+has
+has
+on
+Pants
+Woman
+Woman
+Jacket
+Bowl
+Hand
+Woman
+Desk
+Sitting on
+Wearing
+hand
+Desk
+Wearing
+Sitting on
+Looking 
+at
+on
+behind
+behind
+Figure 4. Qualitative comparison between our method and BGNN† in SGG. Both methods predict many reasonable relationships which
+are not annotated in GT. We mark the relationships of rare semantic predicate categories retrieved by SGTR in red (best viewed in color).
+1.6. Qualitative Results
+Visualization of Entity Indicator and Entity Node
+To
+demonstrate the effectiveness of our proposed graph assem-
+bling mechanism, we visualize predictions of entity indica-
+tors of our predicate representation and entity nodes after the
+graph assembling. As shown in Fig. 3, the entity indicator
+only provides a rough localization and classiﬁcation of en-
+tities rather than precise bounding boxes. This information
+can be reﬁned into more accurate entity results with graph
+assembling, which signiﬁcantly improves the quality of the
+generated scene graph.
+Prediction Comparision between Different Design
+We
+compare different method (e.g., BGNN [?]) by visualizing
+the relationship predictions. In Fig. 4, we mark the different
+relationship predictions between BGNN and SGTR with red
+color. It shows that SGTR retrieves more relationships of
+less frequent semantic categories than BGNN.
+2. Implementation Details
+We implement our method based on the PyTorch 1.8 [?]
+and cvpods [?]. Our training process consists of two phases:
+1) entity detector pre-training and 2) SGTR joint training.
+Entity Detector Pre-training Phase:
+We follow the
+DETR training conﬁguration to learn the entity detector on
+Visual Genome and Openimage datasets. We train the entity
+detector with the AdamW optimizer with a learning rate of
+1e-5, a batch size of 16, and the model takes 100 epochs for
+convergence on 4 TITAN V GPUs. We use the same scale
+augmentation with DETR, resizing the input images such
+that the shortest side is at least 480 and at most 600 pixels,
+while the longest is at most 1000. The hyper-parameters of
+Transformer (e.g., number of attention heads, drop-out rate)
+are also kept the same with the DETR.
+Joint Learning Phase:
+In the joint training phase, we
+adopt the same optimizer, learning rate, and batch size con-
+ﬁguration as in the entity detector pre-training stage. In
+contrast with the two-stage SGG model, we reﬁne the param-
+eters of the detector in the joint learning rather than freezing
+the detector. We empirically observe that this reﬁnement fur-
+ther improves the performance of entity detection. We train
+the SGTR for the Visual Genome dataset for 8.39e4 itera-
+tions without learning rate decay by using an early-stopping
+strategy. For the Openimage dataset, we train the model with
+1.5e5 iterations, and the learning rate is decreased by 0.1x
+after 1e5 iterations.
+We re-implement the previous two-stage methods
+(BGNN [?] and RelDN [?]) in our codebase by using the
+same conﬁguration as the released codes. For fair compra-
+sion, we replace the ResNeXt-101 FPN backbone with the
+ResNet-101 backbone to learn the model. We also apply the
+one-stage HOI works (AS-Net [?] and HOTR [?]) on the
+SGG. We use the hyper-parameters of the models reported
+by the authors. All experiments are conducted by training
+the model until convergence.
+3. Correspondence Matrix for Assembling
+For clarity, we will use the correspondence matrix be-
+tween the subject entity and predicate Ms to introduce the
+details. The correspondence matrix is determined by the
+distance function, which takes the semantic outputs (e.g.
+bounding boxes B, classiﬁcation P of the entity detector
+and entity indicator of the predicate structural decoder) as
+input. Speciﬁcally, the distance function consists of two
+parts: spatial matching distance dloc ∈RNr×Ne and cate-
+gory matching distance dcls ∈RNr×Ne, as shown in Eq. 1
+Ms = dloc(Bs, Be) · dcls(Ps, Pe)
+(1)
+Each element in the correspondence matrix Ms is calcu-
+lated by pairing the Nr predicate predictions with Ne entity
+predictions, as shown in the following equations:
+Ms
+i,j = dloc(Bs(i), Be(j)) · dcls(Ps(i), Pe(j))
+(2)
+= dloc(bs,i, be,j) · dcls(ps,i, pe,j)
+(3)
+where i ∈[0, Ne], j ∈[0, Nr] for enumerating each pair
+between the predicate proposal and entity set.
+Then we present the two components of the distance
+function, dloc and dcls. Speciﬁcally, the dloc consists of the
+dgiou ∈RNr×Ne and dcenter ∈RNr×Ne, as show in Eq. 4.
+dloc(bs, be) = dgiou(bs, be)
+dcenter(bs, be)
+(4)
+Concretely, the dgiou is the clipped GIOU of the entity and
+the indicator’s bounding boxes, and dcenter is the L1 dis-
+tance between the bounding boxes’ centers in Eq. 5, 6. The
+center points-based matching has also been adopted in HOI
+methods [?,?,?].
+dgiou(bs, be) = max(min(GIOU(bs, be), 0), 1)
+(5)
+dcenter(bs, be) = ||[xc, yc]s
+i −[xe, ye]e
+i||1
+(6)
+Here [xs, ys]s and [xe, ye]e are the normalized center coordi-
+nates of the bounding box in bs and be respectively. For the
+dcls, we use the cosine distance to calculate the similarity of
+the classiﬁcation distribution between two entity predictions,
+as shown in following equation:
+dcls(ps, pe) =
+ps · p⊺
+e
+||ps|| · ||pe||
+(7)
+4. Matching Cost and Loss Function
+4.1. Triplets Matching Cost
+We use the set-matching strategy to supervise the relation-
+ship predictions T = {(bs
+e, ps
+e, bo
+e, po
+e, pp, bp)}. To obtain
+the matches, we need to calculate and minimize the matching
+cost C ∈RNr×Ngt between the Nr relationship predictions
+and the Ngt GT relationships. Concretely, the matching cost
+C includes two parts: the predicate cost Cp and the entity
+cost Ce, as:
+C = λpCp + λeCe
+(8)
+where λp, λe is the coefﬁcients of two cost terms.
+The predicate cost, Cp(i, j) between the i-th predicate
+prediction and the j-th ground-truth relationship is com-
+puted according to the predicate classiﬁcation distribution
+and location prediction in Eq. 9:
+Cp(i, j) = exp
+ −pgt
+p,j · p⊺
+p,i
+
++ ∥bp,i −bgt
+p,j∥1
+(9)
+where pp,i ∈R1×Cp is the i-th Pp, and pgt
+p,j ∈R1×Cp is the
+one-hot predicate label of the j-th ground truth relationship.
+Similarly, bp,i ∈R1×4 and bgt
+p,j ∈R1×4 are the center coor-
+dinates of the entity pair from the i-th relationship prediction
+and the j-th ground truth relationship, respectively.
+The entity cost Ce(i, j) between the i-th predicted rela-
+tionship and j-th ground-truth relationship is given by:
+Ce(i, j) =wgiou ·
+Y
+⋆={s,o}
+exp
+ −dgiou(b⋆
+e,i, b⋆
+gt,j)
+
+(10)
++ wl1 ·
+X
+⋆={s,o}
+||b⋆
+e,i −b⋆
+gt,j||1
+(11)
++ wcls ·
+Y
+⋆={s,o}
+exp
+
+−p(⋆,gt)
+e,j
+· p⋆
+e,i
+⊺
+(12)
+where the b⋆
+e,i and p⋆
+e,i are the i-th subject/object entity
+box and category distribution of relationship T after graph
+assembling, respectively. The b⋆
+gt,j and p(⋆,gt)
+e,j
+is the sub-
+ject/object bounding boxes and one-hot entity category label
+from j-th ground truth relationships.
+4.2. Loss Calculation
+Our total loss L is composed of entity detector loss Lenc
+and predicate node generator loss Lpre:
+L = Lenc + Lpre
+(13)
+The entity detector loss Lenc is calculated independently by
+following the same design in DETR [?].
+The loss of predicate node generator Lpre is determined
+by the prediction and ground-the relationships according to
+the matching index Itri ∈NNgt. The Itri stores the index of
+matched predictions for each GT relationship. Speciﬁcally,
+the predicate node generator loss consists of entity indicator
+loss Lpre
+i
+and predicate sub-decoder loss Lpre
+p
+:
+Lpre = Lpre
+i
++ Lpre
+p
+(14)
+For loss of predicate sub-decoder loss Lpre
+p
+, we have:
+Lpre
+p
+=
+Ngt
+X
+i
+ ∥bp,Itri(i) −bgt
+p,i∥1 + CE
+ pp,Itri(i), pgt
+p,i
+
+(15)
+where bgt
+p,i and bp,Itri(i) is the entity center coordinates
+of the GT relationship and prediction, respectively. The
+CE denotes the cross entropy loss between the predicate
+classiﬁcation bp,Itri(i) and the GT predicate category one-
+hot vector pgt
+p,i.
+For the entity indicator loss Lpre
+i
+:
+Lpre
+i
+=
+X
+⋆={s,o}
+ L⋆
+ent_loc + L⋆
+ent_cls
+
+(16)
+where ⋆= {s, o} indicates the subject/object role of an
+entity in relationships. The indicator loss is composed of
+two factors, L⋆
+ent_loc and L⋆
+ent_cls, for two types of semantic
+representation: bounding boxes bs, bo and classiﬁcation
+ps, po.
+L⋆
+ent_loc =
+Ngt
+X
+i
+ ∥b⋆,Itri(i) −bgt
+⋆,i∥1
+(17)
++1 −GIOU
+ b⋆,Itri(i), bgt
+⋆,i
+
+(18)
+L⋆
+ent_cls =
+Ngt
+X
+i
+CE
+ p⋆,Itri(i), pgt
+⋆,i
+
+(19)
+The L⋆
+ent_loc is computed by the L1 distance and GIoU loss
+between the bounding box outputs b⋆,Itri(i) and ground-
+truth entity boxes bgt
+⋆,i. The L⋆
+ent_cls is calculated from the
+cross entropy loss of classiﬁcation prediction p⋆,Itri(i) ac-
+cording to ground-truth entities’category pgt
+⋆,i.
+5. Social Impacts
+Our method has no direct potential negative impact, one
+possible negative impact is that SGG may serve as a base
+module for surveillance abuse.

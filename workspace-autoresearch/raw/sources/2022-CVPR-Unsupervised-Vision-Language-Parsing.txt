@@ -1,0 +1,1250 @@
+Unsupervised Vision-Language Parsing: Seamlessly Bridging Visual Scene
+Graphs with Language Structures via Dependency Relationships
+Chao Lou1,2*, Wenjuan Han1†, Yuhuan Lin3, Zilong Zheng1*
+1 Beijing Institute for General Artificial Intelligence (BIGAI), Beijing, China
+2 ShanghaiTech University, Shanghai, China
+3 Tsinghua Unversity, Beijing, China
+louchao@shanghaitech.edu.cn, hanwenjuan@bigai.ai
+lin-yh20@mails.tsinghua.edu.cn, zlzheng@bigai.ai
+https://github.com/bigai-research/VLGAE
+Abstract
+Understanding realistic visual scene images together
+with language descriptions is a fundamental task towards
+generic visual understanding. Previous works have shown
+compelling comprehensive results by building hierarchical
+structures for visual scenes (e.g., scene graphs) and natural
+languages (e.g., dependency trees), individually. However,
+how to construct a joint vision-language (VL) structure has
+barely been investigated. More challenging but worthwhile,
+we introduce a new task that targets on inducing such a joint
+VL structure in an unsupervised manner. Our goal is to
+bridge the visual scene graphs and linguistic dependency
+trees seamlessly. Due to the lack of VL structural data, we
+start by building a new dataset VLParse. Rather than us-
+ing labor-intensive labeling from scratch, we propose an
+automatic alignment procedure to produce coarse struc-
+tures followed by human refinement to produce high-quality
+ones. Moreover, we benchmark our dataset by proposing a
+contrastive learning (CL)-based framework VLGAE, short
+for Vision-Language Graph Autoencoder. Our model ob-
+tains superior performance on two derived tasks, i.e., lan-
+guage grammar induction and VL phrase grounding. Abla-
+tions show the effectiveness of both visual cues and depen-
+dency relationships on fine-grained VL structure construc-
+tion.
+1. Introduction
+Visual scene understanding has long been considered a
+primal goal for computer vision. Going beyond the success
+*Equal contribution. Author orders are coin clipped. This work was
+conducted when Chao Lou and Yuhuan Lin were research interns at BI-
+GAI.
+†Corresponding author.
+Plates of food and drinks 
+are sitting on a table
+table
+chair
+plates
+drinks
+food
+table
+are
+kettle
+in front of
+sitting
+of
+on
+one
+on top of
+white
+and
+brown
+a
+Input
+                                                                  Joint VL Structure
+Dependency Tree
+Scene Graph
+Figure 1. Task illustration of VLParse. Different node types
+are identified by their background colors and the yellow areas
+indicate first-order relationships (§3.1).
+of high-accurate individual object detection in complicated
+environments, various attempts have been made for higher-
+order visual understanding, such as predicting an explain-
+able, structured, and semantically-aligned representation
+from scene images [18, 23, 42]. Such representations not
+only provide fine-grained visual cues for low-level recog-
+nition tasks, but have further demonstrated their applica-
+tions on numerous high-level visual reasoning tasks, e.g.,
+visual question answering (VQA) [35, 53], image caption-
+ing [3, 46], and scene synthesis [18, 22].
+Scene graph (SG), one of the most popular visual struc-
+tures, serves as an abstraction of objects and their com-
+plex relationships within scene images [23, 27]. Conven-
+tional scene graph generation models recognize and pre-
+dict objects, attributes, relationships, and their correspond-
+ing semantic labels purely from natural images in a fully-
+supervised manner [34, 44]. Despite the promising perfor-
+mance achieved on large-scale SG benchmarks, these meth-
+ods suffer from limitations on existing datasets and task set-
+ting [13]. First, a comprehensive scene graph requires dif-
+ferent semantic levels of visual understanding [28], whilst
+most current datasets only capture a small portion of acces-
+sible semantics for classification [13], which will cause the
+prediction model bias towards those most-frequent labels.
+Second, building such datasets requires exhaustive label-
+ing of bounding boxes, relations, and corresponding seman-
+tics, which are time-consuming and inefficient. Third, it
+is typically hard to induce a semantically-consistent graph-
+ical structure solely from visual inputs, which typically
+requires an extra visual relation recognition module with
+heavy manually-labeled supervision.
+Different from dense and noisy visual information, natu-
+ral language directly provides symbolic and structured in-
+formation (e.g., grammar) to support the comprehension
+process. Researches on language structure induction can
+date back to early computational linguistic theories [4, 5, 6].
+Empowered by advances in deep learning techniques, a va-
+riety of neural structured prediction algorithms were pro-
+posed to analyze more complicated structure information
+and apply them to natural language tasks [9, 10, 24, 45, 48].
+Dependency tree (DT) parsing, as one essential branch of
+language structured prediction, aims to generate a parse
+tree that is composed of vertices representing each word’s
+semantic and syntactic meanings, and directed edges rep-
+resenting the dependency relationships among them.
+Of
+note, such tree structure shares a similar idea as in SG.
+However, the ground truth structure (commonly referred to
+as “gold structure”) requires professional linguists’ label-
+ing. To mitigate the data issue, pioneer works have also
+demonstrated the success of DT learning in an unsupervised
+schema [19, 20, 24].
+In this work, we leverage the best of both modalities and
+introduce a new task – unsupervised vision-language (VL)
+parsing (short for VLParse) – aiming to devise a joint
+VL structure that bridges visual scene graphs with linguis-
+tic dependency trees seamlessly. By “seamless”, we mean
+that each node in the VL structure shall present the well-
+aligned information of some node in SG and DT, so are
+their relationships, as shown in Figure 1. To the best of
+our knowledge, this is the first work that formally defines
+the joint representation of VL structure with dependency
+relationships. Respecting the semantic consistency and in-
+dependent characteristics, the joint VL structure consid-
+ers both the shared multimodal instances and the indepen-
+dent instances for each modality. In such a heterogeneous
+graph, semantically consistent instances across two graphs
+(DT and SG) are aligned in different levels, which maxi-
+mizes the retention of the representation from two modal-
+ities. Some previous attempts have shown the benefits of
+exploring multi-modality information for structured under-
+standing. For example, Shi et al. [32] first proposes a vi-
+sually grounded syntax parser to induce the language struc-
+ture. [49, 51] further exploit visual semantics to improve the
+structure for language. These structures, however, are still
+for language syntactic parsing rather than for joint vision-
+language understanding.
+One closest work to us is VL-
+Grammar [17], which builds separate image structures and
+language structures via compound PCFG [24]. However,
+the annotations (i.e., segmentation parts) are provided in ad-
+vance.
+VLParse aims to conduct thoughtful cross-modality
+understanding and bridge the gap between multiple sub-
+tasks: structure induction for the image and language sep-
+arately and unsupervised visual grounding. As a complex
+task, it is comprised of several instances, such as objects,
+attributes, and different levels of relationships. The interac-
+tions among different instances and subtasks can provide
+rich information and play a complementary or restrictive
+role during identification and understanding.
+To
+address
+this challenging
+task,
+we
+propose
+a
+novel contrastive learning (CL)-based architecture, Vision-
+Language Graph Autoencoder (VLGAE), aiming at con-
+structing a multimodal structure and aligning VL informa-
+tion simultaneously.
+The VLGAE is comprised of fea-
+ture extraction, structure construction, and cross-modality
+matching modules. The feature extraction module extracts
+features from both modalities and builds representations
+for all instances in DT and SG. The structure construc-
+tion module follows the encoder-decoder paradigm, where
+the encoder obtains a compressed global VL representa-
+tion from image-caption pair using attention mechanisms;
+the decoder incorporates the inside algorithm to construct
+the VL structure recursively as well as compute the pos-
+teriors of spans. The VL structure induction is optimized
+by Maximum Likelihood Estimation (MLE) with a nega-
+tive likelihood loss. For cross-modality matching, we com-
+pute the vision-language matching score between visual im-
+age regions and language contexts.
+We further enhance
+the matching score with posterior values achieved from the
+structure construction module. This score is used to pro-
+mote the cross-modality fine-grained correspondence with
+the supervisory signal of the image-caption pairs via a CL
+strategy; see Figure 3 and Section 5 for details.
+In summary, our contributions are five-fold: (i) We de-
+sign a joint VL structure that bridges visual scene graph
+and linguistic dependency tree; (ii) We introduce a new
+task VLParse for better cross-modality visual scene un-
+derstanding (§4); (iii) We present a two-step VL dataset
+creation paradigm without labor-intensive labelling and de-
+liver a new dataset (§3); (iv) We benchmark our dataset
+with a novel CL-based framework VLGAE (§5); (v) Empir-
+ical results demonstrate significant improvements on single
+modality structure induction and cross-modality alignment
+with the proposed framework.
+2. Related Work
+Weakly-supervised
+Visual
+Grounding
+Visual
+grounding (VG) aims to locate the most relevant object or
+region in an image referred by natural language expressions,
+such as phrases [40], sentences [1, 35] or dialogues [53].
+Weakly-supervised visual phrase grounding, which infers
+region-phrase correspondences using only image-sentence
+pairs, has drawn researchers’ attention. There are multiple
+approaches to weakly-supervised visual phrase grounding.
+Gupta et al. [14] leverage contrastive learning to train
+model based on image-sentence pairs data. Wang et al. [39]
+build visually-aware language representations for phrases
+that could be better aligned with the visual representations.
+Wang et al. [37] develop a method to distill knowledge from
+Faster R-CNN for weakly supervised phrase grounding.
+Language sentences contain rich semantics and syntac-
+tics information. Thus, some researches focus on how to
+extract and leverage useful information in a sentence to fa-
+cilitate visual grounding.
+For example, Xiao et al. [43]
+use the linguistic structure of natural language descriptions
+for visual phrase grounding. Yu et al. [47] learn to parse
+captions automatically into three modular components re-
+lated to subject appearance, location, and relationship to
+other objects, which get rich different types of information
+from sentences. In this work, we propose to induce struc-
+tures from realistic image-caption pairs without any struc-
+ture annotations, nor phrase-region correspondence annota-
+tions. Note that different from Wang et al. [38] who predict
+the corresponding regions for a given set of noun phrases,
+noun phrases in VL grammar induction are unknown and all
+spans in the VL structure are corresponding regions in the
+image.
+Language Dependency Parsing
+Dependency parsing,
+a fundamental challenge in natural language processing
+(NLP), aims to find syntactic dependency relations between
+words in sentences.
+Due to the challenge of achieving
+gold structures for all available language corpus, unsuper-
+vised dependency parsing, whose goal is to obtain a de-
+pendency parser without using annotated sentences, has at-
+tracted more attention over recent years. The pioneer work
+Dependency Model with Valence (DMV) [26] proposes to
+model dependency parsing as a generative process of de-
+pendency grammars. Empowered by deep learning tech-
+niques, NDMV [19] employ neural networks to capture the
+similarities between part-of-speech (POS) tags, and learn
+the grammar based on DMV. However, generative mod-
+els often are limited by independence assumption, so more
+researchers have paid attention to autoencoder-based ap-
+proaches [2], e.g., Discriminative NDMV (D-NDMV) [15].
+Visual-Aided
+Grammar
+Induction
+Visual-aided
+word representation learning and sentence representation
+learning achieve positive results. Shi et al. [32] first propose
+the visually grounded grammar induction task and present
+a visually-grounded neural syntax learner (VG-NSL).
+They use an easy-first bottom-up parser [12] and use
+REINFORCE [41] as gradient estimator for image-caption
+matching.
+Zhao and Titov [52] propose an end-to-end
+training algorithm for Compound PCFG [25], a powerful
+grammar inducer. Jin and Schuler [21] formulate a differ-
+ent visual grounding task. They use an autoencoder as a
+visual model and fuse language and vision features on the
+hidden states. Different from visually-grounded grammar
+induction, we not only care about the language structure
+accuracy but also the fine-grained alignment accuracy.
+3. The VLParse Dataset
+In this section, we start by formalizing the joint VL struc-
+ture to represent the shared semantics for vision and lan-
+guage. Then we introduce how the dataset, VLParse, is
+formed in a semi-automatic manner.
+3.1. Joint Vision-Language Structure
+The vision-language (VL) structure is composed of a vi-
+sual structure SG, a linguistic structure DT and a hierarchi-
+cal alignment between SG and DT.
+Scene graph (SG)
+We define SG on an image I as
+a structured representation composed of three types of
+nodes: T “ tOBJECT, ATTRIBUTE, RELATIONSHIPu, de-
+noting the image’s objects features, conceptual attribute
+features, and relationship features between two objects.
+Each OBJECT node is associated with an ATTRIBUTE
+node; between each pair of OBJECT nodes, there exists a
+RELATIONSHIP node. Let R be the set of all relationship
+types (including “none” relationship), we can denote the set
+of all variables in SG as tvcls
+i , vbbox
+i
+, vtype
+i
+, viÑj; i ‰ ju,
+where vcls
+i
+is the class label of the i-th bounding box,
+vbbox
+i
+P R4 denotes the bounding box offsets, vtype
+i
+P T
+is the node type, and viÑj P R is the relationship from
+node vi to vj.
+Dependency tree (DT)
+Conventional DT is a hierar-
+chy with directed dependency relationships. Given the tex-
+tual description denoted as a sequence of N words w “
+tw1, w2, ..., wNu, each dependency within DT can be de-
+noted as triplet pwi, wj, wiÑjq, representing a parent node
+wi, a child node wj and the direct dependency relationship
+from wi to wj, respectively. Similar to SG, for each node’s
+representation, we additionally append the node’s type la-
+bel wtype
+i
+P T . Thus, all variables within in DT becomes
+twi, wtype
+i
+, wiÑj; i ‰ ju.
+Alignment
+The alignment between DT and SG can be
+seen as a realization of visual grounding for instances on
+different levels of the linguistic structure. We hereby define
+three levels of alignment (see Figure 1 for illustration):
+• Zero-order Alignment. It defines connections between
+each node wi in DT with a node vi in SG.
+• First-order Alignment. A first-order relationship can
+be defined as a triplet pwi, wj, wiÑjq, including two
+nodes and a directed dependency. Then the first-order
+table
+kettle
+in front of
+one
+small
+on top of
+on top of
+white
+DT-SG
+Alignment
+Type 
+Classification
+Parent
+Identification
+Plates of food and drinks are sitting on 
+a table
+OBJECT
+OBJECT
+RELATIONSHIP
+RELATIONSHIP
+OBJECT
+plates
+drinks
+sitting
+table
+display
+chair
+Figure 2. An illustration of the process of the automatic rule-
+based alignment. After the process of DT rewriting and DT-SG
+alignment, every instance in DT can be aligned to a SG instance.
+Through SG, instances in DT can match to image regions.
+alignment aims to align the triplet in DT with a similar
+triplet pvi, vj, viÑjq in SG.
+• Second-order Alignment. A second-order relationship
+builds upon the first-order relationship and is repre-
+sented as dependencies among three nodes, e.g., wi,
+wj, and wk in DT. Similar as the first-order alignment,
+the second-order alignment aligns such relationships
+between DT and SG with similar semantics.
+3.2. Automatic Rule-based Alignment
+In practice, the alignment between SG and DT is labor-
+intense and expensive to obtain, whilst unlabeled data is low
+in cost and large in scale. Thus we design a set of rules
+to automatically ground the language instances of DT to
+the vision instances of SG. This automatic alignment pro-
+vides beneficial information to reduce the labeling burden
+on workers. Specifically, we introduce a two-step alignment
+process, i.e., rule-based DT rewriting (DT Rewriting) fol-
+lowed by the alignment between DT and SG (DT-SG Align-
+ment).
+DT Rewriting
+We start by introducing the rewriting
+procedure that extends and deforms DT in order to mitigate
+the difference between DT and SG. The rewriting considers
+two modules:
+Type Classification
+We append the type label xtype
+i
+for
+conventional DT. More specifically, we label words from
+DT with three node types as follows:
+• OBJECT: The OBJECT node in DT is referred as to a
+word/phrase that can be grounded to a specific image
+area. A noun phrase including all words involved ex-
+cept for the attribute is designed as an OBJECT node.
+• ATTRIBUTE: The ATTRIBUTE node is mostly an ad-
+jective used to decorate its linked OBJECT node. In
+our designed rules, we set words with dependency type
+acomp (adjectival complement) as ATTRIBUTE nodes.
+• RELATIONSHIP: Two OBJECT nodes are linked to
+a RELATIONSHIP node with a directed dependency.
+OBJECT nodes are connected to each other through a
+RELATIONSHIP node. For example in Figure 2, “sit-
+ting” as a RELATIONSHIP node between two OBJECT
+nodes “drinks” and “table”.
+Parent Identification
+Since it is hard to identify a ground-
+ing area in image for an ATTRIBUTE node or a function
+word (such as the coordinating conjunction and determiner,
+etc.), we instead define words of these types share the cor-
+responding OBJECT node’s, says parent nodes’ grounding
+area. A parent node is a noun representing the core seman-
+tics of a noun phrase and ATTRIBUTE nodes, as dependent,
+modify it. This parent-dependent relationship is encoded in
+dependency types and dependency directions of DT [7].
+Through the rules we design, every word in DT is
+assigned with a node type and a parent node.
+We
+design 7 rules for OBJECT-ATTRIBUTE, 12 rules for
+RELATIONSHIP-OBJECT, 1 rule for OBJECT-OBJECT, 10
+for OBJECT-RELATIONSHIP and 22 rules for function word
+processing.1
+DT-SG Alignment
+Based on the rewritten DT, we per-
+form DT-SG alignment to map the rewritten DT to SG. In
+details, we calculate the similarity score between the SG
+node and the word’s parent, and choose top k results as the
+alignment result. The words labeled attribute leverage par-
+ent to retrieve OBJECT node it attributes in SG. Then we
+retrieve the ATTRIBUTE node in the subtree rooted by the
+OBJECT node by calculating the similarity score between
+the word and ATTRIBUTE node name. An illustration of the
+process of alignment from words to SG nodes is shown in
+Figure 2.
+3.3. Crowd-Sourcing Human Refinement
+To obtain a high-quality dataset, a human-refinement
+stage is adapted, providing an automatically annotated VL
+structure and asking the annotators to output the refined
+one. We utilize Amazon Mechanical Turk (AMT) to hire
+remotely native speakers to perform a crowd-sourcing sur-
+vey.
+Human Refinement
+We create a survey in AMT that
+allows workers to assess and refine data generated from the
+automatic rule-based alignment stage. We provide workers
+with comprehensive instructions and a set of well-defined
+examples to judge the quality of alignments, and modify
+those unsatisfied ones. During the task, we will show work-
+ers an interface with paired images and captions grouped by
+the image. We ask workers to check DT, SG, and the cross-
+modality alignment. Then the workers correct the inappro-
+priate areas when necessary. The final results are combined
+using a majority vote.
+1The dependencies used here is based on Stanford typed depen-
+dencies [7], a framework for annotation of grammar (parts of speech
+and syntactic dependencies https://catalog.ldc.upenn.edu/
+LDC99T42) [30]. Following [52], a learned parser [50] on this annotated
+data is used to label the dependency existence and dependency type.
+Quality Control
+We adopt a set of measurements for
+quality control during the calibration process. Before sub-
+mitting the task, the survey will first check the modifying
+parts by the worker to ensure that the modifying parts meet
+the base requirement: a dependency in DT is aligned to a
+RELATIONSHIP node in SG. If we find this kind of mis-
+alignment during annotation, we will prompt a message
+asking the workers to recheck their annotation. We pub-
+lish datasets to workers one by one and request at least two
+workers to process the same sample to check whether there
+are disagreements. To ensure high-quality labeling, we re-
+strict participated workers who have finished 500 human in-
+telligence tasks (HITs) with high accuracy in the labeling
+history.
+We do the post-processing double-check after the human
+refinement. We collect the flag disagreements for multi-
+ple decisions from several workers. All samples that have
+disagreement are double-checked manually by a third-party
+worker. We also flag annotations from workers whose work
+seems inadequate and filter out their results from the final
+collections.
+3.4. Dataset Analysis
+For the training dataset, we inherit MSCOCO train-
+ing dataset [29]2.
+We annotate VL structures based on
+the intersection of MSCOCO dev+test datasets and Visual
+Genome [27]. We collect an annotated dataset with 850 im-
+ages and 4,250 captions (each image is associated with 5
+captions). Then we split the 850 images into dev and test
+datasets by 1:1. The remains in dev+test are merged into
+the training dataset. Table 1 shows the data summary.
+Train
+Dev
+Test
+# Images
+83933
+425
+425
+# Sentences
+419665
+2125
+2125
+# Avg. Instances in DT
+-
+20
+21
+# Avg. Instances in SG
+-
+135
+134
+Table 1. Data analysis of VLParse. # Avg.: The average num-
+ber. Instances include zero-order instances, first-order relation-
+ships, and second-order relationships.
+3.5. Human Performance
+Five different workers are asked to label parse trees of
+100 sentences from the test set. A different set of five work-
+ers on AMT were asked to align the visual terms and the
+language terms on the same sentences and their correspond-
+ing images. Then the averaged human performance is cal-
+culated as 96.15%.
+Based on these observations, our designed dataset
+presents language representation and cross-modality under-
+2We use the training data split following Zhao and Titov [51]. It con-
+tains 82,783 training images, 1,000 validation images, and 1,000 test im-
+ages.
+standing clearly and keeps vision-language alignment con-
+crete. It demonstrates the reliability of our new dataset and
+benchmark through manual review.
+4. Unsupervised Vision-Language Parsing
+In this section, we introduce the task of unsupervised
+vision-language (VL) parsing, short for VLParse. We for-
+malize the task of VL parsing followed by evaluation met-
+rics.
+4.1. Task Formulation
+Given an input image I and the associating sentence with
+a sequence of N words w “ tw1, w2, ..., wNu, the task is
+to predict the joint parse tree pt in a unsupervised man-
+ner. Specifically, the goal is to induce VL structures from
+only image-caption pairs without annotations of DT, SG
+nor phrase-region correspondence annotations for training.
+Of note, we do use a pre-trained object detector to obtain
+50 bounding boxes as candidates, while the labels of the
+bounding boxes are not given. For a fully unsupervised set-
+ting, the process of obtaining the bounding boxes can be
+replaced by an object proposal method (e.g., [36]). Com-
+pared with the weakly-supervised scene graph grounding
+task as in [33], the scene graphs in VLParse are unknown.
+Each OBJECT node in language DT will be mapped to a
+box region oi P R4 given M candidate object proposals
+O “ toiuM
+i“1 of the corresponding image. So are the rela-
+tionships.
+4.2. Evaluation Metrics
+Due to lacking annotations of VL structure, we indirectly
+assess our model by two derived tasks from each modality’s
+perspective, i.e., language dependency parsing and phrase
+grounding.
+Directed
+/
+Undirected
+Dependency
+Accuracy
+(DDA/UDA) DDA and UDA are two widely used
+evaluation metrics of dependency parsing. DDA denotes
+the proportion of tokens assigned with the correct parent
+node. UDA denotes the proportion of correctly predicted
+undirected dependency relation.
+Zero-Order Alignment Accuracy (Zero-AA) Zero-AA
+assesses the alignment results on the zero-order level. A
+word is considered successfully grounded if two conditions
+are satisfied. First, the predicted bounding box of a lan-
+guage vertex has at least 0.5 IoU (Intersection over Union)
+with the box of ground-truth SG vertex if the ground-truth is
+a OBJECT node or ATTRIBUTE node, or the connected two
+boxes both have at least 0.5 IoU scores if the ground-truth
+is a RELATIONSHIP node. Second, although OBJECT node
+and ATTRIBUTE node share the same region, we ask models
+to distinguish them.
+First/Second-Order Alignment Accuracy (First/Second-
+AA) We are also interested in whether the first- and
+second-order relationships remain after alignment to an-
+other modality. That is, whether two zero-order instances
+(subject and predicate) in the first-order relationship remain
+adjacent in the aligned SG. For the second-order relation-
+ship, we consider whether three zero-order instances (a sub-
+ject, a predicate, and an object) remain adjacent. For the
+second-order relationships, there are multiple approach to
+connect the three words obj-pred-sub (e.g., objÑpredÑsub
+and objÐpredÑsub). We consider them all correct because
+distinguishing their adjacency to an unsupervised parser is
+more important to identify the semantics.
+5. Vision-Language Graph Auto-Encoder
+In this section, we introduce a novel CL based architec-
+ture, VLGAE, to benchmark the VLParse task. The ar-
+chitecture is composed of feature extraction, structure con-
+struction and cross-modality matching modules; Figure 3
+depicts the overall computational framework. Below we
+will discuss details of each module and then the learning
+and inference algorithms.
+5.1. Modeling
+Feature Extraction
+For visual features, we start by
+using an off-the-shelf object detector Faster R-CNN [31]
+to generate a set of object proposals (RoIs) O “ toiuM
+i“1
+on an input image I and extracting corresponding features
+tvo
+i uM
+i“1 P RD as OBJECT nodes’ features, where D is the
+dimension of each RoI feature. For each OBJECT node vo
+i ,
+an ATTRIBUTE node is tagged along, with its feature de-
+noted as va
+i “ MLPpvo
+i q. For two arbitrary OBJECT nodes
+vo
+i and vo
+j, we denote the zero-order RELATIONSHIP node
+as vimg
+iÑj,0. We also add an dummy node representing the full
+image and take the average of all OBJECT node features as
+its feature. For all nodes except for OBJECT nodes, we use
+randomly initialized neural networks to represent the fea-
+tures.
+For textual features, each word wi in sentence w is repre-
+sented as the concatenation of a pretrained word embedding
+wi and a randomly initialized POS tag embedding ti. Sim-
+ilar to RELATIONSHIP nodes in SGs, the representation of
+dependency between two words, wiÑj is extracted by neu-
+ral networks fed with pwi, wjq. We use Biaffine scorers [8]
+for the first-order relationship:
+  \vspace {
+-
+1 0pt} &w_{i
+}
+^ {1st,parent}, w_{i}^{1s
+t,ch
+ild }  = \text {MLP}^{1st,
+p
+a rent/child
+}
+(
+w_i) \\ &w_{ i\r i gh
+t arro w  j} ^ {1st} =  \text {Biaffine}(w_{i}^{1st,parent}, w_{i}^{1st,child}) \\ &\text {Biaffine}(w_i, w_j) = w_i^{\rm T} \mathbf {W}_{1} w_j + (w_i+w_j)^{\rm T} \mathbf {W}_2+ b, \vspace {-10pt}
+where MLP denotes the multi-layer perceptron, W1, W2
+and b are trainable parameters. The calculation of a second-
+order relationship’s score follows a similar way.
+Structure Construction
+Inspired by neural DT con-
+struction algorithms [15], we use an encoder-decoder
+framework that employs the dynamic programming algo-
+rithm (namely, inside algorithm) and calculate the posteri-
+ors of instances pppt|w, Iq recursively retrieved during the
+structure construction.
+Encoder
+The encoder is to produce a joint representa-
+tion of an input image I and its corresponding caption w.
+Specifically, we obtain contextual encoding c P C by fusing
+the text features with the visual information via attention
+mechanisms, where C denotes the space for the attended
+language context.
+For each token in captions twiu and
+SG representations V “ tvi, viÑju, we calculate attention
+scores between them and then obtain weighted summation
+over all terms, i.e., ci “ ř Attnpwi, viqwi. Finally, we use
+an average-pooling layer to summarize all information into
+a continuous context vector s, which represents the global
+information of the vision-language context.
+Decoder
+The decoder generates the tag sequence t and
+parse tree pt conditioned on the joint representation s w.r.t.
+the joint probability ppt, pt|sq. To consider the exponential
+scale of possible parse trees, we use dynamic programming
+to consider all possible dependencies over the sentence. Re-
+fer to Section 5.2 for the learning process.
+Cross-modality Matching
+We employ cross-modality
+matching to align vision and language features in different
+levels.
+Matching Score
+We define simp¨, ¨q as the cross-modality
+matching function. Following Wang et al. [39], we first
+compute the similarity score between each c P C and each
+v P V:
+ \labe l { eq: sim_v_h} sim(v, c) = \langle v , c \rangle ,
+(1)
+where x¨, ¨y is an inter-product function. Heuristically, we
+can define the similarity score between instance c and the
+entire image I as
+  sim( \m a thb
+f { I}, c)  = \max _{v \in \mathcal {V}} sim(v, c),
+(2)
+Matching Score Enhanced by Posterior
+To leverage the
+contextual information, we use a posterior ppc|sq computed
+from the decoder to reflect how likely c exists given the joint
+representation s. Then we fuse the matching scores with
+the posteriors to provide an enhanced simliarity function,
+sim`pI, cq “ simpI, cq ˆ ppc|sq.
+5.2. Learning
+Maximum Likelihood Estimation (MLE)
+With the
+compressed representation si for image-sentence pair
+pIi, wiq, VLGAE generates the tag sequence ti and the
+parse tree pt. The learning objective is to maximize the
+Word Embedding
+Text Encoding
+POS Embedding
+Obj.
+Attr.
+Rel.
+...
+...
+...
+...
+...
+...
+...
+Feature Extraction
+Faster 
+R-CNN
+MLP
+MLP
+Structure Construction
+Pooling
+Decoder
+Attn.
+s
+Context Encoding
+Cross-modality Matching
+Plates of food and 
+drinks are sitting 
+on a table
+Image
+Caption
+NNS IN NN CC 
+NNS VBP VBG 
+IN DT NN
+Part-of-Speech
+Back-propagation
+Figure 3. Diagram of VLGAE. It first extracts features from both modalities and builds representations for all instances in DT and SG. Then
+the encoder of the structure construction module encodes the language feature with visual cues and output a compressed representation s.
+With this compressed global representation s, the decoder incorporates the inside algorithm to construct the VL structure recursively as
+well as compute the posteriors. On top of the resulting posteriors generated from the structure construction module, an enhanced matching
+score between language context c and image region v is used to promote the cross-modality fine-grained correspondence.
+conditional log-likelihood of K training sentences:
+  \b e g i
+n
+ 
+{
+ali
+gne d} \mathc
+a l  
+{
+L
+}
+_{m
+le}
+ 
+&= -  \fra
+c {1}{ K}\sum \limits _{i=1}\limits ^{K}\log p_{\Theta }(\mathbf {t}_i | \mathbf {w}_{i}) \\ &= -\frac {1}{K}\sum \limits _{i=1}\limits ^{K}\log \sum _{\mathbf {pt} \in PT(\mathbf {s}_i)} p_{\Theta }( \mathbf {t}_{i}, \mathbf {pt} | \mathbf {w}_{i}) \end {aligned} \label {eqn:mle} 
+(3)
+where Θ parameterizes the encoder-decoder neural network
+and PTpsiq denotes the set of all possible parse trees.
+Given some Θ, Eqn. (3) can be computed using the in-
+side algorithm, an Opn3q dynamic programming procedure.
+Therefore, we perform structure construction and parame-
+ter learning via an expectation-maximization (EM) process.
+Specifically, the E-step is to compute possible structures
+given current Θ and the M-step is to optimize Θ by gradient
+descent w.r.t. Eqn. (3). Of note, the posterior ppc|sq used for
+matching score can be computed in the back-propagation
+process [11].
+Contrastive Loss
+Due to the lack of fine-grained an-
+notations in an unsupervised setting, the objective refer-
+ring to the alignment is employed in a contrastive loss.
+The contrastive learning strategy is based on maximizing
+the matching score between paired fine-grained instances.
+For each c, the sentence’s corresponding image is a posi-
+tive example and all the other images in the current batch
+are negative examples.
+Of note, compared with coarse
+image-sentence pairs, our design of fine-grained vision-
+language alignments yield stronger negative pairs for con-
+trastive training.
+Formally, given a vision-language pair
+pw, Iq within a batch, the contrastive loss can be defined
+as,
+  \mat hc a l {L}_{c
+l
+}(\m
+athb f {
+w},
+ \ma th b f  {I
+}) &= \math bb 
+{
+E}_{p(\m athbf {pt}|\ mat
+hbf {w})} \sum _{c\in \mathbf {pt}} \ell (\mathbf {I}, c), \\ \ell (\mathbf {I}, c) =& -\log \frac {\exp [sim^{+}(\mathbf {I}, c)]}{\sum _{\hat {\mathbf {I}}\in batch} \exp [sim^{+}(\hat {\mathbf {I}}, c)]}, \label {eq:cl}
+(5)
+where pt is a valid parse tree, ˆI are negative examples in
+a batch. ℓpI, cq shows an possibly aligned pair that ranks
+higher than other unaligned ones in a batch.
+Finally, the total loss is defined as
+  \b e gi n  { s plit }  \ mathcal {L}_{tot} &= (1-\lambda )\cdot \mathcal {L}_{mle} + \lambda \cdot \mathcal {L}_{cl}, \end {split} 
+(6)
+where λ is pre-defined to balance different scalars between
+two losses.
+5.3. Inference
+Given a trained model with trained parameters Θ, the
+model can predict the VL structure and further the parse
+tree of the sentence and its visual grounding on the SG.
+The parse tree can be parsed by searching for pt˚ with the
+highest conditional probability among all valid parse trees
+PTpsq using the dynamic programming [26]:
+  \ m ath bf 
+{pt} ^ {*}
+ = \arg max _{\mathbf {pt} \in PT(\mathbf {s})}~p(\mathbf {pt} | \mathbf {s}; \boldsymbol {\Theta }) 
+(7)
+For each c P C, we can predict its corresponding image
+region omc using enhanced similarity score as in Eqn. (1):
+UDA
+DDA
+Language Only
+Left branch
+53.61
+30.75
+Right branch
+53.19
+23.01
+Random
+32.44
+19.29
+DMV [26]
+58.06
+41.36
+D-NDMV [15]
+70.77
+65.88
+Vision-Language (VL)
+VLGAE
+71.43
+67.57
+Table 2. Dependency structure induction results on the test split.
+v˚ “ arg max
+v
+sim`pv, cq
+(8)
+It is worth noting that, when the ground truth dependency
+tree is known for sentence, we can directly retrieve corre-
+sponding scene graph w.r.t. Eqn. (8).
+6. Experiments
+6.1. Setup
+The candidate bounding boxes are given in the following
+setting. For an input image, we use an external object detec-
+tor, Faster R-CNN as MAF [39], to generate top-50 object
+proposals. For each proposal, we use RoI-Align [16] and
+global average pooling to compute the object feature [39].
+Since we do not have the ground-truth structure of the cap-
+tions, we follow [32] and [52] to use predictions as ground
+truth produced by an external parser. We report the average
+score of three runs with different random seeds.
+6.2. Evaluation on Language Structure Induction
+We compare VLGAE with prior language-only baselines
+on language structure induction using UDA and DDA met-
+rics in Table 2. We can obverse a performance boosting
+after incorporating visual cues. In particular, VLGAE out-
+performs D-NDMV by 1.69% score on DDA and 0.66%
+score on UDA.
+6.3. Evaluation on Visual Phrase Grounding
+In addition to language structure induction, we evalu-
+ate our approach on the weakly-supervised visual phrase
+grounding task.3
+Experimental results in Table 3 show
+that VLGAE outperforms the previous mutlimodal baseline
+MAF [39] by 1.0%. Moreover, a significant improvement
+is observed, especially for high-order relations, indicating
+the effectiveness of our multi-order alignments. We also re-
+port performance if ground truth bounding boxes (and rela-
+tionships) are used as a reference instead of proposals (and
+dense connections); see VLGAE: in Table 3.
+3We apply the learning strategy of MAF on weakly-supervised visually
+grounding of a DT instead of given noun phrases in the training stage.
+All
+Obj.
+Attr.
+Rel.
+First
+Second
+Random
+12.2
+15.9
+9.4
+0.0
+0.0
+0.0
+MAF*
+27.7
+38.5
+20.7
+0.1
+0.0
+0.0
+VLGAE
+28.7
+36.1
+21.0
+10.2
+3.4
+0.2
+VLGAE:
+42.3
+67.2
+41.8
+15.9
+-
+-
+Table 3. Visual grounding results on the test split. ˚ refers to
+re-implemented results. : refers to experiments using gold scene
+graphs. All: Zero-AA on all zero-order instances. Obj.: Zero-AA
+on objective nodes. Attr.:Zero-AA on attribute nodes. Rel.: Zero-
+AA on relationship nodes. First: First-AA. Second: Second-AA.
+6.4. Ablation Analysis on Arc Length
+We further investigate the recall rate for different lengths
+of arcs lenpwiÑjq in Figure 4.
+The experiments are on
+the Dev split. VLGAE enhanced by visual cues has been
+proven to boost DDA/UDA than its non-visual version (D-
+NDMV) in Table 2. Moreover, this boost is observed not
+only on short arcs but also longer arcs. This phenomenon is
+contrary to VC-PCFG [52], showing that dependency struc-
+tures in VLGAE can be beneficial for all the arcs regardless
+of the arc length, compared with constituent structures.
+2
+4
+6
+8
+10
+12
+14
+20
+30
+40
+50
+60
+70
+80
+Method
+DNDMV
+VLGAE
+Figure 4. DDA of different arc length on the Dev dataset.
+7. Conclusion
+In this work, we introduce a new task VLParse that
+aims to construct a joint VL structure that leverages both
+visual scene graphs and language dependency trees in an
+unsupervised manner.
+Meanwhile, we deliver a semi-
+automatic strategy for creating a benchmark for the pro-
+posed task. Lastly, we devise a baseline framework VLGAE
+based on contrastive learning, aiming to construct such
+structure and build VL alignment simultaneously. Evalu-
+ations on structure induction and visually phrase grounding
+show that VLGAE enhanced by visual cues can boost per-
+formance than its non-visual version. Despite of the com-
+pelling boosted results, the performance on both tasks are
+far from satisfactory. Nevertheless, this work sheds light on
+explainable multimodal understanding and calls for future
+research in this direction.
+References
+[1] Arjun Akula, Spandana Gella, Yaser Al-Onaizan, Song-
+Chun Zhu, and Siva Reddy. Words aren’t enough, their order
+matters: On the robustness of grounding visual referring ex-
+pressions. In Proceedings of the Annual Meeting of the As-
+sociation for Computational Linguistics (ACL), pages 6555–
+6565, Online, July 2020. Association for Computational Lin-
+guistics.
+[2] Jiong Cai, Yong Jiang, and Kewei Tu.
+CRF autoencoder
+for unsupervised dependency parsing.
+In Proceedings of
+the Conference on Empirical Methods in Natural Language
+Processing (EMNLP), pages 1638–1643, Copenhagen, Den-
+mark, Sept. 2017. Association for Computational Linguis-
+tics.
+[3] Shizhe Chen, Qin Jin, Peng Wang, and Qi Wu. Say as you
+wish: Fine-grained control of image caption generation with
+abstract scene graphs. In Proceedings of the IEEE Confer-
+ence on Computer Vision and Pattern Recognition (CVPR),
+pages 9962–9971, 2020.
+[4] Noam Chomsky. Three models for the description of lan-
+guage. IRE Transactions on information theory, 2(3):113–
+124, 1956.
+[5] Noam Chomsky. On certain formal properties of grammars.
+Information and control, 2(2):137–167, 1959.
+[6] Noam Chomsky. Syntactic structures. De Gruyter Mouton,
+2009.
+[7] Marie-Catherine De Marneffe and Christopher D Manning.
+Stanford typed dependencies manual.
+Technical report,
+Technical report, Stanford University, 2008.
+[8] Timothy Dozat and Christopher D. Manning. Deep biaffine
+attention for neural dependency parsing.
+In International
+Conference on Learning Representations (ICLR). OpenRe-
+view.net, 2017.
+[9] Andrew Drozdov, Subendhu Rongali, Yi-Pei Chen, Tim
+O’Gorman, Mohit Iyyer, and Andrew McCallum.
+Unsu-
+pervised parsing with s-diora: Single tree encoding for deep
+inside-outside recursive autoencoders. In Proceedings of the
+Conference on Empirical Methods in Natural Language Pro-
+cessing (EMNLP), 2020.
+[10] Andrew Drozdov, Pat Verga, Mohit Yadav, Mohit Iyyer, and
+Andrew McCallum. Unsupervised latent tree induction with
+deep inside-outside recursive autoencoders. In Proceedings
+of the Annual Conference of the North American Chapter
+of the Association for Computational Linguistics (NAACL),
+2019.
+[11] Jason Eisner.
+Inside-outside and forward-backward algo-
+rithms are just backprop (tutorial paper). In Proceedings of
+the Workshop on Structured Prediction for NLP, pages 1–17,
+Austin, TX, Nov. 2016. Association for Computational Lin-
+guistics.
+[12] Yoav Goldberg and Michael Elhadad. An efficient algorithm
+for easy-first non-directional dependency parsing. In Human
+Language Technologies: The 2010 Annual Conference of the
+North American Chapter of the Association for Computa-
+tional Linguistics, pages 742–750, Los Angeles, California,
+June 2010. Association for Computational Linguistics.
+[13] Jiuxiang Gu, Handong Zhao, Zhe Lin, Sheng Li, Jianfei Cai,
+and Mingyang Ling. Scene graph generation with external
+knowledge and image reconstruction. In Proceedings of the
+IEEE Conference on Computer Vision and Pattern Recogni-
+tion (CVPR), pages 1969–1978, 2019.
+[14] Tanmay Gupta, Arash Vahdat, Gal Chechik, Xiaodong Yang,
+Jan Kautz, and Derek Hoiem.
+Contrastive learning for
+weakly supervised phrase grounding. In European Confer-
+ence on Computer Vision (ECCV), pages 752–768. Springer,
+2020.
+[15] Wenjuan Han, Yong Jiang, and Kewei Tu. Enhancing un-
+supervised generative dependency parser with contextual in-
+formation. In Proceedings of the Annual Meeting of the As-
+sociation for Computational Linguistics (ACL), pages 5315–
+5325, 2019.
+[16] Kaiming He, Georgia Gkioxari, Piotr Doll´ar, and Ross Gir-
+shick. Mask r-cnn. In Proceedings of the IEEE International
+Conference on Computer Vision (ICCV), 2017.
+[17] Yining Hong, Qing Li, Song-Chun Zhu, and Siyuan Huang.
+Vlgrammar: Grounded grammar induction of vision and lan-
+guage. Proceedings of the IEEE International Conference on
+Computer Vision (ICCV), 2021.
+[18] Chenfanfu Jiang, Siyuan Qi, Yixin Zhu, Siyuan Huang,
+Jenny Lin, Lap-Fai Yu, Demetri Terzopoulos, and Song-
+Chun Zhu.
+Configurable 3d scene synthesis and 2d im-
+age rendering with per-pixel ground truth using stochastic
+grammars. International Journal of Computer Vision (IJCV),
+126(9):920–941, 2018.
+[19] Yong Jiang, Wenjuan Han, and Kewei Tu.
+Unsupervised
+neural dependency parsing. In Proceedings of the Confer-
+ence on Empirical Methods in Natural Language Processing
+(EMNLP), pages 763–771, 2016.
+[20] Yong Jiang, Wenjuan Han, and Kewei Tu. Combining gen-
+erative and discriminative approaches to unsupervised de-
+pendency parsing via dual decomposition. In Proceedings
+of the 2017 Conference on Empirical Methods in Natural
+Language Processing, pages 1689–1694, Copenhagen, Den-
+mark, Sept. 2017. Association for Computational Linguis-
+tics.
+[21] Lifeng Jin and William Schuler.
+Grounded PCFG induc-
+tion with images.
+In Proceedings of the 1st Conference
+of the Asia-Pacific Chapter of the Association for Compu-
+tational Linguistics and the 10th International Joint Con-
+ference on Natural Language Processing, pages 396–408,
+Suzhou, China, Dec. 2020. Association for Computational
+Linguistics.
+[22] Justin Johnson, Agrim Gupta, and Li Fei-Fei. Image genera-
+tion from scene graphs. In Proceedings of the IEEE Confer-
+ence on Computer Vision and Pattern Recognition (CVPR),
+pages 1219–1228, 2018.
+[23] Justin Johnson, Ranjay Krishna, Michael Stark, Li-Jia Li,
+David Shamma, Michael Bernstein, and Li Fei-Fei. Image
+retrieval using scene graphs.
+In Proceedings of the IEEE
+Conference on Computer Vision and Pattern Recognition
+(CVPR), pages 3668–3678, 2015.
+[24] Yoon Kim, Chris Dyer, and Alexander Rush.
+Compound
+probabilistic context-free grammars for grammar induction.
+In Proceedings of the Annual Meeting of the Association
+for Computational Linguistics (ACL), pages 2369–2385, Flo-
+rence, Italy, July 2019. Association for Computational Lin-
+guistics.
+[25] Yoon Kim, Chris Dyer, and Alexander Rush.
+Compound
+probabilistic context-free grammars for grammar induction.
+In Proceedings of the 57th Annual Meeting of the Association
+for Computational Linguistics, pages 2369–2385, Florence,
+Italy, July 2019. Association for Computational Linguistics.
+[26] Dan Klein and Christopher D Manning. Corpus-based induc-
+tion of syntactic structure: Models of dependency and con-
+stituency. In Proceedings of the Annual Meeting of the As-
+sociation for Computational Linguistics (ACL), pages 478–
+485, 2004.
+[27] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A. Shamma, Michael S. Bernstein, and
+Li Fei-Fei. Visual genome: Connecting language and vision
+using crowdsourced dense image annotations. Int. J. Com-
+put. Vision, 123(1):32–73, may 2017.
+[28] Yikang Li, Wanli Ouyang, Bolei Zhou, Kun Wang, and Xi-
+aogang Wang. Scene graph generation from objects, phrases
+and region captions. In Proceedings of the IEEE Interna-
+tional Conference on Computer Vision (ICCV), pages 1261–
+1270, 2017.
+[29] Tsung-Yi Lin, Michael Maire, Serge Belongie, James Hays,
+Pietro Perona, Deva Ramanan, Piotr Doll´ar, and C. Lawrence
+Zitnick. Microsoft coco: Common objects in context. In
+David Fleet, Tomas Pajdla, Bernt Schiele, and Tinne Tuyte-
+laars, editors, European Conference on Computer Vision
+(ECCV), pages 740–755, Cham, 2014. Springer International
+Publishing.
+[30] Mitchell P. Marcus, Beatrice Santorini, and Mary Ann
+Marcinkiewicz.
+Building a large annotated corpus of En-
+glish:
+The Penn Treebank.
+Computational Linguistics,
+19(2):313–330, 1993.
+[31] Shaoqing Ren, Kaiming He, Ross Girshick, and Jian Sun.
+Faster r-cnn: Towards real-time object detection with region
+proposal networks. In Workshop on Conference on Neural
+Information Processing Systems (NeurIPS), 2015.
+[32] Haoyue Shi, Jiayuan Mao, Kevin Gimpel, and Karen
+Livescu. Visually grounded neural syntax acquisition. In
+Proceedings of the Annual Meeting of the Association for
+Computational Linguistics (ACL), pages 1842–1861, 2019.
+[33] Jing Shi, Yiwu Zhong, Ning Xu, Yin Li, and Chenliang Xu.
+A simple baseline for weakly-supervised scene graph gen-
+eration. In Proceedings of the IEEE Conference on Com-
+puter Vision and Pattern Recognition (CVPR), pages 16393–
+16402, 2021.
+[34] Mohammed Suhail, Abhay Mittal, Behjat Siddiquie, Chris
+Broaddus, Jayan Eledath, Gerard Medioni, and Leonid Sigal.
+Energy-based learning for scene graph generation. In Pro-
+ceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition (CVPR), pages 13936–13945, 2021.
+[35] Kewei Tu, Meng Meng, Mun Wai Lee, Tae Eun Choe, and
+Song-Chun Zhu.
+Joint video and text parsing for under-
+standing events and answering queries. IEEE MultiMedia,
+21(2):42–70, 2014.
+[36] J. R. Uijlings, K. E. Sande, T. Gevers, and A. W. Smeulders.
+Selective search for object recognition. International Jour-
+nal of Computer Vision (IJCV), 2013.
+[37] Liwei Wang, Jing Huang, Yin Li, Kun Xu, Zhengyuan Yang,
+and Dong Yu. Improving weakly supervised visual ground-
+ing by contrastive knowledge distillation.
+In Proceedings
+of the IEEE Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 14090–14100, 2021.
+[38] Qinxin Wang, Hao Tan, Sheng Shen, Michael Mahoney,
+and Zhewei Yao. MAF: Multimodal alignment framework
+for weakly-supervised phrase grounding. In Proceedings of
+the 2020 Conference on Empirical Methods in Natural Lan-
+guage Processing (EMNLP), pages 2030–2038, Online, Nov.
+2020. Association for Computational Linguistics.
+[39] Qinxin Wang, Hao Tan, Sheng Shen, Michael W Mahoney,
+and Zhewei Yao. Maf: Multimodal alignment framework
+for weakly-supervised phrase grounding. In Proceedings of
+the Conference on Empirical Methods in Natural Language
+Processing (EMNLP), 2020.
+[40] Shuo Wang, Yizhou Wang, and Song-Chun Zhu. Learning
+hierarchical space tiling for scene modeling, parsing and at-
+tribute tagging. IEEE Transactions on Pattern Analysis and
+Machine Intelligence (TPAMI), 37(12):2478–2491, 2015.
+[41] Ronald J. Williams. Simple statistical gradient-following al-
+gorithms for connectionist reinforcement learning. Machine
+Learning, 8:229–256, 2004.
+[42] Tian-Fu Wu, Gui-Song Xia, and Song-Chun Zhu. Composi-
+tional boosting for computing hierarchical image structures.
+In Proceedings of the IEEE Conference on Computer Vision
+and Pattern Recognition (CVPR), pages 1–8. IEEE, 2007.
+[43] Fanyi Xiao, Leonid Sigal, and Yong Jae Lee.
+Weakly-
+supervised visual grounding of phrases with linguistic struc-
+tures. In Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition (CVPR), pages 5945–5954,
+2017.
+[44] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi
+Parikh. Graph r-cnn for scene graph generation. In Euro-
+pean Conference on Computer Vision (ECCV), pages 670–
+685, 2018.
+[45] Songlin Yang, Yong Jiang, Wenjuan Han, and Kewei Tu.
+Second-order unsupervised neural dependency parsing. In
+Proceedings of the 28th International Conference on Com-
+putational Linguistics, pages 3911–3924, Barcelona, Spain
+(Online), Dec. 2020. International Committee on Computa-
+tional Linguistics.
+[46] Benjamin Z Yao, Xiong Yang, Liang Lin, Mun Wai Lee, and
+Song-Chun Zhu. I2t: Image parsing to text description. Pro-
+ceedings of the IEEE, 98(8):1485–1508, 2010.
+[47] Licheng Yu, Zhe Lin, Xiaohui Shen, Jimei Yang, Xin Lu,
+Mohit Bansal, and Tamara L Berg. Mattnet: Modular atten-
+tion network for referring expression comprehension. In Pro-
+ceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition (CVPR), pages 1307–1315, 2018.
+[48] Liwen Zhang, Ge Wang, Wenjuan Han, and Kewei Tu.
+Adapting unsupervised syntactic parsing methodology for
+discourse dependency parsing. In Proceedings of the 59th
+Annual Meeting of the Association for Computational Lin-
+guistics and the 11th International Joint Conference on Nat-
+ural Language Processing (Volume 1: Long Papers), pages
+5782–5794, Online, Aug. 2021. Association for Computa-
+tional Linguistics.
+[49] Songyang Zhang, Linfeng Song, Lifeng Jin, Kun Xu, Dong
+Yu, and Jiebo Luo. Video-aided unsupervised grammar in-
+duction.
+In Proceedings of the Annual Conference of the
+North American Chapter of the Association for Computa-
+tional Linguistics (NAACL), pages 1513–1524, 2021.
+[50] Yu Zhang, Zhenghua Li, and Min Zhang. Efficient second-
+order TreeCRF for neural dependency parsing. In Proceed-
+ings of the Annual Meeting of the Association for Compu-
+tational Linguistics (ACL), pages 3295–3305, Online, July
+2020. Association for Computational Linguistics.
+[51] Yanpeng Zhao and Ivan Titov. Visually grounded compound
+pcfgs. In Proceedings of the Conference on Empirical Meth-
+ods in Natural Language Processing (EMNLP), pages 4369–
+4379, 2020.
+[52] Yanpeng Zhao and Ivan Titov. Visually grounded compound
+PCFGs. In Proceedings of the 2020 Conference on Empirical
+Methods in Natural Language Processing (EMNLP), pages
+4369–4379, Online, Nov. 2020. Association for Computa-
+tional Linguistics.
+[53] Zilong Zheng, Wenguan Wang, Siyuan Qi, and Song-Chun
+Zhu. Reasoning visual dialogs with structural and partial ob-
+servations. In Proceedings of the IEEE Conference on Com-
+puter Vision and Pattern Recognition (CVPR), pages 6669–
+6678, 2019.

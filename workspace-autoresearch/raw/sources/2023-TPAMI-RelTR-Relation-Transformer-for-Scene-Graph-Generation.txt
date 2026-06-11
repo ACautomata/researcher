@@ -1,0 +1,2071 @@
+3202
+rpA41
+]
+VC.sc[
+3v06411.1022:viXra
+1
+RelTR: Relation Transformer for Scene Graph
+Generation
+Yuren Cong, Michael Ying Yang, and Bodo Rosenhahn
+Abstract—Different objects in the same scene are more or less related to each other, but only a limited number of these relationships
+are noteworthy. Inspired by Detection Transformer, which excels in object detection, we view scene graph generation as a set
+prediction problem. In this paper, we propose an end-to-end scene graph generation model Relation Transformer (RelTR), which has
+an encoder-decoder architecture. The encoder reasons about the visual feature context while the decoder infers a ﬁxed-size set of
+triplets subject-predicate-object using different types of attention mechanisms with coupled subject and object queries. We design a set
+prediction loss performing the matching between the ground truth and predicted triplets for the end-to-end training. In contrast to most
+existing scene graph generation methods, RelTR is a one-stage method that predicts sparse scene graphs directly only using visual
+appearance without combining entities and labeling all possible predicates. Extensive experiments on the Visual Genome, Open
+Images V6, and VRD datasets demonstrate the superior performance and fast inference of our model.
+Index Terms—Scene Understanding, Scene Graph Generation, One-Stage, Visual Relationship Detection
+(cid:70)
+1 INTRODUCTION
+I N scene understanding, a scene graph is a graph struc-
+ture whose nodes are the entities that appear in the
+image and whose edges represent the relationships between
+entities [1]. Scene graph generation (SGG) is a semantic
+understanding task that goes beyond object detection and is
+closely linked to visual relationship detection [2]. At present,
+scene graphs have shown their potential in different vision-
+language tasks such as image retrieval [1], image captioning
+[3], [4], visual question answering (VQA) [5] and image
+generation [6], [7]. The task of scene graph generation has
+also received sustained attention in the computer vision
+community. Most existing methods for generating scene
+graphs employ an object detector (e.g. FasterRCNN [8]) and
+use some speciﬁc neural networks to infer the relationships.
+The object detector generates proposals in the ﬁrst stage,
+and the relationship classiﬁer labels the edges between
+the object proposals for the second stage. Although these
+two-stage approaches have made incredible progress, they
+still suffer from the drawback that these models require a
+large number of trained parameters. If 𝑛 object proposals
+are given, the relationship inference network runs the risk
+of learning based on erroneous features provided by the
+detection backbone and has to predict O (𝑛2) relationships
+(see Fig. 1). This manipulation may lead to the selection of
+triplets based on the conﬁdent scores of object proposals
+rather than interest in relationships. Many previous works
+[9], [10], [11], [12], [13] have integrated semantic knowledge
+to improve their performance. However, these models face
+signiﬁcant biases in relationship inference conditional on
+subject and object categories. They prefer to predict the
+• Yuren Cong and Bodo Rosenhahn are with Institute of Information
+Processing, Leibniz University Hannover, Germany. E-mail: cong@tnt.
+uni-hannover.de, rosenhahn@tnt.uni-hannover.de.
+• Micheal Ying Yang (Corresponding Author) is with Scene Understanding
+Group, Faculty of Geo-Information Science and Earth Observation (ITC),
+University of Twente, The Netherlands. Email: michael.yang@utwente.nl.
+Fig. 1: Different from most existing two-stage methods that
+label the dense relationships between all entity proposals,
+our one-stage approach can predict the pair proposals di-
+rectly and generate a sparse scene graph with only visual
+appearance.
+predicates that are popular between particular subjects and
+objects, rather than those based on visual appearance.
+Recently, the one-stage models have emerged in the ﬁeld
+of object detection [14], [15], [16], [17]. They are attractive for
+the fast speed, low costs, and simplicity. These are also the
+properties that are urgently needed for the scene graph gen-
+eration models. Detection Transformer (DETR) [18] views
+object detection as an end-to-end set prediction task and
+proposes a set-based loss via bipartite matching. This strat-
+egy can be extended to scene graph generation: based on
+a set of learned subject and object queries, a ﬁxed num-
+ber of triplets <subject-predicate-object> could be
+predicted by reasoning about the global image context and
+co-occurrences of entities. However, it is challenging to im-
+plement such an intuitive idea. The model needs to predict
+both the location and the category of the subject and object,
+and also consider their semantic connection. Furthermore,
+umbrellawindowbuildingsidewalkwomanpantsonwalkingon wearingholdingwomanpantswindowbuildingsidewalkumbrellaumbrellawindowbuildingsidewalkwomanpantsonwalkingon wearingholdingTwo-Stage MethodOur Method windowbuildingwomanwomanwomansidewalkumbrellapants
+the direct bipartite matching is not competent to assign
+ground truth information to relationship predictions. This
+paper aims to address these challenges.
+We propose a novel end-to-end framework for scene
+graph generation, named Relation Transformer (RelTR). As
+shown in Fig. 1, RelTR can detect the triplet proposals with
+only visual appearance and predict subjects, objects, and
+their predicates concurrently. We evaluate RelTR on Visual
+Genome [19] and large-scale Open Images V6 [20]. The main
+contributions of this work are summarized as follows:
+•
+In contrast to most existing advanced approaches
+that classify the dense relationships between all en-
+tity proposals from the object detection backbone,
+our one-stage method can generate a sparse scene
+graph by decoding the visual appearance with the
+subject and object queries learned from the data.
+• RelTR generates scene graphs based on visual ap-
+pearance only, which has fewer parameters and
+faster inference compared to other SGG models while
+achieving state-of-the-art performance.
+• A set prediction loss is designed to perform the
+matching between the ground truth and predicted
+triplets with an IoU-based assignment strategy.
+• With the decoupled entity attention, the triplet de-
+coder of RelTR can improve the localization and
+classiﬁcation of subjects and objects with the entity
+detection results from the entity decoder.
+• Through comprehensive experiments, we explore
+which components are critical for the performance
+and analyze the working mechanism of learned sub-
+ject and object queries.
+• RelTR can be simply implemented. The source code
+and pretrained model are publicly available at https:
+//github.com/yrcong/RelTR.
+The remainder of the paper is structured as follows. In
+Section 2, we review related work in scene graph generation.
+Section 3 presents our proposed method. Experimental re-
+sults of the proposed framework are discussed in Section 4.
+Section 5 concludes this paper.
+2 RELATED WORK
+2.1 Scene Graph Generation
+Scene graphs have been proposed in [1] for the task of image
+retrieval and attract increasing attention in computer vision
+and natural language processing communities for different
+scene understanding tasks such as image captioning [21],
+[22], [23], VQA [24], [25] and image synthesis [26], [27]. The
+main purpose of scene graph generation (SGG) is to detect
+the relationships between objects in the scene. Many earlier
+works were limited to identifying speciﬁc types of relation-
+ships such as spatial relationships between entities [28], [29].
+The universal visual relationship detection is introduced
+in [2]. Their inference framework, which detects entities
+in an image ﬁrst and then determines dense relationships,
+was widely adopted in subsequent works, including their
+evaluation settings and metrics as well.
+Now many models [30], [31], [32], [33], [34], [35], [36],
+[37] are available to generate scene graphs from different
+perspectives, and some works even extend the scene graph
+2
+generation task from images to videos [38], [39], [40], [41]. To
+solve the problem of class imbalance, several unbiased scene
+graph generation methods are recently proposed [42], [43],
+[44], [45]. Two-stage methods following [2] are currently
+dominating scene graph generation: several works [9], [30],
+[46], [47] use residual neural networks with the global con-
+text to improve the quality of the generated scene graphs.
+Xu et al. [46] use standard RNNs to iteratively improve the
+relationship prediction via message passing while MotifNet
+[9] stacks LSTMs to reason about the local and global con-
+text. Graph-based models [10], [48], [49], [50], [51] perform
+message passing and demonstrate good results. Factorizable
+Net [49] decomposes and combines the graphs to infer the
+relationships. The attention mechanism is integrated into
+different types of graph-based models such as Graph R-
+CNN [48], GPI [52] and ARN [53]. With the rise of Trans-
+former [54], there are several attempts using Transformer
+to detect visual relationships and generate scene graphs
+in very recent works [34], [55], [56]. RelTransformer [57]
+tackles the compositionality in visual relationship recog-
+nition with an effective message-passing ﬂow. To improve
+performance, many works are no longer limited to using
+only visual appearance. Semantic knowledge can be utilized
+as an additional feature to infer scene graphs [2], [9], [11],
+[58], [59], [60]. Furthermore, statistic priors and knowledge
+graphs have been introduced in [11], [61], [62].
+Compared to the boom of two-stage approaches, one-
+stage approaches are still in their infancy and have the
+advantage of being simple, fast, and easy to train. FCSGG
+[63] is a one-stage scene graph generation framework that
+encodes objects as box center points and relationships as 2D
+vector ﬁelds. While FCSGG model being lightweight and
+fast speed, it has a signiﬁcant performance gap compared
+to other two-stage methods. To ﬁll this gap, we propose
+Transformer-based RelTR using only visual appearance in
+this work with fewer parameters, faster inference speed, and
+higher accuracy. Recently, SGTR [64] also introduces an end-
+to-end framework predicting entity and predicate proposals
+independently. A graph assembling module is designed to
+connect the entity and predicates. In contrast, our RelTR
+directly predicts triplet proposals and achieves higher recall
+scores. Distinct from the other two-stage Transformer-based
+approaches [34], [55], [56] that utilize the attention mecha-
+nism to capture the context of the entity proposals from an
+object detector, RelTR can decode the global feature maps
+directly with the subject and object queries learned from the
+data to generate a sparse scene graph.
+2.2 Transformer and Set Prediction
+The original Transformer architecture was proposed in [54]
+for sequence transduction. Its encoder-decoder conﬁgura-
+tion and attention mechanism is also used to solve various
+vision tasks in different ways, e.g. object detection [18],
+image pre-training [65], human-object interaction (HOI) de-
+tection [66], and dynamic scene graph generation [39].
+DETR [18] is a seminal work based on Transformer archi-
+tecture for object detection in recent years. It views detection
+as a set prediction problem. In the end-to-end training,
+with the object queries, DETR predicts a ﬁxed-size set of
+object proposals and performs a bipartite matching between
+3
+Fig. 2: Given a set of learned subject and object queries coupled by subject and object encodings, RelTR captures the
+dependencies between relationships and reasons about the feature context and entity representations, respectively the
+output of the feature encoder and entity decoder, to directly compute a set of subject and object representations. A pair
+of subject and object representations with attention heat maps is decoded into a triplet <subject-predicate-object>
+by feed forward networks (FFNs). CSA, DVA and DEA stand for Coupled Self-Attention, Decoupled Visual Attention and
+Decoupled Entity Attention. Ep, Et, Es and Eo are the positional, triplet, subject and object encodings respectively. ⊕
+indicates element-wise addition, while ⊗ indicates concatenation or split.
+proposals and ground truth objects for the loss function.
+This concept of query-based set prediction quickly gains
+popularity in the computer vision community. Many tasks
+can be reformulated as set prediction problems, e.g. instance
+segmentation [67],
+image captioning [68] and multiple-
+object tracking [69]. Some works [70], [71] attempt to further
+improve object detection based on DETR.
+HOI detection localizes and recognizes the relationships
+between humans and objects, whose result is a sub-graph
+of the scene graph. Several HOI detection frameworks [66],
+[72] have been developed that use holistic triplet queries
+to directly infer a set of interactions. However, such a
+concept is difﬁcult to generalize to the more complex task
+of scene graph generation. On large-scale datasets, such
+as Visual Genome [19] and Open Images [20], localization
+and classiﬁcation of subjects and objects using only triplet
+queries may likely result in low accuracy. On the contrary,
+our proposed RelTR predicts the general relationships using
+coupled subject and object queries to achieve high accuracy.
+3 METHOD
+A scene graph G consists of entity vertices V and re-
+lationship edges E. Different from previous works that
+detect a set of entity vertices and label the predicates be-
+tween the vertices, we propose a one-stage model, Relation
+Transformer (RelTR), to directly predict a ﬁxed-size set of
+< V𝑠𝑢𝑏 − E 𝑝𝑟 𝑑 − V𝑜𝑏 𝑗 > for scene graph generation.
+3.1 Preliminaries
+3.1.1 Transformer
+We provide a brief review on Transformer and its attention
+mechanism. Transformer [54] has an encoder-decoder struc-
+ture and consists of stacked attention functions. The input
+of a single-head attention is formed from queries Q, keys K
+and values V while the output is computed as:
+(cid:19)
+(cid:18) QK𝑇
+√
+𝑑𝑘
+𝐴𝑡𝑡𝑒𝑛𝑡𝑖𝑜𝑛(Q, K, V ) = 𝑠𝑜 𝑓 𝑡𝑚𝑎𝑥
+V ,
+(1)
+where 𝑑𝑘 is the dimension of K. In order to beneﬁt from the
+information in different representation sub-spaces, multi-
+head attention is applied in Transformer. A complete at-
+tention function is a multi-head attention followed by a
+normalization layer with residual connection and denoted
+as 𝐴𝑡𝑡 (.) in this paper for simplicity.
+3.1.2 DETR
+This entity detection framework [18] is built upon the
+standard Transformer encoder-decoder architecture. First, a
+CNN backbone generates a feature map Z0 ∈ R𝐻 ×𝑊 ×𝑑
+for
+an image. With the self-attention mechanism, the encoder
+computes a new feature context Z ∈ R𝐻 𝑊 ×𝑑
+using the
+ﬂatted Z0 and ﬁxed positional encodings E 𝑝 ∈ R𝐻 𝑊 ×𝑑
+.
+The decoder transforms 𝑁𝑒 entity queries into the entity
+representations Q𝑒 ∈ R𝑁𝑒×𝑑
+. The entity queries interact with
+each other to capture the entity context and extract visual
+features from Z.
+For the end-to-end training, a set prediction loss for
+entity detection is proposed in DETR by assigning the
+Eo + Etheaddogrockbeachhasofsitting onnearFeature EncoderEntity Decoderimage featuresfeature contextentity queriesentity representationsTriplet Decodersubject branchobject branchCNNpositionalencodings Ep CSAEs + Etsubject queriesobject queriesDVADVAfeature contextDEADEAfeature contextEtEtsubjectrepresentationsobjectrepresentationspredictionFFNs subject attention heatmapobject attention heatmapentity representationsentity representationsground truth entities to predictions. The ground truth set
+of size 𝑁𝑒 is padded with 𝜙 <background>, and a cost
+function 𝑐𝑚 ( ˆ𝑦, 𝑦) is applied to compute the matching cost
+between a prediction ˆ𝑦 and ground truth entity 𝑦 = {𝑐, 𝑏}
+where 𝑐, 𝑏 indicates the target class and box coordinates re-
+spectively. Given the cost matrix C𝑒𝑛𝑡 , the entity prediction-
+ground truth assignment is computed with the Hungarian
+algorithm [73]. The set prediction loss for entity detection
+can be presented as:
+𝐿𝑒𝑛𝑡𝑖𝑡 𝑦 =
+𝑁𝑒∑︁
+(cid:104)
+𝑖=1
+𝐿𝑐𝑙𝑠 + 𝟙{𝑐𝑖 ≠𝜙} 𝐿𝑏𝑜𝑥
+(cid:105)
+,
+(2)
+where 𝐿𝑐𝑙𝑠 denotes the cross-entropy loss for label classiﬁca-
+tion and 𝑐𝑖 ≠ 𝜙 means that <background> is not assigned
+to the 𝑖-th entity prediction. 𝐿𝑏𝑜𝑥 consists of 𝐿1 loss and
+generalized IoU loss [74] for box regression.
+3.2 RelTR Model
+As shown in Fig. 2, our one-stage model RelTR has an
+encoder-decoder architecture, which directly predicts 𝑁𝑡
+triplets without inferring the possible predicates between
+all entity pairs. It consists of the feature encoder extracting
+the visual feature context, the entity decoder capturing
+the entity representations from DETR [18], and the triplet
+decoder with the subject and object branches.
+A triplet decoder layer contains three attention functions,
+coupled self-attention (CSA), decoupled visual attention
+(DVA), and decoupled entity attention (DEA), respectively.
+Given 𝑁𝑡 coupled subject and object queries, the triplet
+decoder layer reasons about the feature context Z and entity
+representations Q𝑒 from the entity decoder layer to directly
+output the information of 𝑁𝑡 triplets without inferring the
+possible predicates between all entity pairs.
+3.2.1 Subject and Object Queries
+and object queries Q𝑜 ∈ R𝑁𝑡 ×𝑑
+There are two types of learned embeddings, namely subject
+queries Q𝑠 ∈ R𝑁𝑡 ×𝑑
+, for the
+subject branch and object branch respectively. These 𝑁𝑡 pairs
+of subject and object queries are transformed into 𝑁𝑡 pairs
+of subject and object representations of size 𝑑. However,
+the subject query and the object query are not actually
+linked together in a query pair since the attention layers
+in the triplet decoder are permutation invariant. In order to
+distinguish between different triplets, the learnable triplet
+encodings E𝑡 ∈ R𝑁𝑡 ×𝑑
+are introduced.
+3.2.2 Coupled Self-Attention (CSA)
+Coupled self-attention captures the context between 𝑁𝑡
+triplets and the dependencies between all subjects and ob-
+jects. Although the triplet encodings E𝑡 are already avail-
+able, we still need subject encodings E𝑠 and object encod-
+ings E𝑜 of the same size as E𝑡 to inject the semantic concepts
+of <subject> and <object> in coupled self-attention.
+Both E𝑠 and E𝑜 are randomly initialized and learned in
+the training. The subject and object queries are encoded and
+the output of CSA can be formulated as:
+Q = K = [Q𝑠 + E𝑠 + E𝑡 , Q𝑜 + E𝑜 + E𝑡 ]
+[Q𝑠, Q𝑜] = 𝐴𝑡𝑡𝐶𝑆 𝐴(Q, K, [Q𝑠, Q𝑜]),
+(3)
+4
+where [, ] indicates the unordered concatenation operation
+and the updated embeddings keep the original symbols
+unchanged for brevity. The output of CSA [Q𝑠, Q𝑜] is
+decoupled into Q𝑠 and Q𝑜 which continue to be used
+for the subject branch and the object branch, respectively.
+Coupled self-attention enables the subject queries Q𝑠 and
+object queries Q𝑜 aware of each other and provides the
+preconditions for the following cross-attentions.
+3.2.3 Decoupled Visual Attention (DVA)
+Decoupled visual attention concentrates on extracting visual
+features from the feature context Z. Decoupled means that
+the computations of subject and object representations are
+independent of each other, which is distinct from CSA.
+In the subject branch, Q𝑠 ∈ R𝑁𝑡 ×𝑑
+are updated through
+their interaction with the feature context Z ∈ R𝐻 𝑊 ×𝑑
+.
+The feature context combines with ﬁxed position encodings
+E 𝑝 ∈ R𝐻 𝑊 ×𝑑
+again in DVA. The updated subject represen-
+tations containing visual features are presented as:
+Q = Q𝑠 + E𝑡 , K = Z + E 𝑝
+Q𝑠 = 𝐴𝑡𝑡 (𝑠𝑢𝑏)
+𝐷𝑉 𝐴 (Q, K, Z).
+(4)
+The same operation is performed in the object branch. In
+the multi-head attention operation, 𝑁𝑡 attention heat maps
+M𝑠 ∈ R𝑁𝑡 ×𝐻 𝑊
+are computed. We also adopt the reshaped
+heat maps as a spatial feature for predicate classiﬁcation.
+3.2.4 Decoupled Entity Attention (DEA)
+Decoupled entity attention is performed as the bridge be-
+tween entity detection and triplet detection. Entity represen-
+tations Q𝑒 ∈ R𝑁𝑒×𝑑
+can provide localization and classiﬁca-
+tion information with higher quality due to the fact that they
+do not have semantic restrictions like those between subject
+and object representations. The motivation for introducing
+DEA is expecting subject and object representations to learn
+more accurate localization and classiﬁcation information
+from entity representations through the attention mecha-
+nism. Q𝑠 and Q𝑜 are ﬁnally updated in a triplet decoder
+layer as follows:
+𝐷𝐸 𝐴 (Q𝑠 + E𝑡 , Q𝑒, Q𝑒)
+𝐷𝐸 𝐴 (Q𝑜 + E𝑡 , Q𝑒, Q𝑒),
+Q𝑠 = 𝐴𝑡𝑡 (𝑠𝑢𝑏)
+Q𝑜 = 𝐴𝑡𝑡 (𝑜𝑏 𝑗)
+𝐷𝐸 𝐴 and 𝐴𝑡𝑡 (𝑜𝑏 𝑗)
+where 𝐴𝑡𝑡 (𝑠𝑢𝑏)
+𝐷𝐸 𝐴 are the decoupled entity atten-
+tion modules in the subject and object branch. The outputs
+of DEA are processed by a feed-forward network followed
+by a normalization layer with residual connection. The feed-
+forward network (FFN) consists of two linear transforma-
+tion layers with ReLU activation.
+(5)
+3.2.5 Final Inference
+A complete triplet includes the predicate label and the
+class labels as well as the bounding box coordinates of
+the subject and object. The subject representations Q𝑠 and
+object representations Q𝑜 from the last decoder layer are
+transformed by two linear projection layers into entity class
+distributions. We utilize two independent feed-forward net-
+works with the same structure to predict the height, width,
+and normalized center coordinates of subject and object
+boxes. The architecture is shown in Fig. 3 (left). A pair of
+predicate class probability. We deﬁne the predicted proba-
+bility of class 𝑐 as ˆp(𝑐). We adopt the class cost function
+from [70] which can be formulated as:
+5
+𝑐𝑙𝑠 ( ˆ𝑐, 𝑐) = 𝛼 · (1 − ˆp(𝑐)) 𝛾 · (−𝑙𝑜𝑔( ˆp(𝑐) + 𝜀))
+𝑐+
+𝑐𝑙𝑠 ( ˆ𝑐, 𝑐) = (1 − 𝛼) · ˆp(𝑐) 𝛾 · (−𝑙𝑜𝑔(1 − ˆp(𝑐) + 𝜀))
+𝑐−
+𝑐𝑐𝑙𝑠 ( ˆ𝑐, 𝑐) = 𝑐+
+𝑐𝑙𝑠 ( ˆ𝑐, 𝑐) − 𝑐−
+𝑐𝑙𝑠 ( ˆ𝑐, 𝑐),
+(7)
+where 𝛼, 𝛾 and 𝜀 are respectively set to 0.25, 2 and 10−8. The
+box cost for the subject and object is computed using 𝐿1 loss
+and generalized IoU loss [74]:
+𝑐𝑏𝑜𝑥 ( ˆ𝑏, 𝑏) = 5𝐿1 ( ˆ𝑏, 𝑏) + 2𝐿𝐺𝐼 𝑜𝑈 ( ˆ𝑏, 𝑏).
+The cost function 𝑐𝑚 can be presented as:
+𝑐𝑚 ( ˆ𝑦, 𝑦) = 𝑐𝑐𝑙𝑠 ( ˆ𝑐, 𝑐) + 𝟙{𝑏 ∈𝑦 }𝑐𝑏𝑜𝑥 ( ˆ𝑏, 𝑏),
+(8)
+(9)
+where 𝑏 ∈ 𝑦 denotes that the ground truth includes the
+box coordinates (only for the subject/object cost). The cost
+between a triplet prediction and a ground truth triplet is
+computed as:
+𝑐𝑡𝑟 𝑖 = 𝑐𝑚 ( ˆ𝑦𝑠𝑢𝑏, 𝑦𝑠𝑢𝑏) + 𝑐𝑚 ( ˆ𝑦𝑜𝑏 𝑗 , 𝑦𝑜𝑏 𝑗 ) + 𝑐𝑚 ( ˆ𝑐 𝑝𝑟 𝑑, 𝑐 𝑝𝑟 𝑑),
+(10)
+iterations of
+Given the triplet cost matrix C𝑡𝑟 𝑖, the Hungarian al-
+gorithm is executed for the bipartite matching and each
+ground truth triplet is assigned to a prediction. However,
+<background-no relation-background> should not
+be assigned to all predictions that do not match the
+ground truth triplets. After several
+train-
+ing, RelTR is likely to output the triplet proposals in
+four possible ways, as demonstrated in Fig. 4. Assign-
+ing ground truth to Proposal A and <background-no
+relation-background> to Proposal B are two clear
+cases. For Proposal C, <background> should not be as-
+signed to the subject due to poor object prediction. Further-
+more, <background> should not be assigned to the subject
+and object of Proposal D due to the fact that there is a better
+candidate Prediction A. To solve this problem, we integrate
+an IoU-based assignment strategy in our set prediction loss:
+For a triplet prediction, if the predicted subject or object
+label is correct, and the IoU of the predicted box and ground
+truth box is greater than or equal to the threshold 𝑇, the loss
+function does not compute a loss for the subject or object.
+The set prediction loss for triplet detection is formulated as:
+𝐿𝑠𝑢𝑏 =
+Θ
+𝐿𝑐𝑙𝑠 + 𝟙{𝑐𝑖
+𝑠𝑢𝑏≠𝜙} 𝐿𝑏𝑜𝑥
+(cid:105)
+𝑁𝑡
+∑︁
+𝑖=1
+𝑁𝑡
+∑︁
+(cid:104)
+(cid:20)
+𝐿𝑜𝑏 𝑗 =
+Θ
+𝐿𝑐𝑙𝑠 + 𝟙(cid:110)
+𝑐𝑖
+𝑜𝑏 𝑗 ≠𝜙
+𝐿𝑡𝑟 𝑖 𝑝𝑙𝑒𝑡 = 𝐿𝑠𝑢𝑏 + 𝐿𝑜𝑏 𝑗 + 𝐿 𝑝𝑟 𝑑
+𝑐𝑙𝑠 ,
+𝑖=1
+(cid:111) 𝐿𝑏𝑜𝑥
+(cid:21)
+(11)
+𝑐𝑙𝑠
+where 𝐿 𝑝𝑟 𝑑
+is the cross-entropy loss for predicate classi-
+ﬁcation. Θ is 0, when <background> is assigned to the
+subject/object but the label is predicted correctly and the
+box overlaps with the ground truth IoU(cid:62) 𝑇; in other cases,
+Θ is 1. The total loss function is computed as:
+𝐿𝑡𝑜𝑡 𝑎𝑙 = 𝐿𝑒𝑛𝑡𝑖𝑡 𝑦 + 𝐿𝑡𝑟 𝑖 𝑝𝑙𝑒𝑡 .
+(12)
+Fig. 3: Left: Architecture of the feed-forward network for
+subject/object box regression. Right: Architecture of the
+convolutional mask head.
+subject attention heat map M𝑠 and object attention heatmap
+M𝑜 from DVA modules in the last decoder layer is concate-
+nated and resized 2 × 28 × 28. The convolutional mask head
+shown in Fig. 3 (right) converts the attention heat maps to
+spatial feature vectors V𝑠 𝑝𝑎. The predicate probability ˆp 𝑝𝑟 𝑑
+is predicted by a multi-layer perceptron concatenating the
+corresponding subject representation, object representation,
+and spatial feature vector, which can be formulated as:
+ˆp 𝑝𝑟 𝑑 = softmax(MLP([Q𝑠, Q𝑜, V𝑠 𝑝𝑎])).
+(6)
+The ﬁnal predicate labels are determined based on the
+predicted probabilities.
+3.3 Set Prediction Loss for Triplet Detection
+We design a set prediction loss for triplet detection by
+extending the entity detection set prediction loss in Eq. 2.
+We present a triplet prediction as (cid:10) ˆ𝑦𝑠𝑢𝑏, ˆ𝑐 𝑝𝑟 𝑑, ˆ𝑦𝑜𝑏 𝑗 (cid:11) where
+ˆ𝑦𝑠𝑢𝑏 = (cid:8) ˆ𝑐𝑠𝑢𝑏, ˆ𝑏𝑠𝑢𝑏(cid:9) and ˆ𝑦𝑜𝑏 𝑗 = (cid:8) ˆ𝑐𝑜𝑏 𝑗 , ˆ𝑏𝑜𝑏 𝑗 (cid:9) while a ground
+truth is denoted as (cid:10)𝑦𝑠𝑢𝑏, 𝑐 𝑝𝑟 𝑑, 𝑦𝑜𝑏 𝑗 (cid:11). The predicted subject,
+predicate, and object labels are respectively denoted as ˆ𝑐𝑠𝑢𝑏,
+ˆ𝑐 𝑝𝑟 𝑑 and ˆ𝑐𝑜𝑏 𝑗 while the predicted box coordinates of the
+subject and object are denoted as ˆ𝑏𝑠𝑢𝑏 and ˆ𝑏𝑜𝑏 𝑗 .
+When 𝑁𝑡 relationships are predicted and 𝑁𝑡
+is larger
+than the number of triplets in the image, the ground
+truth set of triplets is padded with Φ <background-no
+relation-background>. The pair-wise matching cost
+𝑐𝑡𝑟 𝑖 between a predicted triplet and a ground truth triplet
+the subject cost 𝑐𝑚 ( ˆ𝑦𝑠𝑢𝑏, 𝑦𝑠𝑢𝑏), object cost
+consists of
+𝑐𝑚 ( ˆ𝑦𝑜𝑏 𝑗 , 𝑦𝑜𝑏 𝑗 ) and predicate cost 𝑐𝑚 ( ˆ𝑐 𝑝𝑟 𝑑, 𝑐 𝑝𝑟 𝑑). The pre-
+diction ˆ𝑦 = (cid:8) ˆ𝑐, ˆ𝑏(cid:9) contains the predicted class ˆ𝑐 including
+the class probabilities ˆp and the predicted box coordinates ˆ𝑏
+while the ground truth 𝑦 = {𝑐, 𝑏} contains the ground truth
+class 𝑐 and the ground truth box 𝑏. For the predicate, we
+only have the predicted class ˆ𝑐 𝑝𝑟 𝑑 and ground truth class
+𝑐 𝑝𝑟 𝑑.
+The subject/object cost is determined by the predicted
+entity class probability and the predicted bounding box
+while the predicate cost is determined only by the predicted
+6
+Fig. 4: The ground truth is assigned to Proposal A while <background-no relation-background> is assigned to
+Proposal B. However, <background> should not be assigned to the subject of Proposal C and the subject as well as object
+of Proposal D. BG denotes <background> while X indicates no assignment.
+Method
+MOTIFS [9]
+KERN [10]
+PCPL [43]
+GB-Net [12]
+RelDN [61]
+VCTree-TDE [75]
+GPS-Net [51]
+BGNN [50]
+BGT-Net [55]
+IMP [46]
+CISC [31]
+G-RCNN [48]
+FCSGG [63]
+SGTR [64]
+RelTR (ours)
+𝐴𝑃50
+20.0
+20.0
+---
+28.1
+-
+29.0
+28.1
+--
+24.8
+28.5
+-
+26.4
+R@20
+58.5
+59.1
+--
+66.9
+39.1
+67.6
+-
+60.9
+58.5
+42.1
+-
+33.4
+-
+63.1
+PredCLS ↑
+R@50 mR@20 mR@50
+10.8
+65.2
+-
+65.8
+-
+50.8
+-
+66.6
+-
+68.4
+17.2
+49.9
+17.4
+69.7
+-
+59.2
+16.8
+67.1
+-
+65.2
+-
+53.2
+-
+54.2
+4.9
+41.0
+--
+20.0
+64.2
+14.0
+17.7
+35.2
+19.3
+-
+23.3
+21.3
+30.4
+20.6
+9.8
+--
+6.3
+-
+21.2
+R@20
+32.9
+32.2
+--
+36.1
+22.8
+41.8
+-
+41.7
+31.7
+23.3
+-
+19.0
+-
+29.0
+SGCLS ↑
+R@50 mR@20 mR@50
+6.3
+35.8
+-
+36.7
+-
+27.6
+-
+38.0
+-
+36.8
+8.9
+28.8
+10.0
+42.3
+-
+37.4
+10.4
+45.9
+-
+34.6
+-
+27.8
+-
+29.6
+3.7
+23.5
+--
+7.7
+36.6
+7.7
+9.4
+18.6
+9.6
+-
+11.8
+11.8
+14.3
+12.8
+5.8
+--
+3.7
+-
+11.4
+R@20
+21.4
+22.3
+--
+21.1
+14.3
+22.3
+23.3
+25.5
+14.6
+7.7
+-
+16.1
+-
+21.2
+SGDET ↑
+R@50 mR@20 mR@50
+4.2
+27.2
+-
+27.1
+-
+14.6
+-
+26.4
+-
+28.3
+6.3
+19.6
+6.9
+28.9
+7.5
+31.0
+32.8
+5.7
+-
+20.7
+-
+11.4
+-
+11.4
+2.7
+21.3
+-
+20.6
+6.8
+27.5
+5.7
+6.4
+9.5
+6.1
+-
+9.3
+8.7
+10.7
+7.8
+3.8
+--
+3.6
+15.8
+10.8
+two-
+stage
+one-
+stage
+#params(M) ↓
+FPS ↑
+240.7
+405.2
+--
+615.6
+360.8
+-
+341.9
+-
+203.8
+--
+87.1
+166.5
+63.7
+6.6
+4.6
+--
+4.7
+1.2
+-
+2.3
+-
+10.0
+--
+8.4
+3.4
+16.1
+TABLE 1: Comparison with state-of-the-art scene graph generation methods on Visual Genome [19] test set. These methods
+are divided into two-stage and one-stage. The best numbers in two-stage methods are shown in bold, and the best numbers
+in one-stage methods are shown in italic. Models that use prior knowledge are represented in blue, to distinguish them
+from visual-based models. The inference speed (FPS) of different models is tested on the same RTX 2080Ti of batch size 1.
+3.4 Post-processing
+Unlike two-stage methods that organize 𝑁 entities into
+𝑁 (𝑁 − 1) subject-object pairs, our method simultaneously
+detects subjects and objects while predicting a ﬁxed number
+of triplets. This results in our approach missing the con-
+straint that the subject and object cannot be the same entity.
+It turns out that our model sometimes outputs a kind of
+triplet, where the subject and object are the same entity
+with an ambiguous predicate (see Fig. 5 for example). In
+post-processing, if the subject and object are the same entity
+(determined by the labels and the bounding boxes’ IoU), the
+triplet is removed.
+Fig. 5: Triplets in which the subject (blue) and object (orange)
+are the same entity are removed in post-processing. The
+predicates are usually ambiguous in such cases.
+4 EXPERIMENTS
+4.1 Datasets and Evaluation Settings
+4.1.1 Visual Genome
+We followed the widely used Visual Genome [19] split
+proposed by [46]. There are a total of 108𝑘 images in the
+dataset with 150 entity categories and 50 predicate cate-
+gories. 70% of the images are divided into the training
+dataset and the remaining 30% are used as the test set.
+5𝑘 images are further drawn from the training set for
+validation. There are three standard evaluation settings: (1)
+Predicate classiﬁcation (PredCLS): predict predicates given
+ground truth categories and bounding boxes of entities. (2)
+Scene graph classiﬁcation (SGCLS): predict predicates and
+entity categories given ground truth boxes. (3) Scene graph
+detection (SGDET): predict categories, bounding boxes of
+entities and predicates. Distinct from two-stage methods,
+the ground truth bounding boxes and categories of entities
+cannot be given directly. Therefore, we assign the ground
+truth information to the matched triplet proposals when
+evaluating RelTR on PredCLS/SGCLS. Recall@𝑘 (R@𝑘),
+mean Recall@𝑘 (mR@𝑘), zero-shot Recall@𝑘 (zsR@𝑘), no-
+graph constraint Recall@𝐾 (ng-R@𝐾), and no-graph con-
+straint zero-shot Recall@𝐾 (ng-zsR@𝐾) are adopted to eval-
+uate the algorithm performance [2], [35]. To better estimate
+the model performance on the imbalanced VG dataset, the
+relationship categories are split into three groups based on
+the number of instances in training [50]: head (> 10𝑘), body
+(0.5𝑘 − 10𝑘) and tail (< 0.5𝑘).
+4.1.2 Open Images V6
+We conduct experiments on the large-scale Open Images
+V6 [20] consisting of 126𝑘 training images, 5.3𝑘 test im-
+ages, and 1.8𝑘 validation images. It involves 288 entity
+categories and 30 predicate categories. We adopt the stan-
+dard evaluation metrics used in the Open Images Chal-
+lenge. Recall@50, weighted mean average precision (AP)
+of relationship detection wmAP𝑟 𝑒𝑙, and phrase detection
+Proposal AProposal BProposal CProposal DGTbus-near-bush bus-near-bush BG-no relation-BG X-no relation-BG X-no relation-X building-near-buildingsign-on-signbuilding-near-buildingwindow-in-windowwindow-in-windowsign-on-signsign-on-signsidewalk-on-sidewalkwoman-wearing-woman7
+Fig. 6: SGDET-R@100 for each relationship category on VG dataset. Long-tail groups are shown with different colors.
+RelTR almost always performs better than BGNN [50] from of to in front of. The standard deviation of R@100 are
+respectively 11.51 (ours) and 14.15 (BGNN). It indicates that RelTR is more unbiased.
+wmAP 𝑝ℎ𝑟 are calculated. The ﬁnal score is computed as:
+score𝑤𝑡 𝑑 = 0.2×R@50+0.4×wmAP𝑟 𝑒𝑙 +0.4×wmAP 𝑝ℎ𝑟 .
+4.1.3 Visual Relationship Detection
+We also validate RelTR on the Visual Relationship Detection
+(VRD) dataset [2], which contains 4𝑘 training images and 1𝑘
+test images. R@50 and R@100 in relationship detection and
+phrase detection are reported, which are used in [2].
+4.2 Implementation Details
+For Visual Genome and Open Images, we train RelTR end-
+to-end from scratch for 150 epochs on 8 RTX 2080 Ti GPUs
+with AdamW [76] setting the batch size to 2 per GPU,
+weight decay to 10−4 and clipping the gradient norm> 0.1.
+The initial learning rates of the Transformer and ResNet-
+50 backbone are set to 10−4 and 10−5 respectively and the
+learning rates are dropped by 0.1 after 100 epochs. For
+small-sized VRD, previous two-stage methods [51], [61]
+adopt the entity detectors pretrained on ImageNet [77] and
+COCO [78]. Our single-stage method cannot directly utilize
+these pretrained detectors. Instead, we initialize RelTR with
+Visual Genome pretrained weights, except for the subject,
+object, and predicate classiﬁers. We ﬁnetune RelTR on VRD
+for 100 epochs. The learning rates for the classiﬁers are
+set to 10−4 and for the other modules are set to 10−5. For
+all three datasets, we also use auxiliary losses [79] for the
+triplet decoder as [18], [70] did in the training. By default,
+RelTR has 6 encoder layers and 6 triplet decoder layers. The
+number of triplet decoder layers and the number of entity
+decoder layers are set to be the same. The multi-head atten-
+tion modules with 8 heads in our model are trained with
+dropout of 0.1. For all experiments, the model dimension 𝑑
+is set to 256. If not speciﬁcally stated, the number of entity
+queries 𝑁𝑒 and coupled queries 𝑁𝑡 are respectively set to 100
+and 200 while the IoU threshold in the triplet assignment is
+0.7. For fair comparison, inference speeds (FPS) of all the
+reported SGG models are evaluated on a single RTX 2080 Ti
+with the same hardware conﬁguration. For computing the
+inference speed (FPS), we average over all the test images,
+where for each image, the time cost for start timing when
+an image is given as input and end timing when triplet
+proposals are output as the inference time. The time cost
+for evaluating the whole dataset is not included.
+4.3 Quantitative Results and Comparison
+4.3.1 Visual Genome
+We compare scores of R@𝐾 and mR@𝐾, number of param-
+eters, and inference speed on SGDET (FPS) with several
+two-stage models and two one-stage models [63], [64] in
+Table 1. Models that not only use visual appearance but also
+prior knowledge (e.g. semantic and statistic information)
+are represented in blue, to distinguish them from visual-
+based models. Overall, the two-stage models have higher
+scores of R@𝐾 and mR@𝐾 than the one-stage models while
+they have more parameters and slower inference speed.
+This phenomenon also occurs between the models using
+prior information and visual-based models. Noted that the
+performance of the entity detectors in the two-stage models
+has a signiﬁcant impact on the model’s scores, especially on
+SGDET. Our model achieves R@50 = 27.5 and mR@50 = 10.8
+on SGDET, which is respectively 5.1 and 6.2 points higher
+than the one-stage model FCSGG [63]. RelTR also outper-
+forms SGTR [64] in terms of R@50 on SGDET, while SGTR
+has higher mR@50 due to its graph assembling module. Not
+only that, RelTR has fewer parameters and faster inference
+speed. Our model is also competitive compared with recent
+two-stage models and outperforms state-of-the-art visual-
+based methods. Although the R@20/R@50 score of RelTR
+is 2.1/3.5 points lower than that of BGNN [50], the perfor-
+mance of RelTR on mR@50 is higher. Furthermore, RelTR
+is a light-weight model, which has only 63.7M parameters
+and an inference speed of 16.6 FPS, ca. 7 times faster than
+BGNN. This allows RelTR to be used in a wide range of
+practical applications. For PredCLS and SGCLS, the ground
+truth bounding boxes and labels of entities cannot be given
+to RelTR directly. Therefore, we replace the predicted boxes
+and labels of the matched triplet proposals with ground
+truth information. However, it is not possible to capture
+onhaswearingofinnearbehindwithholdingaboveunderwearssitting onin front ofridingstanding onatattached toovercarryingwalking onforlooking atwatchinghanging frombelonging toandparked onbetweenlaying onalongeatingcoveringcovered inpart ofusingtoon back ofacrossmounted onlying onwalking inagainstfromgrowing onpainted onmade ofplayingsaysflying in0102030405060mRecall@100RatioRelTRBGNN0.000.050.100.150.200.250.300.35Relationship Freq. RatioHeadBodyTailthe exact features of the given boxes by RoIAlign as in
+two-stage methods. RelTR uses the features of detected
+proposals to predict the labels and achieves R@50 = 64.2
+and mR@50 = 21.2 on PredCLS while R@50 = 36.6 and
+mR@50 = 11.4 on SGCLS.
+Table 2 demonstrates R@𝐾, mR@𝐾 and zsR@𝑘 on SGDET
+of state-of-the-art methods. These methods are divided into
+unbiased SGG methods and general SGG methods. Com-
+pared with the general models without unbiased learning,
+RelTR has the best performance on mR@𝐾 and zsR@𝑘.
+zsR@𝑘 and mR@𝐾 of the two-stage methods with unbiased
+learning [42], [44], [45], [75] are improved whereas R@𝐾
+decreases signiﬁcantly. Our model performs well and is
+balanced on all three recall metrics. Table 3 shows no-
+graph constraint ng-R@𝐾 and ng-zsR@𝐾 on SGDET, where
+multiple predicates are allowed for each subject-object pair.
+Method
+Motifs-TDE [75]
+VTransE-TDE [75]
+VCTree-TDE [75]
+VCTree (BA-SGG) [44]
+VCTree-TDE (EMB) [42]
+DT2-ACBS [45]
+Motifs [9]
+VTransE [80]
+VCTree [35]
+FCSGG [63]
+RelTR (ours)
+R@20
+12.4
+13.5
+14.0
+15.8
+14.7
+-
+21.4
+23.0
+22.0
+16.1
+21.2
+SGDET
+R@50 mR@20 mR@50
+5.8
+16.9
+6.3
+18.7
+6.9
+19.4
+10.6
+21.7
+7.1
+20.6
+16.7
+-
+4.2
+27.2
+29.7
+3.7
+5.2
+27.9
+2.7
+21.3
+6.8
+27.5
+8.2
+8.6
+9.3
+13.5
+9.7
+22.0
+5.7
+5.0
+6.9
+3.6
+10.8
+zsR@50
+2.3
+2.0
+2.6
+-
+1.6
+-
+0.1
+0.8
+0.2
+1.0
+1.8
+zsR@100
+2.9
+2.7
+3.2
+-
+2.7
+-
+0.2
+1.5
+0.7
+1.4
+2.4
+Avg.
+8.1
+8.6
+9.2
+-
+9.4
+-
+9.8
+10.6
+10.5
+7.7
+11.8
+TABLE 2: R@𝐾, mR@𝐾 and zsR@𝑘 performance compari-
+son. The last column is the average of the ﬁrst six columns.
+Although the unbiased models have better performance
+on zsR@𝑘, their R@𝐾 drops signiﬁcantly. Our visual-based
+model performs balanced and well on the three metrics.
+Method
+Pixels2Graphs [81]
+KERN [10]
+PCPL [43]
+GB-NET [12]
+Motifs [9]
+RelDN [61]
+FCSGG [63]
+RelTR (ours)
+SGDET
+ng-R@50
+9.7
+30.9
+15.2
+29.3
+30.5
+30.4
+23.5
+30.7
+ng-R@100
+11.3
+35.8
+20.6
+35.0
+35.8
+36.7
+29.2
+35.2
+ng-zsR@50
+------
+1.4
+2.6
+ng-zsR@100
+------
+2.3
+3.4
+TABLE 3: Results of no-graph constraint Recall@𝑘 (ng-R@𝐾)
+and zero shot Recall@𝑘 (ng-zsR@𝐾) on Visual Genome.
+To further analyze the model performance on imbal-
+anced Visual Genome, we compute mR@100 for each re-
+lationship group on SGDET in Table 4. Our method out-
+performs the prior works [50], [51], [75] on the body group
+while mR@100 on the tail group is similar to the best BGNN
+[50]. RelTR achieves the highest mR@100 over all relation-
+ship categories. The results for each relation category are
+shown in Fig. 6. From of to in front of, RelTR almost
+always performs better than BGNN [50] while mR@100 of
+the three most frequent predicates are lower. This could ex-
+plain why R@𝑘 of RelTR is not very high but our qualitative
+results perform well and the relationships in the generated
+scene graphs are semantically diverse.
+4.3.2 Open Images V6
+We train RelTR on the Open Images V6 dataset and com-
+pare it with other two-stage methods and another one-
+stage method SGTR [64], as shown in Table 5. Although
+Method
+GPS-NET [51]
+VCTree-TDE [75]
+BGNN [50]
+RelTR
+SGDET-mR@100 Head
+30.8
+24.7
+34.0
+30.6
+9.8
+11.1
+12.6
+12.6
+Body
+8.5
+12.2
+12.9
+14.4
+8
+Tail
+3.9
+1.8
+6.0
+5.0
+TABLE 4: SGDET-mR@100 for the head, body and tail
+groups which are partitioned according to the number of
+relationship instances in the training set.
+R@50 of RelTR is 3.68 points lower than the best two-stage
+method VCTree [35], RelTR has the higher wmAP𝑟 𝑒𝑙 (0.58
+points higher than BGNN [50]) and wmAP 𝑝ℎ𝑟 (3.15 points
+higher than VCTree). The ﬁnal weighted score of RelTR is
+1.02 points higher than the best two-stage model VCTree.
+The one-stage method SGTR performs slightly better on
+wmAP𝑟 𝑒𝑙 and wmAP 𝑝ℎ𝑟 , whereas its R@50 is low compared
+to the other methods. The inference speed of RelTR is
+16.3 FPS, ca. 6 and 4 times faster than BGNN and SGTR,
+respectively.
+Method
+RelDN [61]
+VCTree [35]
+G-RCNN [48]
+Motifs [9]
+GPS-NET [51]
+BGNN [50]
+SGTR [64]
+RelTR (ours)
+R@50 ↑ wmAP𝑟 𝑒𝑙 ↑ wmAP 𝑝ℎ𝑟 ↑
+73.08
+75.34
+74.51
+71.63
+74.81
+74.98
+59.91
+71.66
+33.39
+34.31
+34.21
+31.59
+33.98
+34.15
+38.73
+37.46
+32.16
+33.21
+33.15
+29.91
+32.85
+33.51
+36.98
+34.19
+score𝑤𝑡 𝑑 ↑
+40.84
+41.97
+41.84
+38.93
+41.69
+41.69
+42.28
+42.99
+FPS ↑
+5.3
+1.9
+-
+7.4
+-
+2.9
+3.8
+16.3
+TABLE 5: Comparison with other state-of-the-art methods
+on the Open Images V6 [20] test set. The numbers of these
+methods are taken from [50], [64].
+To further demonstrate the performance of RelTR, we
+compare the average precision (AP) of relationships and
+phrases for RelTR and BGNN [50] (see Fig. 7) with Open
+Images V6. Although R@50 of RelTR is lower, RelTR out-
+performs BGNN on the weighted mean AP of relationships
+and phrases. The distribution of relationships in the Open
+Images V6 test set is also shown with the black dash
+lines. There are 9 predicates (kiss to handshake) that
+do not appear in the test set. The average precision of
+relationships AP𝑟 𝑒𝑙 and AP 𝑝ℎ𝑟 of RelTR are higher than
+BGNN for 7 of the top-10 high frequency predicates. For
+the low frequency predicates (skateboard to ski), BGNN
+generally performs better than RelTR. We conjecture that it
+is attributed to prior knowledge used in BGNN.
+4.3.3 Visual Relationship Detection
+Table 6 shows the comparison of RelTR with other state-of-
+the-art methods on the VRD dataset. All the models are two-
+stage methods using pretrained entity detectors except our
+RelTR. In order to obtain promising results for RelTR with
+little training data, we initialize RelTR with Visual Genome
+pre-trained weights and ﬁne-tune the subject, object, and
+predicate classiﬁers. RelTR outperforms the other two-stage
+scene graph generation methods in both relationship detec-
+tion and phrase detection.
+4.3.4 Long-tailed Techniques
+To demonstrate the compatibility of our visual-based model
+with long-tailed techniques, we implement two different
+9
+Fig. 7: Average precision of relationships and phrases for RelTR and BGNN on Open Images V6. The distribution of
+relationships in the test set is shown with the black dash line. The average precision of relationships of RelTR is higher
+than BGNN for 7 of the top-10 high frequency predicates while BGNN generally performs better than RelTR for the low
+frequency predicates (skateboard to ski). We conjecture that it is attributed to prior knowledge used in BGNN. The
+overall trend of AP 𝑝ℎ𝑟 is the same as AP𝑟 𝑒𝑙 except hang.
+Method
+VTransE [80]
+ViP-CNN [82]
+VRL [83]
+KL distilation [11]
+MF-URLN [84]
+Zoom-Net [85]
+RelDN [61]
+GPS-Net [51]
+RelTR (ours)
+Relationship Detection
+R@50
+19.4
+17.3
+18.2
+19.2
+23.9
+18.9
+25.3
+27.8
+29.2
+R@100
+22.4
+20.0
+20.8
+21.3
+26.8
+21.4
+28.6
+31.7
+32.2
+Phrase Detection
+R@100
+R@50
+15.2
+14.1
+27.9
+22.8
+22.6
+21.4
+24.0
+23.1
+36.1
+31.5
+28.1
+24.8
+36.4
+31.3
+39.2
+33.8
+39.8
+34.5
+TABLE 6: Comparison with other two-stage approaches on
+the VRD dataset in relationship and phrase detection.
+techniques for RelTR, namely bi-level resampling [50], [64],
+[86] and logit adjustment [87], [88]. We validate two ap-
+proaches on the Visual Genome dataset, where the distribu-
+tion of predicate classes is imbalanced. R@20/50, mR@20/50,
+and mR@100 for the head, body, and tail groups of SGDET
+are demonstrated in Table 7. When implementing the
+bi-level resampling strategy, our model achieves higher
+mR@20 and mR@50 scores; however, there is a decrease
+in R@20 and R@50 performance. In contrast, RelTR with
+the logit adjustment demonstrates better performance. The
+mR@50 score improves to 14.2, with a minor drop of 1.6
+in R@50. Both techniques can improve the inference per-
+formance for the relationship classes of the body and tail
+groups. The results show that our model has the potential
+to be extended to an unbiased scene graph generation
+approach.
+4.4 Ablation Studies
+In the ablation studies, we consider how the following
+aspects inﬂuence the ﬁnal performance. All the ablation
+studies are performed with Visual Genome dataset [19].
+Method
+RelTR
+RelTR+RS
+RelTR+LA
+R@20
+21.2
+18.6
+19.8
+R@50 mR@20 mR@50 Head
+30.6
+27.5
+29.1
+24.1
+28.3
+25.9
+10.8
+13.9
+14.2
+6.8
+9.2
+9.7
+Body
+14.4
+17.3
+19.4
+Tail
+5.0
+10.5
+10.2
+TABLE 7: We implement two long-tail techniques for RelTR,
+respectively the bi-level resampling (RS) [50], [64], [86] and
+the logit adjustment (LA) [87], [88]. The results show that
+RelTR is compatible with these long-tailed techniques and
+the model performance in predicting low-frequency predi-
+cates is signiﬁcantly improved.
+4.4.1 Number of Layers
+The feature encoder layer and triplet decoder layer have dif-
+ferent effects on the performance, size and inference speed.
+When the number of encoder layers varies, we keep the
+number of triplet decoder layers always 6, and vice versa.
+When there is no encoder layer, the decoder reasons about
+the feature map without context and R@50 drops by 4.2
+points signiﬁcantly (see Table 8). Adding an encoder layer
+brings fewer parameters compared to adding a triplet de-
+coder layer. Because the decoder is indispensable for scene
+graph generation, the minimum number of triplet decoder
+layers in our experiment is set to 3. When the number of
+triplet decoder layers is increased to 6, the improvement of
+R@20, R@50 and R@100 are obvious. In contrast, there is a
+small decrease in performance when the number of triplet
+decoder layers is increased to 9. We conjecture that this may
+be caused by overﬁtting.
+4.4.2 Module Effectiveness
+To verify the contribution of each module to the overall
+effect, we deactivate different modules and the results are
+shown in Table 9. We ﬁrst ablate the entire triplet decoder
+(ﬁrst row) and combine the top 64 conﬁdent entity proposals
+provided by the entity decoder into 64 × 63 triplet proposals
+as a two-stage method. The feature vectors are concatenated
+wearsatcontainholdsrideonhangplaysinteracts_withinside_ofskateboardsurfhitskickthrowcatchdrinkreadeatunderskikisstalk_on_phonecuthughighfivedancesnowboardholding_handshandshake0102030405060Average Precision of RelationshipsRatioRelTRBGNN0.000.050.100.150.200.250.300.350.40Relationship Freq. Ratiowearsatcontainholdsrideonhangplaysinteracts_withinside_ofskateboardsurfhitskickthrowcatchdrinkreadeatunderskikisstalk_on_phonecuthughighfivedancesnowboardholding_handshandshake0102030405060Average Precision of PhrasesRatioRelTRBGNN0.000.050.100.150.200.250.300.350.40Relationship Freq. RatioHeadBodyTailHeadBodyTailLayer Number
+Encoder
+039666
+Triplet Decoder
+666639
+R@20
+17.6
+20.5
+21.4
+21.2
+19.5
+21.0
+SGDET
+R@50
+23.3
+26.6
+27.7
+27.5
+25.9
+27.1
+R@100
+27.1
+29.5
+30.8
+30.7
+29.8
+30.1
+#params(M)
+55.8
+59.7
+67.6
+63.7
+48.7
+78.7
+FPS
+18.0
+17.1
+15.5
+16.1
+19.6
+13.8
+TABLE 8: Impact of the number of encoder and decoder
+layers on the performance, model size and inference speed.
+Fig. 8: Triplet proposals when only DVA modules are acti-
+vated. Since the subject and object queries are unaware of
+each other, the 12-th and 74-th triplet proposals are dupli-
+cated, while the 51-th proposal is semantically meaningless.
+CSA can suppress these failures.
+and a 3-layer perceptron is used to predict the relationships.
+This can also be seen as a simple visual-based baseline with
+DETR [18] as the detector. Without the triplet decoder, R@50
+score drops to 18.3 due to the simplicity of the model. It
+indicates that only visual information is used to predict rela-
+tionships, which is a challenge even for two-stage methods.
+To demonstrate the characteristics of each attention mod-
+ule in RelTR, we ﬁrst activate only the coupled self-attention
+(CSA), decoupled visual attention (DVA), and decoupled
+entity attention (DEA), respectively. When only CSA is acti-
+vated (second row), the model is unable to detect relation-
+ships because in the absence of cross-attention, RelTR does
+not actually receive any visual appearance. The model can
+generate normal quality scene graphs when DVA or DEA
+is integrated. Using only DVA (third row) is more effective
+than using only DEA (fourth row) since DVA modules infer
+visual relationships directly from ﬁne-grained image fea-
+tures. However, without the support of CSA, the subject and
+object queries of all triplet proposals are independent and
+mutually unaware, which leads to multiple triplet proposals
+linking to the same relationship, or triplets in which the
+subject and object are the same entity (see Fig. 8).
+Although the triplet decoder is not yet complete, the
+main modules CSA and DVA (ﬁfth row) have shown ex-
+cellent performance. The model parameters are 43% more
+than the simple baseline, but the model can predict up to
+77% of the baseline inference speed (FPS) due to the sparse
+graph generation method. In contrast, activating both CSA
+and DEA has worse performance, but faster inference speed,
+since only the coarse-grained entity representations are used
+to generate a scene graph. Table 9 also demonstrates that
+DEA helps the model to predict higher quality subjects
+and objects, and increase R@50 by 0.6. In comparison, the
+improvement offered by the mask head is limited. We
+hypothesize that the spatial features are already implicit
+encoded in the visual features generated by DVA modules.
+10
+Ablation Setting
+CSA DVA DEA Mask
+(cid:55)
+(cid:51)
+(cid:55)
+(cid:55)
+(cid:51)
+(cid:51)
+(cid:55)
+(cid:51)
+(cid:51)
+(cid:55)
+(cid:55)
+(cid:51)
+(cid:55)
+(cid:51)
+(cid:55)
+(cid:51)
+(cid:51)
+(cid:51)
+(cid:55)
+(cid:55)
+(cid:55)
+(cid:51)
+(cid:55)
+(cid:51)
+(cid:51)
+(cid:51)
+(cid:51)
+(cid:55)
+(cid:55)
+(cid:55)
+(cid:55)
+(cid:55)
+(cid:55)
+(cid:55)
+(cid:55)
+(cid:51)
+R@20
+12.0
+1.1
+16.3
+15.0
+20.6
+17.7
+16.5
+21.0
+21.2
+SGDET
+R@50 mR@20 mR50
+3.5
+18.3
+0.3
+3.9
+5.0
+20.9
+4.8
+19.1
+6.4
+26.6
+5.9
+22.2
+5.1
+21.1
+6.4
+27.2
+6.8
+27.5
+5.9
+0.5
+7.5
+6.9
+9.6
+8.7
+7.4
+10.0
+10.8
+#params(M)
+41.5
+43.6
+57.8
+57.8
+59.3
+59.3
+60.9
+62.5
+63.7
+FPS
+22.0
+22.1
+19.6
+20.3
+17.7
+19.4
+17.5
+16.7
+16.1
+TABLE 9: Coupled self-attention (CSA), decoupled visual
+attention (DVA), decoupled entity attention (DEA), and the
+mask head (Mask) for the attention heat maps are isolated
+separately from the framework. The ﬁrst row indicates that
+the entire triplet decoder is deactivated and the model can
+be seen as a simple visual-based baseline with DETR as the
+detector. (cid:55) denotes the module is ablated.
+4.4.3 Threshold in Set Prediction Loss
+The IoU threshold 𝑇 of the IoU-based assignment strategy
+in the set prediction loss for triplet detection is varied from
+0.6 to 1. Since a prediction box overlaps with the ground
+truth box of IoU= 1 is almost impossible in practice, the
+strategy can be considered as deactivated when 𝑇 = 1. Two
+curves, namely 𝑇-R@50 and 𝑇-mR@50 on SGDET, are shown
+in Fig. 9. When our assignment strategy is deactivated (𝑇 =
+1), the model performs the worst. As 𝑇 increases from 0.7 to
+1, the overall trend of the two curves is decreasing. This is
+more evident for the 𝑇-mR@50 curve.
+Fig. 9: 𝑇-R@50 and 𝑇-mR@50 curve on SGDET. × indicates
+that the IoU-based assignment strategy is deactivated.
+Fig. 10: Changes in the parameter number, performance and
+FPS as the triplet number 𝑁𝑡 varies.
+Subject/Object Query 12Subject/Object Query 74Subject/Object Query 51head-on-headgiraffe-has-headgiraffe-has-head26.527.027.528.0deactivated0.60.70.80.91.09.510.010.511.0deactivatedSGDET R@50SGDET mR@50100150200250300Triplet Query Number25.126.627.527.327.063.663.6463.6863.7263.7616.3416.2416.0915.9115.74#param(M)SGDET R@50FPS11
+Fig. 11: Predictions on 5000 images from Visual Genome test set are presented for 10 coupled subject and object queries.
+The size of all images is normalized to 1 × 1, with each point in the ﬁrst and second rows representing the box center of
+a subject and an object in a prediction respectively. Different point colors denote different entity super-categories: (1) blue
+for humans (child, person and woman etc.) (2) plum for things that exist in nature (beach, dog and head etc.) (3) yellow
+for man-made objects (cup, jacket and table etc.). The corresponding distributions of top-5 predicate are shown in the third
+row.
+4.5 Analysis on Subject and Object Queries
+Distinct from the two-stage methods which output 𝑁 object
+proposals after NMS and then label 𝑁 (𝑁 − 1) predicates,
+RelTR predicts 𝑁𝑡 triples directly by 𝑁𝑡 subject and object
+queries interacting with an image. We trained the model on
+Visual Genome using different 𝑁𝑡 . Fig. 10 shows that as the
+number of coupled subject and object queries increases lin-
+early, the parameters of the model increase linearly whereas
+the inference speed decreases linearly. However, the per-
+formance varies non-linearly and the best performance is
+achieved when 𝑁𝑡 = 200 for the Visual Genome dataset. Too
+many queries generate many incorrect triplet proposals that
+take the place of correct proposals in the recall list.
+To explore how RelTR infers triplets with the coupled
+subject and object queries, we collect predictions from a
+random sample of 5000 images from Visual Genome test set.
+We visualize the predictions for 10 out of total 200 coupled
+queries. Fig. 11 shows the spatial and class distributions of
+subjects and objects, as well as the class distribution of top-
+5 predicates in the 5000 predictions of 10 coupled subject
+and object queries. It demonstrates that different coupled
+queries learn different patterns from the training data, and
+attend to different classes of triplets in different regions
+at the inference. We also select ﬁve predicates: has (from
+Head), wears, riding (from Body) using and mounted
+on (from Tail) and count which queries are more inclined
+to predict these predicates. As shown in Fig. 12, the query
+distribution of has is smooth. This indicates that all queries
+are able to predict high frequency relationships. For predi-
+cates in Body and Tail groups, there are some queries that
+are particularly good at detecting them. For example, 21% of
+the triplets with the predicate wears are predicted by Query
+115, while half of the triplets with the predicate mounted
+on are predicted by Query 107 and 105.
+4.6 Qualitative Results
+Fig. 13 shows the qualitative results for scene graph gen-
+eration (SGDET) of Visual Genome dataset. Although some
+Fig. 12: Query distribution of the triplets with has (from
+Head), wears, riding (from Body) using and mounted
+on (from Tail) in the predictions on 5000 images from Visual
+Genome test set. Note that the same color in different pie
+charts does not mean the same query.
+other proposals are also meaningful, we only demonstrate
+9 relationships with the highest conﬁdence scores and the
+generated scene graph due to space limitations in Fig. 13.
+Blue boxes are the subject boxes while orange boxes are
+the object boxes. Attention scores are displayed in the same
+color as boxes. The overlap of subject and object attention
+is shown in white. The ground truth annotations of the two
+images are demonstrated in Fig. 14. For brevity, we only
+show the bounding boxes of the entities that appear in the
+annotated triplets.
+For the ﬁrst image (with the car and building), we can as-
+sume that the 9 output triplets are all correct. The prediction
+<car-in front of-building> indicates that RelTR can
+understand spatial relationships from 2D image to some
+extent (in front of is not a high-frequent predicate in
+Visual Genome). However, R@9 of the ﬁrst image is only
+5/12 = 41.7 because of the preferences in the ground truth
+triplet annotations. This phenomenon is more evident in
+the second image (with the woman and computer). Note
+that in the used Visual Genome-150 split [46] there is no
+computer class but only laptop class. 6 out of 9 predic-
+tions from RelTR can be considered valid whereas R@9 is
+0 due to the labeling preference. Sometimes RelTR outputs
+some duplicate triplets such as <woman-wearing-jean>
+and <woman-looking at-laptop> in the second image.
+Along with the output results, RelTR also shows the regions
+haswearsridingusingmounted onHeadBodyBodyTailTail12
+Fig. 13: Qualitative results for scene graph generation of Visual Genome dataset. The top-9 relationships with conﬁdence
+and the generated scene graph are shown. Boxes and attention scores of subjects are colored with blue while objects
+with orange. The orange vertices in the generated scene graph indicate the predictions are duplicated. The computer
+is classiﬁed as laptop in the second image since there is no computer class but only laptop class in the used VG-
+150 split [46]. Compared with the ground truth annotations in Fig. 14, the predictions of RelTR are diverse. Although
+sometimes RelTR cannot label very difﬁcult relationships correctly (e.g. looking at), the results demonstrate that the
+generated scene graphs are of high quality.
+of interest for the output relationships, making the behavior
+of the model easier to interpret.
+The qualitative results of SGDET for Open Images V6
+are shown in Fig. 15. Different from the dense triplets in
+the annotations of VG, each image from Open Images V6
+is labeled with 2.8 triplets on average. Therefore, we only
+show the most conﬁdent triplet from predictions for each
+image.
+5 CONCLUSION
+In this paper, based on Transformer’s encoder-decoder ar-
+chitecture, we propose a novel one-stage end-to-end frame-
+work for scene graph generation, RelTR. Given a ﬁxed num-
+ber of coupled subject and object queries, a ﬁxed-size set of
+relationships is directly inferred based on visual appearance
+only, using different attention mechanisms in the triplet
+decoder of RelTR. An IoU-based assignment strategy is pro-
+posed to optimize the triplet prediction-ground truth assign-
+ment during the model training. Compared with other state-
+of-the-art scene graph generation methods, RelTR achieves
+state-of-the-art performance on three datasets of different
+scales, with balanced performance on different evaluation
+metrics. In contrast to previous two-stage models, our ap-
+proach does not require labeling predicates between all
+possible subject-object pairs but rather captures the triplets
+of interest through attention mechanisms. This results in the
+efﬁcient and rapid inference of RelTR. Moreover, our visual-
+based RelTR is easy to implement and has the potential to be
+extended to an unbiased scene graph generation approach
+by using prior information.
+scene graphbuildingwindowwindowwindowcaronhasonin front ofdoortirestreetonononhasonwomanjeanhairshirtonlooking atjeanlaptopscreenonhasscene graphhandlaptopdeskwearingwearinghaswearinglooking at13
+Fig. 14: Ground truth annotations of the two images in Fig. 13 from Visual Genome dataset. For brevity, only the bounding
+boxes of the entities that appear in the annotated triplets are shown with red. All entities are numbered to distinguish
+between entities of the same class. There are two errors in the ground truth annotations: <window8-on-car1> in the
+ﬁrst image and <woman1-wearing-leg2> in the second image. There could be duplicate triplets in the ground truth
+(e.g. <wheel10-on-car1> in the ﬁrst image). For the ﬁrst image, only the relationships with the predicate on are labeled
+while for the second image, the relationships such as <woman1-wearing-shirt> are omitted. These biases in the ground
+truth annotations lead to the low score of R@𝐾, the other SGG models also suffer from this problem.
+Fig. 15: Qualitative results for scene graph generation of Open Images V6. Different from the dense triplets in the
+annotations of VG, each image from Open Images V6 is labeled with 2.8 triplets on average. Although Open Images
+V6 contains more entity classes, the image scenarios are simpler compared to Visual Genome. Therefore, only the top-1
+triplets are shown in the second row while the original images are in the ﬁrst row. Boxes and attention scores of subjects are
+also colored with blue while objects with orange. RelTR demonstrates the excellent quality of its conﬁdent triplet proposals.
+ACKNOWLEDGMENTS
+This work has been supported by the Federal Ministry of
+Education and Research (BMBF), under the project Leib-
+nizKILabor (grant no. 01DD20003), the Center for Digital
+Innovations (ZDIN) and the Deutsche Forschungsgemein-
+schaft (DFG) under Germany’s Excellence Strategy within
+the Cluster of Excellence PhoenixD (EXC 2122).
+REFERENCES
+[1]
+J. Johnson, R. Krishna, M. Stark, L.-J. Li, D. Shamma, M. Bernstein,
+and L. Fei-Fei, “Image retrieval using scene graphs,” in Proceedings
+of the IEEE conference on computer vision and pattern recognition, 2015,
+pp. 3668–3678. 1, 2
+[2] C. Lu, R. Krishna, M. Bernstein, and L. Fei-Fei, “Visual relationship
+detection with language priors,” in European conference on computer
+vision. Springer, 2016, pp. 852–869. 1, 2, 6, 7
+[3] K. Nguyen, S. Tripathi, B. Du, T. Guha, and T. Q. Nguyen, “In
+defense of scene graphs for image captioning,” in Proceedings of
+the IEEE/CVF International Conference on Computer Vision (ICCV),
+2021, pp. 1407–1416. 1
+[4] L. Gao, B. Wang, and W. Wang, “Image captioning with scene-
+graph based semantic concepts,” in Proceedings of the 2018 10th
+International Conference on Machine Learning and Computing, 2018,
+pp. 225–229. 1
+J. Johnson, B. Hariharan, L. Van Der Maaten, J. Hoffman, L. Fei-
+[5]
+woman1-wearing-leg2woman1-sitting on-chair0window4-on-building0window2-on-building0window5-on-building0door3-on-building0window7-on-building0wheel10-on-car1wheel10-on-car1window9-on-car1window8-on-car1tire6-on-car1tire6-on-car1window9-on-car1Fei, C. Lawrence Zitnick, and R. Girshick, “Inferring and executing
+programs for visual reasoning,” in Proceedings of the IEEE Interna-
+tional Conference on Computer Vision, 2017, pp. 2989–2998. 1
+[6] O. Ashual and L. Wolf, “Specifying object attributes and relations
+in interactive scene generation,” in Proceedings of the IEEE/CVF
+International Conference on Computer Vision, 2019, pp. 4561–4569. 1
+J. Johnson, A. Gupta, and L. Fei-Fei, “Image generation from scene
+graphs,” in Proceedings of the IEEE conference on computer vision and
+pattern recognition, 2018, pp. 1219–1228. 1
+S. Ren, K. He, R. Girshick, and J. Sun, “Faster r-cnn: towards
+real-time object detection with region proposal networks,” IEEE
+transactions on pattern analysis and machine intelligence, vol. 39, no. 6,
+pp. 1137–1149, 2016. 1
+[7]
+[8]
+[9] R. Zellers, M. Yatskar, S. Thomson, and Y. Choi, “Neural motifs:
+Scene graph parsing with global context,” in Proceedings of the
+IEEE Conference on Computer Vision and Pattern Recognition, 2018,
+pp. 5831–5840. 1, 2, 6, 8
+[10] T. Chen, W. Yu, R. Chen, and L. Lin, “Knowledge-embedded
+routing network for scene graph generation,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2019, pp. 6163–6171. 1, 2, 6, 8
+[11] R. Yu, A. Li, V. I. Morariu, and L. S. Davis, “Visual relationship
+detection with internal and external linguistic knowledge distilla-
+tion,” in Proceedings of the IEEE international conference on computer
+vision, 2017, pp. 1974–1982. 1, 2, 9
+[12] A. Zareian, S. Karaman, and S.-F. Chang, “Bridging knowledge
+graphs to generate scene graphs,” in European Conference on Com-
+puter Vision, 2020, pp. 606–623. 1, 6, 8
+[13] J. Gu, H. Zhao, Z. Lin, S. Li, J. Cai, and M. Ling, “Scene graph
+generation with external knowledge and image reconstruction,”
+in Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, 2019, pp. 1969–1978. 1
+[14] H. Law and J. Deng, “Cornernet: Detecting objects as paired
+keypoints,” in Proceedings of the European conference on computer
+vision (ECCV), 2018, pp. 734–750. 1
+[15] Z. Tian, C. Shen, H. Chen, and T. He, “Fcos: Fully convolutional
+one-stage object detection,” in Proceedings of the IEEE/CVF interna-
+tional conference on computer vision, 2019, pp. 9627–9636. 1
+[16] X. Zhou, D. Wang, and P. Kr¨ahenb ¨uhl, “Objects as points,” arXiv
+preprint arXiv:1904.07850, 2019. 1
+[17] P. Sun, Y. Jiang, E. Xie, W. Shao, Z. Yuan, C. Wang, and P. Luo,
+“What makes for end-to-end object detection?” in International
+Conference on Machine Learning. PMLR, 2021, pp. 9934–9944. 1
+[18] N. Carion, F. Massa, G. Synnaeve, N. Usunier, A. Kirillov, and
+S. Zagoruyko, “End-to-end object detection with transformers,” in
+European Conference on Computer Vision.
+Springer, 2020, pp. 213–
+229. 1, 2, 3, 4, 7, 10
+[19] R. Krishna, Y. Zhu, O. Groth, J. Johnson, K. Hata, J. Kravitz,
+S. Chen, Y. Kalantidis, L.-J. Li, D. A. Shamma et al., “Visual
+genome: Connecting language and vision using crowdsourced
+dense image annotations,” International journal of computer vision,
+vol. 123, no. 1, pp. 32–73, 2017. 2, 3, 6, 9
+[20] A. Kuznetsova, H. Rom, N. Alldrin, J. Uijlings, I. Krasin, J. Pont-
+Tuset, S. Kamali, S. Popov, M. Malloci, A. Kolesnikov et al., “The
+open images dataset v4,” International Journal of Computer Vision,
+vol. 128, no. 7, pp. 1956–1981, 2020. 2, 3, 6, 8
+[21] X. Yang, K. Tang, H. Zhang, and J. Cai, “Auto-encoding scene
+graphs for image captioning,” in Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition, 2019, pp.
+10 685–10 694. 2
+[22] J. Gu, S. Joty, J. Cai, H. Zhao, X. Yang, and G. Wang, “Unpaired
+image captioning via scene graph alignments,” in Proceedings of
+the IEEE/CVF International Conference on Computer Vision, 2019, pp.
+10 323–10 332. 2
+[23] K.-H. Lee, H. Palangi, X. Chen, H. Hu, and J. Gao, “Learning visual
+relation priors for image-text matching and image captioning with
+neural scene graph generators,” arXiv preprint arXiv:1909.09953,
+2019. 2
+[24] J. Shi, H. Zhang, and J. Li, “Explainable and explicit visual reason-
+ing over scene graphs,” in Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, 2019, pp. 8376–8384. 2
+[25] S. Lee, J.-W. Kim, Y. Oh, and J. H. Jeon, “Visual question answering
+over scene graph,” in International Conference on Graph Computing
+(GC), 2019, pp. 45–50. 2
+[26] Y. Li, T. Ma, Y. Bai, N. Duan, S. Wei, and X. Wang, “Pastegan:
+A semi-parametric method to generate image from scene graph,”
+14
+Advances in Neural Information Processing Systems, vol. 32, pp. 3948–
+3958, 2019. 2
+[27] A. Talavera, D. S. Tan, A. Azcarraga, and K.-L. Hua, “Layout and
+context understanding for image synthesis with scene graphs,” in
+IEEE International Conference on Image Processing (ICIP), 2019, pp.
+1905–1909. 2
+[28] C. Galleguillos, A. Rabinovich, and S. Belongie, “Object catego-
+rization using co-occurrence, location and appearance,” in 2008
+IEEE Conference on Computer Vision and Pattern Recognition.
+IEEE,
+2008, pp. 1–8. 2
+[29] S. Gould, J. Rodgers, D. Cohen, G. Elidan, and D. Koller, “Multi-
+class segmentation with relative location prior,” International jour-
+nal of computer vision, vol. 80, no. 3, pp. 300–316, 2008. 2
+[30] Y. Cong, H. Ackermann, W. Liao, M. Y. Yang, and B. Rosenhahn,
+“Nodis: Neural ordinary differential scene understanding,” in
+Proceedings of the European Conference on Computer Vision (ECCV),
+2020, pp. 636–653. 2
+[31] W. Wang, R. Wang, S. Shan, and X. Chen, “Exploring context
+and visual pattern of relationship for scene graph generation,”
+in Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, 2019, pp. 8188–8197. 2, 6
+[32] J. Shi, Y. Zhong, N. Xu, Y. Li, and C. Xu, “A simple baseline for
+weakly-supervised scene graph generation,” in Proceedings of the
+IEEE/CVF International Conference on Computer Vision, 2021, pp.
+16 393–16 402. 2
+[33] W. Wang, R. Wang, and X. Chen, “Topic scene graph generation by
+attention distillation from caption,” in Proceedings of the IEEE/CVF
+International Conference on Computer Vision, 2021, pp. 15 900–15 910.
+2
+[34] Y. Lu, H. Rai, J. Chang, B. Knyazev, G. Yu, S. Shekhar, G. W. Taylor,
+and M. Volkovs, “Context-aware scene graph generation with
+seq2seq transformers,” in Proceedings of the IEEE/CVF International
+Conference on Computer Vision, 2021, pp. 15 931–15 941. 2
+[35] K. Tang, H. Zhang, B. Wu, W. Luo, and W. Liu, “Learning to com-
+pose dynamic tree structures for visual contexts,” in Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2019, pp. 6619–6628. 2, 6, 8
+[36] L. Chen, H. Zhang, J. Xiao, X. He, S. Pu, and S.-F. Chang, “Coun-
+terfactual critic multi-agent training for scene graph generation,”
+in Proceedings of the IEEE/CVF International Conference on Computer
+Vision, 2019, pp. 4613–4623. 2
+[37] M.-J. Chiou, H. Ding, H. Yan, C. Wang, R. Zimmermann, and
+J. Feng, “Recovering the unbiased scene graphs from the biased
+ones,” in Proceedings of the 29th ACM International Conference on
+Multimedia, 2021, pp. 1581–1590. 2
+[38] J. Ji, R. Krishna, L. Fei-Fei, and J. C. Niebles, “Action genome:
+Actions as compositions of spatio-temporal scene graphs,” in Pro-
+ceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, 2020, pp. 10 236–10 247. 2
+[39] Y. Cong, W. Liao, H. Ackermann, B. Rosenhahn, and M. Y. Yang,
+“Spatial-temporal transformer for dynamic scene graph genera-
+tion,” in Proceedings of the IEEE/CVF International Conference on
+Computer Vision, 2021, pp. 16 372–16 382. 2
+[40] Y. Teng, L. Wang, Z. Li, and G. Wu, “Target adaptive context
+aggregation for video scene graph generation,” in Proceedings of
+the IEEE/CVF International Conference on Computer Vision, 2021, pp.
+13 688–13 697. 2
+[41] Y. Lu, C. Chang, H. Rai, G. Yu, and M. Volkovs, “Multi-view scene
+graph generation in videos,” in International Challenge on Activity
+Recognition (ActivityNet) CVPR 2021 Workshop, vol. 3, 2021. 2
+[42] M. Suhail, A. Mittal, B. Siddiquie, C. Broaddus, J. Eledath,
+G. Medioni, and L. Sigal, “Energy-based learning for scene graph
+generation,” in Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, 2021, pp. 13 936–13 945. 2, 8
+[43] S. Yan, C. Shen, Z. Jin, J. Huang, R. Jiang, Y. Chen, and X.-S.
+Hua, “Pcpl: Predicate-correlation perception learning for unbiased
+scene graph generation,” in Proceedings of the 28th ACM Interna-
+tional Conference on Multimedia, 2020, pp. 265–273. 2, 6, 8
+[44] Y. Guo, L. Gao, X. Wang, Y. Hu, X. Xu, X. Lu, H. T. Shen,
+and J. Song, “From general to speciﬁc: Informative scene graph
+generation via balance adjustment,” in Proceedings of the IEEE/CVF
+International Conference on Computer Vision, 2021, pp. 16 383–16 392.
+2, 8
+[45] A. Desai, T.-Y. Wu, S. Tripathi, and N. Vasconcelos, “Learning of
+visual relations: The devil is in the tails,” in Proceedings of the
+IEEE/CVF International Conference on Computer Vision, 2021, pp.
+15 404–15 413. 2, 8
+[46] D. Xu, Y. Zhu, C. B. Choy, and L. Fei-Fei, “Scene graph generation
+by iterative message passing,” in Proceedings of the IEEE conference
+on computer vision and pattern recognition, 2017, pp. 5410–5419. 2, 6,
+11, 12
+[47] Y. Li, W. Ouyang, B. Zhou, K. Wang, and X. Wang, “Scene
+graph generation from objects, phrases and region captions,” in
+Proceedings of the IEEE international conference on computer vision,
+2017, pp. 1261–1270. 2
+[48] J. Yang, J. Lu, S. Lee, D. Batra, and D. Parikh, “Graph r-cnn for
+scene graph generation,” in Proceedings of the European conference
+on computer vision (ECCV), 2018, pp. 670–685. 2, 6, 8
+[49] Y. Li, W. Ouyang, B. Zhou, J. Shi, C. Zhang, and X. Wang, “Factor-
+izable net: an efﬁcient subgraph-based framework for scene graph
+generation,” in Proceedings of the European Conference on Computer
+Vision (ECCV), 2018, pp. 335–351. 2
+[50] R. Li, S. Zhang, B. Wan, and X. He, “Bipartite graph network with
+adaptive message passing for unbiased scene graph generation,”
+in Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, 2021, pp. 11 109–11 119. 2, 6, 7, 8, 9
+[51] X. Lin, C. Ding, J. Zeng, and D. Tao, “Gps-net: Graph property
+sensing network for scene graph generation,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2020, pp. 3746–3753. 2, 6, 7, 8, 9
+[52] R. Herzig, M. Raboh, G. Chechik, J. Berant, and A. Globerson,
+“Mapping images to scene graphs with permutation-invariant
+structured prediction,” Advances in Neural Information Processing
+Systems, vol. 31, pp. 7211–7221, 2018. 2
+[53] M. Qi, W. Li, Z. Yang, Y. Wang, and J. Luo, “Attentive relational
+networks for mapping images to scene graphs,” in Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2019, pp. 3957–3966. 2
+[54] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N.
+Gomez, Ł. Kaiser, and I. Polosukhin, “Attention is all you need,”
+in Advances in neural information processing systems, 2017, pp. 5998–
+6008. 2, 3
+[55] N. Dhingra, F. Ritter, and A. Kunz, “Bgt-net: Bidirectional gru
+transformer network for scene graph generation,” in Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2021, pp. 2150–2159. 2, 6
+[56] R. Koner, P. Sinhamahapatra, and V. Tresp, “Relation transformer
+network,” arXiv preprint arXiv:2004.06193, 2020. 2
+[57] J. Chen, A. Agarwal, S. Abdelkarim, D. Zhu, and M. Elhoseiny,
+“Reltransformer: A transformer-based long-tail visual relationship
+recognition,” in Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, 2022, pp. 19 507–19 517. 2
+[58] N. Gkanatsios, V. Pitsikalis, P. Koutras, and P. Maragos,
+“Attention-translation-relation network for scalable scene graph
+generation,” in Proceedings of the IEEE/CVF International Conference
+on Computer Vision Workshops, 2019, pp. 0–0. 2
+[59] Z. Cui, C. Xu, W. Zheng, and J. Yang, “Context-dependent dif-
+fusion network for visual relationship detection,” in Proceedings
+of the 26th ACM international conference on Multimedia, 2018, pp.
+1475–1482. 2
+[60] J. Yu, Y. Chai, Y. Wang, Y. Hu, and Q. Wu, “Cogtree: Cognition
+tree loss for unbiased scene graph generation,” arXiv preprint
+arXiv:2009.07526, 2020. 2
+[61] J. Zhang, K. J. Shih, A. Elgammal, A. Tao, and B. Catanzaro,
+“Graphical contrastive losses for scene graph parsing,” in Pro-
+ceedings of the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, 2019, pp. 11 535–11 543. 2, 6, 7, 8, 9
+[62] B. Dai, Y. Zhang, and D. Lin, “Detecting visual relationships with
+deep relational networks,” in Proceedings of the IEEE conference on
+computer vision and Pattern recognition, 2017, pp. 3076–3086. 2
+[63] H. Liu, N. Yan, M. Mortazavi, and B. Bhanu, “Fully convolutional
+scene graph generation,” in Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, 2021, pp. 11 546–11 556.
+2, 6, 7, 8
+[64] R. Li, S. Zhang, and X. He, “Sgtr: End-to-end scene graph gener-
+ation with transformer,” in Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, 2022, pp. 19 486–19 496.
+2, 6, 7, 8, 9
+[65] H. Yuan,
+Jiang, S. Albanie, T. Feng, Z. Huang, D. Ni,
+language-image pre-training
+preprint
+detection,”
+and M. Tang, “Rlip: Relational
+for
+human-object
+arXiv:2209.01814, 2022. 2
+interaction
+arXiv
+J.
+[66] B. Kim, J. Lee, J. Kang, E.-S. Kim, and H. J. Kim, “Hotr: End-
+to-end human-object interaction detection with transformers,” in
+15
+Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, 2021, pp. 74–83. 2, 3
+[67] Y. Wang, Z. Xu, X. Wang, C. Shen, B. Cheng, H. Shen, and H. Xia,
+“End-to-end video instance segmentation with transformers,” in
+Proceedings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, 2021, pp. 8741–8750. 3
+[68] W. Liu, S. Chen, L. Guo, X. Zhu, and J. Liu, “Cptr: Full transformer
+network for image captioning,” arXiv preprint arXiv:2101.10804,
+2021. 3
+[69] F. Zeng, B. Dong, T. Wang, C. Chen, X. Zhang, and Y. Wei,
+“Motr: End-to-end multiple-object tracking with transformer,”
+arXiv preprint arXiv:2105.03247, 2021. 3
+[70] X. Zhu, W. Su, L. Lu, B. Li, X. Wang, and J. Dai, “Deformable
+detr: Deformable transformers for end-to-end object detection,” in
+International Conference on Learning Representations (ICLR), 2021. 3,
+5, 7
+[71] Z. Yao, J. Ai, B. Li, and C. Zhang, “Efﬁcient detr: Improv-
+ing end-to-end object detector with dense prior,” arXiv preprint
+arXiv:2104.01318, 2021. 3
+[72] C. Zou, B. Wang, Y. Hu, J. Liu, Q. Wu, Y. Zhao, B. Li, C. Zhang,
+C. Zhang, Y. Wei et al., “End-to-end human object interaction
+detection with hoi transformer,” in Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition, 2021, pp.
+11 825–11 834. 3
+[73] R. Stewart, M. Andriluka, and A. Y. Ng, “End-to-end people
+detection in crowded scenes,” in Proceedings of the IEEE conference
+on computer vision and pattern recognition, 2016, pp. 2325–2333. 4
+[74] H. Rezatoﬁghi, N. Tsoi, J. Gwak, A. Sadeghian, I. Reid, and
+S. Savarese, “Generalized intersection over union: A metric and
+a loss for bounding box regression,” in Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition, 2019, pp.
+658–666. 4, 5
+[75] K. Tang, Y. Niu, J. Huang, J. Shi, and H. Zhang, “Unbiased
+scene graph generation from biased training,” in Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2020, pp. 3716–3725. 6, 8
+[76] I. Loshchilov and F. Hutter, “Decoupled weight decay regulariza-
+tion,” in International Conference on Learning Representations (ICLR),
+2019. 7
+[77] J. Deng, W. Dong, R. Socher, L.-J. Li, K. Li, and L. Fei-Fei, “Im-
+agenet: A large-scale hierarchical image database,” in 2009 IEEE
+conference on computer vision and pattern recognition.
+Ieee, 2009, pp.
+248–255. 7
+[78] T.-Y. Lin, M. Maire, S. Belongie, J. Hays, P. Perona, D. Ramanan,
+P. Doll´ar, and C. L. Zitnick, “Microsoft coco: Common objects in
+context,” in European conference on computer vision. Springer, 2014,
+pp. 740–755. 7
+[79] R. Al-Rfou, D. Choe, N. Constant, M. Guo, and L.
+Jones,
+“Character-level language modeling with deeper self-attention,”
+in Proceedings of the AAAI Conference on Artiﬁcial Intelligence, vol. 33,
+no. 01, 2019, pp. 3159–3166. 7
+[80] H. Zhang, Z. Kyaw, S.-F. Chang, and T.-S. Chua, “Visual transla-
+tion embedding network for visual relation detection,” in Proceed-
+ings of the IEEE conference on computer vision and pattern recognition,
+2017, pp. 5532–5540. 8, 9
+[81] A. Newell and J. Deng, “Pixels to graphs by associative embed-
+ding,” Advances in neural information processing systems, vol. 30,
+2017. 8
+[82] Y. Li, W. Quyang, and X. Wang, “Vip-cnn: A visual phrase reason-
+ing convolutional neural network for visual relationsip detection,”
+arXiv preprint arXiv:1702.07191, 2017. 9
+[83] X. Liang, L. Lee, and E. P. Xing, “Deep variation-structured rein-
+forcement learning for visual relationship and attribute detection,”
+in Proceedings of the IEEE conference on computer vision and pattern
+recognition, 2017, pp. 848–857. 9
+[84] Y. Zhan, J. Yu, T. Yu, and D. Tao, “On exploring undetermined
+relationships for visual relationship detection,” in Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern Recognition,
+2019, pp. 5128–5137. 9
+[85] G. Yin, L. Sheng, B. Liu, N. Yu, X. Wang, J. Shao, and C. C.
+Loy, “Zoom-net: Mining deep feature interactions for visual re-
+lationship recognition,” in Proceedings of the European Conference on
+Computer Vision (ECCV), 2018, pp. 322–338. 9
+[86] A. Gupta, P. Dollar, and R. Girshick, “Lvis: A dataset for large
+vocabulary instance segmentation,” in Proceedings of the IEEE/CVF
+conference on computer vision and pattern recognition, 2019, pp. 5356–
+5364. 9
+16
+[87] A. K. Menon, S. Jayasumana, A. S. Rawat, H. Jain, A. Veit, and
+S. Kumar, “Long-tail learning via logit adjustment,” in International
+Conference on Learning Representations, 2021. 9
+[88] Y. Teng and L. Wang, “Structured sparse r-cnn for direct scene
+graph generation,” in Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, 2022, pp. 19 437–19 446. 9
+Yuren Cong received his Bachelor degree at
+Hefei University of Technology in 2015. Then he
+studied Electrical Engineering and Information
+Technology at Leibniz University Hannover and
+received his Master degree in 2019. Since 2020
+he has worked as a research assistant towards
+his Ph.D in the group of Prof. Rosenhahn. His
+research interests are in the ﬁelds of computer
+vision with specialization on scene graph gener-
+ation.
+Micheal Ying Yang is currently Assistant Pro-
+fessor at University of Twente, The Netherlands,
+heading a group working on scene understand-
+ing. He received the PhD degree (summa cum
+laude) from University of Bonn (Germany) in
+2011. He received the venia legendi
+in Com-
+puter Science from Leibniz University Hannover
+in 2016. His research interests are in the ﬁelds of
+computer vision and photogrammetry with spe-
+cialization on scene understanding and multi-
+learning. He has co-authored over 100
+modal
+papers and organized several workshops in the last years. He serves
+as Associate Editor of ISPRS Journal of Photogrammetry and Remote
+Sensing, Co-chair of ISPRS working group II/5 Temporal Geospatial
+Data Understanding, Program Chair of ISPRS Geospatial Week 2019,
+and recipient of ISPRS President’s Honorary Citation (2016), Best Sci-
+ence Paper Award at BMVC (2016), and The Willem Schermerhorn
+Award (2021). He is regularly serving as program committee member
+of conferences and reviewer for international journals.
+Bodo Rosenhahn studied Computer Science
+(minor subject Medicine) at
+the University of
+Kiel. He received the Dipl.-Inf. and Dr.-Ing.
+in 1999 and 2003,
+from the University of Kiel
+respectively. From 10/2003 till 10/2005, he
+worked as PostDoc at the University of Auck-
+land (New Zealand), funded with a scholarship
+from the German Research Foundation (DFG).
+In 11/2005-08/2008 he worked as senior re-
+searcher at the Max-Planck Institute for Com-
+puter Science. Since 09/2008 he is Full Profes-
+sor at the Leibniz-University of Hannover, heading a group on automated
+image interpretation. He has co-authored over 200 papers, holds 12
+patents and organized several workshops and conferences in the last
+years. His works received several awards, including a DAGM-Prize
+2002, the Dr.-Ing. Siegfried Werth Prize 2003, the DAGM-Main Prize
+2005, the DAGM-Main Prize 2007, the Olympus-Prize 2007, and the
+G ¨unter Enderle Award (Eurographics) 2017.

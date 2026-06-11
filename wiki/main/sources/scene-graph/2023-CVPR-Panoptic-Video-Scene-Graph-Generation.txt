@@ -1,0 +1,1233 @@
+Panoptic Video Scene Graph Generation
+
+Jingkang Yang†, Wenxuan Peng†, Xiangtai Li†, Zujin Guo†, Liangyu Chen†, Bo Li†
+Zheng Ma‡, Kaiyang Zhou†, Wayne Zhang‡, Chen Change Loy†, Ziwei Liu† (cid:0)
+†S-Lab, Nanyang Technological University, Singapore
+‡SenseTime Research, Shenzhen, China
+https://github.com/Jingkang50/OpenPVSG
+
+Figure 1. An example video from our panoptic video scene graph (PVSG) dataset. The top row shows some keyframes overlaid with
+the frame-wise panoptic segmentation masks. The timeline tubes underneath the keyframes contain fine, temporal scene graph annotations.
+The PVSG dataset contains 400 videos (with an average duration of 76.5 seconds), including 289 third-person and 111 egocentric videos.
+
+Abstract
+
+also provide a variety of baseline methods and share useful
+design practices for future work.
+
+Towards building comprehensive real-world visual per-
+ception systems, we propose and study a new problem
+called panoptic scene graph generation (PVSG). PVSG
+is related to the existing video scene graph generation
+(VidSGG) problem, which focuses on temporal interactions
+between humans and objects localized with bounding boxes
+in videos. However, the limitation of bounding boxes in
+detecting non-rigid objects and backgrounds often causes
+VidSGG systems to miss key details that are crucial for
+comprehensive video understanding. In contrast, PVSG re-
+quires nodes in scene graphs to be grounded by more pre-
+cise, pixel-level segmentation masks, which facilitate holis-
+tic scene understanding. To advance research in this new
+area, we contribute a high-quality PVSG dataset, which
+consists of 400 videos (289 third-person + 111 egocentric
+videos) with totally 150K frames labeled with panoptic seg-
+mentation masks as well as fine, temporal scene graphs. We
+
+1. Introduction
+
+In the last several years, scene graph generation has re-
+ceived increasing attention from the computer vision com-
+munity [15, 16, 24, 48–51]. Compared with object-centric
+labels like “person” or “bike,” or precise bounding boxes
+commonly seen in object detection, scene graphs provide
+far richer information in images, such as “a person riding
+a bike,” which capture both objects and the pairwise rela-
+tionships and/or interactions. A recent trend in the scene
+graph community is the shift from static, image-based scene
+graphs to temporal, video-level scene graphs [1, 41, 49].
+This has marked an important step towards building more
+comprehensive visual perception systems.
+
+Compared with individual images, videos clearly contain
+more information due to the additional temporal dimension,
+
+1
+
+Frame 0000Frame 0008Frame 0042Frame 0066Frame 0104Frame 0155Frame 0194Frame 0027Frame 0360Frame 0087adult3adult4adult2adult1groundrockwatertreeskywalldustbin1camera1shoe2shoe1bottle1adult5adult6adult-2standing on/in wateradult-2walking on/in wateradult-2standing on/inwateradult-1towardadult-2adult-1kissingadult-2bottle-1towardadult-4…adult-1standing on/in groundadult-4holdingcamera-1adult-1holdingadult-2adult-2holdingbottle-1adult-4holdingcamera-1adult-4holdingbottle-1adult-4holdingbottle-1bottle-1toward adult-2bottle-1on rockThisCVPRpaperistheOpenAccessversion,providedbytheComputerVisionFoundation.Exceptforthiswatermark,itisidenticaltotheacceptedversion;thefinalpublishedversionoftheproceedingsisavailableonIEEEXplore.18675Table 1. Comparison between the PVSG dataset and some related datasets. Specifically, we choose three video scene graph generation
+(VidSGG) datasets, three video panoptic segmentation (VPS) datasets, and two egocentric video datasets—one for short-term action antic-
+ipation (STA) while the other for video object segmentation (VOS). Our PVSG dataset is the first long-video dataset with rich annotations
+of panoptic segmentation masks and temporal scene graphs.
+
+Dataset
+
+Task
+
+#Video Video Hours Avg. Len.
+
+View
+
+#ObjCls #RelCls
+
+Annotation
+
+# Seg Frame Year
+
+Source
+
+ImageNet-VidVRD [35]
+Action Genome [15]
+VidOR [34]
+
+VidSGG 1,000
+VidSGG 10,000
+VidSGG 10,000
+
+Cityscapes-VPS [17]
+KITTI-STEP [45]
+VIP-Seg [28]
+
+Ego4D-STA [12]
+VISOR [8]
+
+PVSG
+
+VPS
+VPS
+VPS
+
+STA
+VOS
+
+500
+50
+3,536
+
+1,498
+179
+
+PVSG
+
+400
+
+-
+99
+82
+
+-
+-
+5
+
+111
+36
+
+9
+
+-
+35s
+30s
+
+-
+-
+5s
+
+264s
+720s
+
+77s
+
+3rd
+3rd
+3rd
+
+vehicle
+vehicle
+3rd
+
+ego
+ego
+
+3rd + ego
+
+35
+80
+35
+
+19
+19
+124
+
+-
+257
+
+126
+
+132
+50
+25
+
+-
+-
+-
+
+-
+2
+
+Bounding Box
+Bounding Box
+Bounding Box
+
+Panoptic Seg.
+Panoptic Seg.
+Panoptic Seg.
+
+Bounding Box
+Semantic Seg.
+
+-
+-
+-
+
+3K
+18K
+85K
+
+-
+51K
+
+2017
+2019
+2020
+
+2020
+2021
+2022
+
+2022
+2022
+
+ILVSRC2016-VID [33]
+YFCC100M [42]
+Charades [36]
+
+-
+-
+-
+
+-
+EPIC-KITCHENS [7]
+
+57
+
+Panoptic Seg.
+
+150K
+
+2023 VidOR + Ego4D + EPIC-KITCHENS
+
+which largely facilitates high-level understanding of tempo-
+ral events (e.g., actions [14]) and is useful for reasoning [59]
+and identifying causality [10] as well. However, we ar-
+gue that current video scene graph representations based on
+bounding boxes still fall short of human visual perception
+due to the lack of granularity—which can be addressed with
+panoptic segmentation masks. This is echoed by the evo-
+lutionary path in visual perception research: from image-
+level labels (i.e., classification) to spatial locations (i.e., ob-
+ject detection) to more fine-grained, pixel-wise masks (i.e.,
+panoptic segmentation [20]).
+
+In this paper, we take scene graphs to the next level by
+proposing panoptic video scene graph generation (PVSG), a
+new problem that requires each node in video scene graphs
+to be grounded by a pixel-level segmentation mask. Panop-
+tic video scene graphs can solve a critical issue exposed
+in bounding box-based video scene graphs: both things
+and stuff classes (i.e., amorphous regions containing water,
+grass, etc.) can be well covered—the latter are crucial for
+understanding contexts but cannot be localized with bound-
+ing boxes. For instance, if we switch from panoptic video
+scene graphs to bounding box-based scene graphs for the
+video in Figure 1, some nontrivial relations useful for con-
+text understanding like “adult-1 standing on/in ground” and
+“adult-2 standing on/in water” will be missing. It is also
+worth noting that bounding box-based video scene graph
+annotations, at least in current research [15], often miss
+small but important details, such as the “candles” on cakes.
+To help the community progress in this new area, we
+contribute a high-quality PVSG dataset, which consists of
+400 videos among which 289 are third-person videos and
+111 are egocentric videos. Each video contains an average
+length of 76.5 seconds. In total, 152,958 frames are labeled
+with fine panoptic segmentation and temporal scene graphs.
+There are 126 object classes and 57 relation classes. A more
+detailed comparison between our PVSG dataset and some
+related datasets is shown in Table 1.
+
+To solve the PVSG problem, we propose a two-stage
+framework: the first stage produces a set of features for each
+
+mask-based instance tracklet while the second stage gener-
+ates video-level scene graphs based on tracklets’ features.
+We study two design choices for the first stage: 1) a panop-
+tic segmentation model + a tracking module; 2) an end-to-
+end video panoptic segmentation model. For the second
+scene graph generation stage, we provide four different im-
+plementations covering both convolution and Transformer-
+based methods.
+
+In summary, we make the following contributions to the
+
+scene graph community:
+
+1. A new problem: We identify several issues associated
+with current research in scene graph generation and
+propose a new problem, which combines video scene
+graph generation with panoptic segmentation for holis-
+tic video understanding.
+
+2. A new dataset: A high-quality dataset with fine, tem-
+poral scene graph annotations and panoptic segmenta-
+tion masks is proposed to advance the area of PVSG.
+
+3. New methods and a benchmark: We propose a two-
+stage framework to address the PVSG problem and
+benchmark a variety of design ideas, from which valu-
+able insights on good design practices are drawn for
+future work.
+
+2. Related Work
+
+Scene Graph Generation Given an image, the scene
+graph generation (SGG) task expects the model to output
+a scene graph representation, where nodes represent ob-
+jects and edges represent relations between objects. To lo-
+calize object instances, the nodes should be grounded by
+the bounding boxes [48]. Classic scene graph generation
+methods have been dominated by the two-stage pipeline that
+consists of object detection and pairwise predicate estima-
+tion [38, 39, 48, 56, 58]. Recent works on one-stage meth-
+ods [4, 23, 50] provide simpler models that output seman-
+tically diverse relation predictions. Though the prevalent
+
+2
+
+18676Figure 2. The PVSG dataset statistics. The PVSG dataset contains 400 third-person and ego-centric videos from diverse environments,
+as shown in (a). The statistics of object classes and relation classes are shown in (b) and (c).
+
+SGG benchmark Visual Genome [21] provides rich annota-
+tions, it suffers from numerous “noisy” ground-truth pred-
+icate labels, e.g., some un-annotated negative samples are
+not absolutely background. NICE [22] reformulates SGG
+as a noisy label learning problem. They re-assign pseudo la-
+bels to detected noisy negative samples. Instead of exploit-
+ing the noisy SGG datasets, recently a new task of panoptic
+scene graph generation (PSG) [50] has been proposed with
+a refined PSG dataset, based on panoptic segmentation an-
+notations to identify foreground and background concretely.
+Our work extends PSG to video level by predicting spatial-
+temporal relations.
+
+Shang et al. [35] first
+Video Scene Graph Generation
+proposes Video Scene Graph Generation (VidSGG) and re-
+leased ImageNet-VidVRD dataset. They generate object
+tracklet proposals and short term relations on overlapping
+segments. Subsequently, they greedily associate these rela-
+tion triplets into video level. Several works follow the track-
+to-detect paradigm with spatio-temporal graph and graph
+convolutional neural networks [26, 31], or multiple hypoth-
+esis association [37]. MVSGG [49] investigates the spatio-
+temporal conditional bias problem in VidSGG. They per-
+form a meta training and testing process, constructing the
+data distribution of each query set w.r.t.
+the conditional
+biases. TRACE [41] decouples the context modeling for
+relation prediction from the complicated low-level entity
+tracking. [1] raises the issue of domain shift between im-
+age and video scene graphs. They exploit external com-
+monsense knowledge to infer the unseen dynamic relation-
+ship, and employ hierarchical adversarial learning to adapt
+from image to video data distributions. Embodied Semantic
+SGG [24] exploits the embodiment of the intelligent agent
+to autonomously generate an appropriate path by reinforce-
+ment learning [9] to explore an environment.
+
+Video Panoptic Segmentation Video Panoptic Segmen-
+tation (VPS) [18, 28, 46] unifies both Video Semantic Seg-
+mentation [5] and Video Instance Segmentation [52] in one
+framework. It extends panoptic segmentation into video via
+making instance IDs across frames consistent. VPSNet [18]
+first extends cityscapes sequences [5] and builds a VPS
+dataset for driving scene, along with a new metric named
+Video Panoptic Quality (VPQ). STEP dataset [46] proposes
+another metric named Segmentation and Tracking Quality
+(STQ) that decouples the segmentation and tracking error.
+VIP-Seg [28] proposes a large scale VPS dataset which con-
+tains various scenes. Several works [18, 47, 55] are pro-
+posed to solve VPS task respectively. VIP-Deeplab [32] ex-
+tends the Panoptic-Deeplab [2] with next frame center map
+prediction. Video K-Net [25] unifies the VPS pipeline via
+kernel online tracking and linking. TubeFormer [19] pro-
+cess tube-frames with temporal attention. Compared with
+previous VPS datasets, our PVSG dataset contains the ex-
+tremely long videos, which bring new challenges for VPS
+tasks. Moreover, our work is beyond VPS tasks by also
+considering relation across a video.
+
+3. The PVSG Problem
+
+The goal of the PVSG problem is to describe a given
+video with a dynamic scene graph, with each node associ-
+ated with an object and each edge associated with a relation
+in the temporal space. Formally, the input of the PVSG
+model is a video clip V ∈ RT ×H×W ×3, where T denotes
+the number of frames, and the frame size H × W should be
+consistent across the video. The output is a dynamic scene
+graph G. The PVSG task can be formulated as follows,
+
+Pr (G | V) = Pr (M, O, R | V) .
+
+(1)
+
+3
+
+18677i=1 mt
+
+More specifically, G comprises the binary mask tubes M =
+{m1, . . . , mn} and object labels O = {o1, . . . , on} that
+correspond to each of the n objects in the video, and their
+relations in the set R = {r1, . . . , rl}. For object i, the mask
+tube mi ∈ {0, 1}T ×H×W collects all its tracked masks in
+each frame, and its object category should be oi ∈ CO.
+For all objects in a frame t, the masks do not overlap, i.e.,
+(cid:80)n
+i ≤ 1H×W . The relation ri ∈ CR associates a sub-
+ject and an object with a predicate class and a time period.
+CO and CR means the object and predicate classes.
+Metric
+In practice, the output of the PVSG task is to pre-
+dict a set of triplets to describe the input video. Take a triplet
+as an example, which contains a relation ri from t1 to t2,
+associates the subject with its class category os and mask
+tube m(t1,t2)
+, and an object with os and m(t1,t2)
+. m(t1,t2)
+s
+denotes the mask tube m span across the period of t1 to t2.
+To evaluate the PVSG task, we follow the classic SGG
+and VidSGG paper and use the metrics of the R@K and
+mR@K, which calculates the triplet recall and mean recall
+given the top K triplets from the PVSG model. A success-
+, ˆos, ˆm(ˆt1,ˆt2)
+ful recall of a ground-truth triplet (ˆos, ˆm(ˆt1,ˆt2)
+,
+ˆr(ˆt1,ˆt2)
+) should meet the following criteria: 1) the correct
+i
+category labels of the subject, object, and predicate: 2) the
+volume IOU between the predicted mask tubes (m(t1,t2)
+,
+, m(ˆt1,ˆt2)
+) and the ground-truth tubes (m(ˆt1,ˆt2)
+m(t1,t2)
+)
+o
+should be individually over 0.5. When the previous two
+criteria are met, a soft recall score of the time IOU between
+(ˆt1, ˆt2) and (t1, t2) is recorded.
+
+o
+
+o
+
+o
+
+s
+
+s
+
+s
+
+Please notice the nuance of the PVSG metrics com-
+pared with VidSGG metrics for VidOR [34]. For a case
+where a child stop-and-go several times in a video, different
+from VidOR which considers several “child-1 walking on
+ground” triplets, our PVSG metrics only consider the triplet
+once, but with a scattered time span. This small change
+avoids some relations dominating the metrics by repeating.
+
+4. The PVSG Dataset
+
+In this section, we first summarize the existing VidSGG
+datasets and highlight their problems. Then, we introduce
+the overview and statistics of our PVSG dataset, and its an-
+notation pipeline.
+
+4.1. Connecting Existing Datasets to PVSG
+
+To select candidate video clips for the PVSG dataset,
+a go-to option is to borrow the videos from other
+VidSGG datasets. Table 1 lists three classic VidSGG
+datasets chronologically. While the limited size of their
+first VidSGG dataset, ImageNet-VidVRD [35], Shang et
+al. collects 10K videos from the user-uploaded dataset
+YFCC100M [42] and generate a large-scale VIDOR
+dataset [34], with dense object and relation annotation.
+Ji et al. also introduces a large-scale dataset Action
+
+4
+
+Genome (AG) based on a diverse, crowd-sourcing Charades
+dataset [36]. While Charades provides a novel solution to
+gather large-scale, less-biased video datasets by asking peo-
+ple to act based on the generated script, the curated scripts
+usually produce random action series, such as a man rush-
+ing out of the room and running back for no reason. Also,
+the performance traces turn out to be heavy in the dataset.
+These shortcomings limit the potential of the community to
+explore contextual logic and reasoning in videos.
+
+Alternative video datasets that lean toward logic reason-
+ing and video scene understanding are instruction datasets
+or movie datasets. However,
+these datasets are either
+full of close-up shots (e.g., Something-Something [11],
+Howto100M [29]) or cut shots (e.g., MOMA [27], HC-
+STVG [40]). In fact, humans rely on unpolished videos to
+form an essential understanding of the world. In this sense,
+we find that the unedited, natural, and diverse VidOR [34]
+videos are a good candidate for learning the visual essence
+as well as keeping the potential of contextual logic explo-
+ration. While the videos presented above showcase a third-
+person perspective, egocentric videos have gained popu-
+larity due to their practicality in autonomous driving [54],
+robotic decision-making [57], and in the metaverse [30]. In
+particular, a subset of the Ego4D dataset [12] is suitable for
+exploring logical relationships and modeling, as it supports
+short and long-term action anticipation tasks. Additionally,
+the Epic-Kitchens [6] dataset is focused on the kitchen sce-
+nario and offers rich action data.
+Its subset, the VISOR
+dataset, includes video object segmentation (VOS) annota-
+tion, which partially matches the PVSG scope, though its
+relations are not yet annotated.
+
+Another dataset category that
+
+is closely related to
+the PVSG problem is the video panoptic segmentation
+(VPS) datasets. Popular VPS datasets include Cityscapes-
+VPS [17] and KITTI-STEP [45]. However, the relations
+in the self-driving scenarios are limited, which is not suit-
+able for the PVSG task. Although the recent VIP-Seg [28]
+provides a more diverse VPS dataset, each video only lasts
+around 5 seconds, which also lacks temporal relations.
+
+With all the rationale above, we eventually decide to
+combine three video sources to the PVSG dataset, which
+are VidOR, Ego4D-STA, and Epic-Kitchens-100 (including
+some videos from VISOR).
+
+4.2. Dataset Statistics
+
+Figure 2 displays the statistics of the PVSG dataset,
+which consists of 400 videos, including 289 third-person
+videos from VidOR and 111 egocentric videos from Epic-
+Kitchens and Ego4D. Among the videos, 62 videos feature
+birthday celebrations, while 35 videos center around cere-
+monies, providing rich content for contextual logic and rea-
+soning. Furthermore, the dataset includes numerous videos
+related to sports and pets, featuring complex and diverse ac-
+
+18678Figure 3. PVSG Dataset Annotation Pipeline. The construction of PVSG dataset can be divided into VPS annotation and relation
+annotation. For VPS annotation, we select a few key frames and use an off-the-shelf video object segmentation (VOS) model AOT [53] to
+propagate the annotated objects to the whole video, and then perform frame-level mask fusion using the predefined layer order to obtain a
+coarse VPS annotation for further revision. The relations are annotated based on the description of the key information in the video.
+
+tions and interactions between objects. Figure 2-(c) shows
+the object count (including stuff) in the PVSG dataset.
+
+4.3. Dataset Construction Pipeline
+
+Creating the PVSG dataset is never a trivial task con-
+sidering that both video panoptic segmentation and relation
+annotations are required. This section describes how the
+PVSG dataset is collected and annotated.
+Step 1: Video Clip Selection To get rid of the drawbacks
+of the current datasets (i.e., the unnatural videos in AG [15]
+without logical script, and the static and short videos from
+the VPS datasets), we carefully select around 300 long,
+daily, unedited videos with a logical storyline.
+In addi-
+tion, to encourage the VidSGG models to be practical on
+egocentric videos, we also select around 100 videos from
+Epic-Kitchens and Ego4D with the same criteria. Videos
+with too many small and trivial objects are also discarded
+for VPS annotation purposes. We hope the selected videos
+could greatly encourage the exploration of video recogni-
+tion, understanding, and reasoning.
+Step 2: VPS Annotation Notice that the PVSG videos
+have more than 300 frames on average and 150K in total,
+it is impossible to annotate panoptic segmentation for each
+frame. After iterations and improvements, we finalize a
+human-machine collaborative VPS annotation pipeline, de-
+picted in Figure 3.
+In a nutshell, we largely rely on an
+off-the-shelf VOS model called AOT [53] for the human-
+machine interactive annotation process.
+Coarse VPS Annotation: With a few well-annotated ob-
+
+ject masks in the first frame, the AOT [53] is able to prop-
+agate the masks to later frames. With this strong auto-
+matic tool, we design a pipeline to obtain coarse VPS an-
+notation. For the example video in Figure 3 (actions 1-3),
+we first identify several key objects to annotate, and also
+identify key frames where the selected objects have a clear
+and whole appearance. To identify key objects, our anno-
+tators need to select all objects and background to address
+“panoptic”, except those messy and unrelated ones. After
+annotating these key objects on their corresponding frames,
+we use AOT based on the frames to propagate the mask,
+both forward and backward. Thus, each frame will yield a
+whole mask video. To merge those mask videos into one,
+the layer order should be considered beforehand, i.e., the
+objects from which layer should be put in front. In fact, the
+decision of the layer order is made with key frame selection.
+Fine VPS Annotation: Based on the coarse VPS annota-
+tion, we conduct several rounds (more than 5) of the human-
+machine interactive revision process to obtain the final an-
+notation. We rely on the multi-frame panoptic segmentation
+propagation mode of the AOT algorithm [53], which inter-
+polates the entire video masks based on several frames with
+the entire panoptic segmentation. The quality of interpola-
+tion increases with more intermediate frames. To accelerate
+the revision process, we revise the transit frames first, as
+shown in action 5 in Figure 3. Typical examples of poor
+masks include incorrect tracking masks and boundaries that
+deviate significantly from the object.
+
+Step 3: Relation Annotation We annotate temporal re-
+
+5
+
+18679Figure 4. The two-stage framework to solve the PVSG task. The goal of the first stage is to obtain the video panoptic segmentation mask
+for each object, as well as its corresponding video-length feature tube. Two options are provided to achieve the goal. The second stage
+predicts pairwise relations based on all the feature tubes from the first stage. Four options are provided for a comprehensive comparison.
+
+lations based on the VPS annotation, with object ID pre-
+pared. To guarantee the significance of the relation, we ask
+annotators to describe the video with several sentences and
+annotate relations accordingly. The relations they use are
+strictly within our dictionary, but we also enlarge the dictio-
+nary when necessary. Similar to the PSG dataset [50], we
+ask the annotators to use the most unambiguous predicate
+as possible, i.e., “sitting on” rather than “on”.
+
+5. Methodology
+
+In this section, we introduce the two-stage pipeline to
+address the PVSG problem. We provide two options for the
+first stage and four options for the second stage.
+
+5.1. Stage One: Video Panoptic Segmentation
+
+Given a video clip input V ∈ RT ×H×W ×3, the goal of
+VPS is to segment and track each pixel in a non-overlap
+manner. Specifically, the model predicts a set of video clips
+{yi}N
+i=1, where mi ∈ {0, 1}T ×H×W
+denotes the tracked video mask, and pi(c) denotes the prob-
+ability of assigning class c to a clip mi. N is the number of
+entities, which includes thing classes and stuff classes.
+
+i=1 = {(mi, pi(c))}N
+
+We present two strong baselines for the first stage of VPS
+processing. In particular, we adopt the state-of-the-art im-
+age segmentation baseline [3] with an extra tracker and the
+improved video panoptic segmentation method [25]. For
+the former, it processes the video frames individually. For
+the latter, it processes the video frames across the temporal
+dimension, with a nearby frame as the reference frame.
+
+IPS+T: Image Panoptic Segmentation With Tracker
+We adopt strong Mask2Former [3] as our baseline method
+since it is a mask-based transformer architecture.
+It con-
+tains a transformer encoder-decoder architecture with a set
+of object queries, where the object queries interact with en-
+coder features via masked cross-attention. Given an image
+
+I, during the inference, the Mask2Former directly outputs a
+set of object queries {qi}, i = 1, . . . , N , where each object
+query qi represent one entity. Then, two different Multi-
+ple Layer Perceptrons (MLPs) project the queries into two
+embeddings for mask classification and mask prediction, re-
+spectively. During training, each object query is matched to
+ground truth masks via masked-based bipartite matching.
+
+We first fine-tune the Mask2Former on our dataset.
+Then, we test the model with an extra tracker [44]. In par-
+ticular, we first obtain panoptic segmentation results of each
+frame. Then we link each frame via using UniTrack [44] for
+tracking to obtain the final N tracked video cubes for each
+clip. Therefore, a query tube is obtained. For the object i at
+the t-th frame, the query is noted as qt
+to
+t=t1, and Qi denotes the query
+denote the set of queries {qt
+tube in the entire video.
+
+i . We use Q(t1,t2)
+
+i }t2
+
+i
+
+VPS: Video Panoptic Segmentation Baseline
+For video
+baselines, we modify the previous state-of-the-art method
+Video K-Net [25] into Mask2Former framework. We first
+replace the backbone and neck in Video K-Net [25] with
+Mask2Former feature extractor. Then we use the temporal
+contrastive loss to directly on the output queries from the
+last layer of the decoder. In particular, given two frames, we
+first obtained the object queries from both frames, and then
+we sent them into an embedding layer (a shared MLP) to
+obtain association embeddings. We adopt the same tracking
+loss used in [25] to supervise the association embeddings.
+The embeddings are close if they are the same object, oth-
+erwise, they are pulled away.
+
+During the training, the two nearby frames are sent to
+the model to learn the association embedding. During the
+inference, the learned association embeddings are used to
+perform instance-wised tracking cues to match each thing
+masks frame by frame in an online manner. Compared with
+the image baseline, our video baseline considers the tempo-
+
+6
+
+18680Table 2. Comparison between all two-stage PVSG baselines. We provide two options for the first stage and four options for the second
+stage, as described in Section 3. The results show that using the basic image-based method in the first stage with the transformer encoder
+in the second stage can achieve the optimal recall.
+
+Method
+
+PVSG Metrics
+
+Stage-1
+
+Stage-2
+
+R/mR@20
+
+R/mR@50
+
+R/mR@100
+
+IPS+T [3, 44]
+
+VPS [3, 25]
+
+Vanilla
+Handcrafted Window
+1D Convolution
+Transformer Encoder
+
+Vanilla
+Handcrafted Window
+1D Convolution
+Transformer Encoder
+
+2.35 / 1.22
+2.56 / 1.24
+2.79 / 1.24
+4.02 / 1.75
+
+0.52 / 0.24
+0.54 / 0.27
+0.60 / 0.27
+0.75 / 0.36
+
+2.71 / 1.31
+2.78 / 1.35
+2.80 / 1.47
+4.41 / 1.86
+
+0.60 / 0.24
+0.61 / 0.29
+0.73 / 0.28
+0.91 / 0.39
+
+2.94 / 1.45
+3.05 / 1.54
+3.10 / 1.59
+4.88 / 2.03
+
+0.63 / 0.24
+0.62 / 0.29
+0.76 / 0.29
+0.94 / 0.40
+
+ral learned embedding. After this step, we obtain N tracked
+video cubes for each clip. For both baselines, we also dump
+the corresponding object queries for further processing.
+
+5.2. Stage Two: Relation Classification
+
+The object query (feature) tubes {Qi}N
+
+i=1 serve as a link
+between the first and second stages. Object tubes are paired
+with each other in their intersections in the second stage, as
+in Figure 4. Specifically, as in Figure 4 (b), we first con-
+catenate the query pairs. Next, we mainly introduce four
+operations to process the relations between feature pairs.
+Vanilla: Fully-Connected Layer
+Begin with the most
+basic version, the pairwise feature fusion is followed by a
+straightforward fully-connected layer on the fused features.
+In this scenario, some objects may have several interactions
+occurring simultaneously, we define the issue as a multi-
+label classification job with binary cross-entropy loss.
+Handcrafted Filter
+To further consider the tempo-
+ral
+to gather
+the information from the context in nearby frames. By
+default,
+is a simple vector of
+[1/4, 1/2, 1, 1/2, 1/4] with a window size of 5. Note that
+the filter is also required during inference.
+1D-Convolutional Layer To improve the handcrafted fil-
+ter, we also utilize a learnable 1D-Convolutional layer to
+capture temporal information. The kernel sizes are set to 5
+in 3 layers.
+Transformer Encoder
+A transformer encoder [43] is
+also suitable in this scenario. We utilize a 3-layer trans-
+former block with positional embeddings in the entire fused
+query feature to capture temporal information via cross-
+attention between frames.
+
+information, we design a simple kernel
+
+the handcrafted filter
+
+6. Experiments
+
+In this section, we show the experimental results for the
+PVSG dataset. We split the dataset with 360 videos for
+
+7
+
+training and 40 videos for testing. For both IPS+T and VPS,
+we adopt Mask2Former upon the ResNet-50 [13] backbone
+with 12 training epochs, which takes 12 hours and 48 hours
+on 8 V-100 GPUs, respectively. The training time of the
+second stage is shorter than an hour on single V-100 GPU.
+The experimental results to compare two stage-one op-
+tions and four stage-two options are shown in Table 2. We
+first take a look at the second stage. The transformer en-
+coder obtains the optimal results regardless of the first-stage
+options, showing the effectiveness of temporal information
+fusion. Besides, the 1D convolutional layer achieves better
+results than the handcrafted window, showing that model-
+ing with learning parameters in the second stage is worth
+exploring. Considering the harsh recall criteria described in
+Section 3, even the most basic vanilla method can achieve
+a few recall scores, showing that the PVSG task is solvable
+with a decent first-stage model. We hope that the second
+stage alone could advance research efforts on visual tempo-
+ral predictions.
+
+We then discuss the influence of the first stage. Accord-
+ing to Table 2, the end-to-end VPS model seems to un-
+derperform the IPS+T baseline. Although the VPS mod-
+els are shown effective on the existing VPS datasets such as
+Cityscape-VPS and Kitty-STEP, videos in the PVSG dataset
+are longer and more dynamic (frequent and large camera
+view shift), which seems to bring new challenges for the
+VPS community. According to Figure 5, the end-to-end
+VPS model fails to achieve a higher tracking performance,
+which seems severely affect its performance on the PVSG
+task.
+
+7. Conclusion, Challenges, and Outlook
+
+In this paper, we introduce a new PVSG task, a new
+PVSG dataset with several baselines to address the new
+task, in hope of encouraging comprehensive video under-
+standing and trigger more interesting downstream tasks
+such as visual reasoning. Here we discuss the challenges
+
+18681Figure 5. The visualization of the top triplets generated by PVSG models. The result shows that the IPS+T method is able to predict a
+better-quality video panoptic mask. The VPS baseline is shown unable to perform well on tracking (e.g., the tracking of the child switched
+in the later frames), which leads to its low performance in the PVSG task.
+
+and future work.
+
+Challenges Real-world data often exhibit long-tailed het-
+eroscedastic distributions across objects and relations, as
+shown in Figure 2. The PVSG models are expected to
+predict informative and diverse relations, rather than being
+obsessed with statistically common relations. Yet another
+challenge the PVSG models faces is the aleatoric uncer-
+tainty in verbal relation descriptions. For example, ”playing
+with” can be overlapping with ”chasing” when it describes
+two kids chasing each other. Such nuances from canoni-
+cal languages introduce intrinsic label noises in prevailing
+video event datasets, including PVSG. Another important
+challenge that the PVSG dataset introduces is video panop-
+tic segmentation. With the video with a large view shift, the
+VPS models are expected to have a better performance on
+tracking and segmentation.
+
+Outlook on Video Perception and Reasoning We fore-
+see the potential of PVSG in bridging video scene percep-
+tion and reasoning. While current video question-answering
+datasets lack pixel-level segmentation masks that refine
+(sometimes determine) the relations between object pairs,
+the inclusion of such dense annotations is critical to video
+reasoning tasks. PVSG is related to social intelligence, with
+
+rich event annotations in human behaviors and dynamics. In
+the same spirit, it is also related to human-object interaction
+(HOI) that dense labels are capable to capture very subtle
+visual differences in the scene.
+
+Potential Negative Societal Impacts
+This work releases
+a dataset containing human behaviours, posing possible
+gender and social biases inherently from data. Potential
+users are encouraged to consider the risks of oversighting
+ethical issues in imbalanced data, especially in underrepre-
+sented minority classes.
+
+Acknowledgement
+This study is supported by the Min-
+istry of Education, Singapore, under its MOE AcRF Tier
+2 (MOE-T2EP20221-0012), NTU NAP, and under the
+RIE2020 Industry Alignment Fund – Industry Collabora-
+tion Projects (IAF-ICP) Funding Initiative, as well as cash
+and in-kind contribution from the industry partner(s). We
+are also grateful to SuperAnnotate1 for providing an out-
+standing annotation platform and excellent customer ser-
+vice. Special thanks to Binzhu Xie and Zitang Zhou from
+Beijing University of Posts and Telecommunications for
+their dedicated leadership of the annotation team.
+
+1https://www.superannotate.com/
+
+8
+
+(In the middle of the video, the blue adult loses tracking and turning into brown)(a) The visualization result with the IPS+T method in the first stage and Transformer Encoder in the second stage. (b) The visualization result with the VPS method in the first stage and Transformer Encoder in the second stage. 18682References
+
+[1] Jin Chen, Xiaofeng Ji, and Xinxiao Wu. Adaptive image-to-
+video scene graph generation via knowledge reasoning and
+adversarial learning. 2022. 1, 3
+
+[2] Bowen Cheng, Maxwell D Collins, Yukun Zhu, Ting Liu,
+Thomas S Huang, Hartwig Adam, and Liang-Chieh Chen.
+Panoptic-deeplab: A simple, strong, and fast baseline for
+bottom-up panoptic segmentation. In CVPR, 2020. 3
+
+[3] Bowen Cheng, Ishan Misra, Alexander G. Schwing, Alexan-
+der Kirillov, and Rohit Girdhar. Masked-attention mask
+transformer for universal image segmentation. 2022. 6, 7
+[4] Yuren Cong, Michael Ying Yang, and Bodo Rosenhahn.
+Reltr: Relation transformer for scene graph generation.
+arXiv preprint arXiv:2201.11460, 2022. 2
+
+[5] Marius Cordts, Mohamed Omran, Sebastian Ramos, Timo
+Rehfeld, Markus Enzweiler, Rodrigo Benenson, Uwe
+Franke, Stefan Roth, and Bernt Schiele. The cityscapes
+dataset for semantic urban scene understanding. In CVPR,
+2016. 3
+
+[6] Dima Damen, Hazel Doughty, Giovanni Maria Farinella,
+Sanja Fidler, Antonino Furnari, Evangelos Kazakos, Davide
+Moltisanti, Jonathan Munro, Toby Perrett, Will Price, et al.
+Scaling egocentric vision: The epic-kitchens dataset.
+In
+ECCV, 2018. 4
+
+[7] Dima Damen, Hazel Doughty, Giovanni Maria Farinella,
+Antonino Furnari, Evangelos Kazakos, Jian Ma, Davide
+Moltisanti, Jonathan Munro, Toby Perrett, Will Price, et al.
+International Journal of Computer Vi-
+Epic-kitchens-100.
+sion, 130:33–55, 2022. 2
+
+[8] Ahmad Darkhalil, Dandan Shan, Bin Zhu, Jian Ma, Amlan
+Kar, Richard Ely Locke Higgins, Sanja Fidler, David Fouhey,
+and Dima Damen. Epic-kitchens visor benchmark: Video
+segmentations and object relations. In NeurIPS, 2022. 2
+[9] Linsen Dong, Guanyu Gao, Xinyi Zhang, Liangyu Chen, and
+Yonggang Wen. Baconian: A unified open-source frame-
+work for model-based reinforcement learning, 2021. 3
+[10] Amy Fire and Song-Chun Zhu. Learning perceptual causal-
+ity from video. ACM Transactions on Intelligent Systems and
+Technology (TIST), 7(2):1–22, 2015. 2
+
+[11] Raghav Goyal, Samira Ebrahimi Kahou, Vincent Michal-
+ski, Joanna Materzynska, Susanne Westphal, Heuna Kim,
+Valentin Haenel,
+Ingo Fruend, Peter Yianilos, Moritz
+Mueller-Freitag, et al. The” something something” video
+database for learning and evaluating visual common sense.
+In ICCV, 2017. 4
+
+[12] Kristen Grauman, Andrew Westbury, Eugene Byrne,
+Zachary Chavis, Antonino Furnari, Rohit Girdhar, Jackson
+Hamburger, Hao Jiang, Miao Liu, Xingyu Liu, et al. Ego4d:
+Around the world in 3,000 hours of egocentric video. In Pro-
+ceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, pages 18995–19012, 2022. 2, 4
+[13] Kaiming He, Xiangyu Zhang, Shaoqing Ren, and Jian Sun.
+Deep residual learning for image recognition. In Proceed-
+ings of the IEEE conference on computer vision and pattern
+recognition, pages 770–778, 2016. 7
+
+9
+
+[14] Samitha Herath, Mehrtash Harandi, and Fatih Porikli. Going
+deeper into action recognition: A survey. Image and vision
+computing, 60:4–21, 2017. 2
+
+[15] Jingwei Ji, Ranjay Krishna, Li Fei-Fei, and Juan Carlos
+Niebles. Action genome: Actions as compositions of spatio-
+temporal scene graphs. In CVPR, 2020. 1, 2, 5
+
+[16] Justin Johnson, Ranjay Krishna, Michael Stark, Li-Jia Li,
+David Shamma, Michael Bernstein, and Li Fei-Fei. Image
+retrieval using scene graphs. In CVPR, 2015. 1
+
+[17] Dahun Kim, Sanghyun Woo, Joon-Young Lee, and In So
+In Proceedings of
+Kweon. Video panoptic segmentation.
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 9859–9868, 2020. 2, 4
+
+[18] Dahun Kim, Sanghyun Woo, Joon-Young Lee, and In So
+
+Kweon. Video panoptic segmentation. In CVPR, 2020. 3
+
+[19] Dahun Kim, Jun Xie, Huiyu Wang, Siyuan Qiao, Qihang Yu,
+Hong-Seok Kim, Hartwig Adam, In So Kweon, and Liang-
+Chieh Chen. Tubeformer-deeplab: Video mask transformer.
+In CVPR, 2022. 3
+
+[20] Alexander Kirillov, Kaiming He, Ross Girshick, Carsten
+In Pro-
+Rother, and Piotr Doll´ar. Panoptic segmentation.
+ceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, pages 9404–9413, 2019. 2
+
+[21] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A Shamma, Michael Bernstein, and
+Li Fei-Fei. Visual genome: Connecting language and vision
+using crowdsourced dense image annotations. IJCV, 2017. 3
+[22] Lin Li, Long Chen, Yifeng Huang, Zhimeng Zhang,
+Songyang Zhang, and Jun Xiao. The devil is in the labels:
+Noisy label correction for robust scene graph generation. In
+CVPR, 2022. 3
+
+[23] Rongjie Li, Songyang Zhang, and Xuming He. Sgtr: End-to-
+end scene graph generation with transformer. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, pages 19486–19496, 2022. 2
+
+[24] Xinghang Li, Di Guo, Huaping Liu, and Fuchun Sun. Em-
+bodied semantic scene graph generation. In Conference on
+Robot Learning, pages 1585–1594. PMLR, 2022. 1, 3
+[25] Xiangtai Li, Wenwei Zhang, Jiangmiao Pang, Kai Chen,
+Guangliang Cheng, Yunhai Tong, and Chen Change Loy.
+Video k-net: A simple, strong, and unified baseline for video
+segmentation. In CVPR, 2022. 3, 6, 7
+
+[26] Chenchen Liu, Yang Jin, Kehan Xu, Guoqiang Gong, and
+Yadong Mu. Beyond short-term snippet: Video relation de-
+tection with spatio-temporal global context. In Proceedings
+of the IEEE/CVF conference on computer vision and pattern
+recognition, pages 10840–10849, 2020. 3
+
+[27] Zelun Luo, Wanze Xie, Siddharth Kapoor, Yiyun Liang,
+Michael Cooper, Juan Carlos Niebles, Ehsan Adeli, and Fei-
+Fei Li. Moma: Multi-object multi-actor activity parsing.
+NeurIPS, 2021. 4
+
+[28] Jiaxu Miao, Xiaohan Wang, Yu Wu, Wei Li, Xu Zhang, Yun-
+chao Wei, and Yi Yang. Large-scale video panoptic segmen-
+tation in the wild: A benchmark. In CVPR, 2022. 2, 3, 4
+[29] Antoine Miech, Dimitri Zhukov, Jean-Baptiste Alayrac,
+and Josef Sivic.
+
+Makarand Tapaswi,
+
+Ivan Laptev,
+
+18683HowTo100M: Learning a Text-Video Embedding by
+Watching Hundred Million Narrated Video Clips. In ICCV,
+2019. 4
+
+[30] Beng Chin Ooi, Kian-Lee Tan, Anthony Tung, Gang Chen,
+Mike Zheng Shou, Xiaokui Xiao, and Meihui Zhang.
+Sense the physical, walkthrough the virtual, manage the
+arXiv preprint
+metaverse: A data-centric perspective.
+arXiv:2206.10326, 2022. 4
+
+[31] Xufeng Qian, Yueting Zhuang, Yimeng Li, Shaoning Xiao,
+Shiliang Pu, and Jun Xiao. Video relation detection with
+spatio-temporal graph. In Proceedings of the 27th ACM In-
+ternational Conference on Multimedia, pages 84–93, 2019.
+3
+
+[32] Siyuan Qiao, Yukun Zhu, H. Adam, A. Yuille, and Liang-
+Chieh Chen. Vip-deeplab: Learning visual perception with
+depth-aware video panoptic segmentation. CVPR, 2021. 3
+
+[33] Olga Russakovsky, Jia Deng, Hao Su, Jonathan Krause, San-
+jeev Satheesh, Sean Ma, Zhiheng Huang, Andrej Karpathy,
+Imagenet large
+Aditya Khosla, Michael Bernstein, et al.
+scale visual recognition challenge. IJCV, 2015. 2
+
+[34] Xindi Shang, Donglin Di, Junbin Xiao, Yu Cao, Xun Yang,
+and Tat-Seng Chua. Annotating objects and relations in user-
+generated videos. In ICMR, 2019. 2, 4
+
+[35] Xindi Shang, Tongwei Ren, Jingfan Guo, Hanwang Zhang,
+and Tat-Seng Chua. Video visual relation detection. In ACM
+MM, 2017. 2, 3, 4
+
+[36] Gunnar A Sigurdsson, G¨ul Varol, Xiaolong Wang, Ali
+Farhadi, Ivan Laptev, and Abhinav Gupta. Hollywood in
+homes: Crowdsourcing data collection for activity under-
+standing. In ECCV, 2016. 2, 4
+
+[37] Zixuan Su, Xindi Shang, Jingjing Chen, Yu-Gang Jiang,
+Zhiyong Qiu, and Tat-Seng Chua. Video relation detection
+In Proceedings of the
+via multiple hypothesis association.
+28th ACM International Conference on Multimedia, pages
+3127–3135, 2020. 3
+
+[38] Mohammed Suhail, Abhay Mittal, Behjat Siddiquie, Chris
+Broaddus, Jayan Eledath, Gerard Medioni, and Leonid Sigal.
+Energy-based learning for scene graph generation. In CVPR,
+2021. 2
+
+[39] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan Luo,
+and Wei Liu. Learning to compose dynamic tree structures
+for visual contexts. In CVPR, 2019. 2
+
+[40] Zongheng Tang, Yue Liao, Si Liu, Guanbin Li, Xiaojie Jin,
+Hongxu Jiang, Qian Yu, and Dong Xu. Human-centric
+spatio-temporal video grounding with visual transformers.
+IEEE TCSVT, 2021. 4
+
+[41] Yao Teng, Limin Wang, Zhifeng Li, and Gangshan Wu. Tar-
+get adaptive context aggregation for video scene graph gen-
+eration. In Proceedings of the IEEE/CVF International Con-
+ference on Computer Vision, pages 13688–13697, 2021. 1,
+3
+
+[42] Bart Thomee, David A Shamma, Gerald Friedland, Ben-
+jamin Elizalde, Karl Ni, Douglas Poland, Damian Borth, and
+Li-Jia Li. Yfcc100m: The new data in multimedia research.
+Communications of the ACM, 2016. 2, 4
+
+[43] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszko-
+reit, Llion Jones, Aidan N Gomez, Łukasz Kaiser, and Illia
+Polosukhin. Attention is all you need. NeurIPS, 2017. 7
+
+[44] Zhongdao Wang, Hengshuang Zhao, Ya-Li Li, Shengjin
+Wang, Philip HS Torr, and Luca Bertinetto. Do dif-
+ferent tracking tasks require different appearance models?
+NeurIPS, 2021. 6, 7
+
+[45] Mark Weber, Jun Xie, Maxwell Collins, Yukun Zhu,
+Paul Voigtlaender, Hartwig Adam, Bradley Green, An-
+dreas Geiger, Bastian Leibe, Daniel Cremers, et al. Step:
+arXiv preprint
+Segmenting and tracking every pixel.
+arXiv:2102.11859, 2021. 2, 4
+
+[46] M. Weber, J. Xie, M. Collins, Yukun Zhu, P. Voigtlaender,
+H. Adam, B. Green, A. Geiger, B. Leibe, D. Cremers, Aljosa
+Osep, L. Leal-Taix´e, and Liang-Chieh Chen. Step: Segment-
+ing and tracking every pixel. NIPS, 2021. 3
+
+[47] Sanghyun Woo, Dahun Kim, Joon-Young Lee, and In So
+Kweon. Learning to associate every segment for video
+panoptic segmentation. In CVPR, 2021. 3
+
+[48] Danfei Xu, Yuke Zhu, Christopher B Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing.
+In
+CVPR, 2017. 1, 2
+
+[49] Li Xu, Haoxuan Qu, Jason Kuen, Jiuxiang Gu, and Jun Liu.
+Meta spatio-temporal debiasing for video scene graph gen-
+eration. In European Conference on Computer Vision, pages
+374–390. Springer, 2022. 1, 3
+
+[50] Jingkang Yang, Yi Zhe Ang, Zujin Guo, Kaiyang Zhou,
+Wayne Zhang, and Ziwei Liu. Panoptic scene graph gen-
+eration. In European Conference on Computer Vision, pages
+178–196. Springer, 2022. 1, 2, 3, 6
+
+[51] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi
+Parikh. Graph r-cnn for scene graph generation. In ECCV,
+2018. 1
+
+[52] Linjie Yang, Yuchen Fan, and Ning Xu. Video instance seg-
+
+mentation. In ICCV, 2019. 3
+
+[53] Zongxin Yang, Yunchao Wei, and Yi Yang. Associating ob-
+jects with transformers for video object segmentation.
+In
+NeurIPS, 2021. 5
+
+[54] Yu Yao, Mingze Xu, Chiho Choi, David J Crandall, Ella M
+Atkins, and Behzad Dariush. Egocentric vision-based fu-
+ture vehicle localization for intelligent driving assistance sys-
+tems. In 2019 International Conference on Robotics and Au-
+tomation (ICRA), pages 9711–9717. IEEE, 2019. 4
+
+[55] Haobo Yuan, Xiangtai Li, Yibo Yang, Guangliang Cheng,
+Jing Zhang, Yunhai Tong, Lefei Zhang, and Dacheng Tao.
+Polyphonicformer: Unified query learning for depth-aware
+video panoptic segmentation. In ECCV, 2022. 3
+
+[56] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin
+Choi. Neural motifs: Scene graph parsing with global con-
+text. In CVPR, 2018. 2
+
+[57] Jingzhe Zhang, Lishuo Zhuang, Yang Wang, Yameng Zhou,
+Yan Meng, and Gang Hua. Video demo: An egocentric vi-
+In Proceedings of the IEEE
+sion based assistive co-robot.
+Conference on Computer Vision and Pattern Recognition
+Workshops, pages 48–49, 2013. 4
+
+[58] Yiwu Zhong, Jing Shi, Jianwei Yang, Chenliang Xu, and Yin
+Li. Learning to generate scene graph from natural language
+supervision. In ICCV, 2021. 2
+
+[59] Bolei Zhou, Alex Andonian, Aude Oliva, and Antonio Tor-
+ralba. Temporal relational reasoning in videos. In Proceed-
+
+10
+
+18684ings of the European conference on computer vision (ECCV),
+pages 803–818, 2018. 2
+
+11
+
+18685

@@ -1,0 +1,1990 @@
+Fine-Grained Scene Graph Generation with
+Data Transfer
+Ao Zhang1∗, Yuan Yao2∗, Qianyu Chen2, Wei Ji1†, Zhiyuan Liu2†,
+Maosong Sun2, and Tat-Seng Chua1
+1 Sea-NExT Joint Lab, Singapore
+School of Computing, National University of Singapore, Singapore
+2 Department of Computer Science and Technology
+Institute for Artificial Intelligence, Tsinghua University, Beijing, China
+Beijing National Research Center for Information Science and Technology, China
+aozhang@u.nus.edu, yaoyuanthu@163.com
+Abstract. Scene graph generation (SGG) is designed to extract (sub-
+ject, predicate, object) triplets in images. Recent works have made a
+steady progress on SGG, and provide useful tools for high-level vision and
+language understanding. However, due to the data distribution problems
+including long-tail distribution and semantic ambiguity, the predictions
+of current SGG models tend to collapse to several frequent but unin-
+formative predicates (e.g., on, at), which limits practical application of
+these models in downstream tasks. To deal with the problems above, we
+propose a novel Internal and External Data Transfer (IETrans) method,
+which can be applied in a plug-and-play fashion and expanded to large
+SGG with 1,807 predicate classes. Our IETrans tries to relieve the data
+distribution problem by automatically creating an enhanced dataset that
+provides more sufficient and coherent annotations for all predicates. By
+applying our proposed method, a Neural Motif model doubles the macro
+performance for informative SGG. The code and data are publicly avail-
+able at https://github.com/waxnkw/IETrans-SGG.pytorch.
+Keywords: Scene graph generation, Plug-and-play, Large-scale
+1
+Introduction
+Scene graph generation (SGG) aims to detect relational triplets (e.g., (man,
+riding, bike)) in images. As an essential task for connecting vision and lan-
+guage, it can serve as a fundamental tool for high-level vision and language
+tasks, such as visual question answering [2,25,29,14], image captioning [33,7],
+and image retrieval [10,27,28]. However, existing SGG methods can only make
+correct predictions on a limited number of predicate classes (e.g., 29 out of 50
+pre-defined classes [39]), among which a majority of predicates are trivial and
+uninformative (e.g., on, and, near). This undermines the application of SGG for
+∗indicates equal contribution.
+† Corresponding author: jiwei@nus.edu.sg, liuzy@tsinghua.edu.cn
+arXiv:2203.11654v2  [cs.CV]  20 Jul 2022
+2
+Zhang et al.
+person
+beach
+on
+person
+kite
+person
+beach
+standing on
+person
+kite
+watching
+(b) External Transfer
+NA     relation
+(a) Internal Transfer
+general     informative
+Fig. 1. Generate an enhanced dataset automatically for better model training with:
+(a) Internal Transfer: Specify general predicate annotations as informative ones. (b)
+External Transfer: Relabel missed relations from NA.
+downstream tasks. To address the limitation, we first identify two main problems
+that need to deal with:
+• Long-tail problem: the problem refers to the phenomenon that annota-
+tions mainly concentrate on a few head predicate classes, and are much
+sparse in most tail predicate classes. For example, in Visual Genome[12],
+there are over 100K samples for the top 5 predicate classes, while over 90%
+of predicate classes have less than 10 samples. As a result, the performance
+of tail predicate classes is poor due to the lack of effective supervision.
+• Semantic ambiguity: many samples can be described as either general
+predicate class (e.g., on) or an informative one (e.g., riding). However, data
+annotators prefer some general (and thus uninformative) predicate classes to
+informative ones for simplicity. This causes conflicts in the widely adopted
+single-label optimization since different labels are annotated for the same
+type of instances. Thus, even when the informative predicates have enough
+training samples, the prediction will easily collapse to the general ones.
+To address the problems mentioned above, recent works propose to use re-
+sampling [6,13], reweighting [32], and post-processing methods [23,8]. However,
+we argue that these problems can be better alleviated by enhancing the existing
+dataset into a reasonable dataset, that contains more abundant training samples
+for tail classes and also provides coherent annotations for different classes.
+To this end, we propose a novel framework named Internal and External
+data Transfer (IETrans), which can be equipped to different baseline models
+in a plug-and-play applied in a fashion. As shown in Figure 1, we automatically
+transfer data from general predicates to informative ones (Internal Transfer)
+and relabel relational triplets missed by annotators (External Transfer). (1)
+For internal transfer, we first identify the general-informative relational pairs
+based on the confusion matrix, and then conduct a triplet-level data transfer from
+general ones to informative ones. The internal transfer will not only alleviate the
+optimization conflict caused by semantic ambiguity but also provide more data
+for tail classes; (2) For external transfer, there exist many positive samples
+Fine-Grained Scene Graph Generation with Data Transfer
+3
+missed by annotators [12,19], which are usually treated as negative samples by
+current methods. However, this kind of data can be considered as a potential data
+source, covering a wide range of predicate categories. Inspired by Visual Distant
+Supervision [35] which employs NA samples for pre-training, we also consider the
+NA samples, which are the union of negative and missed annotated samples. The
+missed annotated samples can be relabeled to provide more training samples.
+It is worth noting that both internal transfer and external transfer are in-
+dispensable for improving SGG performance. Without the internal transfer, the
+external transfer will suffer from the semantic ambiguity problem. Meanwhile,
+the external transfer can further provide training samples for tail classes, espe-
+cially for those that have weak semantic connection with head classes.
+Exhaustive experiments show that our method is both adaptive to different
+baseline models and expansible to large-scale SGG. We equip our data augmen-
+tation method with 4 different baseline models and find that it can significantly
+boost all models’ macro performance and achieve SOTA performance for F@K
+metric, a metric for overall evaluation. For example, a Neural Motif Model with
+our proposed method can double the mR@100 performance and achieve the high-
+est F@100 among all model-agnostic methods on predicate classification task of
+the widely adopted VG-50 [31] benchmark.
+To validate the scalability of our proposed method, we additionally propose
+a new benchmark with 1,807 predicate classes (VG-1800), which is more prac-
+tical and challenging. To provide a reliable and stable evaluation, we manually
+remove unreasonable predicate classes and make sure there are over 5 samples
+for each predicate class on the test set. On VG-1800, our method achieves SOTA
+performance with significant superiority compared with all baselines. The pro-
+posed IETrans can make correct predictions on 467 categories, compared with all
+other baselines that can only correctly predict less than 70 categories. While the
+baseline model can only predict relations like (cloud, in, sky) and (window, on,
+building), our method enables to generate informative ones like (cloud, floating
+through, sky) and (window, on exterior of, building).
+Our main contributions are summarized as follows: (1) To cope with the
+long-tail problem and semantic ambiguity in SGG, we propose a novel IETrans
+framework to generate an enhanced training set, which can be applied in a plug-
+and-play fashion. (2) We propose a new VG-1800 benchmark, which can provide
+reliable and stable evaluation for large-scale SGG. (3) Comprehensive experi-
+ments demonstrate the effectiveness of our IETrans in training SGG models.
+2
+Related Works
+2.1
+Scene Graph Generation
+As an important tool of connecting vision and language, SGG [31,19,15] has
+drawn widespread attention from the community. SGG is first proposed as vi-
+sual relation detection (VRD) [19], in which each relation is detected indepen-
+dently. Considering that relations are highly dependent on their context, [31]
+4
+Zhang et al.
+further proposes to formulate VRD as a dual-graph generation task, which can
+incorporate context information. Based on [31], different methods [18,24,39] are
+proposed to refine the object and relation representations in the scene graph. For
+example, [18] proposes a novel message passing mechanism that can encode edge
+directions into node representations. Recently, CPT [36] and PEVL [34] propose
+to employ pre-trained vision-language models for SGG. CPT shows promising
+few-shot ability and PEVL shows much better performance than models training
+from scratch.
+2.2
+Informative Scene Graph Generation
+Although making steady progress on improving recall on SGG task, [24,3] point
+out that the predictions of current SGG models are easy to collapse to several
+general and trivial predicate classes. Instead of only focusing on recall met-
+ric, [24,3] propose a new metric named mean recall, which is the average recall
+of all predicate classes. [23] employs a causal inference framework, which can
+eliminate data bias during the inference process. CogTree [37] proposes to lever-
+age the semantic relationship between different predicate classes, and design a
+novel CogTree loss to train models that can make informative predictions. In
+BGNN [13], the authors design a bi-level resampling strategy, which can help to
+provide a more balanced data distribution during the training process. However,
+previous works of designing new loss or conducting resampling, only focus on
+predicate-level adjustment, while the visual relation is triplet-level. For example,
+given the subject man and object skateboard, the predicate riding is an infor-
+mative version of standing on, while given the subject man and object horse,
+riding will not be an informative alternative of standing on. Thus, instead of
+using less precise predicate-level manipulation, we employ a triplet-level transfer.
+2.3
+Large-scale Scene Graph Generation
+In the last few years, there are some works [1,41,40,35] focusing on large-scale
+SGG. Then, how to provide a reliable evaluation is an important problem. [40]
+first proposes to study large-scale scene graph generation and makes a new split
+of Visual Genome dataset named VG80K, which contains 29,086 predicate cate-
+gories. However, the annotations are too noisy to provide reliable evaluation. To
+cope with this problem, [1] further cleans the dataset, and finally reserves 2,000
+predicate classes. However, only 1,429 predicate classes are contained in the test
+set, among which 903 relation categories have no more than 5 samples. To pro-
+vide enough samples for each predicate class’ evaluation, we re-split the Visual
+Genome to ensure each predicate class on the test set has more than 5 samples,
+and the total predicate class number is 1,807. For the proposed methods, [40]
+employs a triplet loss to regularize the visual representation with the constraint
+on word embedding space. RelMix [1] proposes to conduct data augmentation
+with the format of feature mixup. Visual distant supervision [35] pre-trains the
+model on relabeled NA data with the help of a knowledge base and achieve sig-
+nificant improvement on a well-defined VG setting without semantic ambiguity.
+Fine-Grained Scene Graph Generation with Data Transfer
+5
+External Data
+Internal Data
+Enhanced 
+Dataset
+NA Relabeling
+Transfer
+All NA samples
+...
+...
+...
+...
+√
+predict
+...
+Ǘя
+Ǘӕ
+Ǘ֑
+Ǘя
+Ǘӕ
+Ǘ֑
+NA
+NA
+NA
+Ɇׅ
+...
+NA
+ǔ(֥ѐ˧֕ѐ)
+ǔ(֥Ӗ˧֕Ӗ)
+ǔ(֥֒˧֕֒)
+Ǔя
+Ǔӕ
+Ǔ֑
+Ǔя
+Ǔӕ
+Ǔ֑
+0.4
+0.2
+0.1
+0.2
+0.3
+0.9
+Ǐի%
+Relabeled
+NA samples
+External 
+Data
+scores
+External Transfer
+Internal Transfer
+Confused Pair Discovery
+Transfer Pair Judgement
+All (Ǉ֥, ǔ*, Ǉ֕) samples
+predict
+ǔя
+ǔӕ
+Ɇ*
+ǔӏ
+...
+Confused 
+relations
+Attraction factor
+×
+√
+Transfer
+Ǐջ%
+Ǉ֥
+Ǉ֥
+Ǉ֥
+Ǉ֥
+Ǉ֥
+ǔ*
+ǔя
+ǔӕ
+p1
+ǔ*
+Ǉ֕
+Ǉ֕
+Ǉ֕
+Ǉ֕
+Ǉ֕
+0.8
+0.9
+0.7
+GT
+predicates
+scores
+Ǉ֥
+ǔ*
+Ǉ֕
+ǒ
+NA score
+×
+Fig. 2. Illustration of our proposed IETrans to generate an enhanced dataset. Internal
+transfer is designed to transfer data from general predicate to informative ones. Ex-
+ternal transfer is designed to relabel NA data. To avoid misunderstanding, (cs, p∗, co)
+is a relational triplet class. (si, p(si,oi), oi) represents a single relational triplet instance.
+However, the data extension will be significantly limited by the semantic ambigu-
+ity problem. To deal with this problem, we propose an internal transfer method
+to generate informative triplets.
+3
+Method
+In this section, we first introduce the internal data transfer and external data
+transfer, respectively, and then elaborate how to utilize them collaboratively.
+Figure 2 shows the pipeline of our proposed IETrans.
+The goal of our method is to generate an enhanced dataset automatically,
+which should provide more training samples for tail classes, and also specify
+general predicate classes as informative ones. Concretely, as shown in Figure 1,
+the general relation on between (person, beach) need to be specified as more
+informative one standing on, and the missed annotations between (person, kite)
+can be labeled so as to provide more training samples.
+3.1
+Problem Definition
+Scene Graph Generation. Given an image I, a scene graph corresponding
+to I has a set of objects O = {(bi, ci)}No
+i=1 and a set of relational triplets E =
+{(si, p(si,oi), oi)}Ne
+i=1. For each object (bi, ci), it consists of an object bounding
+box bi ∈R4 and an object class ci which belongs to the pre-defined object class
+set C. With si ∈O and oi ∈O, pi is defined as relation between them and
+belongs to the pre-defined predicate class set P.
+Inference. SGG is defined as a joint detection of objects and relations. Gen-
+erally, an SGG model will first detect the objects in the image I. Based on the
+6
+Zhang et al.
+detected objects, a typical SGG model will conduct a feature refinement for
+objects and relation representation, and then classify the objects and relations.
+3.2
+Internal Data Transfer
+The key insight of internal transfer is to transfer samples from general predicate
+classes to their corresponding informative ones, like the example shown in Fig-
+ure 1. We split the process into 3 sub-steps, including (1) Confusion Pair Dis-
+covery: specify confused predicate pairs as potential general-informative pairs
+for given subject and object classes. (2) Transfer Pair Judgement: judge
+whether the candidate pair is valid. (3) Triplet Transfer: transfer data from
+the selected general predicate class to the corresponding informative one.
+Confusion Pair Discovery. To find general predicate classes and correspond-
+ing informative ones, a straightforward way is to annotate the possible relation
+transitions manually. However, relations are highly dependent on the subject
+and object classes, i.e. relation is triplet-level rather than predicate-level. For
+example, given the entity pair man and bike, riding is a sub-type of sitting
+on, while for man and skateboard, riding shares different meaning with sitting
+on. In this condition, even under 50 predicate classes settings, the possible re-
+lation elements will scale up to an infeasible number for human annotation.
+Another promising alternative is to employ pre-defined knowledge bases, such
+as WordNet [20] and VerbNet [11]. However, existing knowledge bases are not
+specifically designed to cope with visual relation problems, which result in a gap
+between visual and textual hierarchies [26].
+Fig. 3. Confusion matrix of Mo-
+tif [39]’s prediction score on all en-
+tity pairs in VG training set with
+the subject man and the object
+motorcycle.
+Thus, in this work, we try to specify the
+general-informative pairs by taking advantage
+of information within the dataset, and leave
+the exploration of external knowledge sources
+for future work. A basic observation is that
+informative predicate classes are easily
+confused by general ones. Thus, we can
+first find confusion pairs as candidate general-
+informative pairs. By observing the predic-
+tions of the pre-trained Motif [39] model, we
+find that the collapse from informative predi-
+cate classes to general ones, appears not only
+on the test set but also on the training set.
+As shown in Figure 3, the predicate classes
+riding and sitting on are significantly con-
+fused by a more general predicate class on.
+On the training set, given a relational
+triplet class (cs, p, co), we use a pre-trained
+baseline model to predict predicate labels of
+all samples belonging to (cs, p, co), and average their score vectors. We denote
+the aggregated scores for all predicates as S = {spi|pi ∈P}. From S, we select
+Fine-Grained Scene Graph Generation with Data Transfer
+7
+all predicate classes with higher prediction scores than the ground-truth anno-
+tation p, which can be formulated as Pc = {pi|spi > sp}. Pc can be considered
+as the most confusing predicate set for (cs, p, co), which can serve as candidate
+transfer sources.
+Transfer Pair Judgement. However, a confused predicate class does not equal
+to a general one. Sometimes, a general predicate can also be confused by an
+informative predicate. For example, in Figure 3, under the constraint of cs =
+man and co = motorcycle, the less informative predicate sitting on is confused
+by the more informative predicate riding. In this condition, it is not a good
+choice to transfer from riding to sitting on. Thus, we need to further select
+the truly general predicates from the candidate set Pc.
+To select the most possible general predicate classes from Pc, we first intro-
+duce an important feature that is useful to recognize general predicate classes.
+As observed by [37], the general predicate classes usually cover more
+diverse relational triplets, while informative ones are limited. Based on this
+observation, we can define the attraction factor of a triplet category (cs, p, co)
+as:
+  A(c _s , p ,
+ 
+c
+_o) = \ frac {1 }{\sum _{c_i, c_j \in \mathcal {C}}{\mathcal {I}(c_i, p, c_j)}}, 
+(1)
+where C is the object categories set and I(t) indicates whether the triplet cate-
+gory t exists in the training set, which can be formulated as:
+  \m a
+t
+hc
+al  { I}(t) = \be
+gi
+n {cases} 1, &\text {if $t \in $ training set}\\ 0, &\text {otherwise} \end {cases} 
+(2)
+The denominator of A(cs, pi, co) is the number of relational triplet types con-
+taining pi. Thus, A(cs, pi, co) with smaller value means pi is more likely to be a
+general predicate. Concretely, when A(cs, pi, co) < A(cs, p, co), we transfer data
+from (cs, pi, co) to (cs, p, co).
+However, only considering the number of relational triplet types also has
+drawbacks: some relational triplets with very limited number of samples (e.g.,
+only 1 or 2 samples) might be annotation noise, while these relational triplets are
+easily selected as transfer targets. Transferring too much data to such uncertain
+relational triplets will significantly degenerate models’ performance. Thus, we
+further consider the number of each relational triplet and modify the attraction
+factor as:
+  A(c _s , p ,
+ c_o)  =  \f
+r
+ac {N(c _s, p , c_o ) }{\su m _{c_i, c_j \in \mathcal {C}}{\mathcal {I}(c_i, p, c_j) \cdot N(c_i, p, c_j) }}, 
+(3)
+where N(t) denotes the number of instances with relational type t in the training
+set. With the attraction factor, we can further filter the candidate confusion set
+Pc to the valid transfer source for (cs, p, co):
+  \ mathcal  {P} _ s=\{p_ i| (p_ i  \in \m athcal {P}_c) \wedge (A(c_s, p_i, c_o) < A(c_s, p, c_o)) \}, 
+(4)
+where ∧denotes the logical conjunction operator.
+8
+Zhang et al.
+Triplet Transfer. Given the transfer source Ps, we collect all samples in the
+training set satisfying:
+  T= \{ (o_ i, p_k, o _j)  | ( c _{o _ i}=c _ s) \wedge (p_k \in \mathcal {P}_s) \wedge (c_{o_j}=c_o) \}. 
+(5)
+Then, we sort T by model’s prediction score of p, and transfer the top kI%
+samples to the target triplet category (cs, p, co). Note that, a triplet instance
+may need to be transferred to more than one relational triplets. To deal with
+the conflict, we choose the target predicate with the highest attraction factor.
+3.3
+External Data Transfer
+The goal of our external transfer is to relabel unannotated samples to excavate
+missed relational triplets, as the example shown in Figure 1.
+NA Relabeling. NA samples refer to all unannotated samples in the training
+set, including both truly negative samples and missed positive samples. In ex-
+ternal transfer, NA samples are directly considered as the transfer source and are
+relabeled as existing relational triplet types.
+To get the NA samples, we first traverse all unannotated object pairs in im-
+ages. However, considering that data transfer from all NA samples to all pos-
+sible predicate classes will bring heavy computational burden, and inevitably
+increase the difficulty of conducting precise transfer, so as to sacrifice the qual-
+ity of transferred data. Thus, we only focus on object pairs whose bounding
+boxes have overlaps and limit the possible transfer targets to existing relational
+triplet types. The exploration of borrowing zero-shot relational triplets from NA
+is left for future work.
+Given a sample (s, NA, o), we can get its candidate target predicate set as:
+  \tex t { Ta r }(s, \ te x ttt {N A} , o )  =  \{p |(p \in  \mathcal {P}) \wedge ({N(c_s, p, c_o)} > 0) \wedge (\text {IoU}(b_{s}, b_{o})>0) \}, 
+(6)
+where P denotes pre-defined predicate classes, bs and bo denote bounding boxes
+of s and o, and IoU denotes the intersection over union.
+Given a triplet (s, NA, o), the predicate class with the highest prediction score
+except for NA is chosen. The label assignment can be formulated as:
+  p_{( s
+, o )} 
+= \argmax _{p
+\in \t ext {Tar}(s, \texttt {NA}, o)}(\phi ^{p}(s, o)), 
+(7)
+where ϕp(·) denotes the prediction score of predicate p.
+NA Triplet Transfer. To decide transfer or not, we rank all chosen (s, NA, o)
+samples according to NA scores in an ascending order. The lower NA score means
+the sample is more likely to be a missed positive sample. Similar with internal
+transfer, we simply transfer the top kE% data.
+3.4
+Integration
+Internal transfer is conducted on annotated data and external transfer is con-
+ducted on unannotated data, which are orthogonal to each other. Thus, we can
+Fine-Grained Scene Graph Generation with Data Transfer
+9
+simply merge the data without conflicts. After obtaining the enhanced dataset,
+we re-train a new model from scratch and use the new model to make inferences
+on the test set.
+4
+Experiments
+In this section, we first show the generalizability of our method with different
+baseline models and the expansibility to large-scale SGG. We also make ablation
+studies to explore the influence of different modules and hyperparameters. Fi-
+nally, analysis is conducted to show the effectiveness of our method in enhancing
+the current dataset.
+4.1
+Generalizability with Different Baseline Models
+We first validate the generalizability of our method with different baseline models
+and its effectiveness when compared with current SOTA methods.
+Datasets. Popular VG-50 [31] benchmark is employed, which consists of 50
+predicate classes and 150 object classes.
+Tasks. Following previous works [31,23,39], we evaluate our model on three
+widely used SGG tasks: (1) Predicate Classification (PREDCLS) provides
+both localization and object classes, and requires models to recognize predicate
+classes. (2) Scene Graph Classification (SGCLS) provides only correct lo-
+calization and asks models to recognize both object and predicate classes. (3) In
+Scene Graph Detection (SGDET), models are required to first detect the
+bounding boxes and then recognize both object and predicate classes.
+Metrics. Following previous works [37,24], we use Recall@K (R@K) and mean
+Recall@K (mR@K) as our metrics. However, different trade-offs between R@K
+and mR@K are made in different methods, which makes it hard to make a direct
+comparison. Therefore, we further propose an overall metric F@K to jointly
+evaluate R@K and mR@K, which is the harmonic average of R@K and mR@K.
+Baselines. We categorize several baseline methods into two categories: (1)
+Model-agnostic baselines. They refers to methods that can be applied in
+a plug-and-play fashion. For this part, we include Resampling [13], TDE [23],
+CogTree [37], EBM [22], DeC [9], and DLFE [5]. (2) Specific models. We
+also include some dedicated designed models with strong performance, including
+KERN [4], KERN [4], GBNet [38], BGNN [13], DT2-ACBS [6], and PCPL [32].
+Implementation Details. Following [23], we employ a pre-trained Faster-
+RCNN [21] with ResNeXt-101-FPN [16,30] backbone. In the training process,
+the parameters of the detector are fixed to reduce the computation cost. The
+batch size is set to 12, and the learning rate is 0.12, except for Transformer.
+We optimize all models with an SGD optimizer. Specifically, to better balance
+the data distribution, the external transfer will not be conducted for the top 15
+frequent predicate classes. To avoid deviating too much from the original data
+10
+Zhang et al.
+Table 1. Performance (%) of our method and other baselines on VG-50 dataset.
+IETrans denotes different models equipped with our IETrans. Rwt denotes using
+the reweighting strategy.
+Models
+Predicate Classification
+Scene Graph Classification
+Scene Graph Detection
+R@50 / 100 mR@50 / 100 F@50 / 100 R@50 / 100 mR@50 / 100 F@50 / 100 R@50 / 100 mR@50 / 100 F@50 / 100
+Specific
+KERN [4]
+65.8 / 67.6
+17.7 / 19.2
+27.9 / 29.9
+36.7 / 37.4
+9.4 / 10.0
+15.0 / 15.8
+27.1 / 29.8
+6.4 / 7.3
+10.4 / 11.7
+GBNet [38]
+66.6 / 68.2
+22.1 / 24.0
+33.2 / 35.5
+37.3 / 38.0
+12.7 / 13.4
+18.9 / 19.8
+26.3 / 29.9
+7.1 / 8.5
+11.2 / 13.2
+BGNN [13]
+59.2 / 61.3
+30.4 / 32.9
+40.2 / 42.8
+37.4 / 38.5
+14.3 / 16.5
+20.7 / 23.1
+31.0 / 35.8
+10.7 / 12.6
+15.9 / 18.6
+DT2-ACBS [6]
+23.3 / 25.6
+35.9 / 39.7
+28.3 / 31.1
+16.2 / 17.6
+24.8 / 27.5
+19.6 / 21.5
+15.0 / 16.3
+22.0 / 24.0
+17.8 / 19.4
+PCPL [32]
+50.8 / 52.6
+35.2 / 37.8
+41.6 / 44.0
+27.6 / 28.4
+18.6 / 19.6
+22.2 / 23.2
+14.6 / 18.6
+9.5 / 11.7
+11.5 / 14.4
+Model-Agnostic
+Motif [39]
+64.0 / 66.0
+15.2 / 16.2
+24.6 / 26.0
+38.0 / 38.9
+8.7 / 9.3
+14.2 / 15.0
+31.0 / 35.1
+6.7 / 7.7
+11.0 / 12.6
+-TDE [23]
+46.2 / 51.4
+25.5 / 29.1
+32.9 / 37.2
+27.7 / 29.9
+13.1 / 14.9
+17.8 / 19.9
+16.9 / 20.3
+8.2 / 9.8
+11.0 / 13.2
+-CogTree [37]
+35.6 / 36.8
+26.4 / 29.0
+30.3 / 32.4
+21.6 / 22.2
+14.9 / 16.1
+17.6 / 18.7
+20.0 / 22.1
+10.4 / 11.8
+13.7 / 15.4
+-EBM [22]
+- / -
+18.0 / 19.5
+- / -
+- / -
+10.2 / 11.0
+- / -
+- / -
+7.7 / 9.3
+- / -
+-DeC [9]
+- / -
+35.7 / 38.9
+- / -
+- / -
+18.4 / 19.1
+- / -
+- / -
+13.2 / 15.6
+- / -
+-DLFE [5]
+52.5 / 54.2
+26.9 / 28.8
+35.6 / 37.6
+32.3 / 33.1
+15.2 / 15.9
+20.7 / 21.5
+25.4 / 29.4
+11.7 / 13.8
+16.0 / 18.8
+-IETrans (ours)
+54.7 / 56.7
+30.9 / 33.6
+39.5 / 42.2
+32.5 / 33.4
+16.8 / 17.9
+22.2 / 23.3
+26.4 / 30.6
+12.4 / 14.9
+16.9 / 20.0
+-IETrans+Rwt (ours)
+48.6 / 50.5
+35.8 / 39.1
+41.2 / 44.1
+29.4 / 30.2
+21.5 / 22.8
+24.8 / 26.0
+23.5 / 27.2
+15.5 / 18.0
+18.7 / 21.7
+VCTree [24]
+64.5 / 66.5
+16.3 / 17.7
+26.0 / 28.0
+39.3 / 40.2
+8.9 / 9.5
+14.5 / 15.4
+30.2 / 34.6
+6.7 / 8.0
+11.0 / 13.0
+-TDE [23]
+47.2 / 51.6
+25.4 / 28.7
+33.0 / 36.9
+25.4 / 27.9
+12.2 / 14.0
+16.5 / 18.6
+19.4 / 23.2
+9.3 / 11.1
+12.6 / 15.0
+-CogTree [37]
+44.0 / 45.4
+27.6 / 29.7
+33.9 / 35.9
+30.9 / 31.7
+18.8 / 19.9
+23.4 / 24.5
+18.2 / 20.4
+10.4 / 12.1
+13.2 / 15.2
+-EBM [22]
+- / -
+18.2 / 19.7
+- / -
+- / -
+12.5 / 13.5
+- / -
+- / -
+7.7 / 9.1
+- / -
+-DLFE [5]
+51.8 / 53.5
+25.3 / 27.1
+34.0 / 36.0
+33.5 / 34.6
+18.9 / 20.0
+24.2 / 25.3
+22.7 / 26.3
+11.8 / 13.8
+15.5 / 18.1
+-IETrans (ours)
+53.0 / 55.0
+30.3 / 33.9
+38.6 / 41.9
+32.9 / 33.8
+16.5 / 18.1
+22.0 / 23.6
+25.4 / 29.3
+11.5 / 14.0
+15.8 / 18.9
+-IETrans+Rwt (ours)
+48.0 / 49.9
+37.0 / 39.7
+41.8 / 44.2
+30.0 / 30.9
+19.9 / 21.8
+23.9 / 25.6
+23.6 / 27.8
+12.0 / 14.9
+15.9 / 19.4
+GPS-Net [18]
+65.1 / 66.9
+15.0 / 16.0
+24.4 / 25.8
+36.9 / 38.0
+8.2 / 8.7
+13.4 / 14.2
+30.3 / 35.0
+5.9 / 7.1
+9.9 / 11.8
+-Resampling [13]
+64.4 / 66.7
+19.2 / 21.4
+29.6 / 32.4
+37.5 / 38.6
+11.7 / 12.5
+17.8 / 18.9
+27.8 / 32.1
+7.4 / 9.5
+11.7 / 14.7
+-DeC [9]
+- / -
+35.9 / 38.4
+- / -
+- / -
+17.4 / 18.5
+- / -
+- / -
+11.2 / 15.2
+- / -
+-IETrans (ours)
+52.3 / 54.3
+31.0 / 34.5
+38.9 / 42.2
+31.8 / 32.7
+17.0 / 18.3
+22.2 / 23.5
+25.9 / 28.1
+14.6 / 16.5
+18.7 / 20.8
+-IETrans+Rwt (ours)
+47.5 / 49.4
+34.9 / 38.6
+40.2 / 43.3
+29.3 / 30.3
+19.8 / 21.6
+23.6 / 25.2
+23.1 / 25.0
+16.2 / 18.8
+19.0 / 21.5
+Transformer [23]
+63.6 / 65.7
+17.9 / 19.6
+27.9 / 30.2
+38.1 / 39.2
+9.9 / 10.5
+15.7 / 16.6
+30.0 / 34.3
+7.4 / 8.8
+11.9 / 14.0
+-CogTree [37]
+38.4 / 39.7
+28.4 / 31.0
+32.7 / 34.8
+22.9 / 23.4
+15.7 / 16.7
+18.6 / 19.5
+19.5 / 21.7
+11.1 / 12.7
+14.1 / 16.0
+-IETrans (ours)
+51.8 / 53.8
+30.8 / 34.7
+38.6 / 42.2
+32.6 / 33.5
+17.4 / 19.1
+22.7 / 24.3
+25.5 / 29.6
+12.5 / 15.0
+16.8 / 19.9
+-IETrans+Rwt (ours)
+49.0 / 50.8
+35.0 / 38.0
+40.8 / 43.5
+29.6 / 30.5
+20.8 / 22.3
+24.4 / 25.8
+23.1 / 27.1
+15.0 / 18.1
+18.2 / 21.7
+distribution, the frequency bias item calculated from the original dataset is ap-
+plied to our IETrans in the inference stage. For internal and external transfer,
+the kI is set to 70% and kE is set to 100%. Please refer to the Appendix for
+more details.
+Comparison with SOTAs. We report the results of our IETrans and baselines
+for VG-50 in Table 1. Based on the observation of experimental results, we have
+summarized the following conclusions:
+Our IETrans is adaptive to different baseline models. We equip our
+method with 4 different models, including Motif [39], VCTree [24], GPS-Net [18],
+and Transformer [23]. The module architectures range from conventional CNN
+to TreeLSTM (VCTree) and self-attention layers (Transformer). The training al-
+gorithm contains both supervised training and reinforcement learning (VCTree).
+Despite the model diversity, our IETrans can boost all models’ mR@K metric
+and also achieve competitive F@K performance. For example, our IETrans can
+double mR@50/100 and improve the overall metric F@50/100 for over 9 points
+across all 3 tasks for GPS-Net.
+Compared with other model-agnostic methods, our method out-
+performs all of them in nearly all metrics. For example, when applying
+IETrans to Motif on PREDCLS, our model can achieve the highest R@50/100
+and mR@50/100 among all model-agnostic baselines except for DeC. After adding
+the reweighting strategy, our IETrans can outperform DeC on mR@K.
+Fine-Grained Scene Graph Generation with Data Transfer
+11
+Compared with strong specific baselines, our method can also achieve
+competitive performance on mR@50/100, and best overall perfor-
+mance on F@50/100. Considering mR@50/100, our method with reweighting
+strategy is slightly lower than DT2-ACBS on SGCLS and SGDET tasks, while
+our method performs much better than them on R@50/100 (e.g., 24.3 points of
+VCTree on PREDCLS task). For overall comparison considering F@50/100 met-
+rics, our VCTree+IETrans+Rwt can achieve the best F@50/100 on PREDCLS
+and Motif+IETrans+Rwt achieves the best F@50/100 in SGCLS and SGDET
+task.
+4.2
+Expansibility to Large-Scale SGG
+We also validate our IETrans on VG-1800 dataset to show its expansibility to
+large-scale scenarios.
+Datasets. We re-split the Visual Genome dataset to create a VG-1800 bench-
+mark, which contains 70,098 object categories and 1,807 predicate categories.
+Different from previous large-scale VG split [40,1], we clean the misspellings and
+unreasonable relations manually and make sure all 1,807 predicate categories
+appear on both training and test set. For each predicate category, there are over
+5 samples on the test set to provide a reliable evaluation. Detailed statistics of
+VG-1800 dataset are provided in Appendix.
+Tasks. In this work, we mainly focus on the predicate-level recognition ability
+and thus compare models on PREDCLS in the main paper. For SGCLS results,
+please refer to the Appendix.
+Metrics. Following [40,1], we use accuracy (Acc) and mean accuracy upon all
+predicate classes (mAcc). Similar to VG-50, the harmonic average of two metrics
+is reported as F-Acc. In addition, we also report the number of predicate classes
+that the model can make at least one correct prediction, denoted as Non-Zero.
+Baselines. We also include model-agnostic baselines including Focal Loss [17],
+TDE [23], and RelMix [1], and a specific model BGNN [13].
+Implementation Details. Please refer to the Appendix for details.
+Table 2. Performance of our method and baselines on VG-1800 dataset. IETrans de-
+notes the Motif [39] model trained using our IETrans. To better compare with baselines,
+we show different Acc and mAcc trade-offs by setting different kI.
+Models
+Top-1
+Top-5
+Top-10
+Acc
+mAcc F-Acc Non-Zero
+Acc
+mAcc F-Acc Non-Zero
+Acc
+mAcc F-Acc Non-Zero
+BGNN [13]
+61.55
+0.59
+1.16
+37
+85.64
+2.33
+4.5
+111
+90.07
+3.91
+7.50
+139
+Motif [39]
+59.63
+0.61
+1.21
+47
+84.82
+2.68
+5.20
+112
+89.44
+4.37
+8.33
+139
+-Focal Loss
+54.65
+0.26
+0.52
+14
+79.69
+0.79
+1.56
+27
+85.21
+1.36
+2.68
+41
+-TDE [23]
+60.00
+0.62
+1.23
+45
+85.29
+2.77
+5.37
+119
+89.92
+4.65
+8.84
+152
+-RelMix [1]
+60.16
+0.81
+1.60
+65
+85.31
+3.27
+6.30
+134
+89.91
+5.17
+9.78
+177
+-IETrans (kI = 10%) (ours)
+56.66
+1.89
+3.66
+202
+83.99
+8.23
+14.99
+419
+89.71
+13.06
+22.80
+530
+-IETrans (kI = 90%) (ours)
+27.40
+4.70
+8.02
+467
+72.48
+13.34 22.53
+741
+83.50
+19.12 31.12
+865
+12
+Zhang et al.
+0-bear
+6-headboard
+7-neck
+5-foot
+10-wall
+3-cabinet
+Motif
+1-bed
+1-building
+0-balcony
+7-roof
+11-tower
+8-sky
+Motif
+4-entrance
+3-cloud
+5-pillar
+2-clock
+10-top
+12-window
+6-railing
+9-staircase
+13-window
+in
+on
+on
+on
+above
+on
+has
+on
+on
+has
+1-building
+0-balcony
+7-roof
+11-tower
+8-sky
+IETrans
+4-entrance
+3-cloud
+5-pillar
+2-clock
+10-top
+12-window
+6-railing
+9-staircase
+13-window
+floating through
+on either side of
+at top of
+on
+atop
+on exterior of
+has
+installed 
+on
+attached to 
+side of
+supporting
+2-bow
+4-ear
+8-nose
+9-rail
+behind
+behind
+under
+of
+on
+on
+on
+on
+on
+on
+0-bear
+6-headboard
+7-neck
+5-foot
+10-wall
+3-cabinet
+IETrans
+1-bed
+2-bow
+4-ear
+8-nose
+9-rail
+behind
+behind
+besides
+belonging to
+on
+sewn 
+onto
+near
+on
+resting 
+on
+part of
+Fig. 5. Visualization of raw Motif model and Motif equipped with our IETrans.
+Comparison with SOTAs. Performance of our method and baselines are
+shown in Table 2. Based on the observation of experimental results, we have
+summarized the following conclusions:
+Fig. 4. The mAcc and Acc
+curve.
+(a)
+is
+our
+IETrans
+method. kI is tuned to gen-
+erate the blue curve. (b-f) are
+baselines.
+Our model can successfully work on
+large-scale settings. On VG-1800 dataset, the
+long-tail problem is even exacerbated, where hun-
+dreds of predicate classes have only less than
+10 samples. Simply increasing loss weight (Fo-
+cal Loss) on tail classes can not work well. Dif-
+ferent from these methods, our IETrans can suc-
+cessfully boost the performance on mAcc while
+keeping competitive results on Acc. For quantita-
+tive comparison, our IETrans (kI = 10%) can
+significantly improve the performance on top-10
+mAcc (e.g., 19.12% vs. 4.37%) while maintaining
+comparable performance on Acc.
+Compared with different baselines, our
+method can outperform them for overall
+evaluation. As shown in Table 2, our IETrans
+(kI = 90%) can achieve best performance on F-
+Acc, which is over 3 times of the second highest baseline, RelMix, a method
+specifically designed for large-scale SGG. To make the visualized comparison,
+we plot a curve of IETrans with different Acc and mAcc trade-offs by tuning kI,
+and show the performance of other baselines as points. As shown in Figure 4,
+all baselines drawn as points are under our curve, which means our method can
+achieve better performance than them. Moreover, our IETrans (kI = 90%) can
+make correct predictions on 467 predicate classes for top-1 results, while the
+Non-Zero value of all other baselines are less than 70.
+Case Studies. To show the potential of our method for real-world application,
+we provide some cases in Figure 5. We can observe that our IETrans can help to
+generate more informative predicate classes while keeping faithful to the image
+content. For example, when the Motif model only predict relational triplets like
+(foot, of, bear), (nose, on, bear) and (cloud, in, sky), our IETrans can generate
+more informative ones as (foot, belonging to, bear), (nose, sewn onto, bear),
+and (cloud, floating through, sky).
+Fine-Grained Scene Graph Generation with Data Transfer
+13
+Fig. 7. (a) The influence of kI in the Top-10 F-Acc with only internal transfer. (b)
+The influence of kE in the Top-10 F-Acc with only external transfer.
+4.3
+Ablation Studies
+In this part, we analyse the influence of internal transfer, external transfer, and
+corresponding parameters, kI and kE.
+Influence of Internal Transfer. As shown in Figure 6, only using exter-
+nal transfer (yellow cube) is hard to boost the mAcc performance as much as
+IETrans. The reason is that although introducing samples for tail classes, they
+will still be suppressed by corresponding general ones. However, by introducing
+internal transfer (green point) to cope with semantic ambiguity problem, the
+performance (red cross) can be improved significantly on mAcc, together with
+minor performance drop on Acc.
+Fig. 6. The mAcc and Acc
+curve. (a) Normally trained
+Motif. (b) ExTrans: external
+transfer. (c) InTrans: inter-
+nal transfer. (d) Our proposed
+IETrans. kI is tuned to gen-
+erate a curve. The blue circle
+and arrow mean that combin-
+ing ExTrans and InTrans can
+lead to the pointed result.
+Influence of External Transfer. Although in-
+ternal transfer can achieve huge improvement on
+mAcc compared with Motif, its performance is
+poor compared with IETrans, which shows the im-
+portance of further introducing training data by
+external transfer. Integration of two methods can
+maximize the advantages of data transfer.
+Influence of kI. As shown in Figure 7 (a), with
+the increase of kI, the top-10 F-Acc will increase
+until kI
+= 80%, and begin to decrease when
+kI > 80%. The phenomenon indicates that a large
+number of general predicates can be interpreted as
+informative ones. Moving these predicates to in-
+formative ones will boost the overall performance.
+However, there also exists some predicates that
+can not be interpreted as informative ones or be
+modified suitably by current methods, which is
+harmful to the performance of models.
+Influence of kE. As shown in Figure 7 (b), the
+overall performance increases slowly with the ini-
+tial 90% transferred data, but improves signifi-
+cantly with the rest 10%. Note that, the data is
+ranked according to the NA score, which means that the last 10% data is actually
+14
+Zhang et al.
+0-beach
+1-blond hair
+7-ocean
+6-mane
+8-tail
+3-horse
+11-woman
+9 - t w o 
+h o r s e s
+2-front legs
+5-leg
+Ground-Truth
+1 0 - w a v e
+4-leg
+growing on
+in
+has
+has
+has
+has
+on
+of
+0-b e a c h
+1-blond hair
+7-ocean
+6-mane
+8-tail
+3-horse
+11-woman
+9 - t w o 
+h o r s e s
+2-front legs
+5-leg
+Enhanced Scene Graph
+10-wave
+4-l e g
+growing 
+on
+breaking
+in
+waving
+possesses
+has
+galloping on
+of
+possesses
+walking
+riding
+(a) Enhanced Scene Graph Visualization
+(b)  Distribution Change
+Fig. 8. (a) Enhanced Scene Graph Visualization. Gray line denotes unchanged
+relation. Blue line denotes changed and reasonable relation. Red line denotes changed
+but unreasonable relation. (b) Distribution Change. The comparison between distri-
+butions of original dataset and enhanced dataset for VG-1800. The x-axis is the relation
+id intervals from head to tail classes. The y-axis is the corresponding log-frequency.
+what the model considered as most likely to be truly negative. The phenomenon
+indicates that the model may easily classify tail classes as negative samples,
+while this part of data is of vital significance for improving the model’s ability
+of making informative predictions.
+4.4
+Analysis of Enhanced Dataset
+Enhanced Scene Graph Correctness. We investigate the correctness of en-
+hanced scene graphs from the instance level. An example is shown in Figure 8(a).
+We can see that the IETrans is less accurate on VG-1800, which indicates that
+it is more challenging to conduct precise data transfer on VG-1800.
+Distribution Change. The distribution change is shown in Figure 8(b). We
+can see that our IETrans can effectively supply samples for non-head classes.
+5
+Conclusion
+In this paper, we design a data transfer method named IETrans to generate an
+enhanced dataset for the SGG. The proposed IETrans consists of an internal
+transfer module to relabel general predicate classes as informative ones and
+an external transfer module to complete missed annotations. Comprehensive
+experiments are conducted to show the effectiveness of our method. In the future,
+we hope to extend our method to other large-scale visual recognition problems
+(e.g., image classification, semantic segmentation) with similar challenges.
+Acknowledgements. This research is funded by Sea-NExT Joint Lab, Singa-
+pore. The research is also supported by the National Key Research and Devel-
+opment Program of China (No. 2020AAA0106500).
+Fine-Grained Scene Graph Generation with Data Transfer
+15
+References
+1. Abdelkarim, S., Agarwal, A., Achlioptas, P., Chen, J., Huang, J., Li, B., Church,
+K., Elhoseiny, M.: Exploring long tail visual relationship recognition with large
+vocabulary. In: Proceedings of ICCV. pp. 15921–15930 (2021)
+2. Antol, S., Agrawal, A., Lu, J., Mitchell, M., Batra, D., Zitnick, C.L., Parikh, D.:
+VQA: Visual question answering. In: Proceedings of ICCV. pp. 2425–2433 (2015)
+3. Chen, T., Yu, W., Chen, R., Lin, L.: Knowledge-embedded routing network for
+scene graph generation. In: Proceedings of CVPR. pp. 6163–6171 (2019)
+4. Chen, T., Yu, W., Chen, R., Lin, L.: Knowledge-embedded routing network for
+scene graph generation. In: Proceedings of CVPR. pp. 6163–6171 (2019)
+5. Chiou, M.J., Ding, H., Yan, H., Wang, C., Zimmermann, R., Feng, J.: Recovering
+the unbiased scene graphs from the biased ones. In: Proceedings of ACM Multi-
+media. pp. 1581–1590 (2021)
+6. Desai, A., Wu, T.Y., Tripathi, S., Vasconcelos, N.: Learning of visual relations:
+The devil is in the tails. In: Proceedings of ICCV. pp. 15404–15413 (2021)
+7. Gu, J., Joty, S., Cai, J., Zhao, H., Yang, X., Wang, G.: Unpaired image captioning
+via scene graph alignments. In: Proceedings of ICCV. pp. 10323–10332 (2019)
+8. Guo, Y., Gao, L., Wang, X., Hu, Y., Xu, X., Lu, X., Shen, H.T., Song, J.: From
+general to specific: Informative scene graph generation via balance adjustment. In:
+Proceedings of ICCV. pp. 16383–16392 (2021)
+9. He, T., Gao, L., Song, J., Cai, J., Li, Y.F.: Semantic compositional learning for
+low-shot scene graph generation. In: Proceedings of ICCV. pp. 2961–2969 (2021)
+10. Johnson, J., Krishna, R., Stark, M., Li, L.J., Shamma, D., Bernstein, M., Fei-Fei,
+L.: Image retrieval using scene graphs. In: Proceedings of CVPR. pp. 3668–3678
+(2015)
+11. Kipper, K., Korhonen, A., Ryant, N., Palmer, M.: Extending VerbNet with novel
+verb classes. In: LREC. pp. 1027–1032 (2006)
+12. Krishna, R., Zhu, Y., Groth, O., Johnson, J., Hata, K., Kravitz, J., Chen, S.,
+Kalantidis, Y., Li, L.J., Shamma, D.A., et al.: Visual Genome: Connecting language
+and vision using crowdsourced dense image annotations. IJCV pp. 32–73 (2017)
+13. Li, R., Zhang, S., Wan, B., He, X.: Bipartite graph network with adaptive message
+passing for unbiased scene graph generation. In: Proceedings of CVPR. pp. 11109–
+11119 (2021)
+14. Li, Y., Wang, X., Xiao, J., Ji, W., Chua, T.S.: Invariant grounding for video ques-
+tion answering. In: Proceedings of CVPR. pp. 2928–2937 (2022)
+15. Li, Y., Yang, X., Shang, X., Chua, T.S.: Interventional video relation detection.
+In: Proceedings of ACM Multimedia. pp. 4091–4099 (2021)
+16. Lin, T.Y., Doll´ar, P., Girshick, R., He, K., Hariharan, B., Belongie, S.: Feature
+pyramid networks for object detection. In: Proceedings of CVPR. pp. 2117–2125
+(2017)
+17. Lin, T.Y., Goyal, P., Girshick, R., He, K., Doll´ar, P.: Focal loss for dense object
+detection. In: Proceedings of ICCV. pp. 2980–2988 (2017)
+18. Lin, X., Ding, C., Zeng, J., Tao, D.: Gps-Net: Graph property sensing network for
+scene graph generation. In: Proceedings of CVPR. pp. 3746–3753 (2020)
+19. Lu, C., Krishna, R., Bernstein, M., Fei-Fei, L.: Visual relationship detection with
+language priors. In: Proceedings of ECCV. pp. 852–869 (2016)
+20. Miller, G.A.: WordNet: a lexical database for english. Communications of the ACM
+pp. 39–41 (1995)
+16
+Zhang et al.
+21. Ren, S., He, K., Girshick, R., Sun, J.: Faster R-CNN: Towards real-time object
+detection with region proposal networks. In: Proceedings of NIPS. pp. 91–99 (2015)
+22. Suhail, M., Mittal, A., Siddiquie, B., Broaddus, C., Eledath, J., Medioni, G., Sigal,
+L.: Energy-based learning for scene graph generation. In: Proceedings of CVPR.
+pp. 13936–13945 (2021)
+23. Tang, K., Niu, Y., Huang, J., Shi, J., Zhang, H.: Unbiased scene graph generation
+from biased training. In: Proceedings of CVPR. pp. 3716–3725 (2020)
+24. Tang, K., Zhang, H., Wu, B., Luo, W., Liu, W.: Learning to compose dynamic tree
+structures for visual contexts. In: Proceedings of CVPR. pp. 6619–6628 (2019)
+25. Teney, D., Liu, L., van Den Hengel, A.: Graph-structured representations for visual
+question answering. In: Proceedings of CVPR. pp. 1–9 (2017)
+26. Wan, A., Dunlap, L., Ho, D., Yin, J., Lee, S., Jin, H., Petryk, S., Bargal, S.A.,
+Gonzalez, J.E.: NBDT: Neural-backed decision trees pp. 1027–1032 (2021)
+27. Wang, S., Wang, R., Yao, Z., Shan, S., Chen, X.: Cross-modal scene graph matching
+for relationship-aware image-text retrieval. In: Proceedings of WACV. pp. 1508–
+1517 (2020)
+28. Wei, M., Chen, L., Ji, W., Yue, X., Chua, T.S.: Rethinking the two-stage framework
+for grounded situation recognition. In: Proceedings of AAAI. pp. 2651–2658 (2022)
+29. Xiao, J., Yao, A., Liu, Z., Li, Y., Ji, W., Chua, T.S.: Video as conditional graph
+hierarchy for multi-granular question answering. In: Proceedings of AAAI. pp.
+2804–2812 (2022)
+30. Xie, S., Girshick, R., Doll´ar, P., Tu, Z., He, K.: Aggregated residual transformations
+for deep neural networks. In: Proceedings of CVPR. pp. 1492–1500 (2017)
+31. Xu, D., Zhu, Y., Choy, C.B., Fei-Fei, L.: Scene graph generation by iterative mes-
+sage passing. In: Proceedings of CVPR. pp. 5410–5419 (2017)
+32. Yan, S., Shen, C., Jin, Z., Huang, J., Jiang, R., Chen, Y., Hua, X.S.: PCPL:
+Predicate-correlation perception learning for unbiased scene graph generation. In:
+Proceedings of ACM Multimedia. pp. 265–273 (2020)
+33. Yang, X., Tang, K., Zhang, H., Cai, J.: Auto-encoding scene graphs for image
+captioning. In: Proceedings of CVPR. pp. 10685–10694 (2019)
+34. Yao, Y., Chen, Q., Zhang, A., Ji, W., Liu, Z., Chua, T.S., Sun, M.: PEVL:
+Position-enhanced pre-training and prompt tuning for vision-language models.
+arXiv preprint arXiv:2205.11169 (2022)
+35. Yao, Y., Zhang, A., Han, X., Li, M., Weber, C., Liu, Z., Wermter, S., Sun, M.:
+Visual distant supervision for scene graph generation. In: Proceedings of ICCV.
+pp. 15816–15826 (2021)
+36. Yao, Y., Zhang, A., Zhang, Z., Liu, Z., Chua, T.S., Sun, M.: CPT: Colorful prompt
+tuning for pre-trained vision-language models. arXiv preprint arXiv:2109.11797
+(2021)
+37. Yu, J., Chai, Y., Wang, Y., Hu, Y., Wu, Q.: CogTree: Cognition tree loss for
+unbiased scene graph generation pp. 1274–1280 (2021)
+38. Zareian, A., Karaman, S., Chang, S.F.: Bridging knowledge graphs to generate
+scene graphs. In: Proceedings of ECCV. pp. 606–623 (2020)
+39. Zellers, R., Yatskar, M., Thomson, S., Choi, Y.: Neural Motifs: Scene graph parsing
+with global context. In: Proceedings of CVPR. pp. 5831–5840 (2018)
+40. Zhang, J., Kalantidis, Y., Rohrbach, M., Paluri, M., Elgammal, A., Elhoseiny, M.:
+Large-scale visual relationship understanding. In: Proceedings of the AAAI. pp.
+9185–9194 (2019)
+41. Zhuang, B., Wu, Q., Shen, C., Reid, I., van den Hengel, A.: HCVRD: a benchmark
+for large-scale human-centered visual relationship detection. In: Proceedings of
+AAAI. pp. 7631–7638 (2018)
+Fine-Grained Scene Graph Generation with Data Transfer
+17
+A
+VG-1800 Dataset
+The VG-1800 dataset aims to provide reliable evaluation for the large-scale scene
+graph generation.
+A.1
+Dataset Construction
+We construct the dataset based on original Visual Genome dataset [12] by the
+following steps: (1) Filtration. Instead of simply auto-filtering [40] and choos-
+ing the top frequent predicate categories [1], we manually filter out unreasonable
+predicate categories, including misspelling predicates (e.g., i frot of), adjec-
+tives (e.g., white), nouns (e.g., car), and relative clauses (e.g., who has). To
+provide enough relation instances for robust evaluation, we retain all object cat-
+egories and predicate categories with over 5 samples. (2) Split. We split the VG
+dataset into 70% training and 30% test. Following VG-50 split [31], we further
+split out 5, 000 images from the training set as the validation set, and ensure at
+least 5 samples on the test set and at least 1 samples on the training set for each
+predicate category.
+A.2
+Dataset Statistics
+Finally, the dataset contains 70, 098 object categories, 1, 807 predicate categories
+and 272, 084 distinct relation triplets. It consists of 66, 289, 4, 995, and 32, 893
+images for training set, validation set and test set respectively. There are on
+average 19.5 objects and 16.0 relations for each image.
+10%
+20%
+30%
+40%
+50%
+60%
+70%
+80%
+90% 100%
+kI
+83
+84
+85
+86
+87
+88
+89
+90
+Top-10 Acc.
+(a) Influence of kI on Acc.
+10%
+20%
+30%
+40%
+50%
+60%
+70%
+80%
+90% 100%
+kI
+10
+12
+14
+16
+18
+Top-10 mAcc.
+(b) Influence of kI on mAcc.
+10%
+20%
+30%
+40%
+50%
+60%
+70%
+80%
+90% 100%
+kI
+18
+20
+22
+24
+26
+28
+30
+Top-10 F-Acc.
+(c) Influence of kI on F-Acc.
+10%
+20%
+30%
+40%
+50%
+60%
+70%
+80%
+90% 100%
+kE
+89.00
+89.25
+89.50
+89.75
+90.00
+90.25
+90.50
+90.75
+91.00
+Top-10 Acc.
+(d) Influence of kE on Acc.
+10%
+20%
+30%
+40%
+50%
+60%
+70%
+80%
+90% 100%
+kE
+5.5
+6.0
+6.5
+7.0
+7.5
+8.0
+8.5
+9.0
+Top-10 mAcc.
+(e) Influence of kE on mAcc.
+10%
+20%
+30%
+40%
+50%
+60%
+70%
+80%
+90% 100%
+kE
+10
+11
+12
+13
+14
+15
+16
+Top-10 F-Acc.
+(f) Influence of kE on F-Acc.
+Fig. 9. Influence of kI and kE in different metrics.
+Comparison with Other VG Splits. We also compare our VG-1800 split with
+other splits based on Visual Genome [12] dataset, including a conventional VG-
+18
+Zhang et al.
+VG-50
+VG8K
+VG8K-LT VG-1800
+Datasets
+0
+500
+1000
+1500
+2000
+2500
+3000
+3500
+4000
+Num. of Pred. Classes
+50
+3594
+1429
+1807
+VG-50
+VG8K
+VG8K-LT VG-1800
+Datasets
+0
+250
+500
+750
+1000
+1250
+1500
+1750
+2000
+Num. of Pred. Classes (n
+5)
+50
+588
+526
+1807
+Fig. 10. Comparison of number of predicate classes between different splits on test set.
+The n ≥5 denotes predicate classes having no less than 5 samples.
+50 and the other two large-scale SGG splits VG8K and VG8K-LT. Our VG-1800
+can provide a more reliable evaluation for large-scale SGG. (1) When compared
+with VG8K, we provide a much cleaner dataset by manually cleaning the noise.
+For example, VG8K does not filter out nouns and adjectives, which will lead to
+an unreliable evaluation. (2) When compared with VG8K-LT, a cleaner version
+of VG8K, we provide a much stable evaluation for large amount of tail classes.
+More specifically, as shown in Table 3, our VG-1800 contains more test images.
+Meanwhile, VG-1800 also contains more samples of tail classes. As shown in
+Figure 10, our VG-1800 has 1,807 predicate classes with no less than 5 samples,
+while VG8K-LT has only 526 classes that have no less than 5 samples.
+Table 3. Comparison between different datasets’ predicate filtration and split ratio.
+Filtration denotes the method to remove noisy predicates. The Train, Val, and Test
+denote number of images in training set, validation set and test set.
+Dataset
+Filtration
+Train
+Val
+Test
+VG-50 [31]
+-
+57,723
+5,000
+26,446
+VG8K [40]
+Auto
+97,961
+2,000
+4,871
+VG8K-LT [1]
+Auto
+97,623
+1,999
+4,860
+VG-1800
+Manual
+66,289
+4,995
+32,893
+B
+Implementation Details
+B.1
+VG-50
+All normally trained baseline models including Motif, Transformer, VCTree, and
+GPS-Net are reproduced by us. For fair comparison, we equally remove all re-
+sampling and reweighting strategies. Morever, to encourage informative SGG, we
+Fine-Grained Scene Graph Generation with Data Transfer
+19
+remove the frequency bias in the training and inference of base models, which
+may make the result tend to have higher mR@K, F@K and lower R@K than
+results in their original papers.
+For Transformer, some implementation details are different. The batch size
+can be enlarged to 16 on 2 GPUs. The learning rate is reduced to 0.08 for
+PREDCLS and SGDET for training stability. For Transformer on SGCLS, where
+the training is even more unstable, we further lower the learning rate to 0.016.
+All experiments are done on RTX-2080ti GPUs.
+B.2
+VG-1800
+Compared with VG-50, the same backbone, parameter fixation, learning rate,
+optimizer, and learning schedule are used on VG-1800 dataset. Specially, due to
+the significant increase of (subject, predicate, object) combinations, we equally
+remove all frequency bias items on VG-1800 to reduce machines’ memory usage.
+For internal and external transfer, the kI is set to 90% and kE is set to 100%.
+For baselines, we find that due to the significant difference between the num-
+ber of head predicates and tail predicates, the bi-level resampling in BGNN [13]
+will make the model pay most of the attention on tail classes while ignoring head
+classes. The drop out rate of images that do not contain rare predicates are set
+to almost 100%. This lead to a bad convergence of BGNN. Thus, we remove
+bi-level resampling for BGNN results. For RelMix [1], we equip the proposed
+VilHub loss and predicate feature mixup to the Neural Motif model. Similar
+with bi-level sampling, we find that the reweighting strategy also lead to worse
+results. Thus, we do not include a reweighting version like VG-50.
+C
+Supplementary Experiments
+C.1
+Influence of kI abd kE
+Influence of kI. To provide a more detailed analysis on the influence of kI, we
+report the performance on Acc and mAcc with different kI. As shown in Figure 9,
+with the increase of internal transfer percentage kI, Acc decreases linearly, while
+mAcc first increases when kI ≤80% and then decreases. The phenomenon shows
+that transferring more in internal transfer does not necessarily mean higher
+mAcc. For VG-1800, The first 80% internal data transfer is helpful to improve
+mAcc, while the last confident 20% will harm the overall performance. We guess
+the last 20% data may contain too noise, which will lower the data quality for
+model training.
+Influence of kE. As for kE, external transfer shows almost no influence on Acc
+and mAcc when kE ≤90%, while significantly boost mAcc when kE = 100%.
+Contrary to our observations for kI, the last 10% samples which are believed
+to be unuseful by models, seem to bring the most profitable boost for mAcc.
+We guess the reason is that model can not distinguish well between tail classes
+and NA samples, while this part of the data is essential to provide more training
+samples for tail classes.
+20
+Zhang et al.
+Fig. 11. Comparison of adaptive thresholds and fixed percentages for Internal Transfer.
+C.2
+Adaptive Threshold.
+In our IETrans, when determining how much data to transfer, we equally use
+a fixed percentage number for all relational triplets, which seems to be sub-
+optimal. Thus, we also tried an adaptive threshold by considering the prediction
+score of concrete relational triplet instances.
+For internal transfer, given a general relational triplet instance (os, pG, oo),
+we are required to decide whether to transfer to its corresponding informative
+type pI. We denote the model’s prediction score of object pair (os, oo) on pI
+as s∗
+pI. We denote the average and standard error of all (cos, pI, coo) relational
+triplet instances’ prediction score on pI as µI and σI. We conduct the transfer
+when s∗
+pI satisfies:
+  
+s_ { p_ I }^* > \mu _{I} +k \sigma _{I}, 
+(8)
+where k is a hyperparameter. The intuition is that if a general instance (os, pG, oo)’s
+prediction score is over the average of all real (cos, pI, coo)’s prediction scores on
+pI, (os, pG, oo) can probably be relabeled as an informative one. Meanwhile, the
+standard error is considered to further control the adaptive threshold.
+By choosing different k including {−1.0, −0.5, 0.0, 0.5, 1.0}, we can get a curve
+with different Acc and mAcc trade-offs. As shown in Figure 11, the model with
+adaptive thresholds is overall worse than our fixed percentage.
+A possible explanation is that the prediction score of an instance is non-
+linearly dependent on the number of its own instances and its similarity with
+different general classes, which results in inconsistency among different relational
+triplets. Especially when the number of an informative relational triplet is very
+small, the average of its prediction score is often near to zero, which will easily
+lead to an over-transfer problem. Thus, we leave the design of a more intelligent
+adaptive threshold for future work.
+For external transfer, as shown in the paper, the prediction scores on NA of
+missed annotated samples are unreliable, i.e. the samples with the highest NA
+score bring maximum benefits for the model’s performance.
+Fine-Grained Scene Graph Generation with Data Transfer
+21
+Table 4. SGCLS triplet-level evaluation results on VG-1800 dataset.
+Models
+Top-1
+Top-5
+Top-10
+Acc
+mAcc F-Acc Non-Zero
+Acc
+mAcc F-Acc Non-Zero
+Acc
+mAcc F-Acc Non-Zero
+BGNN [13]
+16.29
+0.18
+0.36
+22
+22.99
+0.86
+1.65
+159
+24.15
+1.48
+2.78
+221
+Motif [39]
+18.93
+0.18
+0.36
+37
+26.08
+0.74
+1.43
+90
+27.28
+1.15
+2.21
+121
+-Focal Loss
+18.55
+0.14
+0.28
+29
+25.91
+0.51
+1.00
+52
+27.14
+0.76
+1.48
+80
+-TDE [23]
+18.02
+0.11
+0.22
+15
+24.85
+0.38
+0.75
+38
+26.14
+0.56
+1.10
+53
+-RelMix [1]
+18.27
+0.22
+0.43
+47
+25.57
+0.83
+1.60
+100
+26.71
+1.26
+2.42
+130
+-IETrans (kI = 10%) (ours)
+18.24
+1.68
+3.16
+212
+25.80
+1.68
+3.16
+212
+27.25
+2.54
+4.65
+264
+-IETrans (kI = 90%) (ours)
+4.91
+1.78
+2.62
+298
+20.66
+4.72
+7.68
+538
+24.85
+6.54
+10.36
+637
+SGCLS Results on VG-1800. We also evaluate our method on SGCLS task
+on VG-1800 dataset. As shown in table 4, the comparison with other baselines
+is similar to the results on PREDCLS task. When compared with Motif, our
+IETrans (kI = 10%) can achieve significant improvement on top-1 mAcc and
+Non-Zero metrics (over 5 times of Motif) with negligible degeneration (less than
+1 point) on top-1 Acc metric. Our IETrans (kI = 90%) can further boost the
+mAcc and Non-Zero metrics, which shows the ability of our IETrans to generate
+informative scene graphs. When compared with other baselines, our IEtrans
+can achieve the best F-Acc metrics across top-1, top-5, and top-10 evaluations.
+However, there is a large gap between SGCLS results and PREDCLS results
+(e.g., 2.62% vs. 4.70% for top-1 F-Acc of IETrans (kI = 90%)), which indicates
+that further effort should be made to explore the joint optimization of both
+objects and predicates.
+D
+Discovered Visual Hierarchy Analysis
+Visual Hierarchy Evaluation. A key element of conducting correct internal
+transfer is to find reasonable general-informative relation pairs. To evaluate the
+precision, we randomly choose 50 pairs with over 3 samples being transferred, so
+as to avoid involving too many noise-to-noise pairs. Then, human evaluation is
+conducted. The ratio of reasonable general-informative pairs is 76% for VG-50,
+and 74% for VG-1800.
+Visualization. In the following, we show 100 discovered general-informative
+pairs for both VG-50 and VG-1800. The pairs are ranked by the number of
+samples which are transferred.
+Table 5: Examples of discovered visual hierarchy in VG-50
+(window, on, building) →(window, part of, building)
+(man, wearing, arm) →(man, wears, arm)
+(boy, wearing, boy) →(boy, wears, boy)
+(pillow, on, bed) →(pillow, lying on, bed)
+(building, has, building) →(building, made of, building)
+22
+Zhang et al.
+(sign, on, building) →(sign, mounted on, building)
+(arm, of, arm) →(arm, belonging to, arm)
+(sign, on, building) →(sign, hanging from, building)
+(man, wearing, bag) →(man, wears, bag)
+(window, on, building) →(window, belonging to, building)
+(car, on, building) →(car, parked on, building)
+(clock, on, building) →(clock, mounted on, building)
+(man, wearing, building) →(man, wears, building)
+(man, has, arm) →(man, wears, arm)
+(man, wearing, boot) →(man, wears, boot)
+(bottle, on, bottle) →(bottle, sitting on, bottle)
+(window, on, bus) →(window, belonging to, bus)
+(book, on, book) →(book, above, book)
+(man, has, arm) →(man, with, arm)
+(ear, of, ear) →(ear, belonging to, ear)
+(hand, of, arm) →(hand, belonging to, arm)
+(bottle, on, bottle) →(bottle, above, bottle)
+(window, in, building) →(window, part of, building)
+(light, on, building) →(light, mounted on, building)
+(door, on, building) →(door, to, building)
+(food, on, food) →(food, lying on, food)
+(bowl, on, bowl) →(bowl, above, bowl)
+(man, wearing, man) →(man, wears, man)
+(flower, in, flower) →(flower, painted on, flower)
+(woman, wearing, bag) →(woman, wears, bag)
+(tree, near, building) →(tree, in front of, building)
+(woman, wearing, arm) →(woman, wears, arm)
+(window, of, building) →(window, part of, building)
+(clock, on, building) →(clock, part of, building)
+(bus, on, building) →(bus, parked on, building)
+(man, wearing, coat) →(man, wears, coat)
+(building, has, building) →(building, with, building)
+(boy, wearing, arm) →(boy, wears, arm)
+(man, on, arm) →(man, riding, arm)
+(tree, has, branch) →(tree, with, branch)
+(woman, wearing, boot) →(woman, wears, boot)
+(pillow, on, bed) →(pillow, above, bed)
+(woman, has, arm) →(woman, with, arm)
+(window, on, building) →(window, to, building)
+(glass, on, bottle) →(glass, sitting on, bottle)
+(sign, on, building) →(sign, says, building)
+(man, wearing, bike) →(man, wears, bike)
+(tire, on, building) →(tire, on back of, building)
+Fine-Grained Scene Graph Generation with Data Transfer
+23
+(branch, on, branch) →(branch, growing on, branch)
+(book, on, book) →(book, laying on, book)
+(car, on, car) →(car, parked on, car)
+(man, wearing, bench) →(man, wears, bench)
+(elephant, has, ear) →(elephant, using, ear)
+(person, on, beach) →(person, standing on, beach)
+(wing, on, plane) →(wing, attached to, plane)
+(windshield, on, building) →(windshield, of, building)
+(arm, on, arm) →(arm, belonging to, arm)
+(woman, holding, bag) →(woman, carrying, bag)
+(window, on, bike) →(window, part of, bike)
+(ear, on, ear) →(ear, belonging to, ear)
+(man, on, beach) →(man, walking on, beach)
+(boy, has, boy) →(boy, wears, boy)
+(roof, on, building) →(roof, covering, building)
+(leaf, on, branch) →(leaf, growing on, branch)
+(head, of, arm) →(head, belonging to, arm)
+(wheel, on, building) →(wheel, on back of, building)
+(tree, near, building) →(tree, along, building)
+(bird, on, bird) →(bird, sitting on, bird)
+(door, on, door) →(door, to, door)
+(woman, has, bag) →(woman, with, bag)
+(man, wearing, hat) →(man, wears, hat)
+(man, on, arm) →(man, standing on, arm)
+(sign, on, building) →(sign, attached to, building)
+(letter, on, building) →(letter, painted on, building)
+(bird, on, bird) →(bird, standing on, bird)
+(ear, of, cat) →(ear, belonging to, cat)
+(window, on, bench) →(window, part of, bench)
+(window, near, building) →(window, part of, building)
+(wheel, on, bike) →(wheel, on back of, bike)
+(building, near, building) →(building, across, building)
+(elephant, has, ear) →(elephant, between, ear)
+(man, has, bag) →(man, with, bag)
+(engine, on, plane) →(engine, mounted on, plane)
+(man, wearing, chair) →(man, wears, chair)
+(woman, wearing, building) →(woman, wears, building)
+(sign, on, sign) →(sign, mounted on, sign)
+(plate, on, bowl) →(plate, above, bowl)
+(man, wearing, face) →(man, wears, face)
+(leg, of, giraffe) →(leg, part of, giraffe)
+(pillow, above, bed) →(pillow, lying on, bed)
+(tire, on, bike) →(tire, on back of, bike)
+24
+Zhang et al.
+(leg, of, arm) →(leg, belonging to, arm)
+(man, wearing, cap) →(man, wears, cap)
+(bird, has, bird) →(bird, with, bird)
+(trunk, of, ear) →(trunk, belonging to, ear)
+(roof, of, building) →(roof, covering, building)
+(plate, on, bottle) →(plate, above, bottle)
+(man, wearing, ear) →(man, wears, ear)
+(man, has, building) →(man, wears, building)
+(window, on, arm) →(window, part of, arm)
+Table 6: Examples of discovered visual hierarchy in VG-1800
+(window, on, building) →(window, on exterior of, building)
+(man, wearing, arm) →(man, wearing striped, arm)
+(arm, of, arm) →(arm, stretched out on, arm)
+(man, has, arm) →(man, stretching out, arm)
+(cloud, in, cloud) →(cloud, floating through, cloud)
+(pillow, on, bed) →(pillow, propped up on, bed)
+(tree, in, background) →(tree, visible in, background)
+(leg, of, arm) →(leg, belonging to, arm)
+(boat, in, boat) →(boat, sailing on, boat)
+(building, has, building) →(building, seen outside, building)
+(cloud, in, building) →(cloud, floating through, building)
+(hand, of, arm) →(hand, hand of, arm)
+(boat, on, boat) →(boat, sailing on, boat)
+(cloud, in, sky) →(cloud, floating through, sky)
+(building, in, background) →(building, visible in, background)
+(man, has, arm) →(man, sheltering, arm)
+(man, wearing, arm) →(man, dressed in, arm)
+(head, of, arm) →(head, turning, arm)
+(man, has, arm) →(man, losing, arm)
+(cloud, in, airplane) →(cloud, floating through, airplane)
+(cloud, in, background) →(cloud, floating through, background)
+(window, on, awning) →(window, on exterior of, awning)
+(man, has, arm) →(man, pointing with, arm)
+(man, has, arm) →(man, spreading, arm)
+(window, on, bus) →(window, lining side of, bus)
+(window, on, balcony) →(window, on exterior of, balcony)
+(cloud, in, beach) →(cloud, floating through, beach)
+(car, on, building) →(car, driving alongside, building)
+(window, on, building) →(window, lining side of, building)
+(man, wearing, arm) →(man, lifting up, arm)
+(shirt, on, arm) →(shirt, worn by, arm)
+Fine-Grained Scene Graph Generation with Data Transfer
+25
+(man, wearing, bag) →(man, wearing striped, bag)
+(bottle, on, bottle) →(bottle, kept on, bottle)
+(man, wearing, background) →(man, wearing striped, background)
+(boy, wearing, boy) →(boy, striped, boy)
+(cloud, in, air) →(cloud, floating through, air)
+(woman, has, arm) →(woman, raising, arm)
+(car, on, building) →(car, moving down, building)
+(airplane, in, airplane) →(airplane, flying under, airplane)
+(tile, on, bathroom) →(tile, fixed to, bathroom)
+(arm, on, arm) →(arm, stretched out on, arm)
+(cloud, in, arm) →(cloud, floating through, arm)
+(head, of, arm) →(head, belonging to, arm)
+(man, wearing, arm) →(man, kicking up, arm)
+(airplane, on, airplane) →(airplane, taking off from, airplane)
+(sign, on, building) →(sign, strapped, building)
+(man, wearing, air) →(man, wearing striped, air)
+(sign, on, arrow) →(sign, strapped, arrow)
+(window, on, building) →(window, adorning, building)
+(cat, has, cat) →(cat, possesses, cat)
+(cloud, in, boat) →(cloud, floating through, boat)
+(person, has, arm) →(person, stretching out, arm)
+(clock, on, building) →(clock, attached to side of, building)
+(train, on, building) →(train, switching, building)
+(woman, has, arm) →(woman, combing, arm)
+(boy, wearing, arm) →(boy, striped, arm)
+(window, on, building) →(window, on the side of, building)
+(window, of, building) →(window, on exterior of, building)
+(arrow, on, arrow) →(arrow, printed, arrow)
+(woman, wearing, arm) →(woman, wearing striped, arm)
+(head, of, arm) →(head, turned to, arm)
+(branch, on, branch) →(branch, sticking up on, branch)
+(man, on, arm) →(man, swimming with, arm)
+(wing, on, airplane) →(wing, on left side of, airplane)
+(mountain, in, background) →(mountain, visible in, background)
+(bowl, on, bowl) →(bowl, placed on, bowl)
+(cloud, in, blue sky) →(cloud, floating through, blue sky)
+(window, on, arrow) →(window, on exterior of, arrow)
+(foot, of, arm) →(foot, belonging to, arm)
+(toilet, in, bathroom) →(toilet, installed in, bathroom)
+(sign, on, building) →(sign, anchored to, building)
+(wall, on, building) →(wall, making up, building)
+(kite, in, air) →(kite, flying through, air)
+(leaf, on, building) →(leaf, growing on, building)
+26
+Zhang et al.
+(man, wearing, arm) →(man, adjusting, arm)
+(person, wearing, arm) →(person, striped, arm)
+(tile, on, bathroom) →(tile, installed on, bathroom)
+(bag, on, bag) →(bag, kept in, bag)
+(sky, in, sky) →(sky, stretched across, sky)
+(bear, has, bear) →(bear, scratching, bear)
+(line, on, building) →(line, painted in, building)
+(man, wearing, building) →(man, wearing striped, building)
+(book, on, book) →(book, arranged on, book)
+(wall, near, building) →(wall, making up, building)
+(window, on, advertisement) →(window, lining side of, advertisement)
+(sink, in, bathroom) →(sink, mounted in, bathroom)
+(wave, in, arm) →(wave, cresting in, arm)
+(window, in, building) →(window, on exterior of, building)
+(blanket, on, bed) →(blanket, laying over, bed)
+(man, wearing, backpack) →(man, carrying, backpack)
+(hair, of, arm) →(hair, on head of, arm)
+(kite, in, beach) →(kite, kite in, beach)
+(man, wearing, arm) →(man, dressed, arm)
+(boy, has, arm) →(boy, outstretched, arm)
+(picture, on, bed) →(picture, framed on, bed)
+(window, on, banner) →(window, on exterior of, banner)
+(arm, of, arm) →(arm, belonging to, arm)
+(man, on, board) →(man, going off, board)
+(shadow, on, arm) →(shadow, cast over, arm)
+(arm, of, arm) →(arm, around neck of, arm)

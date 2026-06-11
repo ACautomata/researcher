@@ -1,0 +1,1849 @@
+CAGE-SGG: Counterfactual Active Graph Evidence for Open-Vocabulary Scene
+Graph Generation
+Suiyang Guang, Chenyu Liu, Ruohan Zhang, Siyuan Chen
+Institute of Intelligent Vision and Embodied Cognition
+suiyang01@gmail.com, chengyu liu03@hotmail.com
+Abstract
+Open-vocabulary scene graph generation (SGG) aims to
+describe visual scenes with flexible and fine-grained rela-
+tion phrases beyond a fixed predicate vocabulary. While
+recent vision-language models greatly expand the seman-
+tic coverage of SGG, they also introduce a critical relia-
+bility issue: predicted relations may be driven by language
+priors or object co-occurrence rather than grounded visual
+evidence. In this paper, we propose an evidence-grounded
+open-vocabulary SGG framework based on counterfactual
+relation verification. Instead of directly accepting plausible
+relation proposals, our method verifies whether each can-
+didate relation is supported by relation-specific visual, ge-
+ometric, and contextual evidence. Specifically, we first gen-
+erate open-vocabulary relation candidates with a vision-
+language proposer, then decompose predicate phrases into
+soft evidence bases such as support, contact, contain-
+ment, depth, motion, and state. A relation-conditioned ev-
+idence encoder extracts predicate-relevant cues, while a
+counterfactual verifier tests whether the relation score de-
+creases when necessary evidence is removed and remains
+stable under irrelevant perturbations.
+We further intro-
+duce contradiction-aware predicate learning and graph-
+level preference optimization to improve fine-grained dis-
+crimination and global graph consistency. Experiments on
+conventional, open-vocabulary, and panoptic SGG bench-
+marks show that our method consistently improves stan-
+dard recall-based metrics, unseen predicate generalization,
+and counterfactual grounding quality. These results demon-
+strate that moving from relation generation to relation veri-
+fication leads to more reliable, interpretable, and evidence-
+grounded scene graphs.
+1. Introduction
+Scene graph generation (SGG) aims to parse a visual scene
+into a structured graph, where nodes denote objects and
+edges describe their semantic relations. By moving beyond
+category-level recognition toward object-centric relational
+understanding, scene graphs provide a compact and inter-
+pretable interface for many downstream tasks, such as vi-
+sual question answering, image retrieval, robotic manip-
+ulation, embodied navigation, and commonsense reason-
+ing. However, despite years of progress, most existing SGG
+methods are still limited by a closed-set formulation [1]:
+they predict relations from a predefined predicate vocab-
+ulary and are evaluated mainly by whether the predicted
+triplets match annotated labels. This setting is increasingly
+insufficient for real-world visual understanding, where rela-
+tion categories are open-ended, fine-grained, compositional,
+and often task-dependent.
+Recent advances in vision-language models [2, 3] have
+significantly changed the landscape of SGG. By aligning
+visual representations with natural language, these models
+make it possible to generate open-vocabulary scene graphs
+and describe relations beyond a fixed label space. Instead of
+choosing from a small set of predicates such as “on”, “hold-
+ing”, or “next to”, an open-vocabulary SGG model [4, 5]
+can produce more expressive relations, such as “leaning
+against”, “partially covering”, “supporting”, or “ready to be
+grasped”. This greatly improves the semantic coverage of
+scene graphs and makes them more suitable for open-world
+applications. Nevertheless, this progress also introduces a
+new and critical problem: open-vocabulary relation predic-
+tion can easily become language-prior driven rather than vi-
+sually grounded [6, 7]. A model may predict a plausible re-
+lation because it frequently appears in language or training
+data, even when the image evidence is weak, ambiguous,
+or contradictory. For example, a model may predict cup on
+table simply because cups and tables commonly co-occur,
+even if the cup is actually held by a person or floating in the
+background due to perspective ambiguity.
+This issue reveals a fundamental limitation of the cur-
+rent SGG paradigm.
+Most methods focus on predicting
+what relation should be assigned to an object pair, but rarely
+verify why the relation is valid. Relation labels are often
+treated as independent semantic categories, while the un-
+derlying evidence that supports them is ignored or only im-
+arXiv:2604.22274v7  [cs.CV]  26 May 2026
+plicitly encoded. In reality, visual relations are not merely
+linguistic tokens. Many relations correspond to observable
+visual, geometric, temporal, or functional constraints [8–
+10]. The relation on requires support, contact, and relative
+height; inside requires containment; holding requires hand-
+object proximity and motion coupling; in front of depends
+on depth ordering; and opening or closing requires temporal
+state change. Without explicitly checking such evidence, an
+open-vocabulary SGG model may produce fluent but unre-
+liable graphs.
+Existing studies have made important progress in long-
+tail debiasing [11, 12], language-guided predicate recogni-
+tion, panoptic SGG, video SGG, and 3D/4D scene graph
+construction. However, most of them still optimize relation
+prediction as a recognition problem: given visual features of
+an object pair, classify or generate the most likely predicate.
+Even when vision-language models or large language mod-
+els are introduced, they are often used as relation proposers,
+semantic priors, or pseudo-label generators [3, 13–15]. As a
+result, the generated scene graph may become more expres-
+sive, but not necessarily more trustworthy. This limitation
+becomes especially severe under open-vocabulary settings,
+where annotations are sparse, relation names are diverse,
+and language priors are strong. A reliable OV scene graph
+should not only name the relation, but also expose the vi-
+sual evidence that supports it and reject relations that are
+not grounded in the scene.
+In this work, we argue that the next step for open-
+vocabulary SGG is to move from relation generation to
+relation verification.
+Our key insight is that a visually
+grounded relation should be counterfactually sensitive to
+the evidence that defines it. If the supporting object is re-
+moved, the relation cup on table should disappear. If the
+hand-object contact is broken, the relation person holding
+cup should be weakened. If a viewpoint changes but the
+3D layout remains consistent, a valid spatial relation should
+remain stable.
+Conversely, if a predicted relation is un-
+changed after removing or perturbing its necessary visual
+evidence, the model is likely relying on dataset bias or lan-
+guage co-occurrence rather than actual scene understand-
+ing. This counterfactual perspective provides a natural way
+to distinguish visually grounded relations from plausible
+hallucinations [16–20].
+Based on this idea, we propose Learning Evidence-
+Grounded Open-Vocabulary Scene Graphs via Counter-
+factual Relation Verification. The proposed framework
+treats open-vocabulary relation generation as a two-stage
+process: relation proposal followed by evidence-grounded
+verification. First, a vision-language relation proposer gen-
+erates candidate object-relation-object triplets from the in-
+put scene. These candidates may include both annotated
+predicates and open-vocabulary relation phrases. Second,
+instead of accepting these candidates directly, we intro-
+duce a counterfactual relation verifier that evaluates whether
+each relation is supported by visual, geometric, and contex-
+tual evidence. For each candidate triplet, the model con-
+structs relation-specific evidence from object regions, union
+features, depth or layout cues, temporal consistency when
+available, and language-aligned predicate embeddings. It
+then compares the original scene with counterfactual vari-
+ants, such as subject/object masking, relation-region in-
+painting, geometric perturbation, and hard negative relation
+replacement. A relation is encouraged to be confident only
+when its prediction is both supported in the original scene
+and changed under counterfactual intervention.
+This design brings several advantages. First, it reduces
+open-vocabulary hallucination by requiring relation predic-
+tions to be justified by observable evidence rather than lan-
+guage priors alone. Second, it improves generalization to
+rare and unseen predicates because many relations can be
+verified through shared visual-geometric constraints even
+when their names differ. For instance, standing on, rest-
+ing on, and supported by share related evidence patterns
+despite having different surface forms. Third, it produces
+more interpretable scene graphs, where each edge can be
+associated with the evidence that supports or rejects it.
+This is particularly important for downstream tasks that re-
+quire trustworthy reasoning, such as embodied planning or
+human-AI collaboration [10, 21]. Finally, the framework
+is compatible with both image-based and video/3D exten-
+sions, since counterfactual verification can be defined over
+regions, frames, views, or reconstructed geometry.
+To train the proposed model, we introduce an evidence-
+aware learning objective that combines supervised relation
+learning, language-aligned open-vocabulary prediction, and
+counterfactual consistency regularization [16, 22, 23]. For
+annotated relations, the model learns to assign high con-
+fidence to correct triplets. For OV candidates, the model
+aligns visual relation representations with textual predicate
+descriptions. For counterfactual samples, the model is opti-
+mized to suppress relations whose necessary evidence has
+been removed or contradicted, while preserving relations
+that remain valid under irrelevant perturbations. This objec-
+tive encourages the model to learn not only discriminative
+relation features, but also the dependency between a relation
+and its supporting evidence.
+We further introduce evaluation protocols that measure
+whether generated scene graphs are both semantically cor-
+rect and evidence-grounded. In addition to standard recall-
+based metrics, we evaluate counterfactual relation accuracy,
+open-vocabulary generalization, and evidence consistency.
+These metrics test whether the model can reject plausi-
+ble but unsupported relations, maintain valid relations un-
+der viewpoint or appearance changes, and provide reliable
+graph predictions for rare or unseen predicates. Compared
+with conventional SGG evaluation, this protocol better re-
+flects the requirements of open-world visual reasoning.
+Our contributions are summarized as follows:
+• We identify a critical limitation of current open-
+vocabulary SGG: relation predictions are often expres-
+sive but insufficiently evidence-grounded, leading to
+language-prior hallucination and unreliable scene graphs.
+• We propose a counterfactual relation verification frame-
+work that valids whether each predicted relation is sup-
+ported by visual, geometric, and contextual evidence.
+• We design an evidence-grounded open-vocabulary SGG
+model that combines relation proposal, evidence encod-
+ing, and counterfactual verification to produce more trust-
+worthy and interpretable scene graphs.
+• We introduce counterfactual and evidence-consistency
+evaluation protocols, providing a more rigorous bench-
+mark for open-vocabulary scene graph generation beyond
+standard recall-based metrics.
+2. Related Work
+2.1. Scene Graph Generation
+Scene graph generation (SGG) aims to represent a vi-
+sual scene as a structured graph, where objects are mod-
+eled as nodes and their pairwise relations are modeled as
+edges [24, 25].
+Early SGG methods typically follow a
+detect-then-classify pipeline: an object detector first local-
+izes entities, and a relation classifier then predicts predi-
+cates for object pairs based on visual, spatial, and contex-
+tual features [6, 26, 27]. Subsequent works improve re-
+lation reasoning by incorporating message passing, graph
+neural networks, transformer-based interaction modeling,
+and external commonsense knowledge [7, 28–31]. Despite
+their progress, these methods are usually trained under a
+closed predicate vocabulary and heavily depend on dataset-
+specific annotations, making them less suitable for open-
+world scenes with diverse and fine-grained relations.
+Another long-standing challenge in SGG is the severe
+long-tail distribution of visual predicates. Frequent predi-
+cates such as on, near, and has dominate the training data,
+while many informative predicates appear rarely [32, 33].
+To alleviate this issue, prior works explore re-weighting,
+causal debiasing, predicate clustering, prototype learning,
+and fine-grained relation representation [7, 32–34]. For ex-
+ample, prototype-based methods learn semantic predicate
+prototypes to reduce intra-class variation and improve rare
+predicate recognition [33]. These approaches improve the
+balance between frequent and rare relations, but they still
+mainly optimize relation prediction as a classification prob-
+lem. In contrast, our work focuses on whether a predicted
+relation is evidence-grounded. Rather than only adjusting
+predicate distributions, we explicitly verify whether each
+relation is supported by visual, geometric, and contextual
+evidence.
+2.2. Open-Vocabulary Scene Graph Generation
+Recent advances in vision-language pre-training have en-
+abled open-vocabulary SGG, where models are expected to
+recognize relations beyond a fixed predicate set [2, 3, 35,
+36]. Existing methods typically use vision-language mod-
+els to align visual relation features with textual predicate
+embeddings, generate scene graph sequences from image-
+text models, or mine open-vocabulary relation concepts
+from large-scale language supervision [14, 15, 36–38]. For
+example, image-to-graph generation methods leverage the
+generative capacity of VLMs to produce scene graph triplets
+in natural language form [14].
+Open-set panoptic SGG
+further extends the setting from object boxes to panoptic
+regions and introduces more flexible relation vocabular-
+ies [15]. These works substantially improve the semantic
+coverage of SGG and make scene graphs more compatible
+with downstream vision-language reasoning.
+However, open-vocabulary SGG also introduces a new
+reliability issue. Since large vision-language models en-
+code strong language priors, they may predict relations that
+are linguistically plausible but weakly supported by the im-
+age. For instance, a model may infer person riding horse
+or cup on table from co-occurrence statistics even when
+the visual evidence is ambiguous or contradictory. Exist-
+ing open-vocabulary methods mainly focus on expanding
+the predicate space, aligning visual and textual embeddings,
+or generating richer relation descriptions. They rarely ask
+whether a relation should remain valid after removing, per-
+turbing, or contradicting its supporting evidence. Our work
+addresses this limitation by treating open-vocabulary rela-
+tion prediction as a proposal-and-verification problem. The
+VLM proposes candidate relations, while a counterfactual
+verifier evaluates whether these relations are visually and
+geometrically justified.
+2.3. Panoptic, Video, 3D, and Embodied Scene
+Graphs
+Beyond image-level SGG, recent works have extended
+scene graphs to panoptic, video, 3D, and embodied set-
+tings [8–10, 15, 21, 39–44]. Panoptic SGG associates rela-
+tions with segmentation masks instead of bounding boxes,
+enabling finer object-region grounding [15, 39].
+Video
+SGG introduces temporal consistency and dynamic inter-
+actions, requiring models to reason about relation changes
+over time [8, 42]. 3D scene graph methods further incor-
+porate spatial layouts, metric geometry, and object-level 3D
+structures, making relations such as inside, supporting, and
+in front of more physically meaningful [9, 43]. More re-
+cently, universal and embodied scene graph formulations
+attempt to unify scene graph representations across modali-
+ties and connect them with task planning, object states, and
+functional affordances [10, 21, 44].
+These directions show that SGG is evolving from static
+image parsing toward general structured scene understand-
+ing. Nevertheless, most existing methods still predict rela-
+tions from available observations in a passive manner. They
+do not explicitly test whether a relation depends on the evi-
+dence that defines it. For dynamic, 3D, or embodied scenes,
+this issue becomes even more important: a relation should
+be stable under irrelevant viewpoint changes, but sensitive
+to meaningful interventions such as object removal, contact
+disruption, or state transition. Our method is complemen-
+tary to panoptic, video, and 3D SGG. It introduces a gen-
+eral counterfactual verification mechanism that can operate
+over image regions, temporal frames, or 3D geometric cues,
+thereby improving the trustworthiness of generated scene
+graphs across different modalities.
+2.4. Counterfactual and Evidence-Grounded Visual
+Reasoning
+Counterfactual reasoning has been widely studied in visual
+question answering, model debiasing, causal representation
+learning, and robustness evaluation [7, 16–19, 22, 23, 45].
+The core idea is to determine whether a prediction truly
+depends on the relevant visual evidence rather than short-
+cut correlations. For example, counterfactual VQA meth-
+ods remove or perturb visual regions to test whether the an-
+swer changes accordingly, while causal debiasing methods
+separate direct visual effects from language or dataset pri-
+ors [7, 17]. These methods demonstrate that counterfactual
+interventions can reveal hidden biases that standard accu-
+racy metrics fail to capture.
+Despite their success in other vision-language tasks,
+counterfactual reasoning remains underexplored in open-
+vocabulary SGG. This is non-trivial because a scene graph
+contains many object-relation-object triplets, and each re-
+lation may depend on different types of evidence. Spatial
+relations require geometric evidence, human-object inter-
+actions require contact and pose evidence, part-whole rela-
+tions require containment or structural evidence, and func-
+tional relations may require object state or temporal con-
+text.
+Therefore, relation verification cannot be reduced
+to generic region masking alone. In this work, we intro-
+duce relation-specific counterfactual verification for open-
+vocabulary SGG. By comparing original and counterfactual
+scenes, our model learns whether a predicted relation is sup-
+ported by necessary evidence and whether it should be sup-
+pressed when such evidence is removed or contradicted.
+3. Method
+3.1. Overview
+Motivation. The key motivation is that open-vocabulary
+SGG should not only answer which relation phrase is plau-
+sible, but also answer whether this relation is grounded in
+the current scene. Vision-language models often provide
+strong semantic priors, but these priors may also lead to hal-
+lucinated relations. For example, the relation cup on table
+may be predicted because “cup” and “table” frequently co-
+occur, even when the cup is held by a person. We therefore
+formulate relation grounding from a counterfactual perspec-
+tive: a valid relation should be sensitive to interventions that
+remove its necessary evidence, while remaining stable un-
+der perturbations that do not affect the relation.
+Overview.
+Our framework contains four main compo-
+nents. First, an open-vocabulary relation proposer generates
+a compact candidate set of relation phrases for each object
+pair. Second, a relation-conditioned evidence encoder ex-
+tracts predicate-specific evidence from visual regions, ob-
+ject masks, spatial layouts, depth cues, and optional tem-
+poral features. Third, a counterfactual relation verifier es-
+timates whether the prediction truly depends on its sup-
+porting evidence. Finally, a graph-level preference objec-
+tive encourages the model to prefer globally coherent and
+evidence-grounded graphs over plausible but unsupported
+alternatives.
+3.2. Problem Definition
+Let O = {oi}N
+i=1 denote the set of detected object instances
+in I. Each object oi is represented by its category ci, bound-
+ing box bi, optional segmentation mask mi, and visual fea-
+ture hi. For each ordered object pair (oi, oj), we aim to pre-
+dict one or more relation phrases r ∈Ropen, where Ropen
+is not restricted to the annotated predicate vocabulary. A
+predicted edge is represented as er
+ij = (oi, r, oj).
+A conventional SGG model estimates p(r | I, oi, oj),
+which mixes three different factors: visual evidence, object
+co-occurrence bias, and language prior. This is especially
+problematic in open-vocabulary SGG, where many rela-
+tion phrases are generated from language space and do not
+have direct supervision. We instead estimate an evidence-
+grounded score
+ˆsr
+ij = Fθ(I, oi, oj, r, Zr
+ij),
+where Zr
+ij denotes the relation-specific evidence supporting
+predicate r. The final score ˆsr
+ij combines semantic compat-
+ibility and counterfactual validity. A relation is accepted
+only when it is both semantically plausible and supported
+by evidence.
+3.3. Causal Formulation of Relation Grounding
+We view relation prediction as a causal problem. For an ob-
+ject pair (oi, oj) and a candidate relation r, let Y r
+ij ∈{0, 1}
+denote whether r truly holds. The prediction may depend
+on three types of variables:
+Y r
+ij = f(Er
+ij, Cij, Lr),
+where Er
+ij denotes relation-specific visual evidence, Cij de-
+notes contextual nuisance variables, and Lr denotes lan-
+guage prior associated with relation phrase r. The evidence
+Figure 1. Overall framework. The method first parses objects and proposes open-vocabulary relations, then models predicate-specific
+evidence and verifies each relation via counterfactual interventions. Graph-level preference optimization finally selects evidence-grounded
+and coherent scene graphs.
+variable Er
+ij contains cues that are necessary for deciding
+relation r, such as contact, support, containment, depth or-
+der, relative motion, or part-state change.
+The nuisance
+variable Cij includes background, dataset bias, object co-
+occurrence, and irrelevant surrounding objects.
+A reliable relation predictor should satisfy two causal
+properties.
+Evidence necessity. If the necessary evidence for a rela-
+tion is removed or contradicted, the relation score should
+decrease:
+Sr
+ij(I) > Sr
+ij(do(Er
+ij = ∅)).
+For example, after removing the supporting table, the score
+of cup on table should decrease.
+Nuisance invariance. If only nuisance factors are changed
+while the relation evidence is preserved, the relation score
+should remain stable:
+Sr
+ij(I) ≈Sr
+ij(do(Cij = C′
+ij)).
+For example, changing the background should not affect the
+relation person holding cup if the hand-object contact re-
+mains unchanged.
+These two properties distinguish evidence-grounded re-
+lation prediction from language-prior hallucination. A hal-
+lucinated relation may have a high factual score, but it will
+not exhibit the correct counterfactual behavior. Our method
+explicitly optimizes this causal behavior during training.
+3.4. Open-Vocabulary Relation Proposal
+The first stage generates high-recall candidate predicates for
+each object pair. We extract object features {hi} and pair-
+wise union features hu
+ij using a visual backbone and an ob-
+ject detector or panoptic segmenter [46–49]. We also com-
+pute spatial features
+gij = [∆x, ∆y, ∆w, ∆h, IoU, dij, ai/aj],
+where ∆x, ∆y, ∆w, ∆h encode relative box geometry, IoU
+measures spatial overlap, dij is normalized center distance,
+and ai/aj is the area ratio. When depth or 3D layout is
+available, we additionally include relative depth, height dif-
+ference, and 3D distance.
+The pair representation is computed as
+pij = ϕp
+ [hi, hj, hu
+ij, gij]
+
+,
+where ϕp is a lightweight transformer or MLP projec-
+tion [50].
+For a relation phrase r, we obtain a text embedding tr
+from a frozen or lightly tuned text encoder [2, 3]. The pro-
+posal score is
+ar
+ij = sim(Wppij, Wttr),
+where sim(·, ·) is cosine similarity. For each object pair, we
+keep the top-K relation candidates:
+Cij = TopKr∈Ropenar
+ij.
+This proposal stage is intentionally permissive. It is ex-
+pected to include noisy and biased candidates, since the fol-
+lowing verifier is designed to reject relations that are not
+evidence-grounded.
+3.5.
+Relation-Type
+Decomposition
+for
+Open-
+Vocabulary Predicates
+A challenge in open-vocabulary SGG is that unseen pred-
+icate phrases may correspond to different evidence types.
+For example, standing on, resting on, and supported by are
+different phrases but require similar support evidence. Con-
+versely, looking at and in front of may involve the same
+objects but depend on different visual cues.
+To handle this, we decompose each relation phrase into
+a soft distribution over evidence types. We define a set of
+relation evidence bases:
+B = {support, contact, containment, depth,
+proximity, part, motion, state, functional}.
+(1)
+Given the text embedding tr, a relation router predicts
+πr = softmax(Wbtr),
+where πr(k) indicates how much relation r depends on evi-
+dence basis k. This design allows unseen predicates to share
+evidence patterns with seen predicates. For example, even
+if resting on is unseen during training, it can still be routed
+to the support and contact evidence bases.
+3.6. Relation-Conditioned Evidence Encoding
+For each candidate edge (oi, r, oj), we construct a set of
+multimodal evidence tokens:
+Zij = {zobj
+i
+, zobj
+j
+, zunion
+ij
+, zmask
+ij
+, zgeo
+ij , zctx
+ij , ztemp
+ij
+}.
+Here, zobj
+i
+and zobj
+j
+encode subject and object appearance;
+zunion
+ij
+encodes the visual content of the union region;
+zmask
+ij
+encodes mask-level overlap and boundary cues; zgeo
+ij
+encodes 2D/3D geometry; zctx
+ij
+encodes surrounding con-
+text; and ztemp
+ij
+encodes temporal evidence when video
+frames are available.
+Since different relations require different evidence, we
+use the relation phrase as a query to extract predicate-
+specific evidence: qr = Wqtr,
+Kij = WkZij,
+Vij =
+WvZij. The relation-conditioned attention is αr
+ij
+=
+softmax
+
+qrK⊤
+ij
+√
+d
+
+, and the relation-specific evidence rep-
+resentation is zr
+ij = P
+z∈Zij αr
+ij(z)V (z).
+To further separate evidence from nuisance context, we
+introduce predicate-conditioned evidence gates:
+γr
+ij
+=
+σ
+ Wγ[pij, tr, zr
+ij]
+
+. The gate γr
+ij controls how much each
+evidence source contributes to the final relation decision.
+Unlike the normalized attention αr
+ij, the gate is not con-
+strained to sum to one and can suppress irrelevant evidence
+sources. The gated evidence representation is
+˜zr
+ij = γr
+ij ⊙zr
+ij.
+The factual relation score is then computed as
+sr
+ij = fθ
+ [pij, ˜zr
+ij, tr, πr]
+
+.
+This score measures whether relation r is compatible with
+the observed object pair before counterfactual verification.
+3.7. Counterfactual Relation Verification
+The core of our method is a counterfactual verifier that tests
+whether a relation prediction depends on its necessary evi-
+dence. For each candidate relation (oi, r, oj), we construct
+two families of counterfactual samples: relation-breaking
+counterfactuals and relation-preserving counterfactuals.
+Relation-breaking counterfactuals. A relation-breaking
+counterfactual removes or contradicts evidence that is nec-
+essary for relation r. Instead of using a single generic per-
+turbation for all predicates, we generate interventions ac-
+cording to the relation-type distribution πr. For each evi-
+dence basis in B, we define a intervention operator:
+T −= {T −
+sup, T −
+con, T −
+in, T −
+dep, T −
+prox, T −
+part, T −
+state, T −
+func}.
+For example, T −
+sup disrupts support cues by perturbing rela-
+tive height or contact regions; T −
+in breaks containment cues
+by masking or shifting the contained object; and T −
+dep swaps
+or corrupts depth ordering.
+The final relation-breaking counterfactual is a soft mix-
+ture of basis-specific interventions:
+Ir,−
+ij
+=
+|B|
+X
+k=1
+πr(k)T −
+k (I, oi, oj).
+In practice, the intervention can be implemented either at
+image level or feature level. Image-level interventions in-
+clude object masking, union-region inpainting, and relation-
+region erasing. Feature-level interventions include replac-
+ing evidence tokens with null tokens, perturbing geometry
+features, or swapping predicate-relevant evidence with hard
+negative pairs. Feature-level interventions are efficient and
+avoid requiring photorealistic image generation.
+Relation-preserving
+counterfactuals.
+A
+relation-
+preserving counterfactual changes nuisance factors while
+preserving the relation evidence. We apply perturbations
+such as background replacement, color jittering, mild crop-
+ping, appearance augmentation, and context token dropout:
+Ir,0
+ij
+= T 0(I, oi, oj). These transformations should not
+change the validity of relation r. They encourage the model
+to become invariant to irrelevant visual variations.
+Counterfactual scoring.
+For the factual scene and two
+counterfactual scenes, we compute
+sr
+ij = Fθ(I, oi, oj, r),
+sr,−
+ij
+= Fθ(Ir,−
+ij , oi, oj, r),
+sr,0
+ij = Fθ(Ir,0
+ij , oi, oj, r).
+The relation-breaking score sr,−
+ij
+should be lower than
+the factual score, while the relation-preserving score sr,0
+ij
+should remain close to it.
+We define the counterfactual validity score as
+qr
+ij = softplus(sr
+ij −sr,−
+ij )
+|
+{z
+}
+evidence necessity
+−λinv |sr
+ij −sr,0
+ij |
+|
+{z
+}
+nuisance sensitivity
+.
+The final evidence-grounded relation score is
+ˆsr
+ij = sr
+ij + λcfqr
+ij.
+Thus, a candidate relation receives a high final score only
+if it is plausible in the factual scene, weakened by relation-
+breaking interventions, and stable under relation-preserving
+perturbations.
+3.8. Training Objectives
+The full training objective combines supervised relation
+learning, open-vocabulary alignment, counterfactual veri-
+fication, contradiction-aware hard negative learning, and
+graph-level preference optimization.
+Supervised relation learning. For annotated predicates,
+we use a multi-label relation classification loss. Since an
+object pair may have multiple valid relations, we adopt bi-
+nary cross-entropy over seen predicates:
+Lsup = −
+X
+i,j
+X
+r∈Rseen
+
+yr
+ij log σ(sr
+ij) + (1 −yr
+ij) log(1 −σ(sr
+ij))
+
+,
+where yr
+ij indicates whether relation r is annotated for pair
+(oi, oj).
+To reduce the dominance of frequent predicates, we op-
+tionally use class-balanced weights: wr =
+1−β
+1−βnr , where
+nr is the number of training samples for predicate r. The
+weighted loss becomes
+Lw
+sup =
+X
+r
+wrLr
+sup.
+Contradiction-aware
+predicate
+learning.
+Open-
+vocabulary
+predicates
+often
+contain
+fine-grained
+or
+contradictory meanings.
+For example, in front of and
+behind may share similar object appearances but require
+opposite depth evidence. We therefore construct a contra-
+diction set A(r) for each predicate r using textual similarity
+and relation-type constraints. For each contradictory predi-
+cate r′ ∈A(r), we enforce sr
+ij > sr′
+ij + mcon, for positive
+relation r. The contradiction loss is
+Lcon =
+X
+r′∈A(r)
+max
+
+0, mcon −sr
+ij + sr′
+ij
+
+.
+This loss improves fine-grained predicate discrimination
+and reduces plausible but visually incorrect predictions.
+Graph-level preference optimization. Edge-level supervi-
+sion does not guarantee that the final scene graph is globally
+coherent. A graph may contain individually plausible edges
+but still be inconsistent, such as predicting both cup on table
+and cup under table. To address this, we introduce graph-
+level preference learning. For each scene, we construct a
+group of candidate graphs:
+G = {G1, G2, . . . , GM}.
+These graphs are produced by different sources: the raw
+relation proposer, the evidence verifier, predicate perturba-
+tion, geometry corruption, and counterfactual edge removal.
+Each graph is assigned a reward:
+R(G) = Rrel(G)+βgeoRgeo(G)+βcfRcf(G)+βconsRcons(G).
+Here, Rrel measures agreement with annotated triplets,
+Rgeo measures geometric validity, Rcf measures coun-
+terfactual validity, and Rcons measures graph-level con-
+sistency.
+The score of a predicted graph is Sθ(G) =
+P
+(i,r,j)∈G ˆsr
+ij. For two candidate graphs Ga and Gb, if
+R(Ga) > R(Gb), we optimize the ranking loss:
+Lrank = −log σ
+ Sθ(Ga) −Sθ(Gb)
+
+.
+To better exploit multiple candidates, we also use a
+group-relative objective. Let ¯R =
+1
+M
+PM
+m=1 R(Gm) be the
+group-level average reward. The advantage of graph Gm is
+Am = R(Gm) −¯R. The group-relative loss is
+Lgrp = −
+M
+X
+m=1
+Am log
+exp(Sθ(Gm)/τg)
+PM
+n=1 exp(Sθ(Gn)/τg)
+.
+This objective encourages the model to assign higher prob-
+ability to graphs that are better than other candidates from
+the same scene, rather than relying on absolute reward cali-
+bration across different scenes.
+Overall objective. The final training objective is
+Ltotal = Lw
+sup + λconLcon + λrankLrank + λgrpLgrp.
+The supervised and alignment losses teach the model
+to recognize seen and unseen relation phrases. The coun-
+terfactual loss enforces evidence grounding. The contra-
+diction loss improves fine-grained predicate discrimination.
+The evidence regularization improves interpretability. The
+graph-level losses encourage global consistency and sup-
+press plausible but unsupported graphs.
+3.9. Inference
+During inference, we first detect object instances and ex-
+tract object, pairwise, geometric, and optional temporal fea-
+tures. For each object pair, the relation proposer retrieves
+top-K candidate predicates from the open-vocabulary pred-
+icate pool. The evidence encoder then computes relation-
+conditioned evidence representations for these candidates.
+Counterfactual verification is applied only to the top-K can-
+didates, which keeps inference efficient.
+The final edge score is ˆsr
+ij = sr
+ij + λcfqr
+ij. We retain
+relation edges whose scores exceed a threshold δ or keep
+the top-ranked triplets:
+E = {(oi, r, oj) | ˆsr
+ij > δ}.
+For each retained edge, the model outputs not only the
+predicate phrase but also its evidence trace, including the
+selected evidence tokens, evidence gates, and counterfac-
+tual validity score. Therefore, the generated scene graph is
+open-vocabulary, interpretable, and evidence-grounded.
+3.10. Why Counterfactual Verification Improves
+Open-Vocabulary SGG
+The proposed method improves open-vocabulary SGG from
+both representation and learning perspectives.
+From the
+representation perspective, relation prediction is no longer
+based on a single pair feature. Instead, each predicate is
+associated with relation-specific evidence. This allows se-
+mantically different predicates to attend to different visual
+and geometric cues.
+From the learning perspective, the
+model is not only trained to match annotated labels, but also
+trained to satisfy causal constraints. A valid relation should
+disappear when its necessary evidence is removed and re-
+main stable when irrelevant factors change.
+This
+formulation
+is
+particularly
+useful
+for
+open-
+vocabulary relations.
+Since unseen predicates may have
+limited or no direct supervision, their reliability cannot be
+guaranteed by classification loss alone [14, 37, 38]. By rout-
+ing unseen predicates to shared evidence bases and verify-
+ing them through counterfactual interventions, the model
+can generalize from seen relation names to unseen relation
+concepts. As a result, the model learns not merely to gener-
+ate plausible relation phrases, but to produce scene graphs
+whose edges are grounded in observable evidence.
+4. Experiments
+4.1. Experimental Setup
+Datasets.
+We evaluate our method on three representa-
+tive benchmarks covering conventional, open-vocabulary,
+and panoptic scene graph generation. First, we use Visual
+Genome with the widely adopted VG150 split, which con-
+tains 150 object categories and 50 predicate categories [6,
+7, 25]. Following common practice, we report results under
+three settings: Predicate Classification (PredCls), Scene
+Graph Classification (SGCls), and Scene Graph Detection
+(SGDet). Second, to evaluate open-vocabulary generaliza-
+tion, we construct an OV-VG split by dividing predicates
+into seen and unseen categories. Specifically, 35 frequent
+predicates are used for training, while 15 rare and seman-
+tically diverse predicates are held out for open-vocabulary
+evaluation. Third, we evaluate panoptic scene graph genera-
+tion on PSG, where object instances are represented by seg-
+mentation masks rather than bounding boxes [15, 39, 40].
+This benchmark allows us to examine whether evidence
+grounding remains effective when relation prediction re-
+quires finer region-level understanding.
+Evaluation metrics.
+For conventional SGG, we report
+Recall@K (R@K) and mean Recall@K (mR@K) with
+K ∈{20, 50, 100} [6, 7, 26]. Since R@K is biased to-
+ward frequent predicates, mR@K is used as the primary
+metric. For open-vocabulary SGG, we report seen mean re-
+call (S-mR@K), unseen mean recall (U-mR@K), and their
+harmonic mean (HM@K). For panoptic SGG, we report
+panoptic relation recall (PR@K) and panoptic mean recall
+(PmR@K).
+To evaluate whether predicted relations are visually
+grounded, we further introduce three evidence-oriented
+metrics. CF-Acc measures whether a relation score changes
+correctly under relation-breaking counterfactual interven-
+tions. Inv-Stab measures whether relation scores remain
+stable under relation-preserving perturbations. Hallu-Rate
+measures the percentage of high-confidence predictions that
+are contradicted by counterfactual verification, where lower
+is better.
+Implementation details. We use a Faster R-CNN detector
+with a ResNeXt-101-FPN backbone for VG150 and OV-
+VG [46–48]. For PSG, we use a Mask2Former panoptic
+segmenter to obtain object masks [49]. The visual backbone
+is initialized from ImageNet-pretrained weights. The text
+encoder is initialized from CLIP ViT-B/16 and kept frozen
+unless otherwise stated [2]. The dimension of relation fea-
+tures is set to 512. For each object pair, we retrieve the top
+K = 10 relation candidates from the open-vocabulary pred-
+icate pool. The number of graph candidates for graph-level
+preference learning is set to M = 5. The model is trained
+with AdamW [51] using an initial learning rate of 1×10−4,
+weight decay 1 × 10−4, and batch size 12. All experiments
+are conducted on 1 NVIDIA A100 GPUs.
+4.2. Comparison with State-of-the-Art Methods on
+VG150
+Table 1 compares our method with representative SGG
+methods on VG150. We report results under PredCls, SG-
+Cls, and SGDet.
+Our method consistently outperforms
+previous approaches, especially on mR@K, which indi-
+cates stronger recognition of rare and long-tail predicates.
+Compared with strong recent methods such as PE-Net
+and LLM4SGG, our method improves SGDet mR@50 by
+2.7 and 2.1 points, respectively.
+This demonstrates that
+evidence-grounded verification is complementary to seman-
+tic relation modeling and provides more reliable relation
+predictions.
+Analysis. The improvement is more significant on mR@K
+than on R@K. This is expected because frequent relations
+can often be predicted from object co-occurrence alone,
+while rare relations require more precise evidence. By ex-
+plicitly verifying whether a relation depends on its support-
+ing visual and geometric cues, our method suppresses fre-
+quent but weakly grounded predictions and improves rare
+predicate recognition.
+4.3. Open-Vocabulary Scene Graph Generation
+We next evaluate open-vocabulary generalization on OV-
+VG. Table 2 reports results on seen and unseen predicates.
+Our method achieves the best harmonic mean, showing that
+it improves unseen predicate recognition without sacrific-
+ing seen predicate performance. In particular, our method
+improves U-mR@50 from 12.8 to 17.6 over the baseline, in-
+dicating that relation-specific evidence decomposition helps
+transfer knowledge from seen to unseen predicates.
+Why does our method generalize better?
+Most open-
+vocabulary baselines rely primarily on visual-textual sim-
+ilarity [2, 14, 36–38]. Such similarity is useful for semantic
+expansion but insufficient for fine-grained relation discrimi-
+nation. For example, standing on, resting on, and supported
+by are linguistically different but share similar support evi-
+dence. Our relation-type decomposition allows these predi-
+cates to share evidence bases, while counterfactual verifica-
+tion filters out relations that are semantically plausible but
+visually unsupported.
+4.4. Results on Panoptic Scene Graph Generation
+Table 3 reports results on PSG. Compared with box-based
+SGG, panoptic SGG requires more accurate grounding be-
+cause relations are associated with segmentation masks.
+Our method again achieves the best performance, improv-
+ing PmR@50 by 2.9 points over the strongest baseline. This
+confirms that evidence grounding is beneficial not only for
+bounding-box relations but also for mask-level relation un-
+derstanding.
+4.5. Counterfactual Grounding Evaluation
+Standard recall-based metrics cannot determine whether a
+predicted relation is supported by actual scene evidence.
+We therefore evaluate counterfactual grounding in Table 4.
+For each predicted triplet, we construct relation-breaking
+and relation-preserving counterfactuals. A grounded model
+should reduce confidence under relation-breaking inter-
+ventions and maintain stable confidence under relation-
+preserving perturbations.
+Analysis. The gap between our method and previous ap-
+proaches is larger on counterfactual metrics than on stan-
+dard recall metrics. This suggests that many existing mod-
+els can predict correct-looking triplets but fail to identify
+whether the relation is actually grounded. In contrast, our
+counterfactual verifier explicitly trains the model to reduce
+relation confidence when necessary evidence is removed,
+leading to a much lower hallucination rate.
+4.6. Ablation Study
+We conduct ablation studies on OV-VG under the SGDet
+setting. Table 5 evaluates the contribution of each com-
+ponent. Starting from a CLIP-based open-vocabulary rela-
+tion proposer, adding relation-type decomposition improves
+U-mR@50 by 1.9 points.
+Adding relation-conditioned
+evidence encoding further improves the performance by
+2.1 points. Counterfactual relation verification brings the
+largest gain, improving U-mR@50 from 13.6 to 16.5. Fi-
+nally, contradiction-aware learning and graph-level prefer-
+ence optimization further improve both unseen recall and
+counterfactual grounding.
+Effect of counterfactual verification. CRV contributes the
+largest improvement in both U-mR and CF-Acc. This in-
+dicates that unseen predicates benefit from evidence-level
+verification, since many unseen relations can be recognized
+through shared visual-geometric evidence even without di-
+rect annotation.
+Effect of graph-level preference optimization. GPO im-
+proves HM@50 from 21.4 to 21.9 and reduces Hallu-Rate
+from 13.8 to 12.8.
+This shows that graph-level learning
+helps suppress globally inconsistent relation sets, such as
+simultaneously predicting contradictory spatial predicates.
+4.7. Analysis of Relation Categories
+To better understand where the gains come from, we group
+predicates into five relation types: geometric, contact, con-
+tainment, action, and functional relations. Table 6 reports
+mR@50 on OV-VG. Our method improves all categories
+and obtains particularly large gains on contact, containment,
+and functional relations. These relations depend heavily on
+concrete visual or geometric evidence, making them well
+suited to counterfactual verification.
+4.8. Sensitivity to the Number of Candidate Rela-
+tions
+Table 7 studies the influence of the number of candidate
+predicates K. When K is too small, the correct relation may
+not be included in the proposal set. Increasing K improves
+recall, but too large a candidate set introduces noisy relation
+phrases and increases computation. We use K = 10 as
+Table 1. Comparison with state-of-the-art methods on VG150. R@K and mR@K are reported for PredCls, SGCls, and SGDet. Our method
+achieves the best performance across all three settings, with particularly strong gains on mean recall.
+Method
+PredCls
+PredCls
+SGCls
+SGCls
+SGDet
+SGDet
+R@50
+R@100
+mR@50
+mR@100
+R@50
+R@100
+mR@50
+mR@100
+R@50
+R@100
+mR@50
+mR@100
+Motifs [6]
+65.2
+67.1
+14.6
+15.8
+35.8
+36.5
+7.9
+8.5
+27.4
+30.3
+6.5
+7.3
+VCTree [52]
+66.4
+68.1
+16.1
+17.5
+38.1
+39.2
+8.8
+9.6
+28.7
+31.9
+7.4
+8.2
+Transformer [50]
+67.9
+69.5
+17.4
+18.7
+39.3
+40.1
+9.6
+10.4
+29.5
+32.4
+8.1
+8.9
+BGNN [34]
+68.7
+70.4
+20.2
+22.0
+40.5
+41.6
+12.3
+13.5
+31.0
+34.1
+10.7
+11.8
+PE-Net [33]
+69.8
+71.6
+23.1
+25.0
+41.7
+42.9
+14.2
+15.4
+32.4
+35.5
+12.6
+13.8
+LLM4SGG [13]
+70.5
+72.1
+24.0
+25.8
+42.3
+43.5
+14.8
+16.1
+33.1
+36.3
+13.2
+14.4
+Pix2Graphs [14]
+71.1
+72.8
+24.6
+26.5
+43.0
+44.2
+15.3
+16.7
+33.6
+36.8
+13.6
+14.9
+Ours
+73.4
+75.1
+28.5
+30.3
+45.6
+46.9
+18.9
+20.5
+35.8
+39.1
+15.9
+17.4
+Table 2. Open-vocabulary SGG results on OV-VG. S-mR and U-
+mR denote mean recall on seen and unseen predicates, respec-
+tively. HM denotes their harmonic mean. Our method obtains
+the best unseen predicate performance and the best seen-unseen
+balance.
+Method
+@50
+@100
+S-mR
+U-mR
+HM
+S-mR
+U-mR
+HM
+CLIP-ZS
+18.3
+7.4
+10.5
+19.8
+8.2
+11.6
+OV-SGG [36]
+22.6
+9.8
+13.7
+24.1
+10.9
+15.0
+Pix2Graphs [14]
+24.9
+11.5
+15.7
+26.5
+12.6
+17.0
+OpenPSG [15]
+25.7
+12.1
+16.5
+27.3
+13.3
+17.9
+VL-IRM [38]
+26.4
+12.8
+17.2
+28.1
+14.0
+18.7
+Ours
+28.9
+17.6
+21.9
+30.7
+19.1
+23.5
+Table 3. Panoptic scene graph generation results on PSG. Our
+method improves both panoptic recall and mean recall, show-
+ing the effectiveness of evidence-grounded verification for region-
+level relation prediction.
+Method
+PR@50
+PR@100
+PmR@50
+PmR@100
+PSGTR [39]
+31.8
+36.5
+13.4
+15.1
+Pair-Net [40]
+34.2
+39.0
+15.7
+17.6
+OpenPSG [15]
+36.7
+41.2
+17.5
+19.4
+Pix2Graphs [14]
+37.4
+42.0
+18.1
+20.2
+Ours
+40.6
+45.3
+21.0
+23.4
+Table 4. Counterfactual grounding evaluation. CF-Acc and Inv-
+Stab are higher better, while Hallu-Rate is lower better.
+Our
+method substantially improves counterfactual sensitivity and re-
+duces hallucinated high-confidence relations.
+Method
+CF-Acc↑
+Inv-Stab↑
+Hallu-Rate↓
+Motifs [6]
+54.8
+71.2
+28.6
+PE-Net [33]
+59.5
+73.4
+24.1
+Pix2Graphs [14]
+61.7
+75.8
+22.5
+VL-IRM [38]
+63.4
+76.9
+20.7
+Ours
+74.9
+83.5
+12.8
+the default because it provides the best trade-off between
+performance and efficiency.
+4.9. Effect of Different Counterfactual Interven-
+tions
+Table 8 compares different relation-breaking counterfactual
+interventions.
+Generic object masking already improves
+grounding, but relation-aware interventions perform bet-
+ter. Combining image-level and feature-level interventions
+achieves the best performance, indicating that the two types
+of counterfactuals provide complementary supervision.
+4.10. Robustness to Language-Prior Bias
+To evaluate whether models rely on language priors, we
+construct a biased test split where object pairs are com-
+mon but relations are uncommon or visually contradictory.
+For example, person–horse pairs are not always riding, and
+cup–table pairs are not always on. Table 9 shows that our
+method is substantially more robust to such cases. The im-
+provement suggests that counterfactual verification can sup-
+press co-occurrence-driven predictions [6, 7, 22, 23, 26].
+4.11. Efficiency Analysis
+Table 10 reports the computational cost under the SGDet
+setting on VG150. Although our method introduces coun-
+terfactual verification, it remains efficient because verifi-
+cation is only applied to the top-K candidate predicates.
+Compared with Pix2Graphs, our method introduces mod-
+erate overhead but achieves much better mean recall and
+grounding accuracy.
+5. Conclusion
+In this paper, we propose an evidence-grounded framework
+for open-vocabulary scene graph generation.
+Instead of
+directly accepting plausible relation phrases from vision-
+language priors, our method verifies whether each rela-
+tion is supported by visual, geometric, and contextual ev-
+idence through counterfactual interventions. By combining
+relation-conditioned evidence encoding, counterfactual re-
+lation verification, and graph-level preference optimization,
+Table 5. Ablation study on OV-VG under the SGDet setting. RTD: relation-type decomposition. RCEE: relation-conditioned evidence
+encoding. CRV: counterfactual relation verification. CAP: contradiction-aware predicate learning. GPO: graph-level preference optimiza-
+tion.
+Variant
+RTD
+RCEE
+CRV
+CAP
+GPO
+S-mR@50
+U-mR@50
+HM@50
+CF-Acc
+Inv-Stab
+Hallu-Rate
+Baseline proposer
+–
+–
+–
+–
+–
+24.1
+9.6
+13.7
+58.2
+72.5
+25.9
++ RTD
+✓
+–
+–
+–
+–
+25.3
+11.5
+15.8
+60.4
+73.1
+24.6
++ RCEE
+✓
+✓
+–
+–
+–
+26.7
+13.6
+18.0
+64.8
+76.4
+21.8
++ CRV
+✓
+✓
+✓
+–
+–
+27.8
+16.5
+20.7
+72.3
+82.1
+14.9
++ CAP
+✓
+✓
+✓
+✓
+–
+28.4
+17.1
+21.4
+73.5
+82.6
+13.8
+Full model
+✓
+✓
+✓
+✓
+✓
+28.9
+17.6
+21.9
+74.9
+83.5
+12.8
+Table 6. Per-category mR@50 on OV-VG. Our method brings
+consistent improvements across relation types, especially for
+evidence-sensitive predicates.
+Method
+Geometric
+Contact
+Containment
+Action
+Functional
+Pix2Graphs [14]
+16.4
+13.8
+12.5
+15.1
+10.7
+VL-IRM [38]
+17.2
+14.6
+13.1
+15.9
+11.5
+Ours
+20.5
+19.2
+18.7
+18.4
+16.9
+Table 7. Sensitivity to the number of candidate predicates K on
+OV-VG. We use K = 10 by default.
+K
+S-mR@50
+U-mR@50
+HM@50
+FPS
+3
+26.1
+14.2
+18.4
+10.8
+5
+27.5
+16.1
+20.3
+9.6
+10
+28.9
+17.6
+21.9
+8.1
+15
+28.8
+17.5
+21.8
+6.5
+20
+28.6
+17.3
+21.6
+5.2
+Table 8. Effect of different counterfactual interventions on OV-
+VG. Relation-aware interventions are more effective than generic
+perturbations.
+Counterfactual intervention
+U-mR@50
+CF-Acc
+Hallu-Rate↓
+None
+13.6
+64.8
+21.8
+Subject/object masking
+15.2
+68.7
+18.4
+Union-region erasing
+15.6
+69.5
+17.6
+Geometry perturbation
+16.1
+71.4
+16.2
+Feature-level evidence replacement
+16.4
+72.0
+15.4
+Relation-aware mixture
+17.6
+74.9
+12.8
+the proposed method reduces language-prior hallucination
+and improves the reliability of generated scene graphs. Ex-
+periments on conventional, open-vocabulary, and panoptic
+SGG benchmarks demonstrate consistent gains, especially
+for rare and unseen predicates. We hope this work encour-
+ages future SGG research to move from relation generation
+toward trustworthy relation verification.
+References
+[1] T. He, L. Gao, J. Song, and Y.-F. Li. State-aware composi-
+tional learning toward unbiased training for scene graph gen-
+Table 9. Robustness under language-prior bias. Bias-Acc mea-
+sures relation accuracy on common object pairs with uncom-
+mon or contradictory relations. Lower Hallu-Rate indicates fewer
+language-prior hallucinations.
+Method
+Bias-Acc↑
+U-mR@50↑
+Hallu-Rate↓
+Motifs [6]
+41.7
+5.3
+34.5
+PE-Net [33]
+48.9
+8.7
+27.1
+Pix2Graphs [14]
+52.6
+11.5
+23.4
+VL-IRM [38]
+54.1
+12.8
+21.2
+Ours
+63.8
+17.6
+12.8
+Table 10. Efficiency comparison on VG150 under the SGDet set-
+ting. Runtime is measured on one NVIDIA A100 GPU with batch
+size 1.
+Method
+Params
+FPS
+mR@50
+CF-Acc
+Motifs [6]
+48M
+14.6
+6.5
+54.8
+PE-Net [33]
+72M
+11.3
+12.6
+59.5
+Pix2Graphs [14]
+118M
+8.9
+13.6
+61.7
+VL-IRM [38]
+126M
+7.8
+14.2
+63.4
+Ours
+132M
+8.1
+15.9
+74.9
+eration. IEEE Transactions on Image Processing, 32:43–56,
+2022. 1
+[2] Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya
+Ramesh, Gabriel Goh, Sandhini Agarwal, Girish Sastry,
+Amanda Askell, Pamela Mishkin, Jack Clark, Gretchen
+Krueger, and Ilya Sutskever.
+Learning transferable vi-
+sual models from natural language supervision.
+In Inter-
+national Conference on Machine Learning (ICML), pages
+8748–8763, 2021. 1, 3, 5, 8, 9
+[3] Junnan Li, Dongxu Li, Caiming Xiong, and Steven C. H.
+Hoi. BLIP: Bootstrapping language-image pre-training for
+unified vision-language understanding and generation. In In-
+ternational Conference on Machine Learning (ICML), pages
+12888–12900, 2022. 1, 2, 3, 5
+[4] T. He, L. Gao, J. Song, and Y.-F. Li.
+Towards open-
+vocabulary scene graph generation with prompt-based fine-
+tuning. In European Conference on Computer Vision, 2022.
+1
+[5] X.
+Hu,
+K.
+Qin,
+G.
+Duan,
+M.
+Li,
+Y.-F.
+Li,
+and
+T. He. Spade: Spatial-aware denoising network for open-
+vocabulary panoptic scene graph generation with long-
+and local-range context reasoning.
+In Proceedings of the
+IEEE/CVF International Conference on Computer Vision,
+2025. 1
+[6] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin
+Choi. Neural motifs: Scene graph parsing with global con-
+text. In Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition (CVPR), pages 5831–5840,
+2018. 1, 3, 8, 10, 11
+[7] Kaihua Tang, Yulei Niu, Jianqiang Huang, Jiaxin Shi, and
+Hanwang Zhang. Unbiased scene graph generation from bi-
+ased training. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition (CVPR), pages
+3716–3725, 2020. 1, 3, 4, 8, 10
+[8] Jingkang Yang, Wenxuan Peng, Xiangtai Li, Zujin Guo,
+Liangyu Chen, Bo Li, Zheng Ma, Kaiyang Zhou, Wayne
+Zhang, Chen Change Loy, and Ziwei Liu. Panoptic video
+scene graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+(CVPR), pages 18675–18685, 2023. 2, 3
+[9] Iro Armeni, Zhi-Yang He, JunYoung Gwak, Amir R. Za-
+mir, Martin Fischer, Jitendra Malik, and Silvio Savarese. 3D
+scene graph: A structure for unified semantics, 3D space,
+and camera. In Proceedings of the IEEE/CVF International
+Conference on Computer Vision (ICCV), pages 5664–5673,
+2019. 3
+[10] Yuanchen Ju, Yongyuan Liang, Yen-Jen Wang, Nandiraju
+Gireesh, Yuanliang Ju, Seungjae Lee, Qiao Gu, Elvis Hsieh,
+Furong Huang, and Koushil Sreenath. MomaGraph: State-
+aware unified scene graphs with vision-language models for
+embodied task planning.
+In International Conference on
+Learning Representations (ICLR), 2026. 2, 3
+[11] T. He, L. Gao, J. Song, J. Cai, and Y.-F. Li. Learning from the
+scene and borrowing from the rich: Tackling the long tail in
+scene graph generation. In Proceedings of the International
+Joint Conference on Artificial Intelligence, 2020. 2
+[12] T. He, L. Gao, J. Song, J. Cai, and Y.-F. Li. Semantic compo-
+sitional learning for low-shot scene graph generation. arXiv
+preprint arXiv:2108.08600, 2021. 2
+[13] Kibum Kim, Kanghoon Yoon, Jaehyeong Jeon, Yeonjun
+In, Jinyoung Moon, Donghyun Kim, and Chanyoung Park.
+LLM4SGG: Large language models for weakly supervised
+scene graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+(CVPR), pages 28306–28316, 2024. 2, 10
+[14] Rongjie Li, Songyang Zhang, Dahua Lin, Kai Chen, and
+Xuming He. From pixels to graphs: Open-vocabulary scene
+graph generation with vision-language models. In Proceed-
+ings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), pages 28076–28086, 2024. 3,
+8, 9, 10, 11
+[15] Zijian Zhou, Zheng Zhu, Holger Caesar, and Miaojing Shi.
+OpenPSG: Open-set panoptic scene graph generation via
+large multimodal models. In European Conference on Com-
+puter Vision (ECCV), 2024. 2, 3, 8, 10
+[16] Judea Pearl. Causality: Models, Reasoning, and Inference.
+Cambridge University Press, 2 edition, 2009. 2, 4
+[17] Yash Goyal, Ziyan Wu, Jan Ernst, Dhruv Batra, Devi Parikh,
+and Stefan Lee. Counterfactual visual explanations. In In-
+ternational Conference on Machine Learning (ICML), pages
+2376–2384, 2019. 4
+[18] Long Chen, Xin Yan, Jun Xiao, Hanwang Zhang, Shiliang
+Pu, and Yueting Zhuang. Counterfactual samples synthesiz-
+ing for robust visual question answering. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 10800–10809, 2020.
+[19] Xu Yang, Hanwang Zhang, Guojun Qi, and Jianfei Cai.
+Causal attention for vision-language tasks. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition (CVPR), pages 9847–9857, 2021. 4
+[20] W. Yin, Y. Wang, G. Duan, D. Zhang, X. Hu, Y.-F. Li,
+and T. He. Knowledge-aligned counterfactual-enhancement
+diffusion perception for unsupervised cross-domain visual
+emotion recognition. In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition, pages
+3888–3898, 2025. 2
+[21] Daniel Honerkamp, Martin Buechner, Fabien Despinoy, Tim
+Welschehold, and Abhinav Valada. Language-grounded dy-
+namic scene graphs for interactive object search with mobile
+manipulation. arXiv preprint arXiv:2403.08605, 2024. 2, 3
+[22] Aishwarya Agrawal, Dhruv Batra, Devi Parikh, and Anirud-
+dha Kembhavi. Don’t just assume; look and answer: Over-
+coming priors for visual question answering. In Proceed-
+ings of the IEEE Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 4971–4980, 2018. 2, 4, 10
+[23] Yulei Niu, Kaihua Tang, Hanwang Zhang, Zhiwu Lu, Xian-
+Sheng Hua, and Ji-Rong Wen.
+Counterfactual VQA: A
+cause-effect look at language bias.
+In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 12700–12710, 2021. 2, 4, 10
+[24] Justin Johnson, Ranjay Krishna, Michael Stark, Li-Jia Li,
+David A. Shamma, Michael S. Bernstein, and Li Fei-Fei.
+Image retrieval using scene graphs. In Proceedings of the
+IEEE Conference on Computer Vision and Pattern Recogni-
+tion (CVPR), pages 3668–3678, 2015. 3
+[25] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A. Shamma, Michael S. Bernstein, and
+Li Fei-Fei. Visual genome: Connecting language and vision
+using crowdsourced dense image annotations. International
+Journal of Computer Vision, 123(1):32–73, 2017. 3, 8
+[26] Cewu Lu, Ranjay Krishna, Michael Bernstein, and Li Fei-
+Fei. Visual relationship detection with language priors. In
+European Conference on Computer Vision (ECCV), pages
+852–869, 2016. 3, 8, 10
+[27] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi
+Parikh. Graph R-CNN for scene graph generation. In Euro-
+pean Conference on Computer Vision (ECCV), pages 670–
+685, 2018. 3
+[28] Danfei Xu, Yuke Zhu, Christopher B. Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing. In Pro-
+ceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition (CVPR), pages 5410–5419, 2017. 3
+[29] Yikang Li, Wanli Ouyang, Bolei Zhou, Kun Wang, and Xi-
+aogang Wang. Scene graph generation from objects, phrases
+and region captions. In Proceedings of the IEEE Interna-
+tional Conference on Computer Vision (ICCV), pages 1261–
+1270, 2017.
+[30] Tianshui Chen, Weihao Yu, Riquan Chen, and Liang Lin.
+Knowledge-embedded routing network for scene graph gen-
+eration.
+In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition (CVPR), pages
+6163–6171, 2019.
+[31] Rongjie Li, Songyang Zhang, and Xuming He. SGTR: End-
+to-end scene graph generation with transformer. In Proceed-
+ings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), pages 19486–19496, 2022. 3
+[32] Xinyu Lyu, Lianli Gao, Yuyu Guo, Zhou Zhao, Heng
+Tao Shen Huang, and Jingkuan Song. Fine-grained predi-
+cates learning for scene graph generation. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 19467–19475, 2022. 3
+[33] Chaofan Zheng, Xinyu Lyu, Lianli Gao, Bo Dai, and
+Jingkuan Song.
+Prototype-based embedding network for
+scene graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+(CVPR), pages 22783–22792, 2023. 3, 10, 11
+[34] Rongjie Li, Songyang Zhang, Bo Wan, and Xuming He.
+Bipartite graph network with adaptive message passing for
+unbiased scene graph generation.
+In Proceedings of the
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 11109–11119, 2021. 3, 10
+[35] Chao Jia, Yinfei Yang, Ye Xia, Yi-Ting Chen, Zarana Parekh,
+Hieu Pham, Quoc V. Le, Yun-Hsuan Sung, Zhen Li, and Tom
+Duerig. Scaling up visual and vision-language representation
+learning with noisy text supervision. In International Con-
+ference on Machine Learning (ICML), pages 4904–4916,
+2021. 3
+[36] Tao He, Lianli Gao, Jingkuan Song, and Yuan-Fang Li. To-
+wards open-vocabulary scene graph generation with prompt-
+based finetuning. In European Conference on Computer Vi-
+sion (ECCV), pages 56–73, 2022. 3, 9, 10
+[37] Zuyao Chen, Jinlin Wu, Zhen Lei, Zhaoxiang Zhang, and
+Changwen Chen. Expanding scene graph boundaries: Fully
+open-vocabulary scene graph generation via visual-concept
+alignment and retention. In European Conference on Com-
+puter Vision (ECCV), pages 108–124, 2024. 8
+[38] Yukuan Min, Muli Yang, Jinhao Zhang, Yuxuan Wang, Am-
+ing Wu, and Cheng Deng. Vision-language interactive rela-
+tion mining for open-vocabulary scene graph generation. In
+Proceedings of the IEEE/CVF International Conference on
+Computer Vision (ICCV), 2025. 3, 8, 9, 10, 11
+[39] Jingkang Yang, Yi Zhe Ang, Zujin Guo, Kaiyang Zhou,
+Wayne Zhang, and Ziwei Liu. Panoptic scene graph genera-
+tion. In European Conference on Computer Vision (ECCV),
+pages 178–196, 2022. 3, 8, 10
+[40] Jinghao Wang, Zhengyu Wen, Xiangtai Li, Zujin Guo,
+Jingkang Yang, and Ziwei Liu.
+Pair then relation: Pair-
+net for panoptic scene graph generation. IEEE Transactions
+on Pattern Analysis and Machine Intelligence, 2024. doi:
+10.1109/TPAMI.2024.3442301. 8, 10
+[41] Jingwei Ji, Ranjay Krishna, Li Fei-Fei, and Juan Carlos
+Niebles. Action genome: Actions as compositions of spatio-
+temporal scene graphs.
+In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition
+(CVPR), pages 10236–10247, 2020.
+[42] Shuo Chen, Yingjun Du, Pascal Mettes, and Cees G. M.
+Snoek. Multi-label meta weighting for long-tailed dynamic
+scene graph generation. arXiv preprint arXiv:2306.10122,
+2023. 3
+[43] Sebastian Koch, Narunas Vaskevicius, Mirco Colosi, Pe-
+dro Hermosilla, and Timo Ropinski.
+Open3DSG: Open-
+vocabulary 3D scene graphs from point clouds with
+queryable objects and open-set relationships. In Proceed-
+ings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), pages 14183–14193, 2024. 3
+[44] Dennis Rotondi, Fabio Scaparro, Hermann Blum, and Kai O.
+Arras.
+FunGraph: Functionality-aware 3D scene graphs
+for language-prompted scene interaction. In Proceedings of
+the IEEE/RSJ International Conference on Intelligent Robots
+and Systems (IROS), 2025. 3
+[45] Ehsan
+Abbasnejad,
+Damien
+Teney,
+Amin
+Parvaneh,
+Javen Qinfeng Shi, and Anton van den Hengel. Counter-
+factual vision and language learning.
+In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition (CVPR), pages 10044–10054, 2020. 4
+[46] Shaoqing Ren, Kaiming He, Ross Girshick, and Jian Sun.
+Faster R-CNN: Towards real-time object detection with re-
+gion proposal networks. In Advances in Neural Information
+Processing Systems (NeurIPS), volume 28, 2015. 5, 8
+[47] Saining Xie, Ross Girshick, Piotr Doll´ar, Zhuowen Tu, and
+Kaiming He. Aggregated residual transformations for deep
+neural networks.
+In Proceedings of the IEEE Conference
+on Computer Vision and Pattern Recognition (CVPR), pages
+1492–1500, 2017.
+[48] Tsung-Yi Lin, Piotr Doll´ar, Ross Girshick, Kaiming He,
+Bharath Hariharan, and Serge Belongie.
+Feature pyramid
+networks for object detection. In Proceedings of the IEEE
+Conference on Computer Vision and Pattern Recognition
+(CVPR), pages 2117–2125, 2017. 8
+[49] Bowen Cheng, Ishan Misra, Alexander G. Schwing, Alexan-
+der Kirillov, and Rohit Girdhar.
+Masked-attention mask
+transformer for universal image segmentation. In Proceed-
+ings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition (CVPR), pages 1290–1299, 2022. 5, 8
+[50] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszko-
+reit, Llion Jones, Aidan N. Gomez, Łukasz Kaiser, and Illia
+Polosukhin. Attention is all you need. In Advances in Neu-
+ral Information Processing Systems (NeurIPS), pages 5998–
+6008, 2017. 5, 10
+[51] Ilya Loshchilov and Frank Hutter.
+Decoupled weight de-
+cay regularization. In International Conference on Learning
+Representations (ICLR), 2019. 8
+[52] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan Luo,
+and Wei Liu. Learning to compose dynamic tree structures
+for visual contexts. In Proceedings of the IEEE/CVF Confer-
+ence on Computer Vision and Pattern Recognition (CVPR),
+pages 6619–6628, 2019. 10

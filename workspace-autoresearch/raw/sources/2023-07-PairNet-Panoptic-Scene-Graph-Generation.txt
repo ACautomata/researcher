@@ -1,0 +1,1940 @@
+4
+2
+0
+2
+
+g
+u
+A
+9
+
+]
+
+V
+C
+.
+s
+c
+[
+
+3
+v
+9
+9
+6
+8
+0
+.
+7
+0
+3
+2
+:
+v
+i
+X
+r
+a
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE, VOL. X, NO. X, X
+
+1
+
+Pair then Relation: Pair-Net for
+Panoptic Scene Graph Generation
+
+Jinghao Wang∗, Zhengyu Wen∗, Xiangtai Li, Zujin Guo, Jingkang Yang, Ziwei Liu (cid:0)
+
+Abstract—Panoptic Scene Graph (PSG) is a challenging task in Scene Graph Generation (SGG) that aims to create a more
+comprehensive scene graph representation using panoptic segmentation instead of boxes. Compared to SGG, PSG has several
+challenging problems: pixel-level segment outputs and full relationship exploration (It also considers thing and stuff relation). Thus,
+current PSG methods have limited performance, which hinders downstream tasks or applications. This work aims to design a novel
+and strong baseline for PSG. To achieve that, we first conduct an in-depth analysis to identify the bottleneck of the current PSG
+models, finding that inter-object pair-wise recall is a crucial factor that was ignored by previous PSG methods. Based on this and the
+recent query-based frameworks, we present a novel framework: Pair then Relation (Pair-Net), which uses a Pair Proposal Network
+(PPN) to learn and filter sparse pair-wise relationships between subjects and objects. Moreover, we also observed the sparse nature of
+object pairs for both. Motivated by this, we design a lightweight Matrix Learner within the PPN, which directly learns pair-wised
+relationships for pair proposal generation. Through extensive ablation and analysis, our approach significantly improves upon
+leveraging the segmenter solid baseline. Notably, our method achieves over 10% absolute gains compared to our baseline,
+PSGFormer. The code of this paper is publicly available at https://github.com/king159/Pair-Net.
+
+Index Terms—Scene Graph Generation, Panoptic Segmentation, Detection Transformer
+
+✦
+
+1 INTRODUCTION
+
+S CENE graph generation (SGG) [3] is an essential task in
+
+scene understanding that involves generating a graph-
+structured representation from an input image. This repre-
+sentation captures the locations of a pair of objects (a subject
+and an object) and their relationship, forming a higher-
+level abstraction of the image content. SGG has become
+a fundamental component of several downstream tasks,
+including image captioning [4], [5], [6], [7], visual question
+answering [8], [9], [10], and visual reasoning [11], [12].
+
+However, current box-based SGG approaches suffer
+from two primary limitations. Firstly, they rely on a coarse
+object localization provided by a bounding box, which may
+include noisy foreground pixels belonging to one class.
+Secondly, they do not consider the relationships between
+background stuff and their context, which is a crucial as-
+pect of scene understanding. To address these limitations,
+Panoptic Scene Graph generation (PSG) was proposed [1].
+PSG, as depicted in Figure 1(a), leverages a more fine-
+grained scene mask representation and defines relationships
+for background stuff, thus offering a more comprehensive
+understanding of the scene. PSG also provides two one-
+stage baseline methods, PSGTR and PSGFormer, depicted
+in Figure 1(b). Although these methods outperform their
+two-stage counterparts, their average (triplet) recall rates are
+only around 10%. The unsatisfactory performance could fall
+short of the requirements for downstream applications.
+
+To identify the bottlenecks of the current PSG one-stage
+models [1], we conducted an in-depth analysis of the cal-
+
+•
+•
+
+J. Wang and Z. Wen contribute equally to this work.
+J. Wang, Z. Wen, X. Li, Z. Guo, J. Yang, Z. Liu are with the S-Lab,
+Nanyang Technological University, Singapore. {jinghao003, zhengyu002,
+xiangtai.li, gu0008in, jingkang001, ziwei.liu}@ntu.edu.sg
+
+culation of the main recall@K protocol [1] of the PSG task.
+Notice that a successful recall requires a mask-based IOU of
+over 0.5 for both the subject and object and correct classifi-
+cations for all elements in the triplet {Subject, Relation,
+Object}, we firstly investigated the segmentation quality
+of query-based segmenters for isolated subjects/objects to
+determine their impact on PSG performance. Our experi-
+ments demonstrate that a query-based segmenter can recall
+individual subjects/objects satisfactorily, even without re-
+lation training. Therefore, we naturally turn to conjecture
+that the connectivity of subjects and objects, specifically the
+recall of subject-object pairing, may affect PSG performance.
+We obtain evidence for this assumption from experimental
+results, indicating that the recall of PSG has a strong positive
+correlation with pair-wise recall, and the absolute pair recall
+value is far from saturation, suggesting that improving the
+accuracy of subject-object pairing may be critical for improv-
+ing PSG performance. The complete analysis is illustrated
+in Section 3.2.
+
+These observations motivate us to propose a new frame-
+work for PSG tasks to learn accurate pair-wised relation
+maps. In this paper, we present Pair-Net, a novel PSG
+framework, as shown in Figure 2. In Pair-Net, we first apply
+a query-based segmenter to generate panoptic segmenta-
+tion for subjects/objects and corresponding object queries
+without bells and whistles. We then design a Pair-Proposal
+Network (PPN) that models the object-level interactions
+between each object, taking the encoded object queries from
+the segmenter as input and producing feasible subject-
+object pairs. By systematic analysis of the statistics from
+the existing scene graph datasets, we notice the strong
+sparsity of pair-wised relations, which may hinder learning.
+To acquire sparse and feasible object pairs, we employ a
+matrix learner to filter the dense pairing relationship map
+
+ 
+ 
+ 
+ 
+ 
+ 
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE, VOL. X, NO. X, X
+
+2
+
+Fig. 1: An illustration of Panoptic Scene Graph (PSG) task, framework, and performance comparisons. (a) The Panoptic
+Scene Graph (PSG) task involves generating object-background relations and their masks. (b) Frameworks compared
+include PSGTR [1], PSGFormer [1], and SGTR [2]. Our Pair-Net uses the Pair Proposal Network (PPN) to learn object query
+pairs first and then extract relations between targeted subjects and objects. (c) Performance comparison shows significant
+improvement over previous methods, demonstrating the effectiveness of Pair-Net.
+
+into a considerably sparse one. The frequency count from
+the ground truth scene graph is used to supervise the output
+of the matrix learner, significantly improving the sparsity of
+the filtered map. Based on the filtered map, we select Top-K
+subject-object pairs as inputs to our Relation Fusion module,
+which predicts the relations from the context information in
+the given pairs. This module utilizes context information
+from subject-object pairs and facilitates interactions through
+a cross-attention mechanism. In this way, we eventually
+generate {Subject, Relation, Object} triplets.
+
+We also conduct comprehensive experiments on the PSG
+dataset. Our method outperforms a strong baseline and
+achieves a new state-of-the-art performance. In particular,
+as depicted in Figure 1 (c), we achieve over 10.2% improve-
+ment compared with PSGFormer [1]. Through extensive
+studies, we demonstrate the effectiveness and efficiency of
+our proposed model.
+
+In sum, this paper provides the following valuable con-
+tributions to the PSG community in the hope of advancing
+the research in this field:
+
+1) Comprehensive analysis of pairwise relations in
+PSG. We find that although the individual recall
+for the objects is already saturated for the PSG task,
+pairwise recall is a significant factor for final recall
+through systematic experiments.
+
+2) A novel strategy pair-then-relation for solving
+PSG task. We explore the pair and then relation
+generation order and propose a simple but effective
+PPN for explicit pairing modeling, leading to more
+precise relationship identification.
+
+3) Significant improvement on all metrics of PSG
+dataset. Through extensive experiments, Pair-Net
+outperforms existing PSG methods by a large mar-
+gin and achieves new state-of-the-art performance
+on the PSG dataset.
+
+2 RELATED WORK
+
+object detection part and a pairwise predicate estimation
+part. Many approaches [13], [14], [15], [16], [17], [18] model
+the contextual information between objects. However, these
+methods are constrained by the high time complexity due
+to the pairwise predicate estimation, which is infeasible in
+complex scenarios with many objects but few relations. One-
+stage pipelines [19], [20], [21], [22] focus on the one-stage
+relation detection. However, many still focus on improving
+detection performance and do not fully use the sparse and
+semantic priors for SGG. For query-based methods such as
+RelPN [23] and Graph-RCNN [18], they generate subject,
+object, and relation separately and measure triplet compat-
+ibility score directly. Also, the ROI-based feature extraction
+methods make them unable to encode information of stuff.
+Since the queries given by the segmenter have encoded
+global semantic information, the relation could be naturally
+and purely conditioned on the concatenated pair query.
+Meanwhile, there are also several works for Video Scene
+Graph Generation [24], [25], [26], [27], [28] and long-tailed
+problems [17], [26], [29], [30], [31], [32], [33], [34], [35], [36]
+in SGG. In summary, the methods SGG only handle instance
+level relation in coarse box format, which lacks pixel-level
+fine-grained information.
+
+Panoptic Scene Graph Generation. The de facto SGG
+dataset, i.e., VG-150 [37] has some limitations in terms of
+annotation quality and granularity. 1) Annotation Quality.
+VG-150 contains redundant and ambiguous labels of the
+relation classes (such as alongside and besides), a large num-
+ber of trivial triplets (e.g., woman-has-hair and person-has-
+hand), and inconsistent and repeated labeling of the same
+objects (creating many isolated nodes in the scene graph).
+2) Annotation Granularity. A rich and complete visual
+understanding of an image could not only restrict to only a
+subset of pixels (i.e., the bounding box used in VG-150) but
+all pixels of the image [38] (i.e., the panoptic mask used in
+PSG). Also, the interaction (defined as a relation in the scene
+graph) between background objects (stuff) and foreground
+objects (thing) is crucial to the understanding of the scene.
+
+Scene Graph Generation. The existing works for SGG can
+be divided into the two-stage pipeline and the one-stage
+pipeline. The two-stage pipeline generally consists of an
+
+To fill the gap and two limitations mentioned above,
+Panoptic Scene Graph Generation (PSG) [1] is proposed.
+By better defining the relation classes, PSG improves the
+
+(a) PSG Task(b) Framework Comparison(c) Performance Comparison16.619.420.324.728.530.605101520253035mR@20mR@50mR@10018.921.522.429.635.639.6051015202530354045R@20R@50R@100object queryrelation queryrelation decoderobject decodertriplet decodermatchingtriplet queryrelation decoderPSGTRPSGFormer/SGTRPair-Net (Ours)PPNobject query pairtriplet predictiontriplet predictionpersonpaper(merged)knifechairrug(merged)dining tablecakeInputImagePanopticSegmentationSceneGraphPSG MODELbesidebesideononobject queryrelation querytriplet predictionMean RecallRecallPSGFormerPair-NetIEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE, VOL. X, NO. X, X
+
+3
+
+annotation quality. In addition, by improving the annota-
+tion granularity by using all pixels instead of partial of
+the image, PSG can capture the interaction capture and
+define a total of 4 kinds of relations: stuff-stuff, thing-stuff,
+stuff-thing, and thing-thing. Compared with only 1 kind
+of relation (thing-thing) in SGG, the scene graph in PSG
+is much more informative and coherent. It improves the
+difficulty of the SGG task and requires the training model to
+have a stronger understanding of the scene. The control of
+annotation granularity also improves the quality as it may
+reduce some annotations like woman-has-hair introduced by
+the noisy and overlapping bounding boxes.
+
+Along with the PSG dataset, they propose two base-
+lines, including PSGTR and PSGFormer. PSGTR [1] used
+a triplet query to model
+the relations in the scene
+graph as Subject, Relation, Object pairs, while PS-
+GFormer [1] applied both object query and relation query to
+model the nodes and edges in the scene graph separately,
+then applied a relation-based fetching to find the most
+relevant object queries through some interaction modules
+to build the scene graph. Nonetheless, without explicit
+modeling of objects, the triplet pair approaches require
+heavy hand-designed post-processing modules to merge
+all triplets into a single graph, which may fail to keep
+the consistent entity-relation structure. As for relation-based
+fetching, such an approach is not effective and straightfor-
+ward.
+
+Panoptic Segmentation. This task unifies the semantic seg-
+mentation and instance segmentation into one framework
+with a single metric named Panoptic Quality (PQ) [38].
+Lots of work has been proposed to solve this task using
+various approaches. However, most works [39], [40], [41],
+[42], [43] separate thing and stuff prediction as individual
+tasks. Recently, several approaches [25], [44], [45], [46], [47],
+[48], [49], [50], [51], [52], [53] unify both thing and stuff
+prediction as a mask-based set prediction problem. Our
+method is based on the unified model. However, as shown
+in Table 2, better segmentation quality does not mean a
+better panoptic scene graph result. We pay more attention
+to the panoptic scene graph generation, with the main focus
+on pair-wised relation detection.
+
+Detection Transformer. Starting from DETR [54], object
+query-based detectors [55], [56] are designed using object
+queries to encode each object and model object detection
+as a set prediction problem. Several approaches generalize
+the idea of using object queries for other domains, such
+as segmentation [44], [46], [57], tracking [25], [49], [58],
+[59], [60], [61], and scene graph generation [1], [2], [20].
+In particular, SS-RCNN [22] uses triplet queries to directly
+output sparse relation detections. However, the relationship
+between objects and subjects is not explicitly learned or well
+explored. Moreover, it can not generalize into PSG directly
+since the limited mask resolution results by RoI align [62].
+
+3 METHODS
+
+In this section, we will first formulate the problem setting of
+PSG in Section 3.1. Then, we will present our findings from
+three different aspects in Section 3.2: enough capability of
+current segmenters, the importance of pair recall, and the
+
+TABLE 1: IoU and Recall0.5 of COCO-pretrained detectors
+on PSG. IoU and Recall0.5 are averaged at the triplet level
+of the scene graph. It shows the excellence of object-level
+recall.
+
+Model
+
+sub-IoU obj-IoU sub-R0.5
+
+obj-R0.5
+
+DETR [54]
+Mask2Former [44]
+
+0.74
+0.79
+
+0.73
+0.78
+
+0.87
+0.91
+
+0.84
+0.90
+
+TABLE 2: Pair recall@20, triplet recall@20 and PQ of differ-
+ent models on PSG. PSGFormer+ denotes that the detector
+of PSGFormer is changed from DETR to Mask2Former. The
+table shows that different models have a similar ability
+in panoptic segmentation (PQ), but Pair Recall is strongly
+correlated to Triplet Recall.
+
+Model
+
+Pair R@20
+
+R@20
+
+PQ
+
+MOTIFS [14]
+VCTree [15]
+GPS-Net [16]
+PSGFormer [1]
+PSGFormer+ [1], [44]
+
+Pair-Net (Ours)
+
+36.7
+37.2
+34.3
+26.6
+28.6
+
+52.7
+
+20.0
+20.6
+17.8
+18.0
+18.9
+
+29.6
+
+40.4
+40.4
+40.4
+36.8
+43.8
+
+40.2
+
+sparsity of pair-wise relations. Following this, we will illus-
+trate the details of our Pair-Net architecture in Section 3.3,
+including the Panoptic Segmentation Network, Pair Pro-
+posal Network, and Relation Fusion module. Finally, we will
+provide the training and inference procedures in Section 3.4.
+
+3.1 Problem Setting
+
+Following the previous literatures [63], [64], [65], [66], a
+scene graph S is defined as a set of {Subject, Relation,
+Object} triplets. In the task of Scene Graph Generation
+(SGG), the distribution of a scene graph can be summarized
+in the following two steps:
+
+p(S|I) = p(B, A|I)p(R|B, A, I)
+
+(1)
+Here, I ∈ RH×W ×3 is the input image, and B =
+{b1, . . . , bn} and A = {a1, . . . , an} represent the bounding
+box coordinates and class labels of n objects in the image,
+respectively. R = {r1, . . . , rm} represents the relations be-
+tween objects given B and A. Here, a ∈ Zx and r ∈ Zy refer
+to one of the pre-defined x object and y relation classes. The
+values of n and m are arbitrary numbers depending on the
+context of the image.
+
+Instead of localizing only (foreground) objects using
+the annotation at the level of bounding box coordinates,
+Panoptic Scene Graph Generation (PSG) grounds each fore-
+ground object (thing) with the more fine-grained panoptic
+segmentation mask annotation. It incorporates information
+from background objects (stuff) into the consideration of
+a scene graph. Formally, the model is trained to learn the
+following distribution:
+
+p(S|I) = p(M, A|I)p(R|M, A, I)
+
+(2)
+In this case, M = {m1, . . . , mn} and mi ∈ 0, 1H×W
+represent the panoptic segmentation masks corresponding
+to both foreground and background objects in the image.
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE, VOL. X, NO. X, X
+
+4
+
+3.2 Motivation
+
+Query-based Segmenter is Good Enough for PSG. To
+learn the pair-wised relation between different entities in
+PSG, we first study the question, ‘whether the query-based
+segmenter can encode semantic information of corresponding
+subject or object using object queries?’ In this way, scene graph
+generation could be simplified into learning the pair-wised
+relationship between subjects and objects and classifying
+object queries to subject and object, respectively. We use
+COCO-pre-trained models to test both mean mask IoU and
+Recall of each subject and object depicted in the scene
+graph. The results, presented in Table 1, show that both
+DETR [54] and Mask2Former [44] are effective in recalling.
+Recall0.5 indicates a prediction is correct if the IoU between
+it and the ground truth is larger or equal to 0.5, which is
+the common practice used in the segmentation community.
+Given their high Recall0.5 and IoU, we argue that the quality
+of panoptic segmentation is already good enough to support
+the following pair then relation generation, and the perfor-
+mance of PSG models is not bounded by object segmenters.
+Additionally, this also suggests that object queries, which
+are used for mask and class prediction, can be utilized as a
+good predicate to learn the pairwise relationships between
+entities in PSG directly.
+
+Better Pair Recall, Better Triplet Recall in PSG. In Table 2,
+we test different PSG methods in cases of their recall (main
+metric of PSG) and pairwise recall. The pair recall is calcu-
+lated by jointly considering object and subject predictions
+and omitting the relation classification correctness, which
+shares the similar thought of Region Proposal Network
+(RPN) [62] to recall all possible foreground objects. We
+find pair recall is more important than segmentation qual-
+ity, while different methods with similar PQ have various
+recalls. This motivates us to design a model to directly
+enhance the recall of PSG in pairs rather than improving
+segmentation quality, which is already good enough for
+SGG tasks.
+
+3.3 Pair-Net Architecture
+
+As shown in Figure 2, our Pair-Net mainly contains three
+parts. Firstly, we use the Mask2Former baseline to extract
+the object queries. Then, we use the proposed Pair Proposal
+Network to recall all confident subject-object pairs and select
+the best pairs. Finally, we use the Relation Fusion module to
+decode the final relation prediction between subjects and
+objects.
+
+3.3.1 Panoptic Segmentation Network
+
+We adopt strong Mask2Former [44] as our segmenter in the
+panoptic segmentation network. Mask2Former contains a
+transformer encoder-decoder architecture with a set of ob-
+ject queries, where the object queries interact with encoder
+features via masked cross-attention. Unlike RelPN [23] sep-
+arately generates proposals for subjects, objects, and rela-
+tions with bounding boxes using 3 branches, the segmenter
+jointly produces panoptic segmentation of the subjects and
+objects, without consideration of relation. Given an image
+I, during the inference, the Mask2Former directly outputs
+a set of object queries Qobj = q{i}, i = 1 . . . N , where
+
+each object query qi represent one entity. We denote it
+as Qobj ∈ RNobj×d, where Nobj is the number of object
+queries and d is the embedding dimensions. Each object
+query is matched to ground truth masks during training
+via masked-based bipartite matching. The loss function is
+Lmask = λclsLcls + λceLce + λdiceLdice, where Lcls is Cross
+Entropy (CE) loss for mask classification, and Lce and Ldice
+are CE loss and Dice loss [67] for segmentation, respectively.
+
+3.3.2 Pair Proposal Network
+
+Our Pair Proposal Network (PPN) focuses on predicting
+the relative importance of subject/object queries and then
+selects top-k subject-object pairs according to the index of
+the top-k value in the pair proposal matrix.
+
+As shown in Figure 2, our PPN consists of a subject
+projector, an object projector, and a matrix learner. The
+projector layer is an MLP that will generate subject and
+object embedding Esub, Eobj ∈ RNobj×d respectively from
+input Qobj. After that, cosine similarity between Esub and
+Eobj is calculated, i.e., a rough sketch of Pair Proposal Matrix
+Mrough ∈ RNobj×Nobj . Finally, a Matrix Learner is applied
+to further filter the rough sketch of Pair Proposal Matrix
+Mrough, generating a more precise prediction of importance
+in the Pair Proposal Matrix. To avoid ambiguity, such
+interaction is the pairing step between objects, following
+our pair-then-relation generation order. It is not relevant
+to the design of RelPN [23], which directly calculates the
+visual and spatial compatibility among subjects, objects, and
+relations.
+
+Matrix Learner. Taking the motivation from Section 3.2, a
+small network, namely matrix learner, is designed to do
+further filtration and learn feasible sparse pairs. In partic-
+ular, we find using simple CNN architecture could achieve
+better results. Rather than using transformer architecture
+like ViT [68], we argue that a CNN architecture can preserve
+the local details while filtering the redundant noise as an
+efficient semantic filter. Its output is a filtered pair proposal
+matrix Mfiltered, which contains the sparser connectivity
+representation compared to its input matrix Mrough. Finally,
+a top-k selection is conducted on the Mfiltered. The result
+top-k indexes are used to select the corresponding subject
+and object queries from Qobj, which are denoted as Qs
+and Qo respectively. This selection process means partial
+of the Qobj will be processed into the next module but
+does not mean the gradient flow will be interrupted for the
+end-to-end computation. To supervise the filtration process
+of the matrix learner, we introduce additional information
+about pair-wised relations from the ground truth, which is
+defined as Mgt ∈ RNobj×Nobj . Using Hungarian matching,
+we can assign each subject and object in the ground truth
+scene graph to a specific object query qk based on their
+segmentation losses. After all ground-truth subject-object
+pairs have been assigned, multiple positions of Mgt will be
+assigned to 1, and the remaining positions will be assigned
+to 0.
+
+We use such a matrix to supervise the Matrix Learner
+with a Binary Cross Entropy loss (BCE). Due to the sparsity
+of Mgt, we enhance the BCE loss with a positive weight
+adjustment to ensure stable training. On average, only 5.6
+relations are expected in one image in the PSG dataset [1].
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE, VOL. X, NO. X, X
+
+5
+
+Fig. 2: An illustration of our proposed Pair-Net. It mainly contains three parts: (a) Panoptic Segmentation Network uses a
+query-based object segmenter to generate panoptic segmentation and object queries. (b) Pair Proposal Network generates
+subject-object pairs from object queries, with Matrix Learner to ensure the sparsity property. (c) The relation Fusion module
+models the interaction between pair-wised queries and relation queries and predicts final relation labels.
+
+Therefore, in the ground truth matrix Mgt ∈ RNobj×Nobj
+(Nobj = 100 in our case), it is expected that only 5 ∼ 6
+positions will have a value of 1, while other positions have
+a value of 0. This supervision could be considered as a very
+unbalanced binary classification problem. To encourage the
+Matrix Learner not to output an all-zero Mfiltered, we dra-
+matically increase the weight p of the loss of the positive
+position, which introduces us to the positive weight ad-
+justment BCE loss. This loss forces the network to produce
+sparse relationships for both subject and object pairs, and
+we derive our proposal pair loss as:
+
+Lppn = − [p · y · log σ(x) + (1 − y) · log(1 − σ(x))]
+N 2
+obj
+
+(3)
+
+where
+
+=
+i.e., the reciprocal of Mgt’s sparsity.
+
+p
+
+(cid:80)
+
+i,j Mgt(i,j) ,
+
+Nrel shall be the same as k as a valid triplet has to be
+formed by one object, one subject, and one relation. And,
+it is worth noticing that this value is decoupled with the
+number of the output object query of the segmenter (i.e.,
+100 in Mask2Former).
+
+The cross attention mechanism [69] between Qr and
+Qpair yields an equivalent matching effect through the dot
+product in the attention formulation. Such that, the ith
+relation query mainly pays its attention to the ith of the
+Qpair while still gaining some information from the other
+pairs. Since the relation query is in the same order as the
+pair query, no further post-processing or matching between
+pairs and relations is needed in this stage. The output
+of the relation fusion module is predicted relation classes.
+We illustrate the loss of the relation fusion module in the
+following section.
+
+3.3.3 Relation Fusion
+
+3.4 Training and Inference
+
+After selecting the top-k queries, we adopt another Trans-
+former decoder to predict their relations. As shown in Fig-
+ure 2 (c), we term it as Relation Fusion. In this module, we
+have a relation decoder consisting of transformer decoders
+in the style of [54]. After selecting sub-query Qs and obj-
+query Qo from the object query Qobj via PPN, they are con-
+catenated together along the length dimension to construct
+a pair query Qpair ∈ R2Nrel×d, which are projected as the
+key and value of cross attention in the relation decoder. We
+randomly initialize a trainable relation query Qr ∈ RNrel×d
+as the query input. Nrel denotes the number of relation
+queries and d denotes the embedding size of the decoder.
+
+Long-tailed Distribution on Relation Classes. As SGG
+tasks, we have observed a long-tailed distribution of relation
+classes, which can heavily affect the performance of mean
+AR. Following the definition in previous literature [17], we
+split all relation classes into three disjoint groups according
+to their counts in the training split: head (>10k), body (500
+∼ 10k), and tail (<500). From Figure 3, we notice that half of
+the relation classes (tail classes) only account for about 1%
+and eight classes (head classes) account for about 80% in the
+training set in PSG. This clearly indicates the characteristic
+of a long-tailed distribution in the relation classes. There are
+several methods to handle long-tailed distributions. At the
+
+(a) Panoptic Segmentation Network(b) Pair Proposal Network(c) Relation Fusionsubject embeddingpanopticsegmentation resultinput imagePPNselected pairsconcatenateSubjectProjectorObjectProjectorscene graph tripletsobject embeddingobject queryrelation queryselectedsub-obj query pairsMulti-HeadCross-AttentionMulti-HeadSelf-Attentionrelation querydirected adjacency matrixground truthscene graphobject queryPairProposalNetworkHungarian MatchingMatrixLearnerMatrix SupervisionCosineSimilarityyxrough pair proposal matrixfiltered pair proposal matrixtop-K selectionCNNBackbonexyx,yRelation DecoderSegmenterIEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE, VOL. X, NO. X, X
+
+6
+
+TABLE 3: Different setting comparison with previous SGG
+and PSG methods.
+
+Method
+
+SGG PSG
+
+End-to-end
+
+Sparsity
+
+Pair Loss
+
+Background
+
+RelPN [23]
+Graph-RCNN [18]
+SGTR [2]
+PSGTR [1]
+PSGFormer [1]
+Pair-Net (Ours)
+
+✓
+✓
+✓
+
+✓
+
+✓
+✓
+✓
+
+✓
+✓
+✓
+
+✓
+✓
+
+✓
+
+✓
+✓
+✓
+
+✓
+
+Training Loss. Our Pair-Net can be trained as a one-
+stage SGG model. The entire loss contains three classifica-
+tion losses for the subject, object, and relation, one binary
+classification loss for PPN, and the origin mask loss of
+Mask2Former. For the calculation of the three classification
+losses for the subject, object, and relation, we follow the
+common practice of optimal bipartite matching proposed in
+DETR [54] by matching the K outputs given by the model
+and the N ground-truth triplets (N < K). We define the
+Hungarian matching cost as the sum of classification losses
+and illustrate a sample in Figure 4. Overall, the loss of our
+framework is defined as:
+
+L = λsubject classification Lsubject classification
++ λobject classification Lobject classification
++ λrelation classification Lrelation classification
++ λpair proposal network Lppn
++ λoriginal Mask2Former Loss Loriginal Mask2former Loss
+
+(4)
+
+where we set λo = λs = 4, λr = 2, λppn = 5, λoriginal = 1.
+Inference. The model takes an image as input. Firstly, the
+segmenter produces object queries Qobj, the object classifi-
+cation result, and the mask segmentation result. Then, the
+PPN selects obj-query Qo and sub-query Qs based on the
+top-k index of the filtered pair proposal matrix Mfiltered.
+After concatenation, the selected Qo and Qs form as pair
+query Qpair as the key and value function of the relation
+decoder. Finally, the relation decoder produces a relation
+query, which is fed into a single linear layer for relation
+classification. The result triplets are given by concatenating
+subject, object, and relation classification results.
+
+3.5 Relation With Previous SGG Methods
+
+We provide a more detailed description and comparison
+of Pair-Net in Table 3 with several feature comparisons.
+Compared with previous works, our proposed Pair-Net
+supports both SGG and PSG. Moreover, we adopt pair loss
+to directly optimize the relation between different object and
+subject pairs, which is different from all previous works. As
+a result, our method leads to sparsity in relation pairs within
+the query-based framework. Compared with ReIPN [23]
+and Graph-RCNN [18], our method also considers the back-
+ground context.
+
+4 EXPERIMENT
+
+Panoptic Scene Graph (PSG) Benchmark [1]. Filtered from
+COCO [75] and VG datasets [37], the PSG dataset contains
+133 object classes, including things, stuff, and 56 relation
+classes. This dataset has 46k training images and 2k testing
+
+Fig. 3: Relation classes distribution of PSG and VG-150.
+Following [17], we summarize the proportion and number
+of different classes in the form of head, body, tail of PSG in
+(a) and (c). We provide results of VG-150 in (b) and (d)
+for reference. The figure shows the long-tail effect on the
+distribution of relation classes.
+
+Fig. 4: Illustration of Hungarian matching process before
+the losses calculation for one ground truth example. We
+define the matching cost as the sum of subject, object, and
+relation classification loss between the model output and
+the ground truth. The model outputs are the probabilities of
+all possible classes, and we illustrate the label of the highest
+value of the distribution for simplicity.
+
+dataset level, resampling of the original dataset with logit
+adjustment of relation classes can be applied, generating
+an augmented dataset with a more balanced distribution of
+relations. At the loss level of the relation fusion module,
+Focal Loss [70] modifies the standard cross entropy loss
+and applies weighted discrimination on the well-classified
+classes, which forces the model to focus on wrongly classi-
+fied classes. Furthermore, Seesaw loss [71] dynamically re-
+balances gradients of positive and negative samples, which
+is adopted for relation classification in our framework by
+default. All these different methods will affect the perfor-
+mance of relation loss Lr. Among these three choices, we
+select Seesaw loss in our default training setting as we find
+it yields the best performance in our experiments.
+
+head88.60%body10.90%tail0.40%head78.80%body19.90%tail1.30%#head cls10#body cls29#tail cls11#head cls8#body cls20#tail cls28(b) VG-150 distribution (a) PSG distribution(d) VG-150 class count(c) PSG class countIEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE, VOL. X, NO. X, X
+
+7
+
+TABLE 4: Results on PSG validation dataset. Pair-Net outperforms previous methods by a large margin on all metrics.
+Our model outperforms prior state-of-the-art models by an absolute 10.2% in mR@20 and 11.6% in R@20. The + mark
+indicates our re-implementation of previous methods with Mask2Former as the detector. All results are given by training
+12 epochs except PSGTR, which needs 60 epochs to converge. Previous SGG methods are adapted to the PSG task by using
+their scene graph generation modules to process object features from classic panoptic FPN.
+
+BackBone
+
+Detector
+
+Model
+
+mR@20
+
+mR@50
+
+mR@100
+
+R@20
+
+R@50
+
+R@100
+
+ResNet-50 [72]
+
+Faster R-CNN [62]
+
+DETR [54]
+
+Mask2Former [44]
+
+Swin-B [74]
+
+IMP [13]
+MOTIFS [14]
+VCTree [15]
+GPS-Net [16]
+
+PSGFormer [1]
+PSGTR [1]
+PSGFormer+ [1]
+PSGTR+ [1]
+HiLo [73]
+
+Pair-Net (Ours)
+Pair-Net† (Ours)
+
+6.5
+9.1
+9.7
+7.0
+
+14.5
+16.6
+
+16.6
+20.9
+23.7
+
+24.7
+
+25.4
+
+7.1
+9.6
+10.2
+7.5
+
+17.4
+20.8
+
+19.4
+27.4
+30.3
+
+28.5
+
+28.2
+
+7.2
+9.7
+10.2
+7.7
+
+18.7
+22.1
+
+20.3
+28.4
+33.1
+
+30.6
+
+29.7
+
+16.5
+20.0
+20.6
+17.8
+
+18.0
+28.4
+
+18.9
+32.6
+34.1
+
+29.6
+
+33.3
+
+18.2
+21.7
+22.1
+19.6
+
+19.6
+34.4
+
+21.5
+38.0
+40.7
+
+35.6
+
+39.3
+
+18.6
+22.0
+22.5
+20.1
+
+20.1
+36.3
+
+22.4
+38.9
+43.0
+
+39.6
+
+42.4
+
+images with panoptic segmentation and scene graph anno-
+tation. We follow the same data processing pipelines from
+[1].
+
+Evaluation Metrics. There are multiple evaluation matri-
+ces to evaluate the performance of a scene graph model.
+The Predicate Classification (PredCls) and Scene Graph
+Classification (SGCls) [76] take truth object classification
+and localization labels as input and output their pairwise
+relation. Scene Graph Generation (SGGen) is the hardest
+one, which asks the model to predict correct triplets and
+object segmentation simultaneously. The IoU threshold of a
+correct mask is set to 0.5, and a correct matching means all
+elements in the triplet {Subject, Relation, Object} are
+classified correctly. We report recall@K (R@K) and mean re-
+call@K (mR@K) for K = 20, 50, 100 following the definition
+from [15]. R@K indicates that calculating the recall given the
+top-k-confident triplet classification results from the model.
+mR@K means the average of the recall of each relation class
+following the above procedure. 1
+
+Training Configuration. For the panoptic segmentation task
+in PSG, we use COCO [75] pre-trained Mask2Former2 as the
+object segmenter. Our framework is optimized by AdamW
+[77] with an initial learning rate of 10−4, a weight decay of
+10−4, and a total batch size of 8. We train Pair-Net for a
+total of 12 epochs and reduce the learning rate by a factor
+of 0.1 at epoch 5 and 10. We set all the positional encoding
+of the query, key, and value in the Relation Fusion module
+learnable. We conducted 5 experiments with different seeds
+and the results are stable given ±0.2 in terms of mR@20.
+
+General Framework Hyperparameters. We set the number
+of object queries to Nobj = 100, size of embedding dimen-
+sions, d = 256 inheriting the design of Mask2Former [44].
+The subject projector and object projector are both MLPs
+with three fully connected layers, with embedding dimen-
+sion d = 256 and ReLU as the activation function. For
+
+1. For more detailed illustration, one might check the Github repo:
+
+Scene-Graph-Benchmark.pytorch
+
+2. Since PSG is a subset of COCO, it is equivalent to pre-train the
+
+segmenter on the PSG.
+
+the Matrix Learner, we use a 3-layer CNN with 64 inner
+channels and a 7 by 7 kernel size. The Relation Fusion
+module consists of a 6-layer DETR-style [54] transformer
+self-attention and cross-attention decoder with d = 256.
+
+4.1 Main Results
+
+Comparison with Baselines. The previous two-stage mod-
+els, all of them, choose Faster R-CNN [62] as Detectors. For a
+fair comparison, we create a stronger baseline method based
+on PSGFormer and PSGTR [1] using Mask2Former [44] as
+Detector noted as PSGFormer+. As shown in Section 3.2,
+the segmenter can detect and segment each subject and
+object, including thing and stuff. In Table 4, we apply Re-
+call@20/50/100 and Mean Recall@20/50/100 as our bench-
+marks. All models use ResNet-50 for a fair comparison.
+As shown in Table 4, our method Pair-Net achieves 29.6%
+in R@20 and outperforms the baseline by a 10.7% large
+margin. Additionally, for R@50 and R@100, the margin is
+even larger, which proves that our methods can better
+utilize all 100 proposals and provide reasonable and not self-
+repeated predictions. Considering mean Recall, our method
+also outperforms the baseline with absolute 10.2 ∼ 11.9
+gain for K = 20, 50, 100.
+
+Pair Recall Improvement. In Table 2, our Pair-Net also
+gains significant improvement on the Pair Recall@20 com-
+pared with existing methods. A large 24.1% margin on Pair
+Recall@20 is obtained compared with the baseline method,
+PSGFormer+. This observation strengthens our assumption
+that Pair Recall is highly correlated to Recall, and it is a
+current bottleneck for the PSG model performance.
+
+Categorical Recall@K on PSG. In PSG, which benefited
+from the panoptic segmentation setting, the relation is con-
+structed not only from thing to thing (TT) class but also
+from stuff to stuff (SS), stuff to thing (ST), and thing to
+stuff (TS). To this end, we introduce four new different
+metrics to evaluate the performance of the model fur-
+ther: TT-Recall@K, SS-Recall@K, ST-Recall@K, and TS-
+Recall@K. They calculate the recall on the four categories
+independently. From Table 5, our Pair-Net mainly improves
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE, VOL. X, NO. X, X
+
+8
+
+TABLE 5: Four categorical Recall (R)@20 in PSG. We intro-
+duce four categorical recalls and report the performance in
+terms of Recall@20.
+
+Model
+
+TT-R@20
+
+TS-R@20
+
+ST-R@20
+
+SS-R@20
+
+PSGFormer [1]
+PSGFormer+ [1], [44]
+Pair-Net (ours)
+
+17.2
+19.5
+25.7
+
+21.7
+21.5
+31.5
+
+14.9
+9.5
+24.2
+
+14.7
+18.5
+34.2
+
+the recall of all the cases. Our findings suggest that we
+should pay more attention to pair recall for PSG rather than
+improving segmentation quality.
+
+Stronger Backbone for Pair-Net. We train a larger Pair-Net
+with Swin-Base [74] as the backbone for future research. A
+larger backbone could further improve the performance of
+Pair-Net with absolute ∼ 1% in mean recall and 3 ∼ 4% in
+Recall. This indicates the scalability of Pair-Net.
+
+4.2 Ablation Study
+
+Ablation study on each component of PPN. In Table 6a,
+we first perform ablation studies on the effectiveness of each
+component of PPN. We find that all three components: linear
+embedding, matrix learner, and the supervision from directed ad-
+jacency matrix are all important to the performance. Notably,
+without the linear embedding, the model will just diverge
+and not provide any correct prediction. This is because the
+object queries only contain the category information and
+ignore the pair-wised information. The embedding heads
+force the object queries to distinguish between subject and
+object. As shown in the second row of Table 6a, a similar
+situation also happens on the BCE supervision part, which
+provides vital information about the pair distributions that
+help pair proposal matrix learning. Adding Matrix Learner
+further improves the performance by filtering unconfident
+pairs, as shown in the third row of Table 6a.
+
+Different Architectures for Matrix Learner. In Table 6b,
+we compare different types of architectures for the matrix
+learner. We select multi-layer perceptrons (MLP), two types
+of transformers, and two types of convolutional neural net-
+works with model sizes between 0.2M and 30M. For the de-
+sign of transformers, we follow the ViT [68] by considering
+the Mrough as an image with the size of R1×Nobj×Nobj . Mrough
+is projected by a patch embedding layer followed by three
+transformer layers with global or window attention then de-
+patchify it. Their results are represented as G-transformer
+and W-transformer in the Table respectively. The CNN-tiny
+represents a three-layer CNN with inner channel 64 and
+kernel size 7. In addition, we expand the CNN-tiny to CNN-
+base by two magnitudes (30M) for further comparison.
+Compared with MLP and transformer, CNN achieves the
+best results since the CNN-based matrix learner can filter
+out redundant noise and reserve the local details in the
+matrix, working as an efficient semantic filter. Moreover,
+increasing CNN parameters does not bring about major
+changes in the results, proving that the current scale of
+Matrix Learner is capable of filtering.
+
+Ablation on Relation Loss. To handle the long-tailed prob-
+lems in Section 3.4, in Table 6c, we explore several balanced
+
+loss from the existing methods. We set the cross-entropy loss
+as the baseline. For Focal Loss [70], we test different settings
+γ = 0, 0.5, 2 and report the best one. As shown in that table,
+we choose the Seasaw Loss [71] for our relation classification
+loss.
+
+Different Input for Key and Value of the Relation Fusion.
+In Table 6d, we select four different levels of abstraction of
+information, from low to high, as the key and value input
+for the relation decoder. ‘Random initialization’ means that
+the key and value vectors are both random initialized as
+trainable parameters. ‘Image features’ means that we use the
+output from the vision encoder (ResNet-50 [72] in our case),
+as the KV inputs, which provides more information than
+two random initialization vectors but still has not enough
+prior for the classification for the relation. We also try ‘Ran-
+dom subject-object’ pairs. This design indicates these object
+queries Qobj have contextual information at the object level
+but do not have a pair-level structure. For our method, the
+concatenation of subject-object pair, Qpair, gives both object-
+level context and pair-level selection. As shown in Table 6d,
+an input with a more specific and richer context can boost
+the performance of the whole model.
+
+Different Number of Relation Queries. In Table 6e, we
+adjust the number of relation queries from 100 to 50 and 200.
+We find that the number of relation queries does not greatly
+affect the result, and our model is robust to the number of
+relation queries. We set the relation query number to 100 in
+our model.
+
+Effect of different loss weights. In Table 7a, we adjust the
+weights of components in the loss function. However, the
+different weights have no significant effects on the final
+results. This means that our model design is robust to
+different loss weight settings.
+
+Positive Weight Adjustment in BCELoss. The positive
+weight in the PPN is dynamically calculated by the ratio
+between the total size of Mgt and the number of positive
+samples in the Mgt hence it is not a hyperparameter. In Ta-
+ble 7b, we validate that performance dramatically decreases
+given the absence of the positive weight adjustment of the
+BCELoss.
+
+4.3 Qualitative Results and Visualization
+
+Effect of Pair Proposal Network. In Figure 5, we visualize
+the functionality of each component in the PPN. From
+Qobj · Q⊤
+obj to Mrough, the clear diagonal line is absent, show-
+ing that after the object/subject embedding projection, the
+value of the matrix is not solely based on semantic similarity
+but starts to reflect the relational correlation between ob-
+jects and subjects. Also, the matrix becomes non-symmetric,
+indicating that the projection correctly distinguishes the
+subject and object from the same inputs. After adopting
+our proposed Matrix Learner, from Mrough to Mfiltered, the
+matrix becomes sparse and clean. It is prone to better
+reflect relational correlation and depicts the capability of
+the Matrix Learner on filtering. Finally, the comparison be-
+tween Mfiltered and Mgt shows that although Mgt provides
+an elegant supervision signal to the network, it is unnec-
+essary to reach exactly ground-truth sparsity, considering
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE, VOL. X, NO. X, X
+
+9
+
+TABLE 6: Pair-Net ablation experiments on PSG. We report mean Recall and Recall with K=20, 50. Our settings are
+marked in gray .
+
+(a) Necessity of Each Component of the PPN.
+
+(b) Different Architectures for Matrix Learner.
+
+Linear Embed Matrix Learner
+
+BCE supervision mR/R@20 mR/R@50
+
+Architecture
+
+# Para mR/R@20 mR/R@50
+
+✓
+✓
+×
+✓
+
+✓
+×
+✓
+✓
+
+×
+✓
+✓
+✓
+
+0.5 / 0.4
+14.8 / 20.5
+14.6 / 22.1
+24.7 / 29.6
+
+1.3 / 1.2
+21.0 / 29.8
+17.8 / 27.9
+28.5 / 35.6
+
+MLP
+G-Transformer
+W-Transformer
+CNN-tiny
+CNN-base
+
+0.2M 13.0 / 18.8
+1.4M 17.3 / 26.1
+1.3M 15.5 / 21.4
+0.2M 24.7 / 29.6
+23.3 / 33.3
+30M
+
+(c) Different loss functions for relation classifica-
+tion.
+
+(d) Different KV inputs for relation fusion
+decoder.
+
+(e) Different numbers of
+queries.
+
+19.4 / 26.1
+23.2 / 32.6
+19.4 / 26.7
+28.5 / 35.6
+28.2 / 39.3
+relation
+
+Method
+
+mR/R@20 mR/R@50
+
+Input
+
+mR/R@20 mR/R@50
+
+# Rel-Query mR/R@20 mR/R@50
+
+Cross Entropy Loss
+Weighted Resampling
+Focal Loss [70]
+Seesaw Loss [71]
+
+15.4 / 29.0
+12.6 / 21.4
+19.8 / 28.3
+24.7 / 29.6
+
+17.0 / 34.0
+17.6 / 29.3
+22.1 / 33.6
+28.5 / 35.6
+
+random init
+image features
+random pairs
+concat pairs
+
+7.3 / 0.7
+1.3 / 2.3
+1.1 / 1.2
+24.7 / 29.6
+
+9.8 / 1.0
+2.6 / 4.1
+1.9 / 2.8
+28.5 / 35.6
+
+50
+100
+200
+
+23.4 / 26.7
+24.7 / 29.6
+22.3 / 29.7
+
+29.7 / 35.7
+28.5 / 35.6
+25.9 / 35.6
+
+TABLE 7: More Pair-Net ablation experiments on PSG. We report mean Recall and Recall with K=20, 50. Our settings are
+marked in gray .
+
+(a) Different weights of loss function.
+
+(b) Effect of positive weight adjustment in BCELoss.
+
+Loss weights (λo/ λs/ λr/ λpp) mR/R@20 mR/R@50
+
+Positive weight adjustment mR/R@20 mR/R@50
+
+4 / 4 / 2 / 5
+4 / 4 / 2 / 10
+4 / 4 / 4 / 5
+8 / 8 / 2 / 5
+
+24.7 / 29.6
+22.0 / 25.7
+23.8 / 27.9
+22.2 / 26.5
+
+28.5 / 35.6
+26.8 / 32.4
+26.2 / 32.6
+26.7 / 32.9
+
+×
+✓
+
+0.6 / 1.2
+24.7 / 29.6
+
+1.2 / 2.3
+28.5 / 35.6
+
+unlabeled but reasonable relations and possibly redundant
+object queries introduced in the annotation process.
+
+Effect of Relation Fusion. In Figure 6, we visualize the
+averaged cross-attention map of the last layer of the relation
+decoder. From (a), we notice from values of two diagonals
+that the i-th relation query is heavily weighted from the
+i-th subject query and the i-th object query, with minimal
+information from other queries. From (b) and (c), which
+shows a 10×10 detailed region from (a) along the diagonals,
+we can see that the cross attention implicitly performs the
+matching process between pairs and relation to form the
+result triplet. This proves the relation fusion module suc-
+cessfully helps relation queries to find the matching subject
+query and object query.
+
+Visualization of results on PSG. We further visualize the
+panoptic segmentation and top-20 scene graph triplet from
+our baseline, the Pair-Net, and the corresponding ground
+truths in Figure 7. The center triplets are ground truth
+triplets, the left segmentation mask and triplets are provided
+by the baseline (PSGFormer) model, right image and triplets
+are from our Pair-Net. We use red arrows to correct pre-
+dictions from the model and the ground truth. Meanwhile,
+we use a round tick mark beside the prediction to indicate
+the triplets which are not included in the ground truth
+annotation but are reasonable from a human’s perspective.
+Such predictions should be considered useful information
+for the scene but do not reflect in the numerical evaluation
+metrics due to the missing annotations of the PSG dataset.
+We shall notice that the results from the baseline model
+produce many duplications of the same triplets. Such cases
+downgrade the performance of the model as there are fewer
+
+different triplets predictions given the top-k predictions,
+which decrease the Recall@K and Mean Recall@K. Such
+duplication case is eliminated in the Pair-Net because of the
+pair-then-relation approach. In this process, we explicitly
+select a meaningful subject-object pair first, which elimi-
+nates the probability of producing duplicated triplets and
+encourages the model to produce harder and more diverse
+triplets from the scene.
+
+4.4 Experiments on VG-150
+
+We further report the performance of Pair-Net on VG-150
+[37] in Table 8 to show that our method could be generalized
+to a bounding-box-level scene graph dataset and achieves
+comparable performances with the current specific designed
+SGG models.
+
+Visual Genome (VG) [37]. We use the most widely used
+variant of VG [12], namely VG-150, which includes 150
+object classes and 50 relation classes. We mainly adopt the
+data splits and pre-processing from the previous works [13],
+[14], [17]. After filtering, the VG-150 contains 62k and 26k
+images for training and testing, respectively.
+
+Training configuration. We fine-tune a 100-query De-
+formable DETR [56] on VG-150 for the object detection
+task for 30 epochs. The rest training configurations are the
+same as training on PSG. To adapt this task, we replace
+the Mask2Former [44] in Pair-Net with the Deformable
+DETR [56] as the detector, dubbed as Pair-Net-Bbox. We
+also change the backbone from ResNet-50 to ResNet-101
+for a fair comparison with previous work. The rest of the
+architecture is the same as Pair-Net.
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE, VOL. X, NO. X, X
+
+10
+
+Fig. 5: The visualization of Pair Proposal Matrix. Left to right: self-multiplication of object query Qobj · Q⊤
+obj, Mrough,
+Mfiltered, and Mgt. It reflects that the pairing process in PPN is not based solely on semantic similarity and shows the
+necessity of the PPN.
+
+TABLE 8: Results on VG-150 dataset. Pair-Net achieves comparable performance in recall and mean recall compared with
+previous transformer-based SOTA works. ’-’ indicates that the original paper does not report the data.
+
+Backbone
+
+Detector
+
+Model
+
+mR@20 mR@50 mR@100
+
+R@20
+
+R@50
+
+R@100
+
+VGG [78]
+
+Faster R-CNN [62]
+
+ResNeXt-101 [79]
+
+ResNet-101 [72]
+
+DETR [54]
+Deformable DETR [56]
+
+SGTR [2]
+Pair-Net-Bbox (Ours)
+
+IMP [13]
+MOTIFS [14]
+VCTree [15]
+
+RelDN [31]
+GPS-Net [16]
+
+2.8
+4.1
+5.4
+
+-
+-
+
+-
+8.9
+
+4.2
+5.5
+7.4
+
+6.0
+7.0
+
+12.0
+12.4
+
+5.3
+6.8
+8.7
+
+7.3
+8.6
+
+15.2
+15.4
+
+18.1
+25.1
+24.5
+
+22.5
+22.3
+
+-
+18.8
+
+25.9
+32.1
+31.7
+
+31.0
+28.9
+
+24.6
+24.9
+
+31.2
+36.9
+36.3
+
+36.7
+33.2
+
+28.4
+29.3
+
+TABLE 9: The performance of object detectors on VG-150.
+Different models have a similar object detection ability on
+VG-150 due to the low-quality bounding box label.
+
+Backbone
+
+Detector
+
+Model
+
+ResNet-101 [72]
+
+DETR [54]
+Deformable DETR [56]
+
+SGTR [2]
+Pair-Net-Bbox (Ours)
+
+AP50
+
+31.2
+31.2
+
+Results on VG-150 Benchmark. In Table 8, we apply
+Recall@20/50/100 and Mean Recall@20/50/100 as our
+benchmarks. We mainly compare our results with the
+previous transformer-based VG-150 SOTA model: SGTR [2].
+For recall, our methods gain a + 0.3 gain in R@50 and + 0.9
+in R@100. Considering mean recall, our method performs
+comparably with an additional 0.2 ∼ 0.4 improvement. It
+could be noted that our method is not specially designed
+for SGG, and we do not perform any extra changes from
+PSG to SGG. We will put these as our future work.
+
+Influence of Object Detector. Shown in Table 9, previous
+SGG models and ours have a similar ability in object de-
+tection in terms of mAP50 on VG-150 [37]. Following the
+
+previous discussion Tab. 2 that the panoptic segmentation
+performance in terms of PQ is not the key factor to the
+performance of PSG models, object detection ability in terms
+of AP50 is also not the key factor to the performance in SGG
+task. The model’s performance is mainly determined by the
+quality of the pair classification and relation classification
+and not bottleneck by the object detection ability.
+
+5 CONCLUSION
+In this work, to tackle the challenging PSG task, we first
+conduct an in-depth analysis and present valuable insights
+for PSG research. We highlight the importance of accurate
+subject-object pairing. Based on these insights, we propose
+Pair-Net, a simple and effective framework that achieves
+state-of-the-art performance on the PSG dataset. We design
+the Pair then Relation network (Pair-Net), which has a
+novel Matrix Learner to directly learn the sparse pair-wise
+relation among the object queries. We hope this work can
+help advance research in this field and provide a stronger
+baseline for PSG’s downstream tasks.
+
+Limitation and Societal Impacts. One limitation of Pair-Net
+is that we only explore a middle-scale dataset, i.e., PSG. This
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE, VOL. X, NO. X, X
+
+11
+
+Fig. 6: Visualization of the cross-attention map of relation decoder with class annotations. (a) is the overall Nrel × 2Nrel
+cross-attention map of the last layer of the relation decoder between the relation query Qrel and the pair query Qpair. (b) and
+(c) are two selected detailed zones from (a) with class annotations of {Subject, Relation, Object}. The two diagonals
+in the figure show the strong correlation between the relation query and the matched subject/object query.
+
+setting is mainly for a fair comparison with other works [1].
+Exploring a larger SGG dataset [80] will be our future work.
+We hope that other CV domains, like Visual Grounding and
+Visual Question Answering, can gain some insights from the
+pair-wised relations.
+
+ACKNOWLEDGMENTS. This work is supported by the
+National Research Foundation, Singapore under its AI Sin-
+gapore Programme (AISG Award No: AISG2-PhD-2021-08-
+019), NTU NAP, MOE AcRF Tier 2 (T2EP20221-0012), and
+under the RIE2020 Industry Alignment Fund - Industry Col-
+laboration Projects (IAF-ICP) Funding Initiative, as well as
+cash and in-kind contribution from the industry partner(s).
+
+REFERENCES
+
+[1]
+
+J. Yang, Y. Z. Ang, Z. Guo, K. Zhou, W. Zhang, and Z. Liu,
+“Panoptic scene graph generation,” in ECCV (27), 2022. 1, 2, 3,
+4, 6, 7, 8, 11
+
+[2] R. Li, S. Zhang, and X. He, “SGTR: end-to-end scene graph
+
+[3]
+
+generation with transformer,” in CVPR, 2022. 2, 3, 6, 10
+J. Johnson, R. Krishna, M. Stark, L. Li, D. A. Shamma, M. S.
+Bernstein, and L. Fei-Fei, “Image retrieval using scene graphs,”
+in CVPR, 2015. 1
+
+[4] L. Gao, B. Wang, and W. Wang, “Image captioning with scene-
+
+graph based semantic concepts,” in ICMLC, 2018. 1
+
+[5] C. Sur, “Tpsgtr: Neural-symbolic tensor product scene-graph-
+triplet representation for image captioning,” CoRR, 2019. 1
+S. Chen, Q. Jin, P. Wang, and Q. Wu, “Say as you wish: Fine-
+grained control of image caption generation with abstract scene
+graphs,” in CVPR, 2020. 1
+
+[6]
+
+[7] Y. Zhong, L. Wang, J. Chen, D. Yu, and Y. Li, “Comprehensive
+image captioning via scene graph decomposition,” in ECCV (14),
+2020. 1
+
+[8] C. Zhang, W. Chao, and D. Xuan, “An empirical study on leverag-
+ing scene graphs for visual question answering,” in BMVC, 2019.
+1
+
+[9] Z. Yang, Z. Qin, J. Yu, and Y. Hu, “Scene graph reasoning with
+prior visual relationship for visual question answering,” CoRR,
+2018. 1
+
+[10] S. Ghosh, G. Burachas, A. Ray, and A. Ziskind, “Generating
+natural language explanations for visual question answering using
+scene graphs and visual attention,” CoRR, 2019. 1
+
+[11] S. Aditya, Y. Yang, C. Baral, Y. Aloimonos, and C. Ferm ¨uller,
+“Image understanding using vision and reasoning through scene
+description graph,” Comput. Vis. Image Underst., 2018. 1
+
+[12] J. Zhang, Y. Kalantidis, M. Rohrbach, M. Paluri, A. Elgammal, and
+M. Elhoseiny, “Large-scale visual relationship understanding,” in
+AAAI, 2019. 1, 9
+
+[13] D. Xu, Y. Zhu, C. B. Choy, and L. Fei-Fei, “Scene graph generation
+
+by iterative message passing,” in CVPR, 2017. 2, 7, 9, 10
+
+[14] R. Zellers, M. Yatskar, S. Thomson, and Y. Choi, “Neural motifs:
+Scene graph parsing with global context,” in CVPR, 2018. 2, 3, 7,
+9, 10
+
+[15] K. Tang, H. Zhang, B. Wu, W. Luo, and W. Liu, “Learning to
+compose dynamic tree structures for visual contexts,” in CVPR,
+2019. 2, 3, 7, 10
+
+[16] X. Lin, C. Ding, J. Zeng, and D. Tao, “Gps-net: Graph property
+sensing network for scene graph generation,” in CVPR, 2020. 2, 3,
+7, 10
+
+[17] R. Li, S. Zhang, B. Wan, and X. He, “Bipartite graph network with
+adaptive message passing for unbiased scene graph generation,”
+in CVPR, 2021. 2, 5, 6, 9
+
+[18] J. Yang, J. Lu, S. Lee, D. Batra, and D. Parikh, “Graph R-CNN for
+
+scene graph generation,” in ECCV (1), 2018. 2, 6
+
+[19] Z. Tian, C. Shen, H. Chen, and T. He, “FCOS: fully convolutional
+
+one-stage object detection,” in ICCV, 2019. 2
+
+[20] Q. Dong, Z. Tu, H. Liao, Y. Zhang, V. Mahadevan, and S. Soatto,
+“Visual relationship detection using part-and-sum transformers
+with composite queries,” in ICCV, 2021. 2, 3
+
+[21] H. Liu, N. Yan, M. S. Mortazavi, and B. Bhanu, “Fully convolu-
+
+tional scene graph generation,” in CVPR, 2021. 2
+
+[22] Y. Teng and L. Wang, “Structured sparse R-CNN for direct scene
+
+graph generation,” in CVPR, 2022. 2, 3
+
+[23] J. Zhang, M. Elhoseiny, S. Cohen, W. Chang, and A. M. Elgammal,
+
+“Relationship proposal networks,” in CVPR, 2017. 2, 4, 6
+
+[24] Y. Teng, L. Wang, Z. Li, and G. Wu, “Target adaptive context
+
+aggregation for video scene graph generation,” in ICCV, 2021. 2
+
+[25] X. Li, W. Zhang, J. Pang, K. Chen, G. Cheng, Y. Tong, and C. C.
+Loy, “Video k-net: A simple, strong, and unified baseline for video
+segmentation,” in CVPR, 2022. 2, 3
+
+[26] L. Xu, H. Qu, J. Kuen, J. Gu, and J. Liu, “Meta spatio-temporal
+debiasing for video scene graph generation,” in ECCV (27), 2022.
+2
+
+[27] K. Gao, L. Chen, Y. Niu, J. Shao, and J. Xiao, “Classification-
+then-grounding: Reformulating video scene graphs as temporal
+bipartite graphs,” in CVPR, 2022. 2
+
+[28] J. Yang, W. Peng, X. Li, Z. Guo, L. Chen, B. Li, Z. Ma, K. Zhou,
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE, VOL. X, NO. X, X
+
+12
+
+Fig. 7: The visualization of scene graph generation of baseline model and Pair-Net. In each image, the left column
+displays the results from the baseline model, the middle column shows the ground truth and the right column showcases
+the results from our proposed Pair-Net.
+
+W. Zhang, C. C. Loy et al., “Panoptic video scene graph genera-
+tion,” in CVPR, 2023. 2
+
+[29] K. Tang, Y. Niu, J. Huang, J. Shi, and H. Zhang, “Unbiased scene
+
+graph generation from biased training,” in CVPR, 2020. 2
+
+[30] J. Yu, Y. Chai, Y. Wang, Y. Hu, and Q. Wu, “Cogtree: Cognition tree
+loss for unbiased scene graph generation,” in IJCAI, 2021. 2
+[31] J. Zhang, K. J. Shih, A. Elgammal, A. Tao, and B. Catanzaro,
+“Graphical contrastive losses for scene graph parsing,” in CVPR,
+2019. 2, 10
+
+[32] A. K. Menon, S. Jayasumana, A. S. Rawat, H. Jain, A. Veit, and
+S. Kumar, “Long-tail learning via logit adjustment,” in ICLR, 2021.
+2
+
+[33] S. Abdelkarim, A. Agarwal, P. Achlioptas, J. Chen, J. Huang,
+B. Li, K. Church, and M. Elhoseiny, “Exploring long tail visual
+relationship recognition with large vocabulary,” in ICCV, 2021. 2
+[34] G. Yang, J. Zhang, Y. Zhang, B. Wu, and Y. Yang, “Probabilistic
+modeling of semantic ambiguity for scene graph generation,” in
+CVPR, 2021. 2
+
+[35] Y. Guo, L. Gao, X. Wang, Y. Hu, X. Xu, X. Lu, H. T. Shen,
+and J. Song, “From general to specific: Informative scene graph
+generation via balance adjustment,” in ICCV, 2021. 2
+
+[36] M. Chiou, H. Ding, H. Yan, C. Wang, R. Zimmermann, and J. Feng,
+“Recovering the unbiased scene graphs from the biased ones,” in
+
+ACM Multimedia, 2021. 2
+
+[37] R. Krishna, Y. Zhu, O. Groth, J. Johnson, K. Hata, J. Kravitz,
+S. Chen, Y. Kalantidis, L. Li, D. A. Shamma, M. S. Bernstein, and
+L. Fei-Fei, “Visual genome: Connecting language and vision using
+crowdsourced dense image annotations,” Int. J. Comput. Vis., 2017.
+2, 6, 9, 10
+
+[38] A. Kirillov, K. He, R. Girshick, C. Rother, and P. Doll´ar, “Panoptic
+
+segmentation,” in CVPR, 2019. 2, 3
+
+[39] B. Cheng, M. D. Collins, Y. Zhu, T. Liu, T. S. Huang, H. Adam, and
+L. Chen, “Panoptic-deeplab: A simple, strong, and fast baseline for
+bottom-up panoptic segmentation,” in CVPR, 2020. 3
+
+[40] Y. Li, H. Zhao, X. Qi, Y. Chen, L. Qi, L. Wang, Z. Li, J. Sun, and
+J. Jia, “Fully convolutional networks for panoptic segmentation
+with point-based supervision,” IEEE Trans. Pattern Anal. Mach.
+Intell., 2023. 3
+
+[41] A. Kirillov, R. B. Girshick, K. He, and P. Doll´ar, “Panoptic feature
+
+pyramid networks,” in CVPR, 2019. 3
+
+[42] Y. Xiong, R. Liao, H. Zhao, R. Hu, M. Bai, E. Yumer, and R. Ur-
+tasun, “Upsnet: A unified panoptic segmentation network,” in
+CVPR, 2019. 3
+
+[43] Y. Wu, G. Zhang, H. Xu, X. Liang, and L. Lin, “Auto-panoptic:
+Cooperative multi-component architecture search for panoptic
+segmentation,” in NeurIPS, 2020. 3
+
+IEEE TRANSACTIONS ON PATTERN ANALYSIS AND MACHINE INTELLIGENCE, VOL. X, NO. X, X
+
+13
+
+[69] A. Vaswani, N. Shazeer, N. Parmar, J. Uszkoreit, L. Jones, A. N.
+Gomez, Ł. Kaiser, and I. Polosukhin, “Attention is all you need,”
+NeurIPS, 2017. 5
+
+[70] T. Lin, P. Goyal, R. B. Girshick, K. He, and P. Doll´ar, “Focal loss for
+
+dense object detection,” in ICCV, 2017. 6, 8, 9
+
+[71] J. Wang, W. Zhang, Y. Zang, Y. Cao, J. Pang, T. Gong, K. Chen,
+Z. Liu, C. C. Loy, and D. Lin, “Seesaw loss for long-tailed instance
+segmentation,” in CVPR, 2021. 6, 8, 9
+
+[72] R. Ferjaoui, M. A. Cherni, F. Abidi, and A. Zidi, “Deep residual
+learning based on resnet50 for COVID-19 recognition in lung CT
+images,” in CoDIT, 2022. 7, 8, 10
+
+[73] Z. Zhou, M. Shi, and H. Caesar, “Hilo: Exploiting high low fre-
+quency relations for unbiased panoptic scene graph generation,”
+arXiv preprint arXiv:2303.15994, 2023. 7
+
+[74] Z. Liu, Y. Lin, Y. Cao, H. Hu, Y. Wei, Z. Zhang, S. Lin, and B. Guo,
+“Swin transformer: Hierarchical vision transformer using shifted
+windows,” in ICCV, 2021. 7, 8
+
+[75] T. Lin, M. Maire, S. J. Belongie, J. Hays, P. Perona, D. Ramanan,
+P. Doll´ar, and C. L. Zitnick, “Microsoft COCO: common objects in
+context,” in ECCV (5), 2014. 6, 7
+
+[76] T. Chen, W. Yu, R. Chen, and L. Lin, “Knowledge-embedded
+routing network for scene graph generation,” in CVPR, 2019. 7
+[77] I. Loshchilov and F. Hutter, “Decoupled weight decay regulariza-
+
+tion,” in ICLR (Poster), 2019. 7
+
+[78] K. Simonyan and A. Zisserman, “Very deep convolutional net-
+works for large-scale image recognition,” in ICLR, 2015. 10
+[79] S. Xie, R. B. Girshick, P. Doll´ar, Z. Tu, and K. He, “Aggregated
+residual transformations for deep neural networks,” in CVPR,
+2017. 10
+
+[80] A. Kuznetsova, H. Rom, N. Alldrin, J. R. R. Uijlings, I. Krasin,
+J. Pont-Tuset, S. Kamali, S. Popov, M. Malloci, A. Kolesnikov,
+T. Duerig, and V. Ferrari, “The open images dataset V4,” Int. J.
+Comput. Vis., 2020. 11
+
+[44] B. Cheng, I. Misra, A. G. Schwing, A. Kirillov, and R. Girdhar,
+“Masked-attention mask transformer for universal image segmen-
+tation,” in CVPR, 2022. 3, 4, 7, 8, 9
+
+[45] W. Zhang, J. Pang, K. Chen, and C. C. Loy, “K-net: Towards unified
+
+image segmentation,” in NeurIPS, 2021. 3
+
+[46] B. Cheng, A. G. Schwing, and A. Kirillov, “Per-pixel classification
+is not all you need for semantic segmentation,” in NeurIPS, 2021.
+3
+
+[47] H. Yuan, X. Li, Y. Yang, G. Cheng, J. Zhang, Y. Tong, L. Zhang,
+and D. Tao, “Polyphonicformer: Unified query learning for depth-
+aware video panoptic segmentation,” in ECCV, 2022. 3
+
+[48] X. Li, S. Xu, Y. Yang, H. Yuan, G. Cheng, Y. Tong, Z. Lin, and
+D. Tao, “Panopticpartformer++: A unified and decoupled view
+for panoptic part segmentation,” CoRR, 2023. 3
+
+[49] X. Li, H. Yuan, W. Zhang, G. Cheng, J. Pang, and C. C. Loy,
+“Tube-link: A flexible cross tube baseline for universal video
+segmentation,” ICCV, 2023. 3
+
+[50] Y. Han, J. Zhang, Z. Xue, C. Xu, X. Shen, Y. Wang, C. Wang, Y. Liu,
+and X. Li, “Reference twice: A simple and unified baseline for
+few-shot instance segmentation,” arxiv, 2023. 3
+
+[51] Z. Yang, Y. Wei, and Y. Yang, “Collaborative video object segmen-
+tation by multi-scale foreground-background integration,” TPAMI,
+2021. 3
+
+[52] K. Li, Z. Yang, L. Chen, Y. Yang, and J. Xiao, “Catr: Combinatorial-
+dependence audio-queried transformer for audio-visual video
+segmentation,” in ACM-MM, 2023. 3
+
+[53] Y. Xu, Z. Yang, and Y. Yang, “Video object segmentation in panop-
+
+tic wild scenes,” in IJCAI, 2023. 3
+
+[54] N. Carion, F. Massa, G. Synnaeve, N. Usunier, A. Kirillov, and
+S. Zagoruyko, “End-to-end object detection with transformers,” in
+ECCV, 2020. 3, 4, 5, 6, 7, 10
+
+[55] P. Sun, R. Zhang, Y. Jiang, T. Kong, C. Xu, W. Zhan, M. Tomizuka,
+L. Li, Z. Yuan, C. Wang, and P. Luo, “Sparse R-CNN: end-to-end
+object detection with learnable proposals,” in CVPR, 2021. 3
+[56] X. Zhu, W. Su, L. Lu, B. Li, X. Wang, and J. Dai, “Deformable
+DETR: deformable transformers for end-to-end object detection,”
+in ICLR, 2021. 3, 9, 10
+
+[57] H. Wang, Y. Zhu, H. Adam, A. L. Yuille, and L. Chen, “Max-
+deeplab: End-to-end panoptic segmentation with mask transform-
+ers,” in CVPR, 2021. 3
+
+[58] M. Chen, Y. Liao, S. Liu, Z. Chen, F. Wang, and C. Qian, “Reformu-
+lating HOI detection as adaptive set prediction,” in CVPR, 2021.
+3
+
+[59] B. Kim, J. Lee, J. Kang, E. Kim, and H. J. Kim, “HOTR: end-to-end
+human-object interaction detection with transformers,” in CVPR,
+2021. 3
+
+[60] F. Zeng, B. Dong, Y. Zhang, T. Wang, X. Zhang, and Y. Wei,
+“MOTR: end-to-end multiple-object tracking with transformer,”
+in ECCV (27), 2022. 3
+
+[61] P. Sun, Y. Jiang, R. Zhang, E. Xie, J. Cao, X. Hu, T. Kong, Z. Yuan,
+C. Wang, and P. Luo, “Transtrack: Multiple-object tracking with
+transformer,” CoRR, 2020. 3
+
+[62] S. Ren, K. He, R. B. Girshick, and J. Sun, “Faster R-CNN: towards
+real-time object detection with region proposal networks,” IEEE
+Trans. Pattern Anal. Mach. Intell., 2017. 3, 4, 7, 10
+
+[63] X. Lyu, L. Gao, P. Zeng, H. T. Shen, and J. Song, “Adaptive fine-
+grained predicates learning for scene graph generation,” arXiv
+preprint arXiv:2207.04602, 2022. 3
+
+[64] X. Chang, P. Ren, P. Xu, Z. Li, X. Chen, and A. G. Hauptmann, “A
+comprehensive survey of scene graphs: Generation and applica-
+tion,” IEEE Transactions on Pattern Analysis and Machine Intelligence,
+2021. 3
+
+[65] X. Chang, P. Ren, P. Xu, Z. Li, X. Chen, and A. Hauptmann, “A
+comprehensive survey of scene graphs: Generation and applica-
+tion,” IEEE Trans. Pattern Anal. Mach. Intell., 2023. 3
+
+[66] G. Zhu, L. Zhang, Y. Jiang, Y. Dang, H. Hou, P. Shen, M. Feng,
+X. Zhao, Q. Miao, S. A. A. Shah et al., “Scene graph generation: A
+comprehensive survey,” arXiv preprint arXiv:2201.00443, 2022. 3
+
+[67] F. Milletari, N. Navab, and S. Ahmadi, “V-net: Fully convolutional
+neural networks for volumetric medical image segmentation,” in
+3DV, 2016. 4
+
+[68] A. Dosovitskiy, L. Beyer, A. Kolesnikov, D. Weissenborn, X. Zhai,
+T. Unterthiner, M. Dehghani, M. Minderer, G. Heigold, S. Gelly,
+J. Uszkoreit, and N. Houlsby, “An image is worth 16x16 words:
+Transformers for image recognition at scale,” in ICLR, 2021. 4, 8
+
+

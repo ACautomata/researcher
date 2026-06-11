@@ -1,0 +1,2735 @@
+Vision Relation Transformer for Unbiased Scene Graph Generation
+
+Gopika Sudhakaran1,3
+
+Devendra Singh Dhami1,3
+
+Kristian Kersting1,2,3
+
+Stefan Roth1,2,3
+
+1Department of Computer Science, Technical University of Darmstadt, Germany
+
+2Centre for Cognitive Science, TU Darmstadt
+
+3Hessian Center for AI (hessian.AI)
+
+Abstract
+
+Recent years have seen a growing interest in Scene
+Graph Generation (SGG), a comprehensive visual scene
+understanding task that aims to predict entity relationships
+using a relation encoder-decoder pipeline stacked on top of
+an object encoder-decoder backbone. Unfortunately, cur-
+rent SGG methods suffer from an information loss regarding
+the entities’ local-level cues during the relation encoding
+process. To mitigate this, we introduce the Vision rElation
+TransfOrmer (VETO), consisting of a novel local-level en-
+tity relation encoder. We further observe that many existing
+SGG methods claim to be unbiased, but are still biased to-
+wards either head or tail classes. To overcome this bias, we
+introduce a Mutually Exclusive ExperT (MEET) learning
+strategy that captures important relation features without
+bias towards head or tail classes. Experimental results on
+the VG and GQA datasets demonstrate that VETO + MEET
+boosts the predictive performance by up to 47% over the
+state of the art while being ∼ 10× smaller.1
+
+1. Introduction
+
+Visual scene understanding has made great strides in re-
+cent years, extending beyond standard object detection and
+recognition tasks to tackle more complex problems such as
+visual question answering [1] and image captioning [11].
+One powerful tool for scene understanding is Scene Graph
+Generation (SGG), which aims to identify the relationships
+between entities in a scene [23]. However, despite recent
+advancements, SGG models still have significant limita-
+tions when it comes to real-world applications.
+
+Conventional SGG approaches, as shown in Fig. 1 (panel
+3), generate global-level entity patches for relation encod-
+ing. Yet, during the relation encoding process, they lose
+local-level entity information. As illustrated in Fig. 2a,
+we humans have a tendency to focus on the critical local-
+level information necessary to construct relations between
+
+1Code is available at https://github.com/visinf/veto
+
+Figure 1. VETO-MEET vs. Conventional SGG. (1) VETO: En-
+hancing the information flow from entity features to relationship
+prediction by using a local-level entity relation encoder that con-
+ducts relation and modality fusion of local-level entity patches.
+The local-level components (green ticks) keep the model light-
+weight while reducing information loss. A (blue) and B (green)
+denote example relation classes taken from the corresponding col-
+ored region in the predicate frequency histogram of the VG dataset
+[17]. (2) MEET: Debiased relation decoder that employs out-of-
+distribution aware mutually exclusive experts (E1–E3). Grey A
+and B denote an out-of-distribution prediction discarded by the
+model. (3) Conventional SGG: The projection components (red
+crosses) yield a computationally expensive model and the global-
+level entity patches result in a local-level information loss.
+
+things in a scene, which is overlooked by current SGG ap-
+proaches. Moreover, the major parameter count of current
+SGG models stems from projections (red-crossed compo-
+nents in Fig. 1) involved in global-level entity patch genera-
+tion. Another challenge with existing SGG approaches, de-
+spite efforts to enhance scene graphs using additional cues
+like depth maps and knowledge graphs [27, 48], is that they
+are either resource intensive or limited in exploiting cross-
+modal information.
+
+Finally but crucially, SGG training setups are challenged
+by the strong bias of the visual world around us towards a
+few frequently occurring relationships, leaving a long tail
+of under-represented relations. This is also the case with
+
+Relation EncoderRelation FusionGeometric cuesVisual cuesSemantic cueswomenhelmethorseLocation cues….….ABE3E2E1Global-level entity projectionVisual cuesLocation cuesSemantic cueswomenhelmethorseRelation EncoderRelation DecoderGlobal-level entity projectionVisual cuesSGG32ABwomanhorsehatwearingridingSGGBBAAMEETPredicate classes of Visual Genome (VG) datasetFrequency distribution of predicatesVETOConventional SGGLocal patchesGlobal patchesABVETOVETORelation FusionModality FusionLocal-level entity projection01ThisICCVpaperistheOpenAccessversion,providedbytheComputerVisionFoundation.Exceptforthiswatermark,itisidenticaltotheacceptedversion;thefinalpublishedversionoftheproceedingsisavailableonIEEEXplore.21882(a) Significance of local-level cues
+
+(b) Recall drop of debiased Motifs [49], VCTree [31]
+
+Figure 2. Challenges in SGG. (a) For establishing the attached to
+relation between Handle and Basket, the attention should be on the
+corner regions of the object. (b) R@100 drop (%) and mR@100
+increase (%) of unbiased SGG methods Motifs and VCTree rela-
+tive to their vanilla versions. The R@100 metric measures the av-
+erage recall of all predictions, which is higher for models that over-
+fit to the head classes, while mR@100 denotes the per-predicate
+class mean and is higher for models that overfit to the tail classes.
+
+benchmark SGG datasets, e.g., Visual Genome (VG) [17],
+as depicted by the predicate2 class frequency distribution in
+Fig. 1. Due to the dominance of few head predicates, con-
+ventional SGG models [31, 49] are biased towards the head
+classes. Though several unbiased SGG methods have been
+proposed [7,30,46] to overcome this issue, they are prone to
+over-fitting to the tail classes at the expense of head classes
+(cf . Fig. 2b). Despite recent efforts [7] to fix this bias issue
+using multi-expert learning strategies, we find that they still
+over-fit to the tail classes (“GCL” in Fig. 2b). Overall, there
+are two main problems with present unbiased SGG meth-
+ods: (1) Conventional methods, including debiased models,
+can only learn a limited range of predicates. (2) Existing
+multi-expert SGG models lack adequate exclusivity to en-
+hance both head and tail classes at the same time.
+
+Consequently, we propose the Vision rElation Trans-
+fOrmer (VETO). Inspired by Vision Transformers [8] that
+use image-level patches for classification, VETO generates
+local-level entity patches for the relation prediction task.
+This improves the information flow from entity features to
+relationship prediction by channeling the attention towards
+fused local feature cues of subject and object entities (Re-
+lation Fusion in Fig. 1) and using a local-level entity re-
+lation encoder, which processes entity features at the sub-
+region level. To strengthen the encoder further, we infuse
+geometric cues into VETO using a Modality Fusion com-
+
+2We use the terms predicate/relation interchangeably in this paper.
+
+ponent (cf . Fig. 1), which unites visual and geometric fea-
+tures to yield local-level entity patches. Finally, to suc-
+cessfully debias VETO, we propose a multi-expert learning
+strategy termed Mutually Exclusive ExperTs (MEET). After
+splitting the predicate classes into subgroups, we perform
+in-distribution and out-of-distribution (OOD) sampling for
+each subgroup. Then we train each expert on every pred-
+icate class but each expert will be responsible for only a
+subset of predicates with out-of-distribution prediction han-
+dling predicates outside its subgroup. In contrast to exist-
+ing multi-expert methods [7], where expert classifiers are
+co-dependent to distill knowledge, OOD sampling enables
+experts to independently interpret every inference sample.
+
+Contributions. Let us summarize: (1) We propose a
+novel SGG method with a local-level entity relation encod-
+ing, which is light-weight and reduces the local-level in-
+(2) To strengthen the encoder
+formation loss of entities.
+further, we propose an effective strategy to infuse addi-
+tional geometric cues. (3) We devise a mutually exclusive
+multi-expert learning strategy that effectively exploits our
+relation network design by learning subgroup-specific di-
+verse feature representations and discriminating from sam-
+ples outside its subgroups. (4) Our extensive experimenta-
+tion shows the significance of both VETO and MEET.
+
+2. Related Work
+
+Scene Graph Generation (SGG) is a tool for under-
+standing scenes by simplifying the visual relationships into
+a summary graph. SGG has been receiving increased at-
+tention from the research community due to its potential
+usability in assisting downstream visual reasoning tasks
+[16, 28, 36]. While SGG aims to provide a comprehen-
+sive view of relationships between objects in a visual scene,
+there is another set of research that represents interactions
+as relationships between humans and objects called Human-
+object Interaction (HOI) [9, 13, 32, 39]. In this work, the fo-
+cus is on SGG and its associated literature, emphasizing the
+study of object relationships within visual scenes.
+
+The SGG task was first introduced by Lu et al. [23].
+Early approaches mainly focused on including additional
+features from various sources other than the visual con-
+text, resulting in sub-optimal performance [5, 21, 23]. Later
+work proposed more powerful relation encoders with rich
+contextual information by employing message passing [40],
+sequential LSTMs [31, 49], and fully-connected graphs
+[3, 5, 20, 36, 37, 40, 44, 48]. Recent advancements in atten-
+tion techniques have also resulted in attention-based SGG
+methods. Earlier work [43] in this direction used graph at-
+tention networks (GAT) [34] to capture object-level visual
+similarity. Recently, Transformers [33] have also been used
+for SGG [7,15,22,24] after their successful adoption across
+computer vision [2, 8, 25]. Current transformer-based SGG
+methods use attention to capture global context and improve
+
+Handleattached to basketattached toattached to 5 Z W 3 & 3 / ' / ) ( 7 ' ( , ( 7 U D Q V  5 Z W * & / & R J 7 U H H 8 Q E L D V L Q J  7 H F K Q L T X H            5 H O D W L Y H  5 #     G U R S     Y V  P 5 #     L Q F U H D V H                                                                   0 R W L I V  5 #    0 R W L I V  P 5 #    9 & 7 U H H  5 #    9 & 7 U H H  P 5 #   21883the visual and semantic modality fusion. Lu et al. [24] used
+sequential decoding to capture context, while Dong et al. [7]
+employed self- and cross-attention to fuse visual and se-
+mantic cues. Deviating from this, we use transformers to
+capture local-level relation cues as well as joint visual and
+geometric cues.
+
+Scene Graphs with additional knowledge. Due to the
+long-tail distribution of the relationships, it is difficult to
+obtain enough training data for every relation. To over-
+come this, using additional knowledge in the form of knowl-
+edge graphs [10, 47, 48], depth maps [27, 42], and data
+transfer [50] was proposed. Knowledge graph-based works
+refine features for relation prediction by reasoning using
+knowledge from large-scale databases. Yang et al. [42] and
+Sharifzahed et al. [27] use a monocular depth estimator to
+infer additional depth cues for relation prediction by fusing
+with visual features. Zhang et al. [50] expanded the dataset
+by increasing the SGG annotations through internal and ex-
+ternal data transfer. Our approach can also use depth maps
+to provide additional geometric knowledge. However, in-
+troducing additional knowledge can increase the parameter
+count and computation time of the model. To tackle this
+problem, we strategically prune the parameters, resulting in
+a light-weight yet powerful SGG model.
+
+Unbiased Scene Graph Generation. The SGG re-
+search community started paying attention to the prob-
+lem of class imbalance only after the introduction of the
+less biased mean recall metric by Chen et al. [3] and
+Tang et al. [31]. Subsequently, various unbiasing strate-
+gies [4, 7, 19, 29, 30, 35, 41, 46, 50] were proposed, many
+of which can be used in a model-agnostic fashion. Tang et
+al. [31] used counterfactuals from causal inference to disen-
+tangle unbiased representations from the biased ones. Yu et
+al. [46] utilized tree structures to filter irrelevant predicates.
+Zareian et al. [48] and Yan et al. [41] used re-weighting
+strategies while Li et al. [19] employed a re-sampling strat-
+egy. Dong et al. [7] used a multi-expert learning setup
+that leverages knowledge distillation. However, while these
+methods attain high performance on unbiased metrics, they
+reduce the head class performance significantly as seen in
+Fig. 2b. Hence, to attain an effective balance between the
+head and tail classes, we propose a mutually exclusive ex-
+pert learning setup. Our model not only achieves better head
+and tail class balance but also sets a new state of the art.
+
+3. Vision rElation TransfOrmer (VETO)
+
+Our goal is to improve the Scene Graph Generation task
+that parses an input image to generate a structured graphi-
+cal representation of entities and their relationships. In par-
+ticular, we focus on enhancing the overall performance of
+SGG by improving the prediction on both the head and tail
+relations. To this end, we introduce a relation network that
+learns richer entity/predicate representations by focusing on
+
+local-level entity features and devise a multi-expert learning
+strategy to achieve a better relation prediction trade-off.
+
+3.1. Problem setting
+
+For a given image I, the goal of SGG is to create a sum-
+mary graph G that adequately summarizes the information
+present in the image. At first, we detect all the entities
+within image I, denoted as E = {ei}N
+i=1. Then we pre-
+dict the predicates pi→j for each subject-object entity pair
+(ei, ej). Finally, we construct the scene graph G using the
+triplet form of the predictions (ei, pi→j, ej) as
+
+G = (cid:8) (ei, pi→j, ej) | ei, ej ∈ E, pi→j ∈ P(cid:9).
+
+(1)
+
+3.2. The VETO backbone
+
+Roughly speaking, as shown in Fig. 3, the VETO model
+comprises a feature extraction and a proposal network as the
+backbone, which are fed to the relation network.
+
+Feature extraction. Following previous work, our fea-
+ture extraction backbone comprises an RGB feature extrac-
+tor, which is pre-trained and kept frozen [19, 30], and a
+depth feature extractor, which is trained from scratch dur-
+ing SGG training [27].
+
+Proposal network. We use Faster R-CNN [26] as our
+object detector. Entity proposals are obtained directly from
+the output of object detection, which includes their cate-
+gories and classification scores. We use the entity proposals
+to extract scaled RGB features ri and their corresponding
+geometric features gi from the depth map. We denote the
+proposal bounding box as bi and its detected class as ci.
+
+Before explaining the proposed VETO local-level en-
+tity generator, let us briefly revisit a conventional SGG [19]
+pipeline that uses global-level entity projection.
+
+Entity global-level patch generator. Given the ex-
+tracted RGB features ri, a global-level patch generator in
+conventional SGG [19, 31, 49] would first densely project
+the ri to a lower-dimensional visual representation hi as
+
+hi = fh2 (fh1 (ri)) ,
+
+(2)
+
+where fh1 and fh2 are two fully-connected layers. This
+global-level projection (Fig. 1, panel 3) of visual features
+is not only parameter heavy but can also result in a local-
+level information loss of entities (Fig. 2a).
+
+Given the entity details (hi, bi, ci), conventional SGG
+then computes a combined entity representation qi using
+another fully-connected network fq as
+
+qi = fq (hi ⊕ li ⊕ wi) ,
+
+(3)
+
+where li is a location feature based on the bounding box bi,
+wi is a semantic feature based on a word embedding of its
+class ci, and ⊕ is the concatenation operation.
+
+To yield a relationship proposal from entity i to j, con-
+ventional SGG [19] has an additional entity-level projection
+
+21884Figure 3. VETO architecture. An object detector yields entity proposals and entity features r. Moreover, a depth map is estimated from
+the RGB input, which is also passed through the feature extractor to obtain geometric features g. Then, for each entity pair, a sequence of
+local-level patches are generated, which are passed through the transformer-based relation encoder to yield a relation prediction.
+
+(Fig. 1, panel 3), comprising convolutional features of the
+union region of entity bounding boxes bi and bj, denoted
+as uij. The predicate representation pi→j is then computed
+as pi→j = fu (uij) + fp (qi ⊕ qj), where qi ⊕ qj denotes
+the joint representation of entities ei and ej, and fu, fp are
+two fully-connected networks.
+
+3.3. The VETO entity local-level patch generator
+
+In contrast to the entity-level patch generator of conven-
+tional SGG, the local-level entity patch generator of VETO
+can inculcate local-level and geometric cues of entities for
+relation prediction to learn richer visual representations and
+reduce crucial information loss during relation prediction.
+It consists of a two-stage local-level entity patch genera-
+tor followed by a transformer-based relation encoder and a
+fully-connected relation decoder. In particular, our network
+replaces the parameter heavy and computationally expen-
+sive fully-connected layers in the conventional relation net-
+work resulting from a global entity-level projection (Eq. 2)
+with less expensive local-level entity projections.
+
+For a given image I and its depth-map, we extract the
+RGB features r with cv channels of size w × h and the ge-
+ometric features g with cd channels and the same size. Our
+relation network starts with the patch generation and fusion
+modules, which we call Cross-Relation Patch Generation
+
+(CRPG) and Cross-Modality Patch Fusion (CMPF).
+Cross-Relation Patch Generation module.
+
+In order
+to strengthen our transformer-based relation encoder with
+local-level entity feature dependencies, we introduce a
+Cross-Relation Patch Generation module (Fig. 3). It gen-
+erates combined subject-object local-level patches.
+
+We preserve the local-level entity information by divid-
+ing the RGB features r ∈ Rcv×h×w and geometric features
+g ∈ Rcd×h×w into p × p blocks and then average pooling r
+and g features within each block to summarize the average
+presence of the features that are crucial for relation predic-
+tion. Now for a given subject-object entity pair (ei, ej) the
+resultant pooled RGB features v ∈ Rcv×p×p from both en-
+tities are fused channel-wise (Relation Fusion) as
+
+vij = C (vi, vj) ∈ R2cv×p×p, v = pool (r) ,
+
+(4)
+
+where C (·) denotes concatenation along the channel di-
+mension and pool refers to average pooling. We then split
+vij spatially into sequential patches as
+
+vpa
+ij =
+
+(cid:110)
+
+ij ∈ R2cv×k×k (cid:12)
+vℓ
+(cid:12)
+
+(cid:12) ℓ = 1, . . . , (p/k)2(cid:111)
+
+,
+
+(5)
+
+where p denotes the pooled width and height of v, vℓ refers
+to the ℓth patch, and k is the patch size (in terms of blocks).
+Thus, the CRPG module produces (p/k)2 patches for vij.
+
+RGB Feature ExtractorDepth Feature ExtractorProposal NetworkDepth NetworkCross-Relation Patch GenerationCross-Relation Patch GenerationLearnable 1D position embeddingsSGGClassifierRGBDepth-MapCross-Modality Patch FusionRelation Encoderavg pool….….avg poolPatch Generation….avg pool….avg poolPatch GenerationLocal-levelLearnableClass, LocationPatch TypesDimension….….….….21885Similar to vij, we obtain combined depth features dij ∈
+R2cd×p×p and depth patches dpa
+ij ∈ R2cd×k×k with depth
+patch size 2cd × k × k by repeating Eqs. (4) and (5) for the
+pooled geometric features d ∈ Rcd×p×p.
+
+Cross-Modality Patch Fusion module. In order to re-
+duce the model parameters and computational expense fur-
+ther and to strengthen the encoder with additional modality
+cues, we introduce a Cross-Modality Patch Fusion module.
+It first projects the vpa
+ij from the CRPG module to a
+lower dimensionality:
+
+ij and dpa
+
+pxpa
+
+ij = fx
+
+(cid:0)xpa
+
+ij, px(cid:1) , x ∈ {v, d}.
+
+(6)
+
+ij and pdpa
+
+The resulting pvpa
+ij denote the locally projected
+entity patches for RGB and depth features, fx in Eq. (6) is
+a fully-connected network, which should be understood as
+fx (y, M ) = Wy, where y ∈ RN and W ∈ RM ×N .
+
+Then we fuse the corresponding patches v and d of both
+modalities to capture their dependencies while also further
+reducing the parameters and computational complexity by
+reducing the length of the token sequence from 2 (p/k)2 to
+(p/k)2. This ensures that dependent modality information
+is closely knit to be efficiently exploited by the subsequent
+relation encoder:
+(cid:110)(cid:16)
+zpa
+0 =
+
+(cid:12) ℓ = 1, . . . , (p/k)2(cid:111)
+
+ij ⊕ pdℓ
+ij
+
+(cid:17) (cid:12)
+(cid:12)
+
+pvℓ
+
+(7)
+
+,
+
+where zpa
+0 represents the patch-based input embedding to-
+kens to the first layer of our transformer-based relation en-
+coder and ⊕ denotes the concatenation operation.
+
+Overall, the local-level entity projections in VETO en-
+able capturing the crucial local-level cues that global-level
+entity projection may overlook while simultaneously reduc-
+ing the overall number of parameters.
+
+Additional cues. Unlike conventional SGG in which lo-
+cation features l and semantic features w are fused with
+RGB features to form the entity representation, cf . Eq. (3),
+we fuse them separately for each subject-object pair and use
+them as additional input tokens to our relation encoder:
+
+0
+
+z(p/k)2+1
+z(p/k)2+2
+
+0
+
+= h (cid:0)fl
+= h (cid:0)fw
+
+(cid:0)li ⊕ lj, pv + pd(cid:1)(cid:1)
+(cid:0)wi ⊕ wj, pv + pd(cid:1)(cid:1) ,
+
+(8)
+
+(9)
+
+where fl(·) and fw(·) are fully-connected networks and h(·)
+is a non-linear function.
+
+Relation encoder. We use a transformer-based relation
+encoder architecture. The key to successfully capturing the
+relationship between subject-object pairs in SGG is to ad-
+equately express the subject-object joint features that ac-
+count for their intricate relationship. The Multi-head Self
+Attention (MSA) component of the transformer can jointly
+attend to diverse features by enabling each head to focus
+on a different subspace with distinct semantic or syntac-
+tic meanings. Hence, we propose to capture the subject-
+object inductive bias in SGG with a MSA component
+
+by feeding it embedding tokens zpa
+0 enriched with local-
+level subject-object information. MSA can be formalized
+as MSA(Q, K, V ) = Concat (SA1, SA2, . . . , SAh) W O
+(cid:16) QiKT
+where SAi = softmax
+Vi denotes self-attention,
+i√
+d
+Q, K, and V refer to query, key, and value, and W O are
+trainable parameters. The input token to the transformer is
+split into multiple heads to be attended to in parallel.
+
+(cid:17)
+
+We prepend the entity local-level information enriched
+input patches zpa
+0 from the CMPF module with a learnable
+class token zcl
+0 . Additionally, a learnable 1D positional em-
+bedding zpos is added to each token to preserve the subject-
+object positional information. The resultant sequence is
+passed as input to the encoder. The transformer consists of
+L encoder layers, each with MSA and MLP blocks. Each
+encoder layer also contains a LayerNorm (LN) before every
+block and residual connections after every block:
+0 ; z(p/k)2+1
+
+; z(p/k)2+2
+
+0 ; zpa
+zcl
+
+z0 =
+
++ zpos
+
+(10)
+
+(cid:111)
+
+(cid:110)
+
+0
+
+0
+
+z′
+ℓ = MSA (LN (zℓ−1)) + zℓ−1,
+zℓ = MLP (LN (z′
+y = LN (cid:0)z0
+
+ℓ)) + z′
+ℓ,
+
+(cid:1) ,
+
+L
+
+ℓ = 1 . . . L (11)
+(12)
+
+ℓ = 1 . . . L
+
+(13)
+
+where zpos ∈ R((p/k)2+3)×(pv+pd), and L denotes the num-
+ber of total encoder layers. Each encoder layer contains
+MSA, MLP, and LN blocks as well as residual connections.
+Finally, y is linearly projected to the total number of predi-
+cate relations, forming the relation classification head.
+
+4. MEET: Mutually Exclusive ExperT learning
+
+As pointed out by Dong et al. [7], a single classifier can-
+not achieve satisfactory performance on all the predicate
+classes due to the extreme unbalance of SGG datasets. To
+tackle this issue, they propose to deploy multiple classifiers.
+However, their classifiers are not mutually exclusive and re-
+sult in a significant deterioration of head class performance
+(“GCL” in Fig. 2b), as they distill knowledge from head to
+tail classifiers. We hypothesise that learning mutually ex-
+clusive experts, each responsible for a predicate subgroup,
+can reduce model bias towards a specific set of predicates.
+Therefore, we propose Mutually Exclusive-ExperT
+learning (MEET). MEET splits the predicate classes into
+balanced groups based on the predicate frequency in the
+training set. First, we sort the predicate classes according
+to their frequency in descending order into Psort = {pi}M
+i=1.
+The sorted set is split into G predicate groups {P g
+sort}G
+g=1.
+We use the same class split as [7], yet in contrast, MEET de-
+ploys mutually exclusive classifier experts {Eg}G
+g=1 respon-
+sible for classification within each predicate group P g
+sort.
+
+Unfortunately, training each expert exclusively on a sub-
+group of predicates P g
+sort can be challenged during the eval-
+uation stage with samples out of its classification space, re-
+sulting in uncertain predictions. To overcome this issue,
+
+21886Algorithm 1 MEET: Mutually Exclusive ExperT learning
+1: Input: predicate classes P = {pi}M
+
+i=1, experts E =
+g=1, where G denotes the total number of experts
+
+{E}G
+
+sort ← gth sorted predicate group of Psort
+
+2: Psort ← sorted predicate set P
+3: P g
+4: S g ← relation representation sample z0
+5: fs (x, y) = max (cid:0) min (cid:0)x/y, 1.0(cid:1), 0.01(cid:1)
+6: for g = 1 to G do
+7:
+8:
+9:
+10:
+
+Index ← index of the central predicate in P g
+sort
+centre ← Freq(P g
+sort(Index ))
+dist = {fs (centre, Freq (p)) | ∀p ∈ P g
+I g
+dist = {fs (centre, Freq (p)) | ∀p /∈ P g
+Og
+
+L of gth group
+
+(cid:26) Index (p) in P g
+|P g
+sort| + 1,
+
+yg(p) =
+Sample from distribution: S g
+wg = Eg(cid:0) {S g
+
+out} (cid:1)
+
+in; S g
+
+sort,
+
+11:
+
+12:
+13:
+14: end for
+15: L = (cid:80)G
+
+g=1 LCE (wg, yg)
+
+16: Evaluation stage:
+17: ˆwg = (cid:2)wg
+18: Rconf = {maxi ˆwg
+
+(cid:3)|P g
+i=1
+
+sort|
+
+i
+
+19: Rlabel =
+
+(cid:110)
+
+Psort
+
+(cid:16)
+
+i }G
+g=1
+arg maxi ˆwg
+
+sort}
+sort}
+for p ∈ P g
+sort
+for p /∈ P g
+sort
+dist, S g
+
+in ∼ I g
+
+out ∼ Og
+▷ expert output
+
+dist
+
+▷ multi-expert loss
+
+▷ discard OOD predictions
+
+i + (cid:80)g−1
+
+j=0
+
+(cid:12)
+(cid:12)P j
+sort
+
+(cid:12)
+(cid:12)
+
+(cid:17) (cid:111)G
+
+g=1
+
+we train out-of-distribution aware experts. We summarize
+MEET in Algorithm 1. (Lines 9–10): During training, we
+adjust the in-distribution I g
+dist and out-of-distribution Og
+dist
+sampling frequency within each expert to prevent the ex-
+perts from being overwhelmed with OOD samples. Freq (·)
+denotes the frequency count of a predicate class. (Line 11):
+We re-map the relation labels to accommodate an out-of-
+distribution pseudo-label for every expert group. (Lines 12,
+13, 15): For a given image I, each expert Eg is trained on
+the in-distribution and out-of-distribution samples S g
+in and
+S g
+(Lines 17–19): During the evaluation
+out, respectively.
+stage, we discard the OOD predictions from each group and
+map the prediction labels back to the original labels.
+
+5. Experimental Evaluation
+
+We aim to answer the following questions: (Q1) Does
+VETO + MEET improve the SOTA in unbiased SGG?
+(Q2) What is the impact of MEET on other SGG meth-
+ods? (Q3) Does local-level projection reduce the model
+size? (Q4) Does SGG benefit from local-level patch gener-
+ation? (Q5) Does a depth map improve SGG performance?
+
+5.1. Experimental setup
+
+Dataset. We evaluate our approach on two common
+SGG datasets: Visual Genome (VG) [17] and GQA [12].
+For VG we adopt the popular VG150 split, which consists
+
+of 150 object classes and 50 predicate classes in line with
+previous SGG work [3, 19, 22, 29–31, 40, 46, 49]. For GQA
+we adopt the GQA200 split used by Dong et al. [7]. For
+both datasets, depth maps are generated using the monocu-
+lar depth estimator of Yin et al. [45].
+
+Evaluation protocol. We evaluate our model on the
+most common SGG tasks [40, 49]: (1) Predicate Classi-
+fication (PredCls) predicts the relationships for all object
+pairs by using both the ground-truth bounding boxes and
+classes; (2) Scene Graph Classification (SGCls) predicts
+both the object classes and their pairwise relationships by
+using ground-truth bounding boxes; (3) Scene Graph De-
+tection (SGDet) detects, classifies, and predicts the pairwise
+relationships for all the objects in an image.
+
+Evaluation metrics. Following previous work [7, 19],
+we use Recall@k (R@k) and mean Recall@k (mR@k) as
+our evaluation metrics. We also report the Average of recall
+and mean recall (A@k) to show the combined performance
+improvement of R@k and mR@k. The A@k metric is rel-
+evant because previous models with improved mR@k have
+lower R@k and vice-versa (cf . Fig. 2b).
+
+Implementation details. We implement VETO and
+MEET in PyTorch on Nvidia A100 GPUs. Following prior
+work [18, 30], we adopt a ResNeXt-101-FPN [38] back-
+bone and a Faster R-CNN [26] object detector. The pa-
+rameters of backbone and detector are kept frozen. VETO
+contains 6 relation encoder layers with 6 attention heads for
+each MSA [8] component, uses embeddings of size 576, a
+patch size of 2, and a pooled entity resolution of 8 for entity
+patch generation. For VETO + Rwt, we use the importance
+weighting of [48]. We train our model using the Adam op-
+timizer [14], batch size 12, and an initial learning rate of
+1.2 × 10−3. We apply a linear learning rate warmup over
+the first 3K iterations and train for 125K iterations using
+a learning rate decay with maximum decay step 3 and pa-
+tience 2.
+
+5.2. Experimental results
+
+Using this protocol we are now able to address Qs. 1–5.
+(Q1) Comparison with state of the art. As shown in
+Tabs. 1 and 2, our VETO + MEET model fulfills the fun-
+damental requirement of unbiased SGG, i.e. it improves
+on both R@k and mR@k metrics, yielding state-of-the-art-
+performance in terms of the balanced A@k metric across
+all tasks for both datasets (except for SGDet in VG where
+we are comparable). The heat-map pattern reveals that pre-
+vious models with high mR@k, e.g., SHA + GCL [7], gain
+performance improvements on the under-represented pred-
+icates while losing significantly on the more frequent ones
+as revealed by the lower R@k. Our VETO model with a
+simple re-weighting technique (VETO + Rwt, Tab. 1) al-
+ready outperforms leading baselines without notably reduc-
+ing the R@k metric. This is exemplified by the A@k met-
+
+21887Table 1. Recall (R), mean Recall (mR), and their average (A) on VG (the higher, the better). Colors in the table vary from blue to green
+to depict the performance improvement. ‘+’ denotes the combination with a model-agnostic unbiasing strategy. Double citations refer to
+the original model and its reproduced variant on a ResNeXt-101-FPN backbone. The superscript ‘†’ denotes the method uses Faster-RCNN
+with VGG-16 as the object detector.
+
+Model
+
+IMP [7, 29]
+KERN† [3]
+GB-Net + Rwt† [48]
+DT2-ACBS [6]
+PCPL† [41]
+GPS-Net [7, 22]
+SG-CogTree [46]
+BGNN [19]
+
+VTransE [30, 51]
+VTransE + TDE [30]
+VTransE + GCL [7]
+VTransE + MEET (ours)
+
+Motifs [30, 49]
+Motifs + Rwt [4]
+Motifs + TDE [30]
+Motifs + PCPL [7, 41]
+Motifs + CogTree [46]
+Motifs + DLFE [4]
+Motifs + EMB [29]
+Motifs + GCL [7]
+Motifs + IETrans + Rwt [50]
+Motifs + MEET (ours)
+
+VCTree [30, 31]
+VCTree + Rwt [4]
+VCTree + TDE [30]
+VCTree + PCPL [7, 41]
+VCTree + CogTree [46]
+VCTree + DLFE [4]
+VCTree + EMB [29]
+VCTree + GCL [7]
+VCTree + IETrans + Rwt [4]
+VCTree + MEET (ours)
+
+SHA [7]
+SHA + GCL [7]
+SHA + MEET (ours)
+
+VETO (ours)
+VETO (ours) + Rwt
+VETO + MEET (ours)
+
+PredCls
+
+SGCls
+
+SGDet
+
+R@k: 50 / 100 mR@k: 50 / 100 A@k: 50 / 100
+
+R@k: 50 / 100 mR@k: 50 / 100 A@k: 50 / 100
+
+R@k: 50 / 100 mR@k: 50 / 100 A@k: 50 / 100
+
+61.1 /
+65.8 /
+66.6 /
+23.3 /
+50.8 /
+65.2 /
+38.4 /
+59.2 /
+
+65.7 /
+43.1 /
+35.4 /
+58.3 /
+
+65.2 /
+54.7 /
+46.2 /
+54.7 /
+35.6 /
+52.5 /
+65.2 /
+42.7 /
+48.6 /
+67.4 /
+
+65.4 /
+60.7 /
+47.2 /
+56.9 /
+44.0 /
+51.8 /
+64.0 /
+40.7 /
+48.0 /
+62.0 /
+
+64.3 /
+35.1 /
+66.3 /
+
+64.2 /
+61.9 /
+74.0 /
+
+63.1
+67.6
+68.2
+25.6
+52.6
+67.1
+39.7
+61.3
+
+67.6
+48.5
+37.3
+64.9
+
+67.0
+56.5
+51.4
+56.5
+36.8
+54.2
+67.3
+44.4
+50.5
+72.7
+
+67.2
+62.6
+51.6
+58.7
+45.4
+53.5
+65.8
+42.7
+49.9
+69.8
+
+66.4
+37.2
+72.4
+
+66.3
+63.9
+78.9
+
+11.0 /
+17.7 /
+22.1 /
+35.9 /
+35.2 /
+15.2 /
+28.4 /
+30.4 /
+
+14.7 /
+24.6 /
+34.2 /
+18.3 /
+
+14.8 /
+17.3 /
+25.5 /
+17.3 /
+26.4 /
+26.9 /
+18.0 /
+36.1 /
+35.8 /
+25.3 /
+
+16.7 /
+19.4 /
+25.4 /
+22.8 /
+27.6 /
+25.3 /
+18.2 /
+37.1 /
+37.0 /
+25.5 /
+
+18.8 /
+41.6 /
+28.0 /
+
+22.8 /
+33.1 /
+42.0 /
+
+11.8
+19.2
+24.0
+39.7
+37.8
+16.6
+31.0
+32.9
+
+15.8
+28.0
+36.3
+24.9
+
+16.1
+18.6
+29.1
+18.6
+29.0
+28.8
+19.5
+38.2
+39.1
+33.5
+
+18.2
+20.4
+28.7
+24.5
+29.7
+27.1
+19.7
+39.1
+39.7
+34.5
+
+20.5
+44.1
+36.2
+
+24.7
+35.1
+52.4
+
+36.1 /
+41.8 /
+44.4 /
+29.6 /
+43.0 /
+40.2 /
+33.4 /
+44.8 /
+
+40.2 /
+33.9 /
+34.8 /
+38.3 /
+
+40.0 /
+36.0 /
+35.9 /
+36.0 /
+31.0 /
+39.7 /
+41.6 /
+39.4 /
+42.2 /
+46.4 /
+
+41.1 /
+40.1 /
+36.3 /
+39.9 /
+35.8 /
+38.6 /
+41.1 /
+38.9 /
+42.5 /
+43.8 /
+
+41.5 /
+38.4 /
+47.2 /
+
+43.5 /
+47.5 /
+58.0 /
+
+37.4
+43.4
+46.1
+32.7
+45.2
+41.9
+35.3
+47.1
+
+41.7
+38.3
+36.8
+44.9
+
+41.6
+37.6
+40.3
+37.6
+32.9
+41.5
+43.4
+41.3
+44.8
+53.1
+
+42.7
+41.5
+40.2
+41.6
+37.6
+40.3
+42.8
+40.1
+43.5
+52.2
+
+43.5
+40.7
+54.3
+
+45.5
+49.5
+65.7
+
+37.4 /
+36.7 /
+37.3 /
+16.2 /
+27.6 /
+37.8 /
+22.9 /
+37.4 /
+
+38.6 /
+25.7 /
+25.8 /
+35.8 /
+
+38.9 /
+29.5 /
+27.7 /
+29.5 /
+21.6 /
+32.3 /
+39.2 /
+26.1 /
+29.4 /
+40.5 /
+
+46.7 /
+42.3 /
+25.4 /
+40.6 /
+30.9 /
+33.5 /
+44.7 /
+27.7 /
+30.0 /
+35.4 /
+
+38.0 /
+22.8 /
+37.9 /
+
+35.7 /
+35.1 /
+41.1 /
+
+38.3
+37.4
+38.0
+17.6
+28.4
+39.2
+23.4
+38.5
+
+39.4
+28.5
+26.9
+39.1
+
+39.8
+31.5
+29.9
+31.5
+22.2
+33.1
+40.0
+27.1
+30.2
+43.2
+
+47.6
+43.5
+27.9
+41.7
+31.7
+34.6
+45.8
+28.7
+30.9
+39.2
+
+39.0
+23.9
+41.2
+
+36.9
+36.3
+44.0
+
+6.4
+/
+9.4 /
+12.7 /
+
+6.7
+10.0
+13.4
+24.8 / 27.5
+19.6
+9.1
+16.7
+16.5
+
+18.6 /
+8.5
+/
+15.7 /
+14.3 /
+
+8.2 /
+12.9 /
+20.5 /
+12.8 /
+
+8.3 /
+11.2 /
+13.1 /
+11.2 /
+14.9 /
+15.2 /
+10.2 /
+20.8 /
+21.5 /
+19.0 /
+
+11.8 /
+12.5 /
+12.2 /
+15.2 /
+18.8 /
+18.9 /
+12.5 /
+22.5 /
+19.9 /
+14.5 /
+
+10.9 /
+23.0 /
+16.1 /
+
+11.1 /
+16.1 /
+22.3 /
+
+8.7
+14.8
+21.2
+16.7
+
+8.8
+11.7
+14.9
+11.7
+16.1
+15.9
+11.0
+21.8
+22.8
+23.7
+
+12.5
+13.1
+14.0
+16.1
+19.9
+20.0
+13.5
+23.5
+21.8
+18.6
+
+11.6
+24.3
+20.7
+
+11.9
+17.1
+27.4
+
+21.9 /
+23.1 /
+25.0 /
+20.5 /
+23.1 /
+23.2 /
+19.3 /
+25.9 /
+
+23.4 /
+19.3 /
+22.8 /
+24.3 /
+
+23.6 /
+20.4 /
+20.4 /
+20.4 /
+18.3 /
+23.8 /
+24.7 /
+23.5 /
+25.5 /
+29.8 /
+
+29.3 /
+27.4 /
+18.8 /
+27.9 /
+24.9 /
+26.2 /
+28.6 /
+25.1 /
+25.0 /
+25.0 /
+
+24.5 /
+22.9 /
+27.0 /
+
+23.4 /
+25.6 /
+31.7 /
+
+22.5
+23.7
+25.7
+22.6
+24.0
+24.2
+20.1
+27.5
+
+24.1
+21.7
+23.7
+27.9
+
+24.3
+21.6
+22.4
+21.6
+19.2
+24.5
+25.5
+24.5
+26.5
+33.5
+
+30.1
+28.3
+21.0
+28.9
+25.8
+27.3
+30.0
+26.1
+26.4
+28.9
+
+25.3
+24.1
+31.0
+
+24.4
+26.7
+35.7
+
+23.6 /
+27.1 /
+26.3 /
+15.0 /
+14.6 /
+31.1 /
+19.5 /
+31.0 /
+
+29.7 /
+18.7 /
+14.6 /
+22.0 /
+
+32.8 /
+24.4 /
+16.9 /
+24.4 /
+20.0 /
+25.4 /
+31.7 /
+18.4 /
+23.5 /
+27.9 /
+
+31.9 /
+27.8 /
+19.4 /
+26.6 /
+18.2 /
+22.7 /
+31.4 /
+17.4 /
+23.6 /
+26.4 /
+
+30.6 /
+14.9 /
+24.2 /
+
+27.5 /
+26.2 /
+28.6 /
+
+28.7
+29.8
+29.9
+16.3
+18.6
+35.9
+21.7
+35.8
+
+34.3
+22.6
+17.1
+27.6
+
+37.2
+29.3
+20.3
+29.3
+22.1
+29.4
+36.3
+22.0
+27.2
+33.3
+
+36.2
+32.0
+23.2
+30.3
+20.4
+26.3
+35.9
+20.7
+27.8
+31.2
+
+34.9
+18.2
+29.7
+
+31.5
+30.4
+34.0
+
+/
+3.3
+/
+6.4
+7.1
+/
+22.0 /
+9.5 /
+6.7
+/
+11.1 /
+10.7 /
+
+/
+5.0
+8.6
+/
+13.6 /
+/
+5.8
+
+/
+6.8
+/
+9.2
+/
+8.2
+9.2
+/
+10.4 /
+11.7 /
+7.7
+/
+16.8 /
+15.5 /
+/
+8.5
+
+/
+7.4
+/
+8.7
+9.3
+/
+10.8 /
+10.4 /
+11.8 /
+/
+7.7
+15.2 /
+12.0 /
+/
+8.2
+
+7.8
+/
+17.9 /
+/
+7.7
+
+8.1 /
+10.0 /
+10.6 /
+
+4.1
+7.3
+8.5
+24.0
+11.7
+8.6
+12.7
+12.6
+
+6.0
+10.5
+15.5
+7.6
+
+7.9
+10.9
+9.8
+10.9
+11.8
+13.8
+9.3
+19.3
+18.0
+11.8
+
+8.7
+10.1
+11.1
+12.6
+12.1
+13.8
+9.1
+17.5
+14.9
+11.5
+
+9.1
+20.9
+9.8
+
+9.5
+11.7
+13.8
+
+13.5 /
+16.8 /
+16.7 /
+18.5 /
+12.1 /
+18.9 /
+16.8 /
+20.9 /
+
+17.3 /
+13.7 /
+14.1 /
+13.9 /
+
+19.8 /
+16.8 /
+12.5 /
+16.8 /
+15.2 /
+18.6 /
+19.7 /
+17.6 /
+19.5 /
+18.2 /
+
+19.7 /
+18.3 /
+14.5 /
+18.4 /
+14.3 /
+17.5 /
+19.5 /
+16.3 /
+17.8 /
+17.3 /
+
+19.2 /
+16.4 /
+16.0 /
+
+17.8 /
+18.1 /
+19.6 /
+
+16.4
+18.6
+18.5
+20.2
+15.2
+22.2
+17.2
+24.2
+
+20.2
+16.7
+16.3
+17.6
+
+22.6
+20.1
+15.1
+20.1
+17.0
+21.6
+22.8
+20.7
+22.6
+22.6
+
+22.5
+21.1
+17.2
+21.5
+16.3
+20.1
+22.5
+19.1
+21.4
+21.4
+
+22.0
+19.6
+19.8
+
+20.5
+21.1
+23.9
+
+Table 2. Recall (R), mean Recall (mR), and their average (A) on GQA (the higher, the better). Conventions as described in Tab. 1.
+
+Model
+
+VTransE [7, 51]
+VTransE + GCL [7]
+VTransE + MEET (ours)
+
+Motifs [7, 49]
+Motifs + GCL [7]
+Motifs +MEET (ours)
+
+VCTree [7, 31]
+VCTree + GCL [7]
+VCTree + MEET (ours)
+
+SHA [7]
+SHA + GCL [7]
+SHA + MEET (ours)
+
+VETO (ours)
+VETO + MEET (ours)
+
+PredCls
+
+SGCls
+
+SGDet
+
+R@k: 50/100
+
+mR@k: 50 / 100
+
+A@k: 50/100
+
+R@k: 50/100
+
+mR@k: 50 / 100
+
+A@k: 50/100
+
+R@k: 50/100
+
+mR@k: 50 / 100
+
+A@k: 50/100
+
+55.7 /
+35.5 /
+55.4 /
+
+65.3 /
+44.5 /
+63.6 /
+
+63.8 /
+44.8 /
+57.3 /
+
+63.3 /
+42.7 /
+69.7 /
+
+64.5 /
+73.9 /
+
+57.9
+37.4
+60.9
+
+66.8
+46.2
+68.4
+
+65.7
+46.6
+63.7
+
+65.2
+44.5
+74.4
+
+66.0
+78.3
+
+14.0 /
+30.4 /
+15.2 /
+
+16.4 /
+36.7 /
+25.0 /
+
+16.6 /
+35.4 /
+26.1 /
+
+19.5 /
+41.0 /
+34.2 /
+
+21.2 /
+43.3 /
+
+15.0
+32.3
+21.7
+
+17.1
+38.1
+30.4
+
+17.4
+36.7
+31.3
+
+21.1
+42.7
+42.3
+
+22.1
+50.5
+
+34.9 /
+33.0 /
+35.3 /
+
+40.9 /
+40.6 /
+44.3 /
+
+40.2 /
+40.1 /
+41.7 /
+
+41.4 /
+41.9 /
+52.0 /
+
+42.9 /
+58.6 /
+
+36.5
+34.9
+41.3
+
+42.0
+42.2
+49.4
+
+41.6
+41.7
+47.5
+
+43.2
+43.6
+58.4
+
+44.0
+64.4
+
+33.4 /
+22.9 /
+28.1 /
+
+34.2 /
+23.2 /
+33.7 /
+
+34.1 /
+23.7 /
+28.3 /
+
+32.7 /
+21.4 /
+31.1 /
+
+30.4 /
+34.6 /
+
+34.2
+23.6
+30.7
+
+34.9
+24.0
+36.1
+
+34.8
+24.5
+31.5
+
+33.6
+22.2
+33.7
+
+31.5
+37.2
+
+8.1
+/
+16.6 /
+9.2 /
+
+8.2 /
+17.3 /
+17.3 /
+
+7.9 /
+17.3 /
+12.3 /
+
+8.5 /
+20.6 /
+12.9 /
+
+8.6 /
+19.7 /
+
+8.7
+17.4
+12.0
+
+8.6
+18.1
+19.9
+
+8.3
+18.0
+14.0
+
+9.0
+21.3
+15.6
+
+9.1
+22.5
+
+20.9 /
+19.8 /
+18.7 /
+
+21.2 /
+20.3 /
+25.5 /
+
+21.0 /
+20.5 /
+20.3 /
+
+20.6 /
+18.1 /
+22.0 /
+
+19.5 /
+27.2 /
+
+21.5
+20.5
+21.4
+
+21.9
+21.1
+28.0
+
+21.6
+21.3
+22.8
+
+21.3
+21.9
+24.7
+
+20.3
+29.9
+
+27.2 /
+15.3 /
+24.0 /
+
+28.9 /
+18.5 /
+26.8 /
+
+28.3 /
+17.6 /
+25.1 /
+
+25.5 /
+14.8 /
+25.3 /
+
+26.1 /
+26.7 /
+
+30.7
+18.0
+27.9
+
+33.1
+21.8
+30.8
+
+31.9
+20.7
+28.7
+
+29.1
+17.9
+28.9
+
+29.0
+31.0
+
+5.8
+/
+14.7 /
+5.6 /
+
+6.4 /
+16.8 /
+/
+9.3
+
+6.5
+/
+15.6 /
+7.6 /
+
+6.6
+/
+17.8 /
+/
+7.2
+
+7.0
+/
+12.1 /
+
+6.6
+16.4
+7.8
+
+7.7
+18.8
+12.5
+
+7.4
+17.8
+10.1
+
+7.8
+20.1
+10.1
+
+8.1
+16.0
+
+16.5 /
+15.0 /
+14.8 /
+
+17.7 /
+17.7 /
+18.1 /
+
+17.4 /
+16.6 /
+16.4 /
+
+16.1 /
+16.3 /
+16.3 /
+
+16.6 /
+19.4 /
+
+18.7
+17.2
+17.9
+
+20.4
+20.3
+21.7
+
+19.7
+19.3
+19.4
+
+18.5
+19.0
+19.5
+
+18.6
+23.5
+
+ric and the heat-map hue having less within-row variance
+than the baselines.
+In addition, our final model VETO +
+MEET outperforms the previously best Motifs + IETrans +
+Rwt [50] by a remarkable 47% and 48% relative improve-
+ment on A@100 for PredCls for VG and GQA, respectively.
+To the best of our knowledge, our VETO + MEET model is
+the first to attain state-of-the-art results on both R@k and
+mR@k metrics for PredCls. It also yields state-of-the-art
+results on mR@100 for SGCls.
+
+(Q2) MEET with other SGG approaches. Among
+the models trained with MEET in Tabs. 1 and 2, Motifs
+
++ MEET and SHA + MEET show notable improvements
+on the A@k metric for the PredCls and SGCls tasks. How-
+ever, there is a significant performance gap in comparison to
+VETO + MEET on all the metrics and tasks. This shows the
+unbiasing capabilities of MEET as well as the significance
+of VETO in reducing information loss by using local-level
+information, resulting in improved SGG performance.
+
+(Q3) Light-weight VETO. The comparison of SGG
+models in terms of the number of trainable parameters in
+Fig. 4 shows how our local-level entity projections signifi-
+cantly reduce the number of parameters compared to global
+
+21888Table 4. Impact of depth map quality (the higher, the better). For
+fairer comparison, the Depth-VRD model [27] is reproduced on
+the ResNeXt-101-FPN backbone. Both models are also debiased
+using the reweighting strategy of [48].
+
+Model
+
+mR@k VG-Depth.v1 VG-Depth.v2
+
+Improvement
+
+VETO
+
+Depth-VRD [27]
+
+20
+50
+100
+
+20
+50
+100
+
+25.3
+31.2
+33.5
+
+17.8
+21.7
+23.1
+
+27.5
+33.1
+35.1
+
+18.2
+21.9
+23.1
+
+9%
+6%
+5%
+
+2%
+1%
+0%
+
+Table 5. Improvement of VETO over Depth-VRD for PredCls.
+Conventions as described in Tab. 4.
+
+Depth Map
+
+VG-Depth.v1
+VG-Depth.v2
+
+mR@20 mR@50 mR@100
+
+42%
+51%
+
+44%
+51%
+
+45%
+52%
+
+sive depth data analysis to investigate the modality fusion
+potential of VETO. Fig. 5 shows “noisy” depth-map sam-
+ples used by Sharifzadeh et al. for Depth-VRD [27] (VG-
+Depth.v1); the bottom row shows the corresponding high-
+quality depth maps as extracted by the monocular depth
+estimator of Yin et al. [45] (VG-Depth.v2). We use VG-
+Depth.v1 and VG-Depth.v2 to compare and contrast VETO
+and Depth-VRD. We analyse the significance of the depth-
+map quality on the SGG performance and the importance
+of a careful architectural design to make use of the depth
+map efficiently. As depicted in Tab. 4, the performance
+improvement for our model on VG-Depth.v2 generated us-
+ing the monocular depth estimator of Yin et al. [45] over
+VG-Depth.v1 [27] is around 7%. To the contrary, Depth-
+VRD shows only a minor improvement of 1% on the high-
+quality VG-Depth.v2 dataset. Furthermore, the improve-
+ment of VETO over Depth-VRD in Tab. 5 shows that, over-
+all, VETO has a significant improvement of more than 40%
+respectively 50% in mR@k over Depth-VRD for the VG-
+Depth.v1 respectively VG-Depth.v2 depth maps.
+
+5.2.1 Further results
+
+Fig. 6 shows the predicate-specific improvement of VETO
++ MEET over SHA + GCL (sorted from frequent to less fre-
+quent). Notice that VETO + MEET improves on every part
+of the distribution (head, body, and tail). As emphasized
+in Fig. 2a, we find an enormous performance boost over
+SHA + GCL [7] for relations that can be enhanced with
+local-level information, e.g., attached to (781% improve-
+ment) and part of (441% improvement). This once again
+highlights the efficacy of VETO + MEET.
+
+Fig. 7 shows an illustrative example for the challenges of
+current SGG models, e.g., SHA + GCL [7] overfitting to the
+tail classes after debiasing (panel 4) or Motifs [49] overfit-
+ting to the head classes (panel 5). The generated SG from
+
+Figure 4. No. of trainable parameters (Mio.)
+vs. perfor-
+mance (A@100) of leading SGG models (* denotes debiasing
+with MEET). VETO outperforms prior work and is ∼ 10× leaner.
+
+Table 3. Ablation study of VETO on VG. L: Local-level En-
+tity Patch Generation; CR: Cross-Relation Patch Generation; CM:
+Cross-Modality Patch Fusion; D: Depth.
+
+VETO Components
+
+SGCls
+
+L CR CM D
+✗
+✗
+✓
+✗
+✗
+✓
+✓
+✓
+✓
+✓
+✗
+✓
+✓
+✓
+
+✗
+✗
+✗
+✗
+✗
+✓
+✓
+
+✗
+✗
+✗
+✗
+✓
+✗
+✓
+
+R@k: 50 / 100
+
+mR@k: 50 / 100
+
+A@k: 50 / 100
+
+32.0
+/
+33.2 /
+34.8 /
+35.1 /
+35.1 /
+35.4 /
+35.1 /
+
+33.5
+34.5
+36.2
+36.4
+36.3
+36.6
+36.3
+
+/
+7.6
+7.0
+/
+14.1 /
+13.0 /
+14.4 /
+15.2 /
+16.1 /
+
+8.3
+7.6
+15.1
+14.1
+15.4
+16.1
+17.1
+
+19.8 /
+20.1 /
+24.5 /
+24.1 /
+24.8 /
+25.3 /
+25.6 /
+
+20.9
+21.1
+25.7
+25.3
+25.9
+26.4
+26.7
+
+entity-level projections (cf . Fig. 1). VETO with 20 million
+parameters is 20 times lighter than GB-Net [48], which uses
+knowledge graphs as additional modality, and ∼10 times
+lighter than other leading SGG models. Despite this, VETO
+clearly outperforms previous models in A@k.
+
+(Q4) Benefit of local-level patch generation. Tab. 3
+provides an ablation study of the VETO components. The
+first two rows denote a transformer-based SGG model with-
+out local-level patches. We observe that introducing the
+local-level patch generation (rows 3 & 4) notably improves
+every metric with a ∼23% improvement of A@k, highlight-
+ing the significance of local-level patches. We also ob-
+serve an overall improvement when incrementally adding
+the VETO components in the subsequent rows. In general,
+the use of local-level information and the Cross-Relation
+Patch Generation (2nd to last row) significantly improves
+performance, with a relative improvement of approximately
+28% in A@k compared to the first ablation that does not
+use local-level patches. We also observe that adding the
+depth map components to the final model yields an addi-
+tional small improvement of the mR@k metric.
+
+(Q5) Benefit of depth map. Comparing rows 1 and
+2 of Tab. 3 shows that introducing the depth modality to
+the model without local-level patches yields only a slight
+R@k improvement while mR@k drops. We observe a sim-
+ilar trend when comparing rows 3 and 4. However, af-
+ter introducing the Cross-Modality Patch Fusion module,
+mR@k and A@k improve. We also perform an exten-
+
+ * %  1 H W 9 & 7 U H H  6 + $  0 R W L I V  9 7 U D Q V (  % * 1 1 9 ( 7 2                  7 U D L Q D E O H  S D U D P H W H U V  L Q  P L O O L R Q V                                    $ #     I R U  3 U H G & O V $ #     I R U  3 U H G & O V21889Figure 5. Failure cases reported by [27]. The second row shows “noisy” depth maps from [27] (VG-Depth.v1). The bottom row represents
+the improved depth maps used in VETO (VG-Depth.v2), generated using the monocular depth estimator of [45].
+
+Table 6. SGDet sensitivity analysis: Motifs vs. VETO.
+
+Detector mAP drop (%) Motifs
+
+VETO Motifs
+
+A@50 drop (%)
+
+A@100 drop (%)
+VETO
+
+OD1
+OD2
+
+13
+32
+
+3.3
+28.0
+
+5.7
+29.5
+
+3.5
+27.0
+
+4.2
+28.0
+
+model’s performance is affected by the object detector’s ac-
+curacy, we conducted a sensitivity analysis. Tab. 6 displays
+the results of using weaker Object Detectors (OD1 & 2)
+with 13% and 32% lower mAP, respectively. The resulting
+drop in A@k reveals that VETO is indeed slightly more sen-
+sitive to the detector accuracy. However, it is worth noting
+that despite this sensitivity, our lightweight VETO outper-
+forms state-of-the-art (SOTA) methods on the A@k metric
+in 2 out of 3 tasks on VG and 3 out of 3 tasks on GQA.
+Furthermore, VETO’s performance in SGDet (VG) is com-
+parable to the SOTA methods.
+
+6. Conclusion
+
+We have identified three primary concerns with current
+SGG models: a loss of local-level information, excessive
+parameter usage, and biased relation predictions. To ad-
+dress these issues, we introduce the Vision Relation Trans-
+former (VETO) and the Mutually Exclusive Expert Learn-
+ing (MEET) methods. In most of the cases, our approach
+achieves superior performance on both biased and unbi-
+ased evaluation metrics. Some interesting avenues for fu-
+ture work include improving the contrasting power of multi-
+experts and reducing the label dependency of experts.
+
+Acknowledgement
+
+This work was funded by the Hessian Ministry of Sci-
+ence and the Arts (HMWK) through the projects “The Third
+Wave of Artificial Intelligence – 3AI” and hessian.AI. This
+work was also supported by the EU ICT-48 Network of AI
+Research Excellence Center “TAILOR” (EU Horizon 2020,
+GA No 952215), and the Collaboration Lab “AI in Con-
+struction” (AICO).
+
+Figure 6. R@100 improvement on PredCls for VETO + MEET
+over SHA + GCL [7]. The predicates are sorted based on their
+frequency in descending order.
+
+Figure 7. Qualitative example. Head and tail relations are high-
+lighted in blue and yellow, respectively. Greyed out relations and
+arrows denote missed predictions. (1) VG sample with ground-
+truth bounding boxes and labels; (2) SGG ground-truth; (3) VETO
++ MEET predicts both head and tail classes; (4) SHA + GCL [7]
+misses head classes such as on, of ; (5) Motifs [49] misses many
+tail classes such as walking on, riding, or standing on.
+
+VETO + MEET (panel 3) attains a better balance between
+the head and tail predictions.
+
+5.2.2 SGDet sensitivity analysis
+
+The experimental results obtained from the VG dataset in
+Tab. 1 indicate that VETO’s SGDet performance is slightly
+lower compared to the baselines. To explore whether our
+
+              R Q K D V L Q R I Z H D U L Q J Q H D U Z L W K D E R Y H K R O G L Q J E H K L Q G X Q G H U V L W W L Q J  R Q Z H D U V V W D Q G L Q J  R Q L Q  I U R Q W  R I D W W D F K H G  W R D W K D Q J L Q J  I U R P R Y H U I R U U L G L Q J F D U U \ L Q J H D W L Q J Z D O N L Q J  R Q S O D \ L Q J F R Y H U L Q J O D \ L Q J  R Q D O R Q J Z D W F K L Q J D Q G E H W Z H H Q E H O R Q J L Q J  W R S D L Q W H G  R Q D J D L Q V W O R R N L Q J  D W I U R P S D U N H G  R Q W R P D G H  R I F R Y H U H G  L Q P R X Q W H G  R Q V D \ V S D U W  R I D F U R V V I O \ L Q J  L Q X V L Q J R Q  E D F N  R I O \ L Q J  R Q J U R Z L Q J  R Q Z D O N L Q J  L Q 3 U H G L F D W H  F O D V V H V  R I  9 *  G D W D V H W                                                                                                                                                                          5 #     L P S U R Y H P H Q W    elephantmanlegearbeachhatridingholdingwalking ontrunkstanding onofonwearingofwithwithelephantmanlegearbeachhatridingholdingwalking ontrunkstanding onofonwearingofwithwithelephantmanlegearbeachhatridingholdingwalking ontrunkstanding onofonwearingofwithwithelephantmanlegearbeachhatridingholdingwalking ontrunkstanding onofonwearingofwithwith020304050121890References
+
+[1] Stanislaw Antol, Aishwarya Agrawal, Jiasen Lu, Margaret
+Mitchell, Dhruv Batra, C. Lawrence Zitnick, and Devi
+In Proceedings
+Parikh. VQA: Visual question answering.
+of the IEEE International Conference on Computer Vision,
+pages 2425–2433, 2015.
+
+[2] Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas
+Usunier, Alexander Kirillov, and Sergey Zagoruyko. End-to-
+end object detection with transformers. In Proceedings of the
+European Conference on Computer Vision, volume 1, pages
+213–229. Springer, 2020.
+
+[3] Tianshui Chen, Weihao Yu, Riquan Chen, and Liang Lin.
+Knowledge-embedded routing network for scene graph gen-
+In Proceedings of the IEEE/CVF Conference on
+eration.
+Computer Vision and Pattern Recognition, pages 6163–
+6171, 2019.
+
+[4] Meng-Jiun Chiou, Henghui Ding, Hanshu Yan, Changhu
+Wang, Roger Zimmermann, and Jiashi Feng. Recovering the
+unbiased scene graphs from the biased ones. In Proceedings
+of the 29th ACM International Conference on Multimedia,
+pages 1581–1590, 2021.
+
+[5] Bo Dai, Yuqi Zhang, and Dahua Lin. Detecting visual rela-
+tionships with deep relational networks. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 3076–3086, 2017.
+
+[6] Alakh Desai, Tz-Ying Wu, Subarna Tripathi, and Nuno Vas-
+concelos. Learning of visual relations: The devil is in the
+tails. In Proceedings of the IEEE/CVF International Confer-
+ence on Computer Vision, pages 15404–15413, 2021.
+
+[7] Xingning Dong, Tian Gan, Xuemeng Song, Jianlong Wu,
+Yuan Cheng, and Liqiang Nie. Stacked hybrid-attention and
+group collaborative learning for unbiased scene graph gener-
+ation. In Proceedings of the IEEE/CVF Conference on Com-
+puter Vision and Pattern Recognition, pages 19427–19436,
+2022.
+
+[8] Alexey Dosovitskiy, Lucas Beyer, Alexander Kolesnikov,
+Dirk Weissenborn, Xiaohua Zhai, Thomas Unterthiner,
+Mostafa Dehghani, Matthias Minderer, Georg Heigold, Syl-
+vain Gelly, et al. An image is worth 16x16 words: Trans-
+In Proceedings of
+formers for image recognition at scale.
+the International Conference on Learning Representations,
+2021.
+
+[9] Chen Gao, Yuliang Zou, and Jia-Bin Huang. Ican: Instance-
+centric attention network for human-object interaction detec-
+tion. In British Machine Vision Conference, 2018.
+
+[10] Jiuxiang Gu, Handong Zhao, Zhe Lin, Sheng Li, Jianfei Cai,
+and Mingyang Ling. Scene graph generation with exter-
+nal knowledge and image reconstruction. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 1969–1978, 2019.
+
+[11] MD. Zakir Hossain, Ferdous Sohel, Mohd Fairuz Shiratud-
+din, and Hamid Laga. A comprehensive survey of deep learn-
+ing for image captioning. ACM Computing Surveys, 51(6):1–
+36, 2019.
+
+[12] Drew A. Hudson and Christopher D. Manning. GQA: A new
+dataset for real-world visual reasoning and compositional
+
+question answering. In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition, pages
+6700–6709, 2019.
+
+[13] ASM Iftekhar, Satish Kumar, R Austin McEver, Suya You,
+and BS Manjunath. Gtnet: Guided transformer network for
+detecting human-object interactions. In Pattern Recognition
+and Tracking XXXIV, volume 12527, pages 192–205. SPIE,
+2023.
+
+[14] Diederik P. Kingma and Jimmy Ba. Adam: A method for
+stochastic optimization. In Proceedings of the International
+Conference on Learning Representations, 2015.
+
+[15] Rajat Koner, Suprosanna Shit, and Volker Tresp. Rela-
+tion transformer network. arXiv preprint arXiv:2004.06193,
+2020.
+
+[16] Ranjay Krishna, Ines Chami, Michael Bernstein, and Li Fei-
+In Proceedings of the IEEE
+Fei. Referring relationships.
+Conference on Computer Vision and Pattern Recognition,
+pages 6867–6876, 2018.
+
+[17] Ranjay Krishna, Yuke Zhu, Oliver Groth, Justin Johnson,
+Kenji Hata, Joshua Kravitz, Stephanie Chen, Yannis Kalan-
+tidis, Li-Jia Li, David A. Shamma, et al. Visual Genome:
+Connecting language and vision using crowdsourced dense
+International Journal of Computer Vi-
+image annotations.
+sion, 123(1):32–73, 2017.
+
+[18] Liunian Harold Li, Mark Yatskar, Da Yin, Cho-Jui Hsieh,
+and Kai-Wei Chang. VisualBERT: A simple and perfor-
+arXiv preprint
+mant baseline for vision and language.
+arXiv:1908.03557, 2019.
+
+[19] Rongjie Li, Songyang Zhang, Bo Wan, and Xuming He.
+Bipartite graph network with adaptive message passing for
+In Proceedings of the
+unbiased scene graph generation.
+IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, 2021.
+
+[20] Yikang Li, Wanli Ouyang, Bolei Zhou, Kun Wang, and Xi-
+aogang Wang. Scene graph generation from objects, phrases
+and region captions. In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition, pages
+1261–1270, 2017.
+
+[21] Wentong Liao, Bodo Rosenhahn, Ling Shuai, and Michael
+Ying Yang. Natural language guided visual relationship de-
+In Proceedings of the IEEE/CVF Conference on
+tection.
+Computer Vision and Pattern Recognition Workshops, 2019.
+[22] Xin Lin, Changxing Ding, Jinquan Zeng, and Dacheng Tao.
+GPS-Net: Graph property sensing network for scene graph
+In Proceedings of the IEEE/CVF Conference
+generation.
+on Computer Vision and Pattern Recognition, pages 3746–
+3753, 2020.
+
+[23] Cewu Lu, Ranjay Krishna, Michael Bernstein, and Li Fei-
+Fei. Visual relationship detection with language priors. In
+Proceedings of the European Conference on Computer Vi-
+sion, volume 1, pages 852–869, 2016.
+
+[24] Yichao Lu, Himanshu Rai, Jason Chang, Boris Knyazev,
+Guangwei Yu, Shashank Shekhar, Graham W. Taylor, and
+Maksims Volkovs. Context-aware scene graph generation
+with Seq2Seq transformers. In Proceedings of the IEEE/CVF
+International Conference on Computer Vision, pages 15931–
+15941, 2021.
+
+21891[25] Prajit Ramachandran, Niki Parmar, Ashish Vaswani, Irwan
+Bello, Anselm Levskaya, and Jon Shlens. Stand-alone self-
+attention in vision models. In Advances in Neural Informa-
+tion Processing Systems, volume 32, 2019.
+
+[26] Shaoqing Ren, Kaiming He, Ross Girshick, and Jian Sun.
+Faster R-CNN: Towards real-time object detection with re-
+gion proposal networks. In Advances in Neural Information
+Processing Systems, volume 28, 2015.
+
+[27] Sahand Sharifzadeh, Sina Moayed Baharlou, Max Berren-
+Improving visual re-
+dorf, Rajat Koner, and Volker Tresp.
+In Proceedings of the
+lation detection using depth maps.
+25th International Conference on Pattern Recognition, pages
+3597–3604, 2021.
+
+[28] Jiaxin Shi, Hanwang Zhang, and Juanzi Li. Explainable and
+explicit visual reasoning over scene graphs. In Proceedings
+of the IEEE/CVF Conference on Computer Vision and Pat-
+tern Recognition, pages 8376–8384, 2019.
+
+[29] Mohammed Suhail, Abhay Mittal, Behjat Siddiquie, Chris
+Broaddus, Jayan Eledath, Gerard Medioni, and Leonid Si-
+gal. Energy-based learning for scene graph generation. In
+Proceedings of the IEEE/CVF Conference on Computer Vi-
+sion and Pattern Recognition, pages 13936–13945, 2021.
+
+[30] Kaihua Tang, Yulei Niu, Jianqiang Huang, Jiaxin Shi, and
+Hanwang Zhang. Unbiased scene graph generation from bi-
+ased training. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 3716–
+3725, 2020.
+
+[31] Kaihua Tang, Hanwang Zhang, Baoyuan Wu, Wenhan Luo,
+and Wei Liu. Learning to compose dynamic tree structures
+for visual contexts. In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern recognition, pages
+6619–6628, 2019.
+
+[32] Oytun Ulutan, ASM Iftekhar, and Bangalore S Manjunath.
+Vsgnet: Spatial attention network for detecting human ob-
+ject interactions using graph convolutions. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, pages 13617–13626, 2020.
+
+[33] Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszko-
+reit, Llion Jones, Aidan N Gomez, Łukasz Kaiser, and Illia
+Polosukhin. Attention is all you need. In Advances in Neural
+Information Processing Systems, volume 30, 2017.
+
+[34] Petar Veliˇckovi´c, Guillem Cucurull, Arantxa Casanova,
+Adriana Romero, Pietro Li`o, and Yoshua Bengio. Graph
+International Conference on Learning
+attention networks.
+Representations, 2018.
+
+[35] Tzu-Jui Julius Wang, Selen Pehlivan, and Jorma Laaksonen.
+Tackling the unannotated: Scene graph generation with bias-
+reduced models. Proceedings of the British Machine Vision
+Conference, 2020.
+
+[36] Wenbin Wang, Ruiping Wang, Shiguang Shan, and Xilin
+Chen. Exploring context and visual pattern of relationship
+for scene graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 8188–8197, 2019.
+
+[37] Sanghyun Woo, Dahun Kim, Donghyeon Cho, and In So
+Kweon. LinkNet: Relational embedding for scene graph.
+Advances in Neural Information Processing Systems, 31,
+2018.
+
+[38] Saining Xie, Ross Girshick, Piotr Doll´ar, Zhuowen Tu, and
+Kaiming He. Aggregated residual transformations for deep
+In Proceedings of the IEEE Conference
+neural networks.
+on Computer Vision and Pattern Recognition, pages 1492–
+1500, 2017.
+
+[39] Bingjie Xu, Yongkang Wong, Junnan Li, Qi Zhao, and Mo-
+han S Kankanhalli. Learning to detect human-object interac-
+tions with knowledge. In Proceedings of the IEEE/CVF Con-
+ference on Computer Vision and Pattern Recognition, 2019.
+[40] Danfei Xu, Yuke Zhu, Christopher B. Choy, and Li Fei-Fei.
+Scene graph generation by iterative message passing. In Pro-
+ceedings of the IEEE Conference on Computer Vision and
+Pattern Recognition, pages 5410–5419, 2017.
+
+[41] Shaotian Yan, Chen Shen, Zhongming Jin, Jianqiang Huang,
+Rongxin Jiang, Yaowu Chen, and Xian-Sheng Hua. PCPL:
+Predicate-correlation perception learning for unbiased scene
+graph generation. In Proceedings of the 28th ACM Interna-
+tional Conference on Multimedia, pages 265–273, 2020.
+[42] Hsuan-Kung Yang, An-Chieh Cheng, Kuan-Wei Ho, Tsu-Jui
+Fu, and Chun-Yi Lee. Visual relationship prediction via label
+clustering and incorporation of depth information. In Pro-
+ceedings of the European Conference on Computer Vision
+Workshops, volume 2, pages 571–581, 2018.
+
+[43] Jianwei Yang, Jiasen Lu, Stefan Lee, Dhruv Batra, and Devi
+Parikh. Graph R-CNN for scene graph generation. In Pro-
+ceedings of the European Conference on Computer Vision,
+volume 1, pages 670–685, 2018.
+
+[44] Guojun Yin, Lu Sheng, Bin Liu, Nenghai Yu, Xiaogang
+Wang, Jing Shao, and Chen Change Loy. Zoom-Net: Mining
+deep feature interactions for visual relationship recognition.
+In Proceedings of the European Conference on Computer Vi-
+sion, volume 3, pages 322–338, 2018.
+
+[45] Wei Yin, Jianming Zhang, Oliver Wang, Simon Niklaus,
+Long Mai, Simon Chen, and Chunhua Shen. Learning to
+In Proceed-
+recover 3d scene shape from a single image.
+ings of the IEEE/CVF Conference on Computer Vision and
+Pattern Recognition, pages 204–213, 2021.
+
+[46] Jing Yu, Yuan Chai, Yujing Wang, Yue Hu, and Qi Wu.
+Cogtree: Cognition tree loss for unbiased scene graph gen-
+eration. Proceedings of the 30th International Joint Confer-
+ence on Artificial Intelligence, 2021.
+
+[47] Ruichi Yu, Ang Li, Vlad I. Morariu, and Larry S. Davis. Vi-
+sual relationship detection with internal and external linguis-
+tic knowledge distillation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+pages 1974–1982, 2017.
+
+[48] Alireza Zareian, Svebor Karaman, and Shih-Fu Chang.
+Bridging knowledge graphs to generate scene graphs. In Pro-
+ceedings of the European Conference on Computer Vision,
+volume 3, pages 606–623, 2020.
+
+[49] Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin
+Choi. Neural motifs: Scene graph parsing with global con-
+text. In Proceedings of the IEEE Conference on Computer
+Vision and Pattern Recognition, pages 5831–5840, 2018.
+[50] Ao Zhang, Yuan Yao, Qianyu Chen, Wei Ji, Zhiyuan Liu,
+Maosong Sun, and Tat-Seng Chua. Fine-grained scene graph
+In Proceedings of the Euro-
+generation with data transfer.
+
+21892pean Conference on Computer Vision, volume 2, pages 409–
+424. Springer, 2022.
+
+[51] Hanwang Zhang, Zawlin Kyaw, Shih-Fu Chang, and Tat-
+Seng Chua. Visual translation embedding network for visual
+In Proceedings of the IEEE/CVF Con-
+relation detection.
+ference on Computer Vision and Pattern Recognition, pages
+5532–5540, 2017.
+
+21893

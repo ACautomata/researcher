@@ -1,0 +1,1188 @@
+Motion-aware Contrastive Learning for
+Temporal Panoptic Scene Graph Generation
+Thong Thanh Nguyen1, Xiaobao Wu2, Yi Bin1,3*,
+Cong-Duy T Nguyen2, See-Kiong Ng1, Anh Tuan Luu2
+1 Institute of Data Science (IDS), National University of Singapore, Singapore
+2 Nanyang Technological University (NTU), Singapore,
+3 Tongji University, China
+Abstract
+To equip artificial intelligence with a comprehensive under-
+standing towards a temporal world, video and 4D panoptic
+scene graph generation abstracts visual data into nodes to
+represent entities and edges to capture temporal relations.
+Existing methods encode entity masks tracked across tem-
+poral dimensions (mask tubes), then predict their relations
+with temporal pooling operation, which does not fully uti-
+lize the motion indicative of the entities’ relation. To over-
+come this limitation, we introduce a contrastive representa-
+tion learning framework that focuses on motion pattern for
+temporal scene graph generation. Firstly, our framework en-
+courages the model to learn close representations for mask
+tubes of similar subject-relation-object triplets. Secondly, we
+seek to push apart mask tubes from their temporally shuf-
+fled versions. Moreover, we also learn distant representations
+for mask tubes belonging to the same video but different
+triplets. Extensive experiments show that our motion-aware
+contrastive framework significantly improves state-of-the-art
+methods on both video and 4D datasets.
+Introduction
+The advent of autonomous agents, intelligent systems, and
+robots warrants a comprehensive understanding of real-
+world environments (Ma et al. 2022; Driess et al. 2023; Ray-
+chaudhuri et al. 2023; Cheng et al. 2022; Li et al. 2023b,a).
+Such understanding encompasses beyond merely recogniz-
+ing individual entities, but also a sophisticated understand-
+ing of their relationships. To construct a detailed understand-
+ing, scene graph generation (SGG) research (Li, Yang, and
+Xu 2022; Bin et al. 2019; Sudhakaran et al. 2023; Nag et al.
+2023; Wang et al. 2024) has sought to provide relational per-
+spective on scene understanding. In SGG frameworks, scene
+graphs utilize nodes to represent entities and edges to repre-
+sent relationships, constructing a comprehensive and struc-
+tured understanding of visual scenes.
+However, due to being primarily based on bounding boxes
+to denote entities, scene graphs fall short of replicating hu-
+man visual perception with a lack of granularity (Yang et al.
+2023). To overcome this limitation, panoptic scene graph
+generation (Yang et al. 2022; Zhao et al. 2023) has been pre-
+sented to expand the scope of SGG to incorporate pixel-level
+*Yi Bin is the corresponding author, yi.bin@hotmail.com
+Copyright © 2025, Association for the Advancement of Artificial
+Intelligence (www.aaai.org). All rights reserved.
+on
+standing on sitting on
+kicking
+running on
+opening
+Predicate
+0.0
+0.1
+0.2
+0.3
+0.4
+0.5
+0.6
+R@50
+IPS+T - Conv
+Ours
+Figure 1: State-of-the-art IPS+T - Convolution (Yang et al.
+2023) exhibits high R@50 scores for static relations, e.g. on,
+sitting on, and standing on, than dynamic relations, e.g. kick-
+ing, running on, and opening. In contrast, our method can
+perform effectively on both static and dynamic relations.
+precise entity localization and thorough scene understand-
+ing including background components. Subsequently, be-
+cause the temporal dimension undoubtedly provides richer
+information than the static spatial dimension, recent works
+(Yang et al. 2023, 2024) have shifted attention to the domain
+of videos and 4D scenes, resulting in the tasks of panoptic
+video and 4D scene graph generation.
+Popular methods (Yang et al. 2023, 2024, 2022) for tem-
+poral panoptic scene graph generation produce entity masks
+tracked across the temporal dimension, i.e. mask tubes, then
+predict temporal relations among them. To conduct relation
+prediction, these methods encode the segmentation mask
+tubes, apply global pooling, then forward to a multi-layer
+perceptron for classifying their relations. However, such
+global pooling operation is well-known to be ineffective in
+representing temporal or motion patterns, which are use-
+ful for determining the relation among the entities. Conse-
+quently, this would result in higher misclassification rates of
+more dynamic relations (Wang et al. 2023; Nag et al. 2023;
+Zhou et al. 2022), as illustrated in Figure 1.
+To encourage temporal representation learning, current
+research (Nguyen et al. 2023; Liu et al. 2022; Zhou, Liu, and
+Wang 2023) uses contrastive learning for videos. However,
+they mainly seek to force two clips from the same video to
+be close together. As such, they mostly capture the semantics
+The Thirty-Ninth AAAI Conference on Artificial Intelligence (AAAI-25)
+6218
+
+---PAGE BREAK---
+Frame 387
+Frame 393
+Frame 526
+Frame 563
+child kicking ball_13
+child running on grass
+Frame index: 
+Video:
+Groundtruth
+IPS+T -
+Convolution
+child_6 on grass_1
+child_6 next_to ball_13
+child_6 kicking ball_13
+child_6 running on grass_1
+Ours:
+Groundtruth
+PSG4DFormer:
+Ours:
+Video:
+Frame 036
+Frame 041
+Frame 081
+Frame 090
+person opening door
+person closing door
+person_2 next_to door_1
+person_2 closing door_1
+person_2 next_to door_1
+person_2 opening door_1
+Frame index: 
+Figure 2: Examples of temporal panoptic scene graph generation of state-of-the-art (Yang et al. 2023, 2024) and our method.
+of visual scenes and disregard motions (Chen et al. 2020).
+Moreover, instead of paying attention to precise entity lo-
+calization, they work on frame-level representations. This
+would inadvertently inject motions from non-target entities
+into visual representations, which might not benefit relation
+classification in panoptic scene graph generation.
+In this paper, to encourage representation learning to cap-
+ture motion patterns for temporal panoptic scene graph gen-
+eration, we propose a novel contrastive learning framework
+that focuses on mask tubes of the segmented entities. First,
+we force a mask tube and the one of similar subject-relation-
+object but of a different video to obtain close represen-
+tations. Since positive mask tubes originate from distinct
+video clips, the model cannot rely upon visual semantics to
+optimize the contrastive objective, but instead depends on
+the motion trajectory evolution, which is our target compo-
+nent for representation learning. Second, we propel nega-
+tive mask tubes generated by temporally shuffling the origi-
+nal tubes. Moreover, we also push apart representations of
+mask tubes from the same video but belonging to differ-
+ent triplets. Because mask tubes of different triplets from a
+common video with close visual features are separated from
+each other, we once again motivate the model to generate
+representations that are less reliant upon visual semantics
+but motion-sensitive features. In addition, the visually sim-
+ilar negative mask tubes can play a role as hard negative
+samples, thus accelerating the contrastive learning process
+(Chen, Zheng, and Song 2024).
+Moreover, in order to implement our motion-aware con-
+trastive learning framework, there is a need to quantify the
+relationship between mask tubes. This quantification marks
+a challenging problem as mask tubes are a sequence of
+segmentation masks that span over the sequence of video
+frames. Furthermore, mask tubes of two triplets might ex-
+hibit different lengths since two events often occur at differ-
+ent speed. Unfortunately, the popular pipeline of temporal
+pooling and then similarity estimation flattens the tempo-
+ral dimension of the mask tubes and neglects their motion
+features. To resolve this problem, we consider mask tubes
+of two triplets as two distributions and seek the optimal
+transportation map between them, then utilize the transport
+distance as the distance between two triplets’ tubes. Such
+scheme of transporting can play a role of synchronizing the
+motion states of two triplets and takes advantage of the mask
+tubes’ evolutionary trajectory.
+To sum up, our contributions are as follows:
+• We propose a novel contrastive learning framework for
+temporal panoptic scene graph generation which pulls to-
+gether entity mask tubes with similar motion patterns and
+pushes away those of distinct motion patterns.
+• We utilize optimal transport distance to estimate the re-
+lationship between two events’ mask tubes for the pro-
+posed contrastive framework.
+• Comprehensive experiments demonstrate that our frame-
+work outperforms state-of-the-art methods on both natu-
+ral and 4D video datasets, especially on recognizing dy-
+namic subject-object relations.
+Problem Formulation
+Temporal panoptic scene graph generation (TPSGG) is a
+task to generate a dynamic scene graph given an input video.
+In the generated scene graph, each node corresponds to an
+entity and each edge corresponds to a spatial-temporal rela-
+tion between two entities. Formally, the input of a TPSGG
+model is a video clip V , particularly V ∈RT ×H×W ×3 for
+a natural video, V ∈RT ×H×W ×4 for a 4D RGB-D video,
+and V ∈RT ×M×6 for a 4D point cloud video, T denotes the
+number of frames, M the number of point clouds of interest,
+and the frame size H × W should remain consistent across
+the video. The output of the model is a dynamic scene graph
+G. The TPSGG task can be formulated as follows:
+P(G|V ) = P(M, O, R|V ).
+(1)
+In particular, G consists of binary mask tubes M
+=
+{m1, m2, ..., mN} and entity labels O = {o1, o2, ..., oN}
+which are associated with N entities in the video, and their
+relations are denoted as R = {r1, r2, ..., rL}. With respect to
+entity oi, the mask tube mi ∈{0, 1}T ×H×W composes all
+tracked masks in all video frames, and its category oi ∈CO.
+For all entities in frame t, their masks must not overlap, i.e.
+N
+P
+i=1
+mt
+i ≤1H×W . The relation ri ∈CR associates two en-
+tities, one of which is the subject and the other is an object,
+with a relation class and a time period. CO and CR denote
+the entity and relation set class, respectively.
+Methodology
+We firstly present the backbone pipeline to conduct temporal
+panoptic scene graph generation. Then, we explain our pro-
+posed contrastive learning framework to facilitate motion-
+aware mask tube representation learning. We also present
+6219
+
+---PAGE BREAK---
+Figure 3: Framework overview of contrastive learning for temporal scene graph generation.
+0
+12
+3
+6
+9
+1
+2
+3
+Frame
+Motion
+amplitude
+0
+12
+3
+6
+9
+1
+2
+3
+Frame
+Motion
+amplitude
+4
+adult - throwing - ball
+adult - touching - oven
+Figure 4: Proposed strategy to select strong-motion tubes.
+the detail of our optimal transport approach to estimate the
+relation between two mask tubes for the contrastive objec-
+tive. Our overall framework is illustrated in Figure 3.
+Temporal Panoptic Segmentation
+Given a video clip V ∈RT ×H×W ×3, V ∈RT ×H×W ×4,
+or V ∈RT ×M×6, the initial step is to segment and track
+each pixel in a non-overlapping manner. Formally, the model
+produces a set of entity masks {yi}N
+i=1 = {(mi, pi(c))}N
+i=1,
+where mi ∈{0, 1}T ×H×W denotes the tracked video mask,
+i.e. the mask tube, and pi(c) denotes the probability of as-
+signing class c to the tube mi. N denotes the number of
+entities, which consist of both foreground (thing) and back-
+ground (stuff) classes.
+Segmentation module. Inspired by (Yang et al. 2023,
+2024), we adopt the Transformer-based encoder-decoder
+segmentation model. There are two types of segmentation
+procedure: 1) image panoptic segmentation combined with a
+tracker (IPS+T) and 2) video panoptic segmentation (VPS).
+IPS+T procedure will process each video frame separately
+and uses the tracker to connect the mask tubes across the
+video frames, while VPS processes each video frame with
+its reference frame from a nearby timestamp.
+Both procedures are initiated by producing a set of ob-
+ject queries which interacts with encoded visual patches via
+masked cross-attention. Receiving a video V , the model pro-
+duces a set of queries {qi}N
+i=1, where each query qi corre-
+sponds to one entity. Subsequently, every query is forwarded
+to two multi-layer perceptrons (MLPs) to project the queries
+into mask classification and mask regression outputs.
+Training and inference. During training, each query is
+matched to a groundtruth mask through mask-based bipar-
+tite matching to calculate the segmentation loss. During in-
+ference, IPS+T generates panoptic segmentation masks for
+each frame, and uses the tracker to achieve N tracked mask
+tubes. In contrast, VPS employs two query embeddings of
+the target and reference frame, and performs query-wised
+similarity tracking to obtain N tracked mask tubes.
+6220
+
+---PAGE BREAK---
+Relation Classification
+After the segmentation step, if the relation module is
+to be trained, we match query tubes with the annotated
+groundtruth masks based on the tube IoU values with the
+groundtruth. Otherwise, we directly forward mask tubes to
+self-attention or convolutional layers for encoding them into
+hidden representations {Hi}N
+i=1, Hi ∈RT ×D, where D de-
+notes the hidden dimension. Then, we construct query pairs
+from every two query tubes’ representations Hi and Hj,
+i, j ∈{1, 2, ..., N}, i ̸= j. Inspired by (Yang et al. 2023,
+2024), in every pair, we perform global pooling over the
+temporal dimension for each mask tube representation:
+hi = Pooling (Hi) ,
+(2)
+where hi ∈RD. Afterwards, we concatenate hi and hj, and
+forward to a MLP to generate the relation category:
+log p(ri,j) = MLP ([hi, hj]) .
+(3)
+To train the relation classification module, we use the cross-
+entropy loss calculated based on the predicted relation log-
+likelihood and the groundtruth. For inference, we extract the
+relation of the highest log-likelihood.
+Contrastive Learning for Temporal Panoptic Scene
+Graph Generation
+Our goal is to encourage mask tube representations {Hi}N
+i=1
+to become motion-aware. In the beginning, we concatenate
+the representations of two mask tubes Hsub
+i
+and Hobj
+j , which
+have been matched to a groundtruth subject-relation-object
+triplet, to form an anchor representation Hi,j (anchor):
+Ha
+i,j = [Hsub
+i
+, Hobj
+j ],
+(4)
+where Ha
+i,j ∈RT ×2D. Then, we propose a contrastive learn-
+ing framework in which we motivate the model to associate
+mask tubes based upon the motion information. The objec-
+tive of contrastive learning is to produce a representation
+space through attracting positive pairs, i.e. Ha and Hp (pos-
+itive), while pushing apart negative pairs, i.e. Ha and Hn
+(negative). We accomplish this by optimizing the contrastive
+objective, which is formulated as follows:
+Lcont = −log
+esim(Ha,Hp)
+esim(Ha,Hp) +
+Nn
+P
+z=1
+esim(Ha,Hn
+z )
+,
+(5)
+where sim denotes the similarity function defined upon a
+pair of mask tube representations. The formulation shows
+that what the model learn is largely dependent upon how
+positive and negative samples are generated.
+Positive sampling. To satisfy our motion-aware requirement
+for contrastive learning, we extract mask tube representa-
+tions from the entities of the same subject and object cate-
+gory that exhibit a similar groundtruth relation from another
+video. Since two videos possess distinct visual features, the
+model must rely on the shared motion pattern of similar
+subject-relation-object triplets to associate the anchor and
+the positive sample.
+Negative sampling. For negative sampling, we design two
+strategies, which result in two contrastive approaches, i.e.
+shuffle-based and triplet-based contrastive learning.
+Shuffle-based contrastive learning
+In our shuffle-based approach, we create negative samples
+by utilizing a series of temporal permutations π to the anchor
+tube, i.e. shuffling:
+Hn = π (Ha) .
+(6)
+As such, the contrastive objective will force the model to
+propel representations of the anchor tube, which is in the
+normal order, from the shuffled tube, which exhibits a dis-
+torted motion due to the shuffled order. This would make
+the learned representation sensitive to frame ordering, i.e.
+motion-aware, as the anchor Ha and the negative tube Hn
+share visual semantics and can only be distinguished using
+motion information.
+Selecting strong-motion mask tubes. However, there ex-
+ists a potential risk: for static relations such as on, next to,
+and in, mask tubes might involve almost no motion. As a re-
+sult, the shuffled tube would become identical to the anchor
+one and the model would not be able to differentiate them
+and learn reasonably. To address this problem, we propose
+a strategy to select strong-motion tubes for shuffling, which
+we illustrated in Figure 4.
+Given a video, our aim is to select mask tubes that carry
+strong motion for shuffling. To measure the motion of the
+mask tube, we utilize optical flow edges (Xiao, Tighe, and
+Modolo 2021). We estimate flow edges via employing a So-
+bel filter (Sobel et al. 2022) onto the flow magnitude map
+and take the median over the flow edge pixels of the en-
+tity masks. Then, we select mask tubes whose the maximum
+value across the optical flow surpasses a threshold γ.
+Triplet-based contrastive learning
+To take advantage of motion-aware signals from triplets of
+similar subject-relation-object category, we design a triplet-
+based approach to create negative samples. A naive ap-
+proach would be to sample mask tubes of any distinct
+subject-relation-object triplet from the anchor sample. How-
+ever, if we run into triplets with all distincgt subject, relation,
+and object categories, the negative pair would be trivial for
+the model to distinguish, resulting in less effective learning.
+In order to create harder negative samples, we choose neg-
+ative mask tubes from the same video with the anchor. We
+create a multi-nomial distribution, where triplets that share
+more subject, relation, or object categories with the anchor
+will be more likely to be drawn. Hence, our negative sam-
+ples can hold close visual semantics with the anchor sample,
+and increase the likelihood that the model depends on mo-
+tion semantics to push them apart. From contrastive learning
+perspective, these samples form hard negative samples to ac-
+celerate the learning process (Chen, Zheng, and Song 2024).
+Optimal Transport for Mask Tube Relation
+Quantification
+There is one remaining problem, i.e. how to define the sim-
+ilarity function sim for two mask tubes’ representations
+Hi and Hj. In this work, we consider two mask tubes as
+two discrete distributions µ and ν, whose Hi and Hj are
+6221
+
+---PAGE BREAK---
+Algorithm 1: Computing the optimal transport distance
+Require: C = {Cl,k = c (hi,l, hj,k) | 1 ≤i ≤NV , 1 ≤j ≤
+NL} ∈RTi×Tj, a ∈RTi, b ∈RTj, s, Niter
+dOT = ∞
+for s = 1 to min(Ti, Tj) do
+T = exp
+ −C
+τ
+
+T =
+s
+(1Ti)
+⊤·T·1Tj
+T
+for i = 1 to Niter do
+pa = min
+
+a
+T1Tj , 1Ti
+
+, Ta = diag (pa) · T
+pb = min
+
+b
+T⊤
+a 1Ti , 1Tj
+
+, Tb = diag (pb) · Ta
+T =
+s
+(1Ti)
+⊤·T·1NL
+Tb
+end for
+dOT = min
+ 
+dOT,
+Ti
+P
+k=1
+Tj
+P
+l=1
+Tk,lCk,l
+!
+end for
+return dOT
+their supports, respectively. Formally, µ =
+Ti
+P
+k=1
+akδhi,k and
+ν =
+Tj
+P
+l=1
+blδhj,l, where δhi,k and δhj,l denote the Dirac func-
+tions centered upon hi,k and hj,l, respectively. The weights
+of the supports are a =
+1Ti
+Ti and b =
+1Tj
+Tj .
+After defining the distribution scheme, we propose the
+tube alignment optimization problem, which is to find the
+transport plan that achieves the minimum distance between
+µ and ν as follows:
+dOT = DOT(µ, ν) =
+min
+T∈Π(a,b)
+Ti
+X
+k=1
+Tj
+X
+l=1
+Ti,j · c (hi,k, hj,l) ,
+(7)
+s.t
+Π(a, b) = {T ∈RTi×Tj
++
+| T1Ti ≤a, T⊤1Tj ≤b,
+1⊤
+Ti · T · 1Tj = s,
+0 ≤s ≤min(Ti, Tj)},
+(8)
+where c denotes a pre-defined distance between two vec-
+tors. We implement the cost distance c (hi,k, hj,l) = 1 −
+hi,k·hj,l
+||hi,k||2||hi,k||2 as the cosine distance. As the exact optimiza-
+tion over the transport plan T is intractable, we adopt the
+Sinkhorn-based algorithm to estimate T. We delineate the
+algorithm to calculate the distance in Algorithm 1. To turn
+the distance into similarity value, we take its negative value
+and add to a pre-defined margin α:
+sim (ha, hp) = α −dOT.
+(9)
+Experiments
+We conduct comprehensive experiments to evaluate the ef-
+fectiveness of our motion-aware contrastive framework. We
+first describe the experiment settings, covering the evalua-
+tion datasets, evaluation metrics, baseline methods, and im-
+plementation details. Next, we present quantitative results
+of our method, then provide ablation study and careful anal-
+ysis to explore properties of our motion-aware contrastive
+framework. Eventually, we conduct qualitative analysis to
+concretely examine its behavior.
+Experiment Settings
+Datasets. We assess the effectiveness of our method on nat-
+ural and 4D video inputs. The corresponding dataset to each
+input type is as follows:
+• Open-domain Panoptic video scene graph generation
+(OpenPVSG) (Yang et al. 2023): OpenPVSG consists
+of scene graphs and associated segmentation masks with
+respect to subject and object nodes in the scene graph.
+The dataset comprises 400 videos, including 289 third-
+person videos from ViDOR (Shang et al. 2019), 111 ego-
+centric videos from Epic-Kitchens (Damen et al. 2022)
+and Ego4D (Grauman et al. 2022).
+• Panoptic scene graph generation for 4D (PSG4D)
+(Yang et al. 2024): The PSG4D dataset is divided into
+two groups, i.e. PSG4D-GTA and PSG4D-HOI. PSG4D-
+GTA comprises 67 third-view videos with an average
+length of 84 seconds, 35 object categories, and 43
+relationship categories. On the contrary, PSG4D-HOI
+contains 2,973 videos from an egocentric perspective,
+whose average duration is 20 seconds. The PSG4D-
+HOI’s videos are mostly related to indoor scenes, cov-
+ering 46 object categories and 15 relationship categories.
+Evaluation metrics. We use the recall at K (R@K) and
+mean recall at K (mR@K) metrics, which are standard met-
+rics used in scene graph generation tasks. Both R@K and
+mR@K consider the top-K triplets predicted by the panop-
+tic scene graph generation model. A successful recall of a
+predicted triplet must satisfy the following criteria: 1) cor-
+rect category labels for the subject, object, and predicate;
+2) a volume Intersection over Union (vIoU) greater than
+or equal to 0.5 between the predicted mask tubes and the
+groundtruth tubes. For extensive comparison, we also report
+results with the vIoU threshold of 0.1.
+Baseline methods. We compare our method with a com-
+prehensive list of baseline approaches for temporal panop-
+tic scene graph generation: (i) IPS+T - Vanilla (Yang et al.
+2023) uses image panoptic segmentation (IPS) model with
+a tracker for segmentation, and fully-connected layers to
+separately encode temporal states of entity mask tubes; (ii)
+IPS+T - Handcrafted filter (Yang et al. 2023) uses image
+panoptic segmentation (IPS) model with a tracker for seg-
+mentation, and a manually-designed kernel to encode en-
+tity mask tubes; (iii) IPS+T - Convolution (Yang et al.
+2023) uses image panoptic segmentation (IPS) model with
+a tracker for segmentation, and learnable convolutional lay-
+ers to encode entity mask tubes; (iv) IPS+T - Transformer
+(Yang et al. 2023) uses image panoptic segmentation model
+(IPS) with a tracker for segmentation, and Transformer-
+based encoder with self-attention layers to encode entity
+mask tubes; (v) VPS - Vanilla (Yang et al. 2023) is simi-
+lar to IPS+T - Vanilla, but uses video panoptic segmentation
+(VPS) model for panoptic segmentation; (vi) VPS - Hand-
+crafted filter (Yang et al. 2023) is similar to IPS+T - Hand-
+crafter filter, but uses video panoptic segmentation (VPS)
+model for segmentation; (vii) VPS - Convolution (Yang
+et al. 2023) is similar to IPS+T - Convolution, but uses video
+panoptic segmentation (VPS) model for segmentation; (viii)
+VPS - Transformer (Yang et al. 2023) is similar to IPS+T
+6222
+
+---PAGE BREAK---
+Method
+vIoU threshold = 0.5
+vIoU threshold = 0.1
+R/mR@20
+R/mR@50
+R/mR@100
+R/mR@20
+R/mR@50
+R/mR@100
+IPS+T - Vanilla
+3.04 / 1.35
+4.61 / 2.94
+5.56 / 3.33
+8.28 / 5.68
+14.47 / 9.92
+18.24 / 11.84
+IPS+T - Handcrafted filter
+2.52 / 1.72
+3.77 / 2.36
+4.72 / 2.79
+8.07 / 5.61
+13.42 / 8.27
+16.46 / 10.11
+IPS+T - Transformer
+3.88 / 2.81
+5.66 / 4.12
+6.18 / 4.44
+9.01 / 6.69
+14.88 / 11.28
+17.51 / 13.20
+IPS+T - Convolution
+3.88 / 2.55
+5.24 / 3.29
+6.71 / 5.36
+10.06 / 8.98
+14.99 / 12.21
+18.13 / 15.47
+Ours - Transformer
+3.98 / 2.98
+5.97 / 4.20
+7.44 / 5.15
+10.59 / 9.56
+16.98 / 12.39
+22.33 / 17.47
+Ours - Convolution
+4.51 / 3.56
+6.08 / 4.38
+7.76 / 5.86
+11.43 / 9.57
+17.30 / 13.13
+22.85 / 17.48
+VPS - Vanilla
+0.21 / 0.10
+0.21 / 0.10
+0.31 / 0.18
+6.29 / 3.04
+9.64 / 6.74
+12.89 / 9.60
+VPS - Handcrafted filter
+0.42 / 0.13
+0.52 / 0.50
+0.94 / 0.92
+5.24 / 2.84
+7.65 / 7.14
+9.64 / 8.22
+VPS - Transformer
+0.42 / 0.61
+0.73 / 0.76
+1.05 / 0.92
+6.50 / 5.75
+9.64 / 8.25
+12.26 / 9.51
+VPS - Convolution
+0.42 / 0.25
+0.63 / 0.67
+0.63 / 0.67
+8.07 / 7.84
+11.01 / 9.78
+12.89 / 10.77
+Ours - Transformer
+0.63 / 0.83
+1.05 / 0.76
+1.05 / 0.76
+6.71 / 6.94
+10.27 / 8.68
+13.42 / 12.09
+Ours - Convolution
+0.84 / 0.98
+1.26 / 1.22
+1.26 / 1.22
+8.18 / 8.00
+12.90 / 11.47
+14.22 / 13.59
+Table 1: Experimental results on the OpenPVSG dataset.
+Input type
+Method
+PSG4D-GTA
+PSG4D-HOI
+R/mR@20
+R/mR@50
+R/mR@100
+R/mR@20
+R/mR@50
+R/mR@100
+Point cloud videos
+3DSGG
+1.48 / 0.73
+2.16 / 0.79
+2.92 / 0.85
+3.46 / 2.19
+3.15 / 2.47
+4.96 / 2.84
+PSG4DFormer
+4.33 / 2.10
+4.83 / 2.93
+5.22 / 3.13
+5.36 / 3.10
+5.61 / 3.95
+6.76 / 4.17
+Ours
+5.88 / 3.45
+6.31 / 3.70
+7.31 / 4.70
+7.28 / 5.09
+7.62 / 6.49
+9.18 / 6.85
+RGB-D videos
+3DSGG
+2.29 / 0.92
+2.46 / 1.01
+3.81 / 1.45
+4.23 / 2.19
+4.47 / 2.31
+4.86 / 2.41
+PSG4DFormer
+6.68 / 3.31
+7.17 / 3.85
+7.22 / 4.02
+5.62 / 3.65
+6.16 / 4.16
+6.28 / 4.97
+Ours
+9.07 / 5.52
+9.73 / 6.32
+9.73 / 6.32
+7.63 / 6.09
+8.36 / 6.94
+8.53 / 8.29
+Table 2: Experimental results on both PSG4D-GTA and PSG4D-HOI groups of PSG4D dataset.
+Method
+R/mR@20
+R/mR@50
+R/mR@100
+w/o shuffle-based
+4.41 / 3.43
+5.90 / 4.24
+7.30 / 5.79
+w/o triplet-based
+4.44 / 3.50
+6.02 / 4.28
+7.36 / 5.83
+Ours
+4.51 / 3.56
+6.08 / 4.38
+7.44 / 5.86
+Table 3: Ablation results for contrastive learning approaches
+on OpenPVSG dataset. We adopt the vIoU threshold of 0.5.
+Tube relation quantification
+R/mR@20
+R/mR@50
+R/mR@100
+Pooling - Cosine similarity
+4.44 / 3.40
+6.04 / 4.36
+7.36 / 5.84
+Pooling - L2
+4.36 / 3.37
+3.77 / 5.95
+7.29 / 5.80
+Optimal transport
+4.51 / 3.56
+6.08 / 4.38
+7.44 / 5.86
+Table 4: Ablation results for mask tube relation quantifica-
+tion method between mask tubes on OpenPVSG dataset.
+- Transformer, but uses video panoptic segmentation (VPS)
+model for segmentation; (ix) 3D-SGG (Wald et al. 2020) is
+based on PointNet (Qi et al. 2017) and graph convolutional
+network (Kipf and Welling 2016) but neglects the depth di-
+mension and generates panoptic scene graphs for 4D video
+inputs; (x) PSG4DFormer (Yang et al. 2024) is a special-
+ized model for 4D inputs, using Mask2Former (Cheng et al.
+2022) for segmentation and a spatial-temporal Transformer
+to encode object mask tubes for relation classification.
+Implementation details. For fair comparison, we experi-
+ment our contrastive framework with both IPS+T and VPS
+as segmentation module for panoptic video scene graph
+generation. In the former case, we leverage the UniTrack
+tracker (Wang et al. 2021) combined with Mask2Former
+model (Cheng et al. 2022), which is initialized from the
+best-performing COCO-pretrained weights and fine-tuned
+for 8 epochs using AdamW optimizer with a batch size of
+32, learning rate of 0.0001, weight decay of 0.05, and gra-
+dient clipping with a max L2 norm of 0.01. In the latter
+case, we utilize Video K-Net (Li et al. 2022), also initial-
+6
+7
+8
+9
+10
+γ
+5.925
+5.950
+5.975
+6.000
+6.025
+6.050
+6.075
+R@50
+Figure 5: Ablation results on threshold γ.
+ized from COCO-pretrained weights and fine-tuned with the
+same strategy as IPS+T. In the relation classification step, we
+conduct fine-tuning with a batch size of 32, employing the
+Adam optimizer with a learning rate of 0.001. For 4D panop-
+tic scene graph generation, we adopt the PSG4DFormer
+baseline. To work with RGB-D and point cloud videos, we
+use an ImageNet pretrained on ResNet-101 (Russakovsky
+et al. 2015) and the DKNet (Wu et al. 2022) as the visual en-
+coder, respectively. We fine-tune the segmentation module
+for RGB-D and point cloud videos for 12 and 200 epochs,
+respectively. We use additional 100 epochs to train the re-
+lation classification module. Based on validation, we adopt
+a threshold γ = 9.0 and a margin α = 10.0. We set the
+maximum number of iterations Niter to 1,000.
+Main Results
+Results on OpenPVSG. As shown in Table 1, we substan-
+tially outperform both IPS+T - Convolution and IPS+T -
+Transformer when we use IPS+T for segmentation. In par-
+ticular, using a higher vIoU threshold to filter out inaccurate
+segmentation, we surpass IPS+T - Transformer by 1.3/0.7
+6223
+
+---PAGE BREAK---
+Input type
+Method
+PSG4D-GTA
+PSG4D-HOI
+R/mR@20
+R/mR@50
+R/mR@100
+R/mR@20
+R/mR@50
+R/mR@100
+Point cloud videos
+w/o shuffle-based
+5.56 / 2.92
+5.57 / 2.98
+6.51 / 4.36
+6.56 / 4.29
+6.98 / 6.25
+8.76 / 6.43
+w/o triplet-based
+5.77 / 2.93
+5.59 / 3.26
+6.53 / 4.39
+6.67 / 4.85
+7.52 / 6.31
+8.84 / 6.43
+Ours
+5.88 / 3.45
+6.31 / 3.70
+7.31 / 4.70
+7.28 / 5.09
+7.62 / 6.49
+9.18 / 6.85
+RGB-D videos
+w/o shuffle-based
+8.35 / 5.34
+8.76 / 5.68
+8.88 / 5.53
+7.00 / 5.53
+7.51 / 6.02
+7.56 / 7.42
+w/o triplet-based
+9.00 / 5.46
+9.71 / 5.95
+9.63 / 5.82
+7.12 / 6.03
+8.31 / 6.51
+8.24 / 7.95
+Ours
+9.07 / 5.52
+9.73 / 6.32
+9.73 / 6.32
+7.63 / 6.09
+8.36 / 6.94
+8.53 / 8.29
+Table 5: Ablation results for contrastive learning approaches on PSG4D dataset.
+Input type
+Tube relation quantification
+PSG4D-GTA
+PSG4D-HOI
+R/mR@20
+R/mR@50
+R/mR@100
+R/mR@20
+R/mR@50
+R/mR@100
+Point cloud videos
+Pooling - Cosine similarity
+5.76 / 2.87
+6.02 / 3.62
+6.84 / 4.11
+7.24 / 4.45
+7.44 / 6.27
+8.20 / 6.64
+Pooling - L2
+5.46 / 2.78
+5.38 / 3.39
+6.51 / 3.86
+6.72 / 4.11
+6.74 / 6.05
+7.96 / 6.11
+Optimal transport
+5.88 / 3.45
+6.31 / 3.70
+7.31 / 4.70
+7.28 / 5.09
+7.62 / 6.49
+9.18 / 6.85
+RGB-D videos
+Pooling - Cosine similarity
+9.03 / 5.37
+9.47 / 5.86
+9.70 / 6.02
+7.36 / 5.43
+7.93 / 6.70
+8.06 / 7.42
+Pooling - L2
+8.89 / 4.70
+8.90 / 5.41
+9.08 / 5.78
+6.65 / 5.26
+7.74 / 6.29
+7.95 / 7.39
+Optimal transport
+9.07 / 5.52
+9.73 / 6.32
+9.73 / 6.32
+7.63 / 6.09
+8.36 / 6.94
+8.53 / 8.29
+Table 6: Ablation results for mask tube relation quantification method between mask tubes on PSG4D dataset.
+points of R/mR@100, while surpassing IPS+T - Convolu-
+tion by 0.8/1.1 points of R/mR@50. In addition, for a less
+strict vIoU threshold, we outperform IPS+T - Transformer
+by 1.6/2.9 points of R/mR@20, and IPS+T - Convolution
+by 2.3/0.9 points of R/mR@50. These results demonstrate
+that our method makes a propitious contribution to tempo-
+ral panoptic scene graph generation, not only to popular but
+also to unpopular relation classes.
+Results on PSG4D. Table 2 shows that our method
+also achieves significantly higher performance than the
+PSG4DFormer model. Specifically, when working with
+point cloud videos, on PSG4D-GTA, we outperform the
+baseline method by 1.6/1.4 points. Analogously, on PSG4D-
+HOI, we outperform PSG4DFormer by 2.0/2.5 points of
+R/mR@50. These results indicate that our framework bears
+a valuable impact to both egocentric and third-view videos.
+We hypothesize that both video types consist of dynamic ac-
+tions among objects whose mask tube representations should
+be polished. In addition, when working with RGB-D videos,
+on PSG4D-GTA, we enhance the baseline method by 2.4/2.2
+points of R/mR@20,. Furthermore, on PSG4D-HOI, our
+motion-aware contrastive learning also considerably refines
+PSG4DFormer by 2.0/2.4 points of R/mR@20. Such results
+have verified the generalizability of our motion-aware con-
+trastive framework over natural, point cloud, and RGB-D
+videos.
+Ablation Study
+Effect of the contrastive components. We evaluate our
+framework without the assistance of either the shuffle-based
+or the triplet-based contrastive objective. As shown in Table
+3 and 5, the performance degrades when we both remove
+shuffle-based and triplet-based contrastive approaches. In
+addition, triplet-based contrastive learning plays a more fun-
+damental role than the shuffle-based one. We hypothesize
+that shuffle-based contrastive learning is better at focusing
+on motion semantics than triplet-based one.
+Effect of selecting strong-motion tubes. We evaluate the
+impact of our strategy to filter out weak motion tubes. In Fig-
+ure 5, we observe a performance boost when we increase the
+threshold to select mask tubes with strong motion. However,
+further elevating the threshold results in performance degra-
+dation, since there are more mask tubes eliminated, thus lim-
+iting the effect of our motion-aware contrastive framework.
+Effect of optimal transport distance. In this ablation, we
+compare various strategies to calculate the similarity be-
+tween two mask tubes. Results in Table 4 and 6 show that
+the proposed optimal transport achieves much higher perfor-
+mance for both natural and 4D video inputs. We conjecture
+that other method such as pooling then cosine similarity or
+L2 neglects the temporal or flattens the motion nature of the
+entity mask tubes, thus reducing the effectiveness.
+Qualitative Analysis
+We visualize examples processed by the state-of-the-art
+models and ours in Figure 2. As can be observed, our
+model successfully produces mask tubes overlapping with
+the groundtruth, and importantly predicts the correct rela-
+tions of the subject-object pairs. On the other hand, base-
+line models tend to prefer more static relations, since during
+training they do not explicitly focus on motion-sensitive fea-
+tures. Statistics in Figure 1 also substantiate our proposition,
+in which we achieve considerably higher recalls for dynamic
+relations than baseline approaches.
+Conclusion
+In this paper, we propose a motion-aware contrastive learn-
+ing framework for temporal panoptic scene graph genera-
+tion. In our framework, we learn close representations for
+temporal masks of similar entities that exhibit common re-
+lations. Moreover, we separate temporal masks from their
+shuffled version, and also separate temporal masks of dif-
+ferent subject-relation-object triplets. To quantify the rela-
+tionship among temporal masks in the proposed contrastive
+framework, we utilize optimal transport to preserve the tem-
+poral nature among temporal entity masks. Extensive exper-
+iments substantiate the effectiveness of our framework for
+both natural and 4D videos.
+6224
+
+---PAGE BREAK---
+Acknowledgements
+This research/project is supported by the National Re-
+search Foundation, Singapore under its AI Singapore Pro-
+gramme (AISG Award No: AISG3-PhD-2023-08-051T).
+Thong Nguyen is supported by a Google Ph.D. Fellowship
+in Natural Language Processing.
+References
+Bin, Y.; Yang, Y.; Tao, C.; Huang, Z.; Li, J.; and Shen, H. T.
+2019. Mr-net: Exploiting mutual relation for visual relation-
+ship detection. In Proceedings of the AAAI Conference on
+Artificial Intelligence, volume 33, 8110–8117.
+Chen, Y.; Ma, G.; Yuan, C.; Li, B.; Zhang, H.; Wang, F.; and
+Hu, W. 2020. Graph convolutional network with structure
+pooling and joint-wise channel attention for action recogni-
+tion. Pattern Recognition, 103: 107321.
+Chen, Z.; Zheng, T.; and Song, M. 2024.
+Curriculum
+Negative Mining For Temporal Networks. arXiv preprint
+arXiv:2407.17070.
+Cheng, B.; Misra, I.; Schwing, A. G.; Kirillov, A.; and Gird-
+har, R. 2022. Masked-attention mask transformer for univer-
+sal image segmentation. In Proceedings of the IEEE/CVF
+conference on computer vision and pattern recognition,
+1290–1299.
+Damen, D.; Doughty, H.; Farinella, G. M.; Furnari, A.;
+Kazakos, E.; Ma, J.; Moltisanti, D.; Munro, J.; Perrett, T.;
+Price, W.; et al. 2022.
+Epic-kitchens-100.
+International
+Journal of Computer Vision, 130: 33–55.
+Driess, D.; Xia, F.; Sajjadi, M. S.; Lynch, C.; Chowdhery, A.;
+Ichter, B.; Wahid, A.; Tompson, J.; Vuong, Q.; Yu, T.; et al.
+2023. Palm-e: An embodied multimodal language model.
+arXiv preprint arXiv:2303.03378.
+Grauman, K.; Westbury, A.; Byrne, E.; Chavis, Z.; Furnari,
+A.; Girdhar, R.; Hamburger, J.; Jiang, H.; Liu, M.; Liu, X.;
+et al. 2022. Ego4d: Around the world in 3,000 hours of ego-
+centric video. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, 18995–19012.
+Kipf, T. N.; and Welling, M. 2016. Semi-supervised classi-
+fication with graph convolutional networks. arXiv preprint
+arXiv:1609.02907.
+Li, X.; Ding, H.; Yuan, H.; Zhang, W.; Pang, J.; Cheng, G.;
+Chen, K.; Liu, Z.; and Loy, C. C. 2023a.
+Transformer-
+based visual segmentation: A survey.
+arXiv preprint
+arXiv:2304.09854.
+Li, X.; Yuan, H.; Zhang, W.; Cheng, G.; Pang, J.; and Loy,
+C. C. 2023b. Tube-Link: A flexible cross tube framework
+for universal video segmentation.
+In Proceedings of the
+IEEE/CVF International Conference on Computer Vision,
+13923–13933.
+Li, X.; Zhang, W.; Pang, J.; Chen, K.; Cheng, G.; Tong, Y.;
+and Loy, C. C. 2022. Video k-net: A simple, strong, and
+unified baseline for video segmentation. In Proceedings of
+the IEEE/CVF Conference on Computer Vision and Pattern
+Recognition, 18847–18857.
+Li, Y.; Yang, X.; and Xu, C. 2022. Dynamic scene graph
+generation via anticipatory pre-training. In Proceedings of
+the IEEE/CVF conference on computer vision and pattern
+recognition, 13874–13883.
+Liu, K.; Li, Y.; Xu, Y.; Liu, S.; and Liu, S. 2022. Spatial
+focus attention for fine-grained skeleton-based action tasks.
+IEEE Signal Processing Letters, 29: 1883–1887.
+Ma, X.; Yong, S.; Zheng, Z.; Li, Q.; Liang, Y.; Zhu, S.-C.;
+and Huang, S. 2022. Sqa3d: Situated question answering in
+3d scenes. arXiv preprint arXiv:2210.07474.
+Nag, S.; Min, K.; Tripathi, S.; and Roy-Chowdhury, A. K.
+2023. Unbiased scene graph generation in videos. In Pro-
+ceedings of the IEEE/CVF Conference on Computer Vision
+and Pattern Recognition, 22803–22813.
+Nguyen, T.; Wu, X.; Dong, X.; Nguyen, C.-D.; Ng, S.-K.;
+and Tuan, L. A. 2023.
+Demaformer: Damped exponen-
+tial moving average transformer with energy-based mod-
+eling for temporal language grounding.
+arXiv preprint
+arXiv:2312.02549.
+Qi, C. R.; Su, H.; Mo, K.; and Guibas, L. J. 2017. Pointnet:
+Deep learning on point sets for 3d classification and segmen-
+tation. In Proceedings of the IEEE conference on computer
+vision and pattern recognition, 652–660.
+Raychaudhuri, S.; Campari, T.; Jain, U.; Savva, M.; and
+Chang, A. X. 2023. Reduce, reuse, recycle: Modular multi-
+object navigation. arXiv preprint arXiv:2304.03696, 2.
+Russakovsky, O.; Deng, J.; Su, H.; Krause, J.; Satheesh, S.;
+Ma, S.; Huang, Z.; Karpathy, A.; Khosla, A.; Bernstein, M.;
+et al. 2015. Imagenet large scale visual recognition chal-
+lenge. International journal of computer vision, 115: 211–
+252.
+Shang, X.; Di, D.; Xiao, J.; Cao, Y.; Yang, X.; and Chua, T.-
+S. 2019. Annotating objects and relations in user-generated
+videos. In Proceedings of the 2019 on International Confer-
+ence on Multimedia Retrieval, 279–287.
+Sobel, I.; Duda, R.; Hart, P.; and Wiley, J. 2022.
+Sobel-feldman operator.
+Preprint at https://www. re-
+searchgate. net/profile/Irwin-Sobel/publication/285159837.
+Accessed, 20.
+Sudhakaran, G.; Dhami, D. S.; Kersting, K.; and Roth, S.
+2023. Vision relation transformer for unbiased scene graph
+generation. In Proceedings of the IEEE/CVF International
+Conference on Computer Vision, 21882–21893.
+Wald, J.; Dhamo, H.; Navab, N.; and Tombari, F. 2020.
+Learning 3d semantic scene graphs from 3d indoor recon-
+structions. In Proceedings of the IEEE/CVF Conference on
+Computer Vision and Pattern Recognition, 3961–3970.
+Wang, G.; Li, Z.; Chen, Q.; and Liu, Y. 2024. OED: Towards
+One-stage End-to-End Dynamic Scene Graph Generation.
+In Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, 27938–27947.
+Wang, W.; Luo, Y.; Chen, Z.; Jiang, T.; Yang, Y.; and Xiao,
+J. 2023. Taking a closer look at visual relation: Unbiased
+video scene graph generation with decoupled label learning.
+IEEE Transactions on Multimedia.
+Wang, Z.; Zhao, H.; Li, Y.-L.; Wang, S.; Torr, P.; and
+Bertinetto, L. 2021. Do different tracking tasks require dif-
+ferent appearance models? Advances in Neural Information
+Processing Systems, 34: 726–738.
+6225
+
+---PAGE BREAK---
+Wu, Y.; Shi, M.; Du, S.; Lu, H.; Cao, Z.; and Zhong, W.
+2022. 3d instances as 1d kernels. In European Conference
+on Computer Vision, 235–252. Springer.
+Xiao, F.; Tighe, J.; and Modolo, D. 2021. Modist: Motion
+distillation for self-supervised video representation learning.
+arXiv preprint arXiv:2106.09703, 3.
+Yang, J.; Ang, Y. Z.; Guo, Z.; Zhou, K.; Zhang, W.; and Liu,
+Z. 2022.
+Panoptic scene graph generation.
+In European
+Conference on Computer Vision, 178–196. Springer.
+Yang, J.; Cen, J.; Peng, W.; Liu, S.; Hong, F.; Li, X.; Zhou,
+K.; Chen, Q.; and Liu, Z. 2024. 4d panoptic scene graph
+generation. Advances in Neural Information Processing Sys-
+tems, 36.
+Yang, J.; Peng, W.; Li, X.; Guo, Z.; Chen, L.; Li, B.; Ma, Z.;
+Zhou, K.; Zhang, W.; Loy, C. C.; et al. 2023. Panoptic video
+scene graph generation. In Proceedings of the IEEE/CVF
+Conference on Computer Vision and Pattern Recognition,
+18675–18685.
+Zhao, C.; Shen, Y.; Chen, Z.; Ding, M.; and Gan, C. 2023.
+Textpsg: Panoptic scene graph generation from textual de-
+scriptions. In Proceedings of the IEEE/CVF International
+Conference on Computer Vision, 2839–2850.
+Zhou, H.; Liu, Q.; and Wang, Y. 2023. Learning discrimi-
+native representations for skeleton based action recognition.
+In Proceedings of the IEEE/CVF Conference on Computer
+Vision and Pattern Recognition, 10608–10617.
+Zhou, L.; Zhou, Y.; Lam, T. L.; and Xu, Y. 2022. Context-
+aware mixture-of-experts for unbiased scene graph genera-
+tion. arXiv preprint arXiv:2208.07109.
+6226
+
+---PAGE BREAK---

@@ -6,8 +6,8 @@
 # and runs one smoke turn. Every benchmark's env.sh runs after this.
 #
 # Required env (set by CI workflow or by the user for local runs):
-#   DEEPSEEK_API_KEY         -- LLM provider key (fail-fast if missing)
-#   DEEPSEEK_BASE_URL        -- optional, defaults to https://api.deepseek.com
+#   MINIMAX_API_KEY         -- LLM provider key (fail-fast if missing)
+#   MINIMAX_BASE_URL        -- optional, defaults to https://api.minimaxi.com
 #   BENCH_RUN_ID            -- used as the session key prefix and as the compose project name
 #   BENCH_COMPOSE_FILE      -- optional, defaults to docker/docker-compose.bench.yml
 #   BENCH_OPENCLAW_IMAGE    -- optional, overrides the image tag
@@ -28,15 +28,10 @@ log() { printf '\n[env_setup] %s\n' "$*"; }
 die() { printf '\n[env_setup][FATAL] %s\n' "$*" >&2; exit 1; }
 
 # 0. Secrets check
-if [[ -z "${DEEPSEEK_API_KEY:-}" ]]; then
-  die "DEEPSEEK_API_KEY is not set. Add it as a GitHub Actions secret, then re-run."
+if [[ -z "${MINIMAX_API_KEY:-}" ]]; then
+  die "MINIMAX_API_KEY is not set. Add it as a GitHub Actions secret, then re-run."
 fi
-: "${DEEPSEEK_BASE_URL:=https://api.deepseek.com}"
-case "${DEEPSEEK_BASE_URL}" in
-  https://api.deepseek.com|https://api.deepseek.com/)
-    DEEPSEEK_BASE_URL="https://api.deepseek.com/anthropic"
-    ;;
-esac
+: "${MINIMAX_BASE_URL:=https://api.minimaxi.com}"
 
 # 1. Build a temporary .env the compose file can read.
 ENV_DIR="${ROOT}/.bench-runtime"
@@ -49,67 +44,58 @@ OPENCLAW_IMAGE=${IMAGE}
 OPENCLAW_DATA_DIR=${ENV_DIR}/openclaw-data
 OPENCLAW_RUN_USER=0:0
 DOCKER_BIND=127.0.0.1
-OPENCLAW_GATEWAY_PORT=18790
+OPENCLAW_GATEWAY_PORT=18789
 OPENCLAW_GATEWAY_BIND=127.0.0.1
 TZ=Asia/Shanghai
 SYNC_OPENCLAW_CONFIG=false
 SYNC_EXTENSIONS_ON_START=false
-SYNC_MODEL_CONFIG=true
-MODEL_ID=deepseek/deepseek-chat
-PRIMARY_MODEL=deepseek/deepseek-chat
-BASE_URL=${DEEPSEEK_BASE_URL}
-DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL}
-API_PROTOCOL=anthropic-messages
+SYNC_MODEL_CONFIG=false
+MODEL_ID=minimax/MiniMax-M2.7
+PRIMARY_MODEL=minimax/MiniMax-M2.7
+BASE_URL=${MINIMAX_BASE_URL}
+API_PROTOCOL=anthropic
 CONTEXT_WINDOW=200000
 MAX_TOKENS=8192
 DM_POLICY=disabled
 GROUP_POLICY=disabled
 ALLOW_FROM=
 OPENCLAW_WORKSPACE_ROOT=/home/node/.openclaw
-OPENCLAW_SANDBOX_MODE=off
 OPENCLAW_PLUGINS_ENABLED=false
 EOF
 mkdir -p "${ENV_DIR}/openclaw-data"
-log "clearing ${ENV_DIR}/openclaw-data"
-find "${ENV_DIR}/openclaw-data" -mindepth 1 -delete 2>/dev/null || true
-log "seeding ${ENV_DIR}/openclaw-data/openclaw.json"
-BENCH_ROOT="${ROOT}" BENCH_ENV_DIR="${ENV_DIR}" DEEPSEEK_BASE_URL="${DEEPSEEK_BASE_URL}" python3 - <<'PY'
-import json, os, pathlib
 
-root = pathlib.Path(os.environ["BENCH_ROOT"])
-data_dir = pathlib.Path(os.environ["BENCH_ENV_DIR"]) / "openclaw-data"
-src = json.loads((root / "openclaw.json").read_text(encoding="utf-8"))
-
-src["gateway"] = {
-    "mode": "local",
-    "bind": "loopback",
-    "port": 18790,
-    "controlUi": {
-        "allowInsecureAuth": True,
-        "dangerouslyDisableDeviceAuth": False,
-    },
-    "auth": {
-        "mode": "token",
-        "token": "\${GATEWAY_TOKEN}",
-    },
+# 2a. Pre-seed the data directory with a minimally-valid openclaw.json so
+#     the gateway starts clean (no config invalid errors) even though we
+#     haven't rsync'd the repo yet. The real config arrives during
+#     `bench_reapply_setup` and bench_force_recreate overwrites this
+#     openclaw.json with the repo copy + SecretRef patch.
+log "pre-seeding openclaw.json in data dir to avoid gateway config errors"
+mkdir -p "${ENV_DIR}/openclaw-data"
+cat >"${ENV_DIR}/openclaw-data/openclaw.json" <<'PRESEEDEOF'
+{
+  "gateway": {"mode": "local", "bind": "loopback", "port": 18789, "auth": {"mode": "token"}},
+  "models": {
+    "mode": "merge",
+    "providers": {
+      "minimax": {
+        "baseUrl": "https://api.minimaxi.com/anthropic",
+        "api": "anthropic-messages",
+        "authHeader": true,
+        "apiKey": {"source": "env", "provider": "default", "id": "MINIMAX_API_KEY"}
+      }
+    }
+  }
 }
-providers = src.setdefault("models", {}).setdefault("providers", {})
-deepseek = providers.setdefault("deepseek", {})
-deepseek["baseUrl"] = os.environ.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com"
-deepseek["api"] = "anthropic-messages"
-deepseek["apiKey"] = {"source": "env", "provider": "default", "id": "DEEPSEEK_API_KEY"}
-sandbox = src.setdefault("agents", {}).setdefault("defaults", {}).setdefault("sandbox", {})
-sandbox["mode"] = "off"
+PRESEEDEOF
+# We can't set the apiKey until the container is running (the container
+# env provides MINIMAX_API_KEY). For now we use a placeholder; the SecretRef
+# patch in bench_reapply_setup replaces it after docker compose.
 
-out = data_dir / "openclaw.json"
-out.write_text(json.dumps(src, ensure_ascii=False, indent=2), encoding="utf-8")
-PY
-
-# 2. Pull the image (idempotent). Use docker hub mirror if available.
+# 2b. Pull the image (idempotent). Use docker hub mirror if available.
 log "pulling ${IMAGE}"
 docker pull "${IMAGE}" >/dev/null
 
-# 3. Bring up the gateway service. We pass the project name to isolate the
+# 3. Bring up the gateway service.
 #    stack from any other compose project on the same host.
 #
 #    `--force-recreate` makes sure the container starts from a clean state on
@@ -149,7 +135,7 @@ log "container: ${CONTAINER}"
 #    This is the same sequence `bench_force_recreate` re-runs after a
 #    container is recreated: clear the mount, stream the repo tarball,
 #    create the per-agent session dirs, chown to 1000:1000, and patch
-#    openclaw.json with the SecretRef + sandbox-off fixes.
+#    openclaw.json with the SecretRef patch.
 bench_reapply_setup() {
   local container="${1:-${BENCH_CONTAINER:-}}"
   [[ -n "${container}" ]] || { echo "[bench_reapply_setup][FATAL] no container" >&2; return 64; }
@@ -157,7 +143,7 @@ bench_reapply_setup() {
   docker exec "${container}" bash -lc '
     set -e
     cd /home/node/.openclaw
-    find . -mindepth 1 ! -path "./openclaw.json" -delete 2>/dev/null || true
+    find . -mindepth 1 -delete 2>/dev/null || true
   '
   tar --exclude='.git' --exclude='.github' --exclude='.env' \
       --exclude='*.sqlite*' --exclude='qmd' --exclude='logs' \
@@ -165,86 +151,58 @@ bench_reapply_setup() {
       --exclude='devices' --exclude='identity' --exclude='feishu' \
       --exclude='extensions' --exclude='qqbot' --exclude='.openclaw' \
       --exclude='.dreams' --exclude='dreaming' --exclude='.bench-runtime' \
-      --exclude='bench-results' --exclude='openclaw.json' \
+      --exclude='bench-results' \
       -C "${ROOT}" -cf - . | \
     docker exec -i "${container}" tar -xf - -C /home/node/.openclaw
   echo "[bench_reapply_setup] creating agent session dirs"
   docker exec "${container}" bash -lc '
     set -e
-    for agent_id in main autoresearch paper-review idea-generate reviewer; do
+    for agent_id in main ingest curate extract critic design spec audit ideate judge; do
       mkdir -p "/home/node/.openclaw/agents/${agent_id}/sessions"
     done
   '
   echo "[bench_reapply_setup] chown /home/node/.openclaw -> 1000:1000"
   docker exec "${container}" chown -R 1000:1000 /home/node/.openclaw || true
-  echo "[bench_reapply_setup] patching openclaw.json (SecretRef + sandbox off)"
-  docker cp "${ROOT}/openclaw.json" "${container}:/tmp/bench-openclaw.json"
+  echo "[bench_reapply_setup] patching openclaw.json (SecretRef)"
   docker exec "${container}" python3 -c '
-import json, os, pathlib
+import json, pathlib
 p = pathlib.Path("/home/node/.openclaw/openclaw.json")
-runtime = json.loads(p.read_text(encoding="utf-8"))
-repo = json.loads(pathlib.Path("/tmp/bench-openclaw.json").read_text(encoding="utf-8"))
-data = repo
-if runtime.get("gateway"):
-    data["gateway"] = runtime["gateway"]
-prov = data.setdefault("models", {}).setdefault("providers", {}).setdefault("deepseek", {})
-if os.environ.get("DEEPSEEK_BASE_URL"):
-    prov["baseUrl"] = os.environ["DEEPSEEK_BASE_URL"]
-prov["api"] = "anthropic-messages"
-prov["apiKey"] = {"source": "env", "provider": "default", "id": "DEEPSEEK_API_KEY"}
-sandbox = data.setdefault("agents", {}).setdefault("defaults", {}).setdefault("sandbox", {})
-if sandbox.get("mode") and sandbox["mode"] != "off":
-    sandbox["mode"] = "off"
-    print("patched agents.defaults.sandbox.mode -> off")
-tmp = p.with_suffix(".json.tmp")
-tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-tmp.replace(p)
-print("patched models.providers.deepseek.apiKey -> SecretRef(DEEPSEEK_API_KEY)")
+data = json.loads(p.read_text(encoding="utf-8"))
+prov = data.setdefault("models", {}).setdefault("providers", {}).setdefault("minimax", {})
+prov["apiKey"] = {"source": "env", "provider": "default", "id": "MINIMAX_API_KEY"}
+# Docker image upgrade: container init.sh writes models.providers.default
+# with baseUrl from env vars. When it has no models, OpenClaw rejects it.
+# Remove it so the minimax provider is used directly.
+default_prov = data.get("models", {}).get("providers", {}).pop("default", None)
+if default_prov is not None:
+    print("removed models.providers.default overlay (not needed for bench)")
+# Sandbox mode requires Docker-in-Docker which is not available in CI.
+# Disable sandboxing for the embedded agent runs.
+agents = data.setdefault("agents", {})
+defaults = agents.setdefault("defaults", {})
+defaults["sandbox"] = {"mode": "off"}
+# YOLO mode: auto-approve all tool calls so CI never stalls on prompts.
+defaults["elevatedDefault"] = "full"
+tools = data.setdefault("tools", {})
+tools.setdefault("exec", {})["mode"] = "full"
+p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+print("patched models.providers.minimax.apiKey -> SecretRef(MINIMAX_API_KEY)")
+print("patched agents.defaults.sandbox.mode -> off")
+print("patched agents.defaults.elevatedDefault -> full")
+print("patched tools.exec.mode -> full (no-approval)")
 '
   docker exec "${container}" chown 1000:1000 /home/node/.openclaw/openclaw.json
-  echo "[bench_reapply_setup] patching agent model configs -> DeepSeek only"
-  docker exec "${container}" python3 -c '
-import json, os, pathlib
-
-root = pathlib.Path("/home/node/.openclaw")
-base_url = os.environ.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com/anthropic"
-provider = {
-    "baseUrl": base_url,
-    "api": "anthropic-messages",
-    "authHeader": True,
-    "apiKey": "DEEPSEEK_API_KEY",
-    "models": [
-        {
-            "id": "deepseek-chat",
-            "name": "DeepSeek Chat",
-            "reasoning": True,
-            "contextWindow": 204800,
-            "maxTokens": 131072,
-            "input": ["text", "image"],
-            "cost": {"input": 0.3, "output": 1.2, "cacheRead": 0.06, "cacheWrite": 0.375},
-        }
-    ],
-}
-for agent_id in ("main", "autoresearch", "paper-review", "idea-generate", "reviewer"):
-    agent_dir = root / "agents" / agent_id / "agent"
-    agent_dir.mkdir(parents=True, exist_ok=True)
-    path = agent_dir / "models.json"
-    path.write_text(json.dumps({"providers": {"deepseek": provider}}, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"patched {path}")
-'
-  docker exec "${container}" chown -R 1000:1000 /home/node/.openclaw/agents || true
 }
 log "docker cp repo into ${CONTAINER}:/home/node/.openclaw"
 bench_reapply_setup "${CONTAINER}"
 log "repo copied into container"
 
-# 5b. The SecretRef patch for models.providers.deepseek.apiKey and the
-#     sandbox-off patch live inside `bench_reapply_setup` (see section 5
-#     above) so that `bench_force_recreate` re-runs them after recreating
-#     the container. We deliberately do NOT restart the container after
-#     patching -- restarting was the root cause of 13+ CI failures because
-#     init.sh re-runs on restart and the container exits within seconds.
-log "SecretRef + sandbox off patches applied via bench_reapply_setup (no restart)"
+  # 5b. The SecretRef patch for models.providers.minimax.apiKey lives inside
+  #     `bench_reapply_setup` (see section 5 above) so that
+  #     `bench_force_recreate` re-runs it after recreating the container.
+  #     The pre-seeded openclaw.json (section 2a) prevents the gateway from
+  #     starting up invalid, so we don't need to restart.
+  log "SecretRef patch applied via bench_reapply_setup (no restart)"
 
 # 6. Wait for the openclaw container to start and the gateway to become
 #    ready. The image's healthcheck is informational only (we set
@@ -289,23 +247,21 @@ bench_wait_ready "${CONTAINER}"
 #    GitHub Actions steps. We can't `export` from a subshell back into the
 #    caller, so we both export (for any subshells in this step) and write
 #    a small env file the next workflow step can `source`.
-EXPORT_FILE="${ENV_DIR}/bench-runtime-env.sh"
 export BENCH_CONTAINER="${CONTAINER}"
 export BENCH_MOUNT="/home/node/.openclaw"
 export BENCH_OPENCLAW="openclaw"
 export BENCH_COMPOSE_PROJECT="${COMPOSE_PROJECT}"
-export BENCH_ENV_FILE="${EXPORT_FILE}"
-export BENCH_COMPOSE_ENV_FILE="${ENV_FILE}"
+export BENCH_ENV_FILE="${ENV_FILE}"
 export BENCH_DATA_DIR="${ENV_DIR}/openclaw-data"
 
 # Drop a sourceable env file for subsequent workflow steps.
+EXPORT_FILE="${ENV_DIR}/bench-runtime-env.sh"
 cat >"${EXPORT_FILE}" <<EOF
 # Auto-sourced by .github/workflows/benchmark.yml after env_setup.sh.
 export BENCH_CONTAINER='${CONTAINER}'
 export BENCH_MOUNT='/home/node/.openclaw'
 export BENCH_OPENCLAW='openclaw'
 export BENCH_COMPOSE_PROJECT='${COMPOSE_PROJECT}'
-export BENCH_ENV_FILE='${EXPORT_FILE}'
 export BENCH_COMPOSE_ENV_FILE='${ENV_FILE}'
 export BENCH_DATA_DIR='${ENV_DIR}/openclaw-data'
 
@@ -319,41 +275,6 @@ export BENCH_DATA_DIR='${ENV_DIR}/openclaw-data'
 # can immediately exec into the new container without racing the gateway
 # init.
 
-bench_seed_openclaw_config() {
-  local data_dir="\${BENCH_DATA_DIR:-}"
-  [[ -n "\${data_dir}" ]] || { echo "[bench_seed_openclaw_config][FATAL] BENCH_DATA_DIR not set" >&2; return 64; }
-  echo "[bench_seed_openclaw_config] seeding \${data_dir}/openclaw.json"
-  BENCH_ROOT="${ROOT}" BENCH_DATA_DIR="\${data_dir}" DEEPSEEK_BASE_URL="\${DEEPSEEK_BASE_URL:-https://api.deepseek.com}" python3 - <<'PY'
-import json, os, pathlib
-
-root = pathlib.Path(os.environ["BENCH_ROOT"])
-data_dir = pathlib.Path(os.environ["BENCH_DATA_DIR"])
-src = json.loads((root / "openclaw.json").read_text(encoding="utf-8"))
-src["gateway"] = {
-    "mode": "local",
-    "bind": "loopback",
-    "port": 18790,
-    "controlUi": {
-        "allowInsecureAuth": True,
-        "dangerouslyDisableDeviceAuth": False,
-    },
-    "auth": {
-        "mode": "token",
-        "token": "\${GATEWAY_TOKEN}",
-    },
-}
-providers = src.setdefault("models", {}).setdefault("providers", {})
-deepseek = providers.setdefault("deepseek", {})
-deepseek["baseUrl"] = os.environ.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com"
-deepseek["api"] = "anthropic-messages"
-deepseek["apiKey"] = {"source": "env", "provider": "default", "id": "DEEPSEEK_API_KEY"}
-sandbox = src.setdefault("agents", {}).setdefault("defaults", {}).setdefault("sandbox", {})
-sandbox["mode"] = "off"
-out = data_dir / "openclaw.json"
-out.write_text(json.dumps(src, ensure_ascii=False, indent=2), encoding="utf-8")
-PY
-}
-
 bench_reapply_setup() {
   local container="\${1:-\${BENCH_CONTAINER:-}}"
   [[ -n "\${container}" ]] || { echo "[bench_reapply_setup][FATAL] no container" >&2; return 64; }
@@ -362,7 +283,7 @@ bench_reapply_setup() {
   docker exec "\${container}" bash -lc '
     set -e
     cd /home/node/.openclaw
-    find . -mindepth 1 ! -path "./openclaw.json" -delete 2>/dev/null || true
+    find . -mindepth 1 -delete 2>/dev/null || true
   '
   tar --exclude='.git' --exclude='.github' --exclude='.env' \
       --exclude='*.sqlite*' --exclude='qmd' --exclude='logs' \
@@ -370,74 +291,44 @@ bench_reapply_setup() {
       --exclude='devices' --exclude='identity' --exclude='feishu' \
       --exclude='extensions' --exclude='qqbot' --exclude='.openclaw' \
       --exclude='.dreams' --exclude='dreaming' --exclude='.bench-runtime' \
-      --exclude='bench-results' --exclude='openclaw.json' \
+      --exclude='bench-results' \
       -C "\${root}" -cf - . | \
     docker exec -i "\${container}" tar -xf - -C /home/node/.openclaw
   echo "[bench_reapply_setup] creating agent session dirs"
   docker exec "\${container}" bash -lc '
     set -e
-    for agent_id in main autoresearch paper-review idea-generate reviewer; do
+    for agent_id in main ingest curate extract critic design spec audit ideate judge; do
       mkdir -p "/home/node/.openclaw/agents/\${agent_id}/sessions"
     done
   '
   echo "[bench_reapply_setup] chown /home/node/.openclaw -> 1000:1000"
   docker exec "\${container}" chown -R 1000:1000 /home/node/.openclaw || true
-  echo "[bench_reapply_setup] patching openclaw.json (SecretRef + sandbox off)"
-  docker cp "\${root}/openclaw.json" "\${container}:/tmp/bench-openclaw.json"
+  echo "[bench_reapply_setup] patching openclaw.json (SecretRef)"
   docker exec "\${container}" python3 -c '
-import json, os, pathlib
+import json, pathlib
 p = pathlib.Path("/home/node/.openclaw/openclaw.json")
-runtime = json.loads(p.read_text(encoding="utf-8"))
-repo = json.loads(pathlib.Path("/tmp/bench-openclaw.json").read_text(encoding="utf-8"))
-data = repo
-if runtime.get("gateway"):
-    data["gateway"] = runtime["gateway"]
-prov = data.setdefault("models", {}).setdefault("providers", {}).setdefault("deepseek", {})
-if os.environ.get("DEEPSEEK_BASE_URL"):
-    prov["baseUrl"] = os.environ["DEEPSEEK_BASE_URL"]
-prov["api"] = "anthropic-messages"
-prov["apiKey"] = {"source": "env", "provider": "default", "id": "DEEPSEEK_API_KEY"}
-sandbox = data.setdefault("agents", {}).setdefault("defaults", {}).setdefault("sandbox", {})
-if sandbox.get("mode") and sandbox["mode"] != "off":
-    sandbox["mode"] = "off"
-    print("patched agents.defaults.sandbox.mode -> off")
-tmp = p.with_suffix(".json.tmp")
-tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-tmp.replace(p)
-print("patched models.providers.deepseek.apiKey -> SecretRef(DEEPSEEK_API_KEY)")
+data = json.loads(p.read_text(encoding="utf-8"))
+prov = data.setdefault("models", {}).setdefault("providers", {}).setdefault("minimax", {})
+prov["apiKey"] = {"source": "env", "provider": "default", "id": "MINIMAX_API_KEY"}
+default_prov = data.get("models", {}).get("providers", {}).pop("default", None)
+if default_prov is not None:
+    print("removed models.providers.default overlay (not needed for bench)")
+# Sandbox mode requires Docker-in-Docker which is not available in CI.
+# Disable sandboxing for the embedded agent runs.
+agents = data.setdefault("agents", {})
+defaults = agents.setdefault("defaults", {})
+defaults["sandbox"] = {"mode": "off"}
+# YOLO mode: auto-approve all tool calls so CI never stalls on prompts.
+defaults["elevatedDefault"] = "full"
+tools = data.setdefault("tools", {})
+tools.setdefault("exec", {})["mode"] = "full"
+p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+print("patched models.providers.minimax.apiKey -> SecretRef(MINIMAX_API_KEY)")
+print("patched agents.defaults.sandbox.mode -> off")
+print("patched agents.defaults.elevatedDefault -> full")
+print("patched tools.exec.mode -> full (no-approval)")
 '
   docker exec "\${container}" chown 1000:1000 /home/node/.openclaw/openclaw.json
-  echo "[bench_reapply_setup] patching agent model configs -> DeepSeek only"
-  docker exec "\${container}" python3 -c '
-import json, os, pathlib
-
-root = pathlib.Path("/home/node/.openclaw")
-base_url = os.environ.get("DEEPSEEK_BASE_URL") or "https://api.deepseek.com/anthropic"
-provider = {
-    "baseUrl": base_url,
-    "api": "anthropic-messages",
-    "authHeader": True,
-    "apiKey": "DEEPSEEK_API_KEY",
-    "models": [
-        {
-            "id": "deepseek-chat",
-            "name": "DeepSeek Chat",
-            "reasoning": True,
-            "contextWindow": 204800,
-            "maxTokens": 131072,
-            "input": ["text", "image"],
-            "cost": {"input": 0.3, "output": 1.2, "cacheRead": 0.06, "cacheWrite": 0.375},
-        }
-    ],
-}
-for agent_id in ("main", "autoresearch", "paper-review", "idea-generate", "reviewer"):
-    agent_dir = root / "agents" / agent_id / "agent"
-    agent_dir.mkdir(parents=True, exist_ok=True)
-    path = agent_dir / "models.json"
-    path.write_text(json.dumps({"providers": {"deepseek": provider}}, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(f"patched {path}")
-'
-  docker exec "\${container}" chown -R 1000:1000 /home/node/.openclaw/agents || true
 }
 
 bench_wait_ready() {
@@ -477,18 +368,11 @@ bench_force_recreate() {
     return 64
   fi
   local compose_file="${ROOT}/docker/docker-compose.bench.yml"
+  echo "[bench_force_recreate] bringing up openclaw-bench --force-recreate (project=\${BENCH_COMPOSE_PROJECT})"
   set -a
   # shellcheck disable=SC1090
   . "\${BENCH_COMPOSE_ENV_FILE}"
   set +a
-  # Reset the host data dir to empty so the new container's init script
-  # sees the same clean state as the initial env_setup.sh run.
-  echo "[bench_force_recreate] clearing host data dir"
-  mkdir -p "\${BENCH_DATA_DIR}"
-  find "\${BENCH_DATA_DIR}" -mindepth 1 -delete 2>/dev/null || true
-  bench_seed_openclaw_config
-
-  echo "[bench_force_recreate] bringing up openclaw-bench --force-recreate (project=\${BENCH_COMPOSE_PROJECT})"
   docker compose --project-name "\${BENCH_COMPOSE_PROJECT}" \
       -f "\${compose_file}" --env-file "\${BENCH_COMPOSE_ENV_FILE}" \
       up -d --force-recreate openclaw-bench
@@ -499,8 +383,18 @@ bench_force_recreate() {
   if [ -n "\${new_container}" ]; then
     export BENCH_CONTAINER="\${new_container}"
   fi
-  # The recreated container is bare: no repo, no SecretRef patch, no
-  # sandbox-off patch. Re-apply the same setup that env_setup.sh ran for
+  # Defensive: docker compose up -d --force-recreate occasionally leaves
+  # the container in created / exited state when the host docker daemon is
+  # under load. bench_reapply_setup would then fail with "container is not
+  # running". Explicitly start it.
+  local _state
+  _state="\$(docker inspect --format '{{.State.Running}}' "\${BENCH_CONTAINER}" 2>/dev/null || echo "false")"
+  if [ "\${_state}" != "true" ]; then
+    echo "[bench_force_recreate] container \${BENCH_CONTAINER} not running (state=\${_state}); starting"
+    docker start "\${BENCH_CONTAINER}" >/dev/null 2>&1 || true
+  fi
+  # The recreated container is bare: no repo, no SecretRef patch.
+  # Re-apply the same setup that env_setup.sh ran for
   # the initial container, so subsequent exec calls see a fully-prepared
   # environment.
   bench_reapply_setup "\${BENCH_CONTAINER}"

@@ -1,0 +1,2004 @@
+0
+2
+0
+2
+
+r
+a
+
+M
+9
+2
+
+]
+
+V
+C
+.
+s
+c
+[
+
+1
+v
+2
+6
+9
+2
+1
+.
+3
+0
+0
+2
+:
+v
+i
+X
+r
+a
+
+GPS-Net: Graph Property Sensing Network for Scene Graph Generation
+
+Xin Lin1 Changxing Ding1
+
+Jinquan Zeng1 Dacheng Tao2
+
+1 School of Electronic and Information Engineering, South China University of Technology
+2 UBTECH Sydney AI Centre, School of Computer Science, Faculty of Engineering,
+The University of Sydney, Darlington, NSW 2008, Australia
+{ eelinxin,eetakchatsau }@mail.scut.edu.cn chxding@scut.edu.cn dacheng.tao@sydney.edu.au
+
+Figure 1: (a) The ground-truth scene graph for one image. (b) The direction of the edge speciﬁes the subject and object,
+and also affects the relationship type and node-speciﬁc context. (c) The priority of nodes varies, according to the number of
+triplets included in the graph. (d) The long-tailed distribution of relationships causes error for low-frequency relationships,
+e.g., the failure in recognizing sitting on.
+
+Abstract
+
+Scene graph generation (SGG) aims to detect objects in
+an image along with their pairwise relationships. There are
+three key properties of scene graph that have been under-
+explored in recent works: namely, the edge direction in-
+formation, the difference in priority between nodes, and
+the long-tailed distribution of relationships. Accordingly,
+in this paper, we propose a Graph Property Sensing Net-
+work (GPS-Net) that fully explores these three properties
+for SGG. First, we propose a novel message passing mod-
+ule that augments the node feature with node-speciﬁc con-
+textual information and encodes the edge direction infor-
+mation via a tri-linear model. Second, we introduce a node
+priority sensitive loss to reﬂect the difference in priority be-
+tween nodes during training. This is achieved by design-
+ing a mapping function that adjusts the focusing parame-
+ter in the focal loss. Third, since the frequency of rela-
+tionships is affected by the long-tailed distribution prob-
+
+lem, we mitigate this issue by ﬁrst softening the distribu-
+tion and then enabling it to be adjusted for each subject-
+object pair according to their visual appearance. System-
+atic experiments demonstrate the effectiveness of the pro-
+posed techniques. Moreover, GPS-Net achieves state-of-
+the-art performance on three popular databases: VG, OI,
+and VRD by signiﬁcant gains under various settings and
+metrics. The code and models are available at https:
+//github.com/taksau/GPS-Net.
+
+1. Introduction
+
+Scene Graph Generation (SGG) provides an efﬁcient
+way for scene understanding and valuable assistance for
+various computer vision tasks, including image captioning
+[1], visual question answering [2] and 3D scene synthesis
+[3]. This is mainly because the scene graph [4] not only
+records the categories and locations of objects in the scene
+
+(b) Influence of the direction information of the edge(c) Graph nodes with different priorities(d) Misclassified relationship with low frequencypawdoglegmanshirttreeearhatpawdoglegmanshirttreeearhathaswearingin front ofofofonsitting onpawdoglegmanshirttreeearhathaswearingin front ofofofonsitting onpawdoglegmanshirttreeearhatpawdoglegmanshirttreeearhatofonbehindofofonsitting onofonbehindofofonsitting onpawdoglegmanshirttreeearhatofonbehindofofonsitting onpawdoglegmanshirttreeearhatpawdoglegmanshirttreeearhathaswearingin front ofhashaswearingsitting onhaswearingin front ofhashaswearingsitting onpawdoglegmanshirttreeearhathaswearingin front ofhashaswearingsitting onpawdoglegmanshirttreeearhatpawdoglegmanshirttreeearhathaswearingin front ofofofonsitting onhaswearingin front ofofofonsitting onhaspawdoglegmanshirttreeearhathaswearingin front ofofofonsitting onhas(a) Ground-truth scene graphSGGpawdoglegmanshirttreeearhatpawdoglegmanshirttreeearhathaswearingin front ofofofonsitting onhaswearingin front ofofofonsitting onpawdoglegmanshirttreeearhathaswearingin front ofofofonsitting on 
+ 
+ 
+ 
+ 
+ 
+but also represents pairwise visual relationships of objects.
+As illustrated in Figure 1(a), a scene graph is com-
+posed of multiple triplets in the form <subject-relationship-
+object>. Speciﬁcally, an object is denoted as a node with
+its category label, and a relationship is characterized by a
+directed edge between two nodes with a speciﬁc category
+of predicate. The direction of the edge speciﬁes the subject
+and object in a triplet. Due to the complexity in relationship
+characterization and the imbalanced nature of the training
+data, SGG has emerged as a challenging task in computer
+vision.
+
+Multiple key properties of the scene graph have been
+under-explored in the existing research, such as [5, 6, 7].
+The ﬁrst of these is edge direction. Indeed, edge direction
+not only indicates the subject and object in a triplet, but
+also affects the class of the relationship. Besides, it inﬂu-
+ences the context information for the corresponding node,
+as shown in recent works [8, 9]. An example is described in
+Figure 1(b), if the direction ﬂow between man and the other
+objects is reversed, the focus of the context will change and
+thus affects the context information for all the related nodes.
+This is because that the importance of nodes varies accord-
+ing to the number of triplets they are included in the graph.
+As illustrated in Figure 1(c), leg, dog and man are involved
+in two, three, and four triplets in the graph, respectively.
+Hence, considering the contribution of each node to this
+scene graph, the priority in object detection should follow
+the order: man > dog > leg. However, existing works
+usually treat all nodes equally in a scene graph.
+
+Here, we propose a novel direction-aware message pass-
+ing (DMP) module that makes use of the edge direction
+information. DMP enhances the feature of each node by
+providing node-speciﬁc contextual information with the fol-
+lowing strategies. First, instead of using the popular ﬁrst-
+order linear model [10, 11], DMP adopts a tri-linear model
+based on Tucker decomposition [12] to produce an attention
+map that guides message passing. In the tri-linear model,
+the edge direction affects the attention scores produced.
+Second, we augment the attention map with its transpose to
+account for the uncertainty of the edge direction in the mes-
+sage passing step. Third, a transformer layer is employed to
+reﬁne the obtained contextual information.
+
+Afterward, we devise a node priority-sensitive loss
+(NPS-loss) to encode the difference in priority between
+nodes in a scene graph. Speciﬁcally, we maneuver the loss
+contribution of each node by adjusting the focusing param-
+eter of the focal loss [13]. This adjustment is based on the
+frequency of each node included in the triplets of the graph.
+Consequently, the network can pay more attention to high
+priority nodes during training. Comparing with [11] (ex-
+ploiting a non-differentiable local-sensitive loss function to
+represent the node priority), the proposed NPS-loss is dif-
+ferentiable and convex, and so it can be easily optimized by
+
+gradient descent based methods and deployed to other SGG
+models.
+
+Finally, the frequency distribution of relationships has
+proven to be useful as prior knowledge in relationship pre-
+diction [7]. However, since this distribution is long-tailed,
+its effectiveness as the prior is largely degraded. For ex-
+ample, as shown in Figure 1(d), one SGG model tends to
+misclassify sitting on as has since the occurrence rate of
+the latter is relatively high. Accordingly, we propose two
+strategies to handle this problem. First, we utilize a log-
+softmax function to soften the frequency distribution of re-
+lationships. Second, we propose an attention model to adap-
+tively modify the frequency distribution for each subject-
+object pair according to their visual appearance.
+
+In summary, the innovation of the proposed GPS-Net is
+three-fold: (1) DMP for message passing, which enhances
+the node feature with node-speciﬁc contextual information;
+(2) NPS-loss to encode the difference in priority between
+different nodes; and (3) a novel method for handling the
+long-tailed distribution of relationships. The efﬁcacy of the
+proposed GPS-Net is systematically evaluated on three pop-
+ular SGG databases: Visual Genome (VG) [14], OpenIm-
+ages (OI) [15] and Visual Relationship Detection (VRD)
+[16]. Experimental results demonstrate that the proposed
+GPS-Net consistently achieves top-level performance.
+
+2. Related Work
+
+Visual Context Modeling: Recent approaches for vi-
+sual context modeling can be divided into two categories,
+which model the global and object-speciﬁc context, respec-
+tively. To model the global context, SENet [17] and PSANet
+[18] adopt rescaling to different channels in feature maps
+for feature fusion. In addition, Neural Motif [7] represents
+the global context via Long Short-term Memory Networks.
+To model the object-speciﬁc context, NLNet [19] adopts
+self-attention mechanism to model the pixel-level pairwise
+relationships. CCNet [20] accelerates NLNet via stacking
+two criss-cross blocks. However, as pointed out in [21],
+these methods [22, 23, 24] may fail to learn object-speciﬁc
+context due to the utilization of the ﬁrst-order linear model.
+To address this issue, we design a direction-aware message
+passing module to generate node-speciﬁc context via a tri-
+linear model.
+
+Scene Graph Generation. Existing SGG approaches
+can be roughly divided into two categories: namely, one-
+stage methods and two-stage methods. Generally speak-
+ing, most one-stage methods focus on object detection and
+relationship representation [1, 5, 10, 16, 22, 30], but al-
+most ignore the intrinsic properties of scene graphs, e.g.,
+the edge direction and node priority. To further capture the
+attributes of scene graph, two-stage methods utilize an ex-
+tra training stage to reﬁne the results produced by the ﬁrst
+stage training. For example, [24] utilizes the permutation-
+
+Figure 2: The framework of GPS-Net. GPS-Net adopts Faster R-CNN to obtain the location and visual feature of object
+proposals. It includes three new modules for SGG: (1) a novel message passing module named DMP that enhances the node
+feature with node-speciﬁc contextual information; (2) a new loss function named NPS-loss that reﬂects the difference in pri-
+ority between different nodes; (3) an adaptive reasoning module (ARM) to handle the long-tailed distribution of relationships.
+
+invariant representations of scene graphs to reﬁne the results
+of [7]. Besides, [2] utilizes dynamic tree structure to char-
+acterize the acyclic property of scene graph. Meanwhile,
+[11] adopts a graph-level metric to learn the node priority of
+scene graph. However, the adopted loss functions in [2, 11]
+are non-differentiable and therefore hard to optimize. The
+proposed approach is a one-stage method but has the fol-
+lowing advantages comparing with existing works. First, it
+explores the properties of the scene graph more appropri-
+ately. Second, it is easy to optimize and deploy to existing
+models.
+
+3. Approach
+
+Figure 2 illustrates the proposed GPS-Net. We employ
+Faster R-CNN [25] to obtain object proposals for each im-
+age. We adopt exactly the same way as [7] to obtain the
+feature for each proposal. There are O object categories
+(including background) and R relationship categories (in-
+cluding non-relationship). The visual feature for the i-th
+proposal is formed by concatenating the appearance fea-
+R2048, object classiﬁcation conﬁdence scores
+tures vi
+R4. Then, the concate-
+si
+nated feature is projected into a 512-dimensional subspace
+and denoted as xi. Besides, we further extract features from
+the union box of one pair of proposal i and j, denoted as
+R2048. To better capture properties of scene graph,
+uij
+we make contributions from three perspectives. First, a
+direction-aware message passing (DMP) module is intro-
+duced in Section 3.1. Second, a node priority sensitive loss
+(NPS-loss) is introduced in Section 3.2. Third, an adaptive
+
+RO, and the spatial feature bi
+
+∈
+
+∈
+
+∈
+
+∈
+
+reasoning module (ARM) is designed in Section 3.3.
+
+3.1. Direction-aware Message Passing
+
+N
+
+The message passing (MP) module takes a node features
+xi as input. Its output for the i-th node is denoted as zi, and
+the neighborhood of this node is represented as
+i. For all
+MP modules in this section,
+i includes all nodes but the
+N
+i-th node itself. Following the deﬁnition in graph attention
+network [8], given two nodes i and j, we represent the di-
+rection of i
+j as backward for the
+i-th node. In the following, we ﬁrst review the design of the
+one representative MP module, which is denoted as Global
+Context MP (GCMP) in this paper. GCMP adopts the soft-
+max function for normalization. Its structure is illustrated
+in Figure 3(a) and can be formally expressed as
+
+j as forward and i
+
+→
+
+←
+
+zi = xi+Wzσ
+
+(cid:32)
+
+(cid:88)
+
+j∈Ni
+
+exp(wT [xi, xj])
+
+m∈Ni
+
+exp(wT [xi, xm])
+
+(cid:80)
+
+(cid:33)
+
+Wvxj
+
+,
+
+(1)
+
+∈
+
+exp(wT [xi,xj ])
+
+where σ represents the ReLU function. Wv and Wz
+∈
+R512×512 are linear transformation matrices. w
+R1024 is a
+projection vector, and [, ] represents the concatenation oper-
+ation. For simplicity, we deﬁne cij =
+exp(wT [xi,xm])
+as the pairwise contextual coefﬁcient between nodes i and
+j in the forward direction. However, it has been revealed
+that utilizing the concatenation operation in Equation (1)
+may not obtain node-speciﬁc contextual information [21].
+In fact, it is more likely that xi in Equation (1) is ignored by
+w. Therefore, GCMP actually generates the same contex-
+tual information for all nodes.
+
+m∈Ni
+
+(cid:80)
+
+2779361463991360993490hasofwearingwatchingObject Detection ModuleBiasAdaptionFrequencySofteningNode Priority Sensitive Loss③paw④shirt⑤ear①man②catwatchinghaswearingofDirection-aware Context ModelingGround-truth Scene GraphGenerated Scene Graphpawshirtearmancatwatchinghaswearingofhasonofmanearshirtcatpawmanearshirtcatpaw①②③④⑤①②③④⑤The Properties of Scene Graph      Edge Direction           Node Priority Long-tailed DistributionGPS-NetInput ImageObject Detection ResultTransformer Layer(a)DMP(c)ARM①man②cat③paw④shirt⑤ear①man②cat③paw④shirt⑤ear(b)NPS-LossFigure 3: Architecture of the three MP modules in Section 3.1.
+and Kronecker product, respectively.
+
+,
+
+(cid:12)
+
+,
+
+⊕
+
+⊗
+
+, represent Hadamard product, element-wise addition,
+
+Inspired by this observation, Equation (1) can be simpli-
+
+ﬁed as follows [21]:
+
+zi = xi + Wzσ
+
+(cid:32)
+
+(cid:88)
+
+j∈Ni
+
+(cid:80)
+
+m∈Ni
+
+exp(wT
+
+e xj)
+exp(wT
+
+e xm)
+
+(cid:33)
+
+Wvxj
+
+,
+
+∈
+
+(2)
+R512 is a projection vector. As depicted in Fig-
+where we
+ure 3(b), we denote this model as Simpliﬁed Global Context
+MP (S-GCMP) module. The above two MP modules may
+not be optimal for SGG because they ignore the edge direc-
+tion information and cannot provide node-speciﬁc contex-
+tual information. Accordingly, we propose the DMP mod-
+ule to solve the above problems. As illustrated in Figure
+3(c), DMP consists of two main components: direction-
+aware context modeling and one transformer layer.
+
+Direction-aware Context Modeling: This component
+aims to learn node-speciﬁc context and guide message pass-
+Inspired by the
+ing via the edge direction information.
+multi-modal low rank bilinear pooling method [34], we for-
+mulate the contextual coefﬁcient eij between two nodes i
+and j as follows:
+
+eij = wT
+
+e (Wsxi
+
+Woxj
+
+(cid:12)
+
+(cid:12)
+
+Wuuij),
+
+(3)
+
+(cid:12)
+
+represents Hadamard product. Ws, Wo, and Wu
+
+where
+∈
+R512×512 are projection matrices for fusion. Equation (3)
+can be considered as a tri-linear model based on Tucker de-
+composition [12].
+
+Compared with the ﬁrst two MP modules, Equation (3)
+has four advantages. First, it employs union box features
+to expand the receptive ﬁeld in context modeling. Second,
+the tri-linear model is a more powerful way to model high-
+order interactions between three types of features. Third,
+
+since features for the two nodes and the union box are cou-
+pled together by Hadamard product in Equation (3), they
+jointly affect context modeling. In this way, we obtain node-
+speciﬁc contextual information. Fourth, Equation (3) speci-
+ﬁes the position of subject and object; therefore, it considers
+the edge direction information of the edge.
+
+However, the direction of the edge is unclear in the MP
+step of SGG, since the relationship between two nodes is
+still unknown. Therefore, we consider the contextual co-
+efﬁcient for both the forward and backward directions by
+stacking them as a two-element-vector [αijαji]T , where αij
+denotes the normalized contextual coefﬁcient. Finally, the
+output of the ﬁrst component of DMP for the i-th node can
+be denoted as
+
+(cid:88)
+
+j∈Ni
+
+(cid:21)
+
+(cid:20) αij
+αji
+
+⊗
+
+Wt3xj,
+
+(4)
+
+where
+learnable projection matrix.
+
+denotes Kronecker product. Wt3
+
+⊗
+
+R256×512 is a
+
+∈
+
+Transformer Layer: The contextual information ob-
+tained above may contain redundant information. Inspired
+by [21], we employ a transformer layer to reﬁne the ob-
+tained contextual information. Speciﬁcally, it is consisted of
+two fully-connected layers with ReLU activation and layer
+normalization (LN) [33]. Finally, residual connection is ap-
+plied to fuse the original feature and the contextual infor-
+mation. Our whole DMP module can be expressed as
+
+(cid:18)
+
+(cid:18)
+
+zi = xi + Wt1σ
+
+LN
+
+Wt2
+
+(cid:88)
+
+j∈Ni
+
+(cid:21)
+
+(cid:20) αij
+αji
+
+⊗
+
+(cid:19)(cid:19)
+
+Wt3xj
+
+,
+
+where Wt1
+∈
+transformation matrices.
+
+R512×128 and Wt2
+
+∈
+
+(5)
+R128×512 denote linear
+
+(a) GCMPDirection-aware Context Modeling(b) S-GCMPContext Modeling(c) DMPContext Modeling∙NormStackLN, ReLU +Transformer Layer𝑾(cid:3047)(cid:2869)𝑾(cid:3047)(cid:2870)𝒘(cid:3032)𝑾(cid:3048)𝑾(cid:3046)𝑾(cid:3042)𝑾(cid:3047)(cid:2871)ReLU𝒙(cid:3036)𝒖(cid:3036)(cid:3037)𝒙(cid:3037)∙+Transformer LayerReLU𝑾(cid:3053)𝑾(cid:3049)ConcatNorm𝒘𝒙(cid:3037)𝒙(cid:3036)∙+Transformer Layer𝑾(cid:3053)Norm𝒘(cid:3032)𝑾(cid:3049)ReLU𝒙(cid:3037)𝒙(cid:3036)ConcatConcatenationNormalizationNormLNLayer Normalizationcurve for the mapping function changes quickly for nodes
+with low priority, and slowly for nodes of high priority.
+Moreover, a larger µ leads to more nodes to be highlighted
+during training. Finally, we obtain the NPS-loss that guides
+the training process according to node priority:
+
+nps(pi) =
+
+(1
+
+pi)γ(θi) log(pi),
+
+(8)
+
+L
+
+−
+where pi denotes the object classiﬁcation score on the
+ground-truth object class for the i-th node.
+
+−
+
+Figure 4: Mapping function γ(θi) with different controlling
+factors µ.
+
+3.2. Node Priority Sensitive Loss
+
+Existing works for SGG tend to utilize cross-entropy loss
+as objective function for object classiﬁcation, which implic-
+itly regards the priority of all nodes is equal for the scene
+graph. However, their priority varies according to the num-
+ber of triplets they are involved. Recently, a local-sensitive
+loss has been proposed to address this problem in [11]. As
+the loss is non-differentiable, the authors in [11] adopt a
+two-stage training strategy, where the second stage is real-
+ized by a complicated policy gradient method [46].
+
+To handle this problem, we propose a novel NPS-loss
+that not only captures the node priority in scene graph but
+also has the beneﬁt of differentiable and convex formula-
+tion. NPS-loss is inspired by focal loss that reduces weights
+of well-classiﬁed objects using a focusing parameter, which
+is denoted as γ in this paper. Compared with focal loss, NP-
+loss has the following key differences: (1) it is mainly used
+to solve the node-priority problem in SGG. In comparison,
+focal loss is designed to solve the class imbalance problem
+in object detection; (2) γ is ﬁxed in [13]. In NPS-loss, it
+depends on the node priority. Speciﬁcally, we ﬁrst calculate
+the priority θi for the i-th node according to its contribution
+to the scene graph:
+
+,
+
+(cid:107)
+
+(cid:107)
+
+(cid:107)
+
+T
+
+(6)
+
+θi =
+
+ti
+T
+(cid:107)
+where ti denotes the number of triplets that include the i-th
+node and
+is the total number of triplets in one graph.
+Given θi, one intuitive way to obtain the focusing param-
+eter γ is a linear transformation, e.g., γ(θi) =
+2θi + 2.
+However, this transformation exaggerates the difference be-
+tween nodes of high-priority and middle-level priority, and
+narrows the difference between nodes of middle-level pri-
+ority and low-priority. To solve this problem, we design a
+nonlinear mapping function that transforms θi to γ:
+
+−
+
+γ(θi) = min (2,
+
+(1
+
+−
+
+−
+
+θi)µ log(θi)) ,
+
+(7)
+
+where µ denotes a controlling factor, which controls the in-
+ﬂuence of θi to the value of γ. As depicted in Figure 4,
+
+3.3. Adaptive Reasoning Module
+
+After obtaining the reﬁned node features by DMP and
+the object classiﬁcation scores by NPS-loss, we further pro-
+pose an adaptive reasoning module (ARM) for relationship
+classiﬁcation. Speciﬁcally, ARM provides prior for classi-
+ﬁcation by two steps: frequency softening and bias adapta-
+tion for each triplet. In what follows, we introduce the two
+steps in detail.
+
+Frequency Softening: Inspired by the frequency base-
+line introduced in [7], we employ the frequency of rela-
+tionships as prior to promote the performance of relation-
+ship classiﬁcation. However, the original method in [7] suf-
+fers from the long-tailed distribution problem of relation-
+ships. Therefore, it may fail to recognize relationships of
+low frequency. To handle this problem, we ﬁrst adopt a
+log-softmax function to soften the original frequency distri-
+bution of relationships as follows:
+
+˜pi→j = log softmax (cid:0)pi→j(cid:1) ,
+RR denotes the original frequency distribu-
+where pi→j
+tion vector between the i-th and the j-th nodes. The same
+as [7], this vector is determined by the object class of the
+two nodes. ˜pi→j is the normalized vector of pi→j.
+
+(9)
+
+∈
+
+Bias Adaptation: To enable the frequency prior ad-
+justable for each node pair, we further propose an adpa-
+tive attention mechanism to modify the prior according to
+the visual appearance of the node pair. Speciﬁcally, a sig-
+moid function is applied to obtain attention on the frequency
+RR×2048 is
+prior: d = sigmoid (Wpuij), where Wp
+transformation matrix. Then, the classiﬁcation score vec-
+tor of relationships can be obtained as follows:
+
+∈
+
+pij = softmax (cid:0)Wr(zi
+
+zj
+
+uij) + d
+
+˜pi→j(cid:1) ,
+
+(10)
+
+∗
+
+(cid:12)
+
+∗
+RR×1024 denotes the classiﬁer, and d
+
+∈
+represents a fusion function deﬁned in [47]: x
+
+where Wr
+the bias.
+∗
+y = ReLU (Wxx + Wyy)
+Wyy),
+(Wxx
+where Wx and Wy project x, y to 1024-dimensional space,
+respectively.
+
+˜pi→j is
+
+(Wxx
+
+Wyy)
+
+−
+
+−
+
+(cid:12)
+
+−
+
+(cid:12)
+
+∗
+
+Relationship Prediction: During testing, the category
+of relationship between i-th and j-th nodes is predicted by:
+
+rij = arg maxr∈R(pij(r)),
+
+(11)
+
+where
+
+R
+
+represents the set of relationship categories.
+
+00.20.40.60.81object priority θi00.40.81.21.62high occurrenceµ=2µ=3µ=4µ=5γ(θi)=min(2,−(1−θi)µlog(θi))focusing parameter γ(θi)Model
+GPI(cid:5) [24]
+
+Two-Stage VCTREE-HL(cid:5) [2]
+
+CMAT(cid:5) [11]
+IMP(cid:5) [5]
+FREQ(cid:5)[7]
+MOTIFS(cid:5) [7]
+
+One-Stage Graph-RCNN [22]
+
+KERN(cid:5) [23]
+VCTREE-SL(cid:5) [2]
+CMAT-XE(cid:5) [11]
+RelDN‡ [6]
+GPS-Net(cid:5)
+GPS-Net‡
+
+SGDET
+
+SGCLS
+
+PREDCLS
+
+R@20 R@50 R@100 R@20 R@50 R@100 R@20 R@50 R@100 Mean
+
+-
+22.0
+22.1
+14.6
+20.1
+21.4
+-
+-
+21.7
+-
+21.1
+22.6
+22.3
+
+-
+27.9
+27.9
+20.7
+26.2
+27.2
+11.4
+27.1
+27.7
+-
+28.3
+28.4
+28.9
+
+-
+31.3
+31.2
+24.5
+30.1
+30.3
+13.7
+29.8
+31.1
+-
+32.7
+31.7
+33.2
+
+-
+35.2
+35.9
+31.7
+29.3
+32.9
+-
+-
+35.0
+34.0
+36.1
+36.1
+41.8
+
+36.5
+38.1
+39.0
+34.6
+32.3
+35.8
+29.6
+36.7
+37.9
+36.9
+36.8
+39.2
+42.3
+
+38.8
+38.8
+39.8
+35.4
+32.9
+36.5
+31.6
+37.4
+38.6
+37.6
+36.8
+40.1
+42.3
+
+-
+60.1
+60.2
+52.7
+53.6
+58.5
+-
+-
+59.8
+-
+66.9
+60.7
+67.6
+
+65.1
+66.4
+66.4
+59.3
+60.6
+65.2
+54.2
+65.8
+66.2
+-
+68.4
+66.9
+69.7
+
+66.9
+68.1
+68.1
+61.3
+62.2
+67.1
+59.1
+67.6
+67.9
+-
+68.4
+68.8
+69.7
+
+-
+45.1
+45.4
+39.3
+40.7
+43.7
+33.2
+44.1
+44.9
+-
+45.2
+45.9
+47.7
+
+Table 1: Comparisons with state-of-the-arts on VG. Since some works do not evaluate on R@20, we compute the mean on
+all tasks over R@50 and R@100. (cid:5) and ‡ denote the methods using the same Faster-RCNN detector and evaluation metric as
+[7] and [6], respectively.
+
+SGDET
+PREDCLS
+SGCLS
+mR@100 mR@100 mR@100
+6.0
+8.5
+8.2
+10.0
+10.8
+12.6
+
+Model
+IMP(cid:5) [5]
+FREQ(cid:5) [7]
+MOTIFS(cid:5) [7]
+KERN(cid:5) [23]
+VCTREE-HL(cid:5) [2]
+GPS-Net(cid:5)
+Table 2: Comparison on the mR@100 metric between vari-
+ous methods across all the 50 relationship categories.
+
+10.5
+16.0
+15.3
+19.2
+19.4
+22.8
+
+4.8
+7.1
+6.6
+7.3
+8.0
+9.8
+
+4. Experiments
+
+We present experimental results on three datasets: Vi-
+sual Genome (VG) [14], OpenImages (OI) [15], and Visual
+Relationship Detection (VRD) [16]. We ﬁrst report evalua-
+tion settings, followed by comparisons with state-of-the-art
+methods and the ablation studies. Besides, qualitative com-
+parisons between GPS-Net and other approaches are pro-
+vided in the supplementary ﬁle.
+
+4.1. Evaluation Settings
+
+Visual Genome: We use the same data and evalua-
+tion metrics that have been widely adopted in recent works
+[22, 10, 1, 24, 30, 11]. Speciﬁcally, the most frequent 150
+object categories and 50 relationship categories are utilized
+for evaluation. After preprocessing, the scene graph for
+each image consists of 11.6 objects and 6.2 relationships
+on average. The data is divided into one training set and
+one testing set. The training set includes 70% images, with
+5K images as a validation subset. The testing set is com-
+posed of the remaining 30% images.
+In the interests of
+fair comparisons, we also adopt Faster R-CNN [25] with
+VGG-16 backbone to obtain the location and features of ob-
+
+Figure 5: The R@100 improvement in PREDCLS of GPS-
+Net compared with the VCTREE [2]. The Top-35 cate-
+gories of relationship are selected according to their occur-
+rence frequency.
+
+ject proposals. Moreover, since SGG performance highly
+depends on the pre-trained object detector, we utilize the
+same set of hyper-parameters as [7] and [6] respectively.
+We follow three conventional protocols for evaluation: (1)
+Scene Graph Detection (SGDET): given an image, detect
+object bounding boxes and their categories, and predict their
+pair-wise relationships; (2) Scene Graph Classiﬁcation (SG-
+CLS): given ground-truth object bounding boxes, predict
+the object categories and their pair-wise relationships; (3)
+Predicate Classiﬁcation (PREDCLS): given the object cate-
+gories and their bounding boxes, predict their pair-wise re-
+lationships only. All algorithms are evaluated by Recall@K
+metrics, where K=20, 50, and 100, respectively. Consid-
+ering that the distribution of relationships is highly imbal-
+anced in VG, we further utilize mean recall@K (mR@K) to
+evaluate the performance of each relationship [2, 23].
+
+OpenImages: The training and testing sets contain
+53,953 images and 3,234 images respectively. We utilize
+Faster R-CNN associated with the pre-trained ResNeXt-
+101-FPN [6] as the backbone. We also follow the same data
+
++2.61+1.94 +1.74+0.89+1.76-1.60+3.75-0.79+3.82+3.00+2.97+0.00+4.37 +3.87+2.79+3.91+2.75+0.63+19.72+7.35+3.79+7.17+0.56+12.31+4.91+4.19+8.68+0.00+16.36+9.91+5.29+5.86+3.13+4.31+20.51-10-5051015202530onhaswearingofinnearbehindwithholdingabovesitting onwearsunderridingin front ofstanding onatattached tocarryingwalking onoverforlooking atwatchinghanging fromparked onlaying onbelonging toeatingandusingcoveringbetweenalongcovered inR@100 improvement (%)Model
+RelDN, L0[6] 74.67
+74.94
+RelDN[6]
+77.27
+GPS-Net
+
+R@50 wmAPrel wmAPphr scorewtd
+
+34.63
+35.54
+38.78
+
+37.89
+38.52
+40.15
+
+43.94
+44.61
+47.03
+
+APrel per class
+
+at
+
+on
+
+32.40 36.51 41.84 36.04
+32.90 37.00 43.09 41.04
+35.10 38.90 51.47 45.66
+
+holds plays interacts with wears hits inside of under
+5.70 55.40 44.17 25.00
+7.83 51.04 44.72 50.00
+32.35 71.71 47.21 57.28
+
+40.43
+44.16
+44.58
+
+Table 3: Comparisons with state-of-the-arts on OI. We adopt the same evaluation metrics as [6]
+
+Pre.
+
+Rel.
+
+Phr.
+
+-
+-
+
+R@50 R@50 R@100 R@50 R@100
+Model
+22.4
+44.8 19.4
+VTransE [37]
+20.0
+17.3
+ViP-CNN [39]
+20.8
+18.2
+VRL [40]
+21.3
+55.2 19.2
+KL distilation [43]
+MF-URLN [44]
+26.8
+58.2 23.9
+Zoom-Net∗[42]
+21.4
+50.7 18.9
+CAI + SCA-M∗[42]
+22.4
+56.0 19.5
+GPS-Net∗ (ImageNet) 58.7 21.5
+24.3
+RelDN† [6]
+28.6
+25.3
+GPS-Net† (COCO)
+31.7
+63.4 27.8
+Table 4: Comparisons with state-of-the-arts on VRD (
+de-
+notes unavailable). Pre., Phr., and Rel. represent predica-
+tion detection, phrase detection, and relation detection, re-
+spectively. † and ∗ denote using the same object detector.
+
+14.1
+22.8
+21.4
+23.1
+31.5
+24.8
+25.2
+28.9
+31.3
+33.8
+
+15.2
+27.9
+22.6
+24.0
+36.1
+28.1
+28.9
+34.0
+36.4
+39.2
+
+−
+
+-
+
+processing and evaluation metrics as in [6]. More specif-
+ically, the results are evaluated by calculating Recall@50
+(R@50), weighted mean AP of relationships (wmAPrel),
+and weighted mean AP of phrase (wmAPphr). The ﬁ-
+nal score is given by scorewtd = 0.2
+×
+wmAPphr. Note that the wmAPrel eval-
+wmAPrel + 0.4
+uates the AP of the predicted triplet where both the subject
+and object boxes have an IoU of at least 0.5 with ground
+truth. The wmAPphr is similar, but utilized for the union
+area of the subject and object boxes.
+
+R@50 + 0.4
+
+×
+
+×
+
+Visual Relationship Detection: We apply the same ob-
+ject detectors as in [6]. More speciﬁcally, two VGG16-
+based backbones are provided, which were trained on Im-
+gaeNet and COCO, respectively. The evaluation metric is
+the same as in [16], which reports R@50 and R@100 for
+relationship, predicate, and phrase detection.
+
+4.2. Implementation Details
+
+To ensure compatibility with the architectures of previ-
+ous state-of-the-art methods, we utilize ResNeXt-101-FPN
+as our OpenImages backbone on OI and VGG-16 on VG
+and VRD. During training, we freeze the layers before the
+ROIAlign layer and optimize the model jointly considering
+the object and relationship classiﬁcation losses. Our model
+is optimized by SGD with momentum, with the initial learn-
+ing rate and batch size set to 10−3 and 6 respectively. For
+the SGDET task, we follow [7] that we only predict the re-
+lationship between proposal pairs with overlapped bound-
+ing boxes. Besides, the top-64 object proposals in each
+
+image are selected after per-class non-maximal suppression
+(NMS) with an IoU of 0.3. Moreover, the ratio between
+pairs without any relationship (background pairs) and those
+with relationship during training is sampled to 3:1.
+
+4.3. Comparisons with State-of-the-Art Methods
+
+Visual Genome: Table 1 shows that GPS-Net out-
+performs all state-of-the-arts methods on various metrics.
+Speciﬁcally, GPS-Net outperforms one very recent one-
+stage model, named KERN [23], by 1.8% on average at
+R@50 and R@100 over the three protocols. In more de-
+tail, it outperforms KERN by 1.9%, 2.7% and 1.2% at
+R@100 on SGDET, SGCLS, and PRECLS, respectively.
+Even when compared with the best two-stage model CMAT
+[11], GPS-Net still demonstrates a performance improve-
+ment of 0.5% on average over the three protocols. Mean-
+while, compared with the one-stage version of VCTREE
+[2] and CMAT [11], GPS-Net respectively achieves 1.5%
+and 2.5% performance gains on SGCLS at Recall@100.
+Another advantage of GPS-Net over VCTREE and CMAT
+is that GPS-Net is much more efﬁcient, as the two meth-
+ods adopt policy gradient for optimization, which is time-
+consuming [46]. Moreover, when compare with RelDN us-
+ing the same backbone, the performance gain by GPS-Net
+is even more dramatic, namely, 5.5% promotion on SGCLS
+at Recall@100 and 2.5% on average over three protocols.
+
+Due to the class imbalance problem in VG, previous
+works usually achieve low performance for less frequent
+categories. Hence, we conduct an experiment utilizing the
+Mean Recall as evaluation metric [23, 2]. As shown in Ta-
+ble 2 and Figure 5, GPS-Net shows a large absolute gain for
+both the Mean Recall and Recall metrics, which indicates
+that GPS-Net has advantages in handling the class imbal-
+ance problem of SGG.
+
+OpenImages: We present results compared with RelDN
+[6] in Table 3. RelDN is an improved version of the
+model that won the Google OpenImages Visual Relation-
+ship Detection Challenge, with the same object detector,
+GPS-Net outperforms RelDN by 2.4% on the overall metric
+scorewtd. Moreover, despite of the severe class imbalance
+problem, GPS-Net still achieves outstanding performance
+in APrel for each category of relationships. The largest gap
+between GPS-Net and RelDN in APrel is 24.5% for wears
+and 20.6% for hits.
+
+Visual Relationship Detection: Table 4 presents com-
+parisons on VRD with state-of-the-art methods. To facil-
+
+Module
+Exp DMP NPS ARM R@20
+21.1
+22.3
+21.5
+21.3
+22.6
+
+1
+2
+3
+4
+5
+
+(cid:88)
+(cid:88)
+
+(cid:88)
+
+(cid:88)
+
+(cid:88)
+
+(cid:88)
+
+SGDET
+R@50
+26.3
+28.1
+26.6
+26.5
+28.4
+
+R@100 R@20
+32.7
+35.2
+33.2
+32.9
+36.1
+
+29.4
+31.4
+29.8
+29.6
+31.7
+
+SGCLS
+R@50
+35.4
+38.3
+36.3
+35.8
+39.2
+
+R@100 R@20
+58.8
+59.6
+59.1
+60.5
+60.7
+
+36.3
+39.3
+37.1
+36.8
+40.1
+
+PREDCLS
+R@50
+65.6
+66.1
+65.9
+66.7
+66.9
+
+R@100
+67.3
+67.9
+67.7
+68.5
+68.8
+
+Table 5: Ablation studies on the proposed methods. We consistently use the same backbone as [7].
+
+w. stack w.o. stack
+
+R@20
+SGCLS R@50
+
+R@20
+SGCLS R@50
+
+35.7
+38.8
+R@100 39.6
+22.4
+R@20
+28.3
+SGDET R@50
+R@100 31.5
+
+Focal µ = 3 µ = 4 µ = 5
+R@20 35.8 36.0 36.1 35.8
+SGCLS R@50 39.0 38.9 39.2 39.1
+R@100 39.8 39.9 40.1 39.9
+R@20 22.4 22.5 22.6 22.5
+SGDET R@50 28.2 28.2 28.4 28.3
+R@100 31.5 31.6 31.7 31.6
+Table 6: The left sub-table shows the effectiveness of the stacking operation in DMP. The middle sub-table compares
+the performance of the three MP modules in Section 3.1 with the same transformer layer. The right sub-table compares
+NPS-loss and the focal loss, and shows the inﬂuence of the controlling factor µ.
+
+GCMP S-GCMP DMP
+36.1
+34.8
+39.2
+37.7
+40.1
+38.4
+22.6
+22.1
+28.4
+28.0
+31.7
+31.2
+
+34.3
+37.2
+R@100 37.9
+21.7
+R@20
+27.5
+SGDET R@50
+R@100 30.8
+
+36.1
+39.2
+40.1
+22.6
+28.4
+31.7
+
+itate fair comparison, we adopt the two backbone models
+provided in RelDN [6] to train GPS-Net, respectively. It is
+shown that GPS-Net consistently achieves superior perfor-
+mance with both backbone models.
+
+4.4. Ablation Studies
+
+To prove the effectiveness of our proposed methods, we
+conduct four ablation studies. Results of the ablation studies
+are summarized in Table 5 and Table 6, respectively.
+
+Effectiveness of the Proposed Modules. We ﬁrst per-
+form an ablation study to validate the effectiveness of DMP,
+NPS-loss, and ARM. Results are summarized in Table 5.
+We add the above modules one by one to the baseline
+In Table 5, Exp 1 demotes our baseline that is
+model.
+based on the MOTIFNET-NOCONTEXT method [7] with
+our feature construction strategy for relationship prediction.
+From Exp 2-5, we can clearly see that the performance im-
+proves consistently when all the modules are used together.
+This shows that each module plays a critical role in inferring
+object labels and their pair-wise relationships.
+
+Effectiveness of the Stacking Operation in DMP. We
+conduct additional analysis on the stacking operation in
+DMP. The stacking operation accounts for the uncertainty
+in the edge direction information. As shown in the left
+sub-table of Table 6, the stacking operation consistently
+improves the performance of DMP over various metrics.
+Therefore, its effectiveness is justiﬁed.
+
+Comparisons between Three MP Modules. We com-
+pare the performance of three MP modules in Section 3.1:
+GCMP, S-GCMP, and DMP. To facilitate fair comparison,
+we implement the same transformer layer as DMP to the
+other two modules. As shown in the middle sub-table in
+Table 6, the performance of DMP is much better than the
+
+other two modules. This is because DMP encodes the edge
+direction information and provides node-speciﬁc contextual
+information for each node involved in message passing.
+
+Design Choices in NPS-loss. The value of the control-
+ling factor µ determines the impact of node priority on ob-
+ject classiﬁcation. As shown in the right sub-table of Table
+6, we show the performance of NPS-loss with three differ-
+ent values of µ. We also compare NPS-loss with the focal
+loss [13]. NPS-loss achieves the best performance when µ
+equals to 4. Moreover, NPS-loss outperforms the focal loss,
+justifying its effectiveness to solve the node priority prob-
+lem for SGG.
+
+5. Conclusion
+
+In this paper, we devise GPS-Net to address the main
+challenges in SGG by capturing three key properties of
+scene graph. Speciﬁcally, (1) edge direction is encoded
+when calculating the node-speciﬁc contextual information
+via the DMP module; (2) the difference in node priority is
+characterized by a novel NPS-loss; and (3) the long-tailed
+distribution of relationships is alleviated by improving the
+usage of relationship frequency through ARM. Through
+extensive comparative experiments and ablation studies,
+we validate the effectiveness of GPS-Net on three datasets.
+
+Acknowledgment. Changxing Ding was supported in
+part by NSF of China under Grant 61702193, in part by
+the Science and Technology Program of Guangzhou under
+Grant 201804010272, in part by the Program for Guang-
+dong Introducing Innovative and Entrepreneurial Teams un-
+der Grant 2017ZT07X183. Dacheng Tao was supported in
+part by ARC FL-170100117 and DP-180103424.
+
+References
+
+[1] Y. Li, W. Ouyang, B. Zhou, K. Wang, and X. Wang.
+Scene graph generation from objects, phrases and region
+captions. In ICCV, 2017.
+
+[15] A. Kuznetsova, H. Rom, N. Alldrin, J. Uijlings, I.
+Krasin, J. Tuset, S. Kamali, S. Popov, M. Malloci, T.
+Duerig, et al. The open imagesdataset v4: Uniﬁed im-
+age classiﬁcation, object detection, and visual relation-
+ship detection at scale. In arXiv:1811.00982, 2018.
+
+[2] K. Tang, H. Zhang, B. Wu, W. Luo, and W. Liu. Learn-
+ing to compose dynamic tree structures for visual con-
+texts. In CVPR, 2019.
+
+[16] C. Lu, R. Krishna, M. Bernstein, and L. Fei-Fei.
+Visual relationship detection with language priors. In
+ECCV, 2016.
+
+[3] S. Qi, Y. Zhu, S. Huang, C. Jiang, S. Zhu. Human-
+centric Indoor Scene Synthesis Using Stochastic Gram-
+mar. In ICLR, 2018.
+
+[4] J. Johnson, R. Krishna, M. Stark, L. Li, D. Shamma, M.
+Bernstein, and L. Fei-Fei. Image retrieval using scene
+graphs. In CVPR, 2015.
+
+[5] D. Xu, Y. Zhu, C. Choy, and L. Fei-Fei. Scene graph
+generation by iterative message passing. In CVPR, 2017.
+
+[6] J. Zhang, K. Shih, A. Elgammal, A. Tao, and B. Catan-
+zaro. Graphical contrastive losses for scene graph pars-
+ing. In CVPR, 2019.
+
+[7] R. Zellers, M. Yatskar, S. Thomson, and Y. Choi. Neu-
+ral motifs: Scene graph parsing with global context. In
+CVPR, 2018.
+
+[8] P. Velickovic, G. Cucurull, A. Casanova, and A.
+Romero. Graph Attention Networks. In ICLR, 2018.
+
+[9] L. Gong and Q. Cheng. Exploiting Edge Features in
+
+Graph Neural Networks. In CVPR, 2019.
+
+[10] M. Qi, W. Li, Z. Yang, Y. Wang and J. Luo. Atten-
+tive Relational Networks for Mapping Images to Scene
+Graphs. In CVPR, 2019.
+
+[17] J. Hu, L. Shen, and G. Sun. Squeeze-and-excitation
+
+networks. In CVPR, 2018.
+
+[18] H. Zhao, Y. Zhang, S. Liu, J. Shi, C. Change Loy, D.
+Lin, and J. Jia. Psanet: Point-wise spatial attention net-
+work for scene parsing. In ECCV, 2018.
+
+[19] X.Wang, R. Girshick, A. Gupta, and K. He. Non-local
+
+neural networks. In CVPR, 2018.
+
+[20] Z. Huang, X. Wang, L. Huang, C. Huang, Y. Wei, and
+W. Liu. Ccnet: Criss-cross attention for semantic seg-
+mentation. In arXiv preprint arXiv:1811.11721, 2018.
+
+[21] Y. Cao and J. Xu. GCNet: Non-local Networks Meet
+Squeeze-Excitation Networks and Beyond. In arXiv
+preprint arXiv:1904.11492, 2019.
+
+[22] J. Yang, J. Lu, S. Lee, D. Batra, and D. Parikh. Graph
+r-cnn for scene graph generation. In ECCV, 2018.
+
+[23] T. Chen, W. Yu, R. Chen, and L. Lin. Knowledge-
+embedded routing network for scene graph generation.
+In CVPR, 2019.
+
+[24] R. Herzig, M. Raboh, G. Chechik, J. Berant, and
+A. Globerson. Mapping images to scene graphs with
+permutation-invariant structured prediction. In NeurIPS,
+2018.
+
+[11] L. Chen, H. Zhang, J. Xiao, X. He, S. Pu, and S. F.
+Chang, Counterfactual Critic Multi-Agent Training for
+Scene Graph Generation. In CVPR, 2019.
+
+[25] S. Ren, K. He, R. Girshick, and J. Sun. Faster r-cnn:
+Towards real-time object detection with region proposal
+networks. In NIPS, 2015.
+
+[12] H. Ben-Younes, R. Cadene, M. Cord, and N. Thome.
+Mutan: Multimodal tucker fusion for visual question an-
+swering. In CVPR, 2017.
+
+[13] T.-Y. Lin, P. Goyal, R. Girshick, K. He, and P. Dollar.
+Focal loss for dense object detection. In ICCV, 2017.
+
+[14] R. Krishna, Y. Zhu, O. Groth, J. Johnson, K. Hata, J.
+Kravitz, S. Chen, Y. Kalantidis, L.-J. Li, D. A. Shamma,
+et al. Visual genome: Connecting language and vision
+using crowdsourced dense image annotations. In IJCV,
+2017.
+
+[26] A. Newell and J. Deng. Pixels to graphs by associative
+
+embedding. In NIPS, 2017.
+
+[27] S. Hwang, S. Ravi, Z. Tao, H. Kim, M. Collins, and V.
+Singh. Tensorize, factorize and regularize: Robust vi-
+sual relationship learning. In CVPR, 2018.
+
+[28] J. Zhang, Y. Kalantidis, M. Rohrbach, M. Paluri, A.
+Elgammal, and M. Elhoseiny. Large-scale visual rela-
+tionship un- derstanding. In AAAI, 2019.
+
+[29] K. He, G. Gkioxari, P. Doll´ar, and R. Girshick. Mask
+
+r-cnn. In ICCV, 2017.
+
+[30] Y. Li, W. Ouyang, B. Zhou, Y. Cui, J. Shi, and X.
+Wang. Factorizable net: An efﬁcient subgraph-based
+framework for scene graph generation. In ECCV, 2018.
+
+[45] T. N. Kipf and M. Welling. Semi-Supervised Classi-
+ﬁcation with Graph Convolutional Networks. In ICLR,
+2017.
+
+[31] Y. Li, W. Ouyang, B. Zhou, K. Wang, and X. Wang.
+Scene graph generation from objects, phrases and region
+captions. In ICCV, 2017.
+
+[46] R. Houthooft, R. Y. Chen, P. Isola, B. C. Stadie, F.
+Wolski, J. Ho, and P. Abbeel. Evolved policy gradients.
+In NeurlPS, 2018.
+
+[47] Y. Zhang, J. Hare, and A. Prugel-Bennett. Learning
+to count objects in natural images for visual question
+answering. In ICLR, 2018.
+
+[32] L. Gong, and Q. Cheng. Exploiting Edge Features for
+
+Graph Neural Networks. In CVPR, 2019.
+
+[33] J. Ba, J. R. Kiros, and G. E. Hinton, Layer normaliza-
+
+tion. In arXiv preprint arXiv:1607.06450, 2016.
+
+[34] J. Kim, K. On, W. Lim, J. Kim, J. Ha, and B. Zhang.
+Hadamard product for low-rank bilinear pooling. In
+ICLR, 2017.
+
+[35] H. Zhang, Z. Kyaw, J. Yu, and S.-F. Chang. Ppr-fcn:
+Weakly supervised visual relation detection via parallel
+pairwise r-fcn. In CVPR, 2017.
+
+[36] J. Peyre, I. Laptev, C. Schmid, and J. Sivic. Weakly-
+supervised learning of visual relations. In ICCV, 2017.
+
+[37] H. Zhang, Z. Kyaw, S. Chang, and T. Chua. Visual
+translation embedding network for visual relation detec-
+tion. In CVPR, 2017.
+
+[38] B. Dai, Y. Zhang, and D. Lin. Detecting visual rela-
+tionships with deep relational networks. In CVPR, 2017.
+
+[39] Y. Li, W. Ouyang, and X. Wang. Vip-cnn: A visual
+phrase reasoning convolutional neural network for vi-
+sual relationship detection. In CVPR, 2017.
+
+[40] X. Liang, L. Lee, and E. P. Xing. Deep variation-
+structured reinforcement learning for visual relationship
+and attribute detection. In CVPR, 2017.
+
+[41] B. Zhuang, L. Liu, C. Shen, and I. Reid. Towards
+context-aware interaction recognition for visual rela-
+tionship detec- tion. In ICCV, 2017.
+
+[42] G. Yin, L. Sheng, B. Liu, N. Yu, X. Wang, J. Shao,
+and C. Change Loy. Zoom-net: Mining deep feature in-
+teractions for visual relationship recognition. In ECCV,
+2018.
+
+[43] R. Yu, A. Li, V. I. Morariu, and L. S. Davis. Visual re-
+lationship detection with internal and external linguistic
+knowl- edge distillation. In ICCV, 2017.
+
+[44] Y. Zhan, J. Yu, T. Yu, D. Tao. On Exploring Undeter-
+mined Relationships for Visual Relationship Detection.
+In CVPR, 2019.
+
+B.2. Attention Maps of Different MP Modules
+
+We make qualitative comparisons between GCMP, S-
+GCMP, and DMP in Figure 7. Figures 7(a) and (b) show
+ground-truth object regions and the ground-truth relation-
+ship matrix. More speciﬁcally, in the relationship matrix,
+yellow cube denotes one relationship is presented, and pur-
+ple cube represents the opposite. Figures 7(c)(d)(e) show
+the attention maps produced by GCMP, S-GCMP, and DMP
+respectively. It is clear that GCMP and S-GCMP produce
+very similar context for each node (elements in each col-
+umn are similar). Only DMP obtains node-speciﬁc context
+(elements in each column are diverse). Furthermore, the at-
+tention map produced by DMP is highly consistent with the
+ground-truth relationship matrix in Figures 7(b). Therefore,
+our proposed DMP module plays a key role in SGG, helping
+GPS-Net to achieve state-of-the-art performance.
+
+Appendix
+
+This supplementary document is organized as follows:
+
+•
+
+•
+
+Section A shows more detailed comparison results un-
+der the Mean Recall metric between GPS-Net and
+state-of-the-art methods on the VG database. Results
+are summarized in Table 7. Meanwhile, we also treat
+the number of relationship predictions per object pair
+(k) as a hyper-parameter on VRD, and report Recall
+with respect to different k in Table 8.
+
+Section B ﬁrst provides the qualitative comparisons
+between GPS-Net and a strong baseline named MO-
+TIFS [7] under the SGDET protocol in Figure 6. Then,
+attention maps of different MP modules are visualized
+in Figure 7.
+
+A. Quantitative Analysis
+
+A.1. Mean Recall for Scene Graph on VG
+
+As shown in Table 7, GPS-Net shows the best perfor-
+mance under all protocols. In particular, GPS-Net outper-
+forms one very recent work named VCTREE-HL [2] by
+2.3% on average over the three protocols.
+
+A.2. Performance Comparison on VRD with vari-
+
+ous k
+
+As revealed in previous works [42, 43, 6], each object
+pair may be described by several plausible predicates. In
+other words, it should have been formulated as a multi-label
+classiﬁcation problem. Therefore, evaluation metrics based
+on the top-1 prediction (k=1) per object pair only may be
+unreasonable. Following [42, 43, 6], we further report re-
+call with respect to different k (k=1, 70) and compare with
+state-of-the-art methods. As shown in Table 8, GPS-Net
+consistently achieves the best performance among state-of-
+the-art methods.
+
+B. Qualitative Analysis
+
+B.1. Generated Scene Graph
+
+Figure 6 illustrates qualitative comparisons between
+GPS-Net and MOTIFS [7]. In Figure 6(a), it is shown that
+for nodes with low priority and relationships with high fre-
+quency, GPS-Net still makes better predictions than MO-
+TIFS. Therefore, we owe this performance gain to the DMP
+module that encodes edge direction information and provide
+node-speciﬁc context. In Figure 6(b), it is shown that GPS-
+Net makes fewer mistakes than MOTIFS for nodes of high
+priority. We give this credit to the NPS-loss. Finally, in Fig-
+ure 6(c), it can be observed that GPS-Net makes outstand-
+ing improvement in predicting low-frequency relationships,
+e.g., walking on and wearing, via the help of the ARM mod-
+ule.
+
+Model
+IMP(cid:5) [5]
+FREQ(cid:5) [7]
+MOTIFS(cid:5) [7]
+KERN(cid:5) [23]
+Chain(cid:5) [2]
+Overlap(cid:5) [2]
+Multi-Branch(cid:5) [2]
+VCTREE-SL(cid:5) [2]
+VCTREE-HL(cid:5) [2]
+GPS-Net(cid:5)
+
+SGDET
+
+SGCLS
+
+PREDCLS
+
+mR@20 mR@50 mR@100 mR@20 mR@50 mR@100 mR@20 mR@50 mR@100 Mean
+
+-
+4.5
+4.2
+-
+4.6
+4.8
+4.7
+5.0
+5.2
+6.9
+
+3.8
+6.1
+5.7
+6.4
+6.3
+6.5
+6.5
+6.7
+6.9
+8.7
+
+4.8
+7.1
+6.6
+7.3
+7.2
+7.5
+7.4
+7.7
+8.0
+9.8
+
+-
+5.1
+6.3
+
+6.3
+7.2
+6.9
+8.0
+8.2
+10.0
+
+5.8
+7.2
+7.7
+9.4
+7.9
+9.0
+8.6
+9.8
+10.1
+11.8
+
+6.0
+8.5
+8.2
+10.0
+8.8
+9.3
+9.2
+10.5
+10.8
+12.6
+
+-
+8.3
+10.8
+-
+11.0
+12.5
+11.9
+13.4
+14.0
+17.4
+
+9.8
+13.0
+14.0
+17.7
+14.4
+16.1
+15.5
+17.0
+17.9
+21.3
+
+10.5
+16.0
+15.3
+19.2
+16.6
+17.4
+16.9
+18.5
+19.4
+22.8
+
+6.8
+9.8
+9.6
+11.7
+10.2
+11.0
+10.7
+11.7
+12.2
+14.5
+
+Table 7: Mean recall (%) of various methods across all the 50 relationship categories. All methods in this table adopt the
+same Faster-RCNN detector.
+
+Pretrained Model
+
+Unknown VRL [40]
+
+Pre.
+k=1
+
+Rel.
+
+Phr.
+
+k=1
+
+k=1
+
+k=70
+
+VRD-Full [16]
+PPRFCN [35]
+VTranse [37]
+Vip-CNN [39]
+
+k=70
+R@50 R@100 R@50 R@100 R@50 R@100 R@50 R@100 R@50 R@100
+47.9
+47.4
+44.8
+-
+-
+55.2
+KL distilation[43]
+58.2
+MF-URLN [44]
+Zoom-Net [42]
+50.7
+CAI+SCA-M [42] 56.0
+RelDN[6]
+GPS-Net
+RelDN [6]
+GPS-Net
+
+13.9
+14.4
+14.1
+22.8
+21.4
+23.1
+31.5
+24.8
+25.2
+26.4
+28.9
+31.3
+33.8
+
+-
+-
+-
+-
+-
+22.7
+-
+21.4
+22.3
+21.5
+23.6
+28.2
+30.6
+
+16.2
+19.6
+19.4
+17.3
+18.2
+19.2
+23.9
+18.9
+19.5
+19.8
+21.5
+25.3
+27.8
+
+-
+-
+-
+-
+-
+26.3
+-
+29.1
+29.6
+28.2
+30.4
+34.5
+36.8
+
+47.9
+47.4
+44.8
+-
+-
+55.2
+58.2
+50.7
+56.0
+-
+58.7
+-
+63.4
+
+-
+-
+-
+-
+-
+29.4
+-
+37.3
+18.4
+25.4
+38.2
+42.1
+44.5
+
+-
+-
+-
+-
+-
+31.9
+-
+27.3
+28.5
+26.4
+28.9
+33.9
+37.0
+
+17.0
+23.2
+22.4
+20.0
+20.8
+21.3
+26.8
+21.4
+22.4
+23.0
+24.3
+28.6
+31.7
+
+14.7
+15.7
+15.2
+27.9
+22.6
+24.0
+36.1
+28.1
+28.9
+31.4
+34.0
+36.4
+39.2
+
+-
+58.7
+-
+63.4
+
+ImageNet
+
+COCO
+
+Table 8: Performance comparison with state-of-the-art methods on the VRD dataset. Pre., Phr., and Rel. represent predicate
+detection, phrase detection, and relation detection, respectively.
+
+denotes that the result is unavailable.
+
+−
+
+Figure 6: Qualitative comparisons between GPS-Net and MOTIF with R@20 in the SGDET setting. Green boxes are detected
+objects with IOU larger than 0.5 with the ground-truth. Green edges are predictions of relationships that are consistent with
+the ground-truth. Yellow boxes (edges) denote reasonable detections of objects (relationships), but are not annotated in the
+database. Red boxes (edges) represent ground-truth objects (relationships) that have no match with the detection results by
+the algorithm.
+
+windows-1windows-2building-1windows-3onhasononhashaswindows-1windows-2building-GT1windows-3onononfood-GT1glass-1bag-2bag-1counter-1inononfood-GT1glass-1bag-2bag-1bowel-GT1counter-GT1inonononononshirt-1sidewalk-1pole-1man-1jean-1woman-GT1shirt-1sidewalk-1pole-GT1man-1jean-1woman-GT1wearingononwearingwearingononwearingwindows-1windows-2car-1street-1building-1man-1onwalking onparked onhashasbuilding-1windows-1head-1roof-1cat-1ononhashaslaying onhasofbuilding-1windows-1head-1roof-1cat-1ononhashaslaying onhas(b)Node Priority(c)Long-tailed Distributionwoman-2leg-2woman-1leg-1shirt-1arm-1ofofwearinghasman-1shirt-1woman-1shirt-2onwearinghasbuilding-1windows-1woman-2leg-GT1woman-1leg-1shirt-1arm-GT1ofofwearinghashasonwearingman-1shirt-1woman-1shirt-GT1onwearingononhasbuilding-GT1tire-1tree-1car-1windows-1house-1sidewalk-1onin front ofnearbehindpole-GT1sidewalk-1onpole-GT1sidewalk-1onhasofchair-GT2woman-2man-2tie-1chair-GT1onwearingsitting onsitting onman-2tie-1chair-GT1onwearingsitting onchair-GT2woman-2sitting ontree-GT1trunk-GT1ofin front oftree-GT1trunk-GT1ofin front ofwindow-GT1ontree-GT1in front oftire-1tree-1car-1house-1sidewalk-1nearbehindwindow-GT1ontree-GT1in front ofin front ofhashaschair-GT2leg-1leg-2ofofbowel-GT1onchair-GT2leg-1leg-2ofoftie-GT1bike-1ontail-GT1tail-GT1hashashat-1man-1person-GT1flower-1table-1man-2arm-1head-2glove-GT1hat-1man-1person-GT1flower-1table-1man-GT1arm-1head-2glove-GT1nearofhashasofnearononwearingwearingofhasGPS-NetGPS-NetGPS-Net(a)Edge DirectionMOTIFS [7]MOTIFS [7]MOTIFS [7]motorcycle-1motorcycle-1tree-1building-1window-GT1onbehindin front ofontree-1building-1in front ofbehindwindow-1ononman-3nearnearman-3nearnearfruit-1car-1nearnearhead-1head-1ofhasonofhasonsign-1tree-1sign-1tree-1onononononcar-2nearnearmotorcycle-1motorcycle-GT1behindwindows-1windows-2car-1street-1building-1man-1onwalking onparked onhashastie-GT1bike-1ononcar-2nearnearmotorcycle-1motorcycle-GT1behindFigure 7: Attention Maps of Different MP Modules.
+
+①arm-1②arm-2③hand-1④head-1⑤man-1⑥racket-1⑦shirt-1⑧short①②③④⑤⑥⑦⑧①②③④⑤⑥⑦⑧① ②③④⑤⑥⑦⑧① ②③④⑤⑥⑦⑧① ②③④⑤⑥⑦⑧① ②③④⑤⑥⑦⑧①②③④⑤⑥⑦⑧①②③④⑤⑥⑦⑧①②③④⑤⑥⑦⑧①②③④⑤⑥⑦⑧① ②③④⑤⑥⑦⑧① ②③④⑤⑥⑦⑧①②③④⑤⑥⑦⑧①②③④⑤⑥⑦⑧① ②③④⑤⑥⑦⑧① ②③④⑤⑥⑦⑧①②③④⑤⑥⑦①②③④⑤⑥⑦① ②③④⑤⑥⑦① ②③④⑤⑥⑦①②③④⑤⑥⑦①②③④⑤⑥⑦① ②③④⑤⑥⑦① ②③④⑤⑥⑦① ②③④⑤⑥⑦① ②③④⑤⑥⑦①②③④⑤⑥⑦①②③④⑤⑥⑦①②③④⑤⑥⑦①②③④⑤⑥⑦① ②③④⑤⑥⑦① ②③④⑤⑥⑦①building-1②coat-1③hair-1④hand-1⑤handle-1⑥window-1⑦woman-1①box-1②chair-2③cup-1④fence-1⑤logo-1⑥pizza-1⑦table-1①②③④⑤⑥⑦①②③④⑤⑥⑦① ②③④⑤⑥⑦① ②③④⑤⑥⑦①②③④⑤⑥⑦①②③④⑤⑥⑦① ②③④⑤⑥⑦① ②③④⑤⑥⑦①②③④⑤⑥⑦①②③④⑤⑥⑦① ②③④⑤⑥⑦① ②③④⑤⑥⑦①②③④⑤⑥⑦①②③④⑤⑥⑦① ②③④⑤⑥⑦① ②③④⑤⑥⑦(b)Relationship Matrix(c)GCMP(d)S-GCMP(e)DMP(a)Object Regions

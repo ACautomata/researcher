@@ -1,0 +1,713 @@
+arXiv:2505.21322v1  [cs.AI]  27 May 2025
+Proceedings of Machine Learning Research 288:1–19, 2025
+Assured Autonomy with Neuro-Symbolic Perception
+R. Spencer Hallyburton
+SPENCER.HALLYBURTON@DUKE.EDU
+Miroslav Pajic
+MIROSLAV.PAJIC@DUKE.EDU
+Duke University
+Keywords: Perception. Autonomy. Cyber-physical system security.
+Abstract
+Many state-of-the-art AI models deployed in cyber-physical systems (CPS), while highly accu-
+rate, are simply pattern-matchers. With limited security guarantees, there are concerns for their
+reliability in safety-critical and contested domains. To advance assured AI, we advocate for a
+paradigm shift that imbues data-driven perception models with symbolic structure, inspired by a
+human’s ability to reason over low-level features and high-level context. We propose a neuro-
+symbolic paradigm for perception (NeuSPaPer) and illustrate how joint object detection and scene
+graph generation (SGG) yields deep scene understanding. Powered by foundation models for of-
+fline knowledge extraction and specialized SGG algorithms for real-time deployment, we design
+a framework leveraging structured relational graphs that ensures the integrity of situational aware-
+ness in autonomy. Using physics-based simulators and real-world datasets, we demonstrate how
+SGG bridges the gap between low-level sensor perception and high-level reasoning, establishing a
+foundation for resilient, context-aware AI and advancing trusted autonomy in CPS.
+1. Introduction
+Over the past decade, AI research has been primarily focused on optimizing black-box models with
+vast domain-specific training data. While benchmark performance has improved, the effort spent
+tuning traditional models has not led to significant assuredness guarantees. It is well known that even
+minor perturbations to the input data of AI models, both natural and adversarial, have led to high-
+profile unintended and sometimes catastrophic failures (e.g., from Eykholt et al. (2018), Finlayson
+et al. (2019)), raising concerns about AI’s reliability in safety-critical cyber-physical systems (CPS).
+Defensive techniques such as adversarial training Shafahi et al. (2020), distillation Papernot
+et al. (2016), and ensembling Jia et al. (2019) contend to secure models. However, adaptive adver-
+saries consistently overcome such defenses Carlini and Wagner (2017), suggesting that deep neural
+networks (DNNs) are statistical pattern-matchers rather than true high-level reasoners. Current se-
+curity analyses remain incomplete, focusing largely on structured noise like Lp norm perturbations
+that fail to capture real-world adversary complexities. Examining recent attacks on multi-sensor
+fusion, such as the frustum attack Hallyburton et al. (2022), we argue that traditional DNN architec-
+tures face innate and unavoidable vulnerabilities to attacks that alter a scene’s semantic structure.
+Achieving robust perception necessitates moving beyond reactive defenses to existing archi-
+tectures and integrating structured reasoning with statistical learning. In contrast to DNNs, human
+perception seamlessly integrates low-level feature recognition with high-level contextual and com-
+monsense reasoning, enabling us to interpret ambiguous, noisy, or incomplete data because of an
+ability to infer object relationships, detect inconsistencies, and reason about cause-and-effect in-
+teractions in a scene. Given fundamental vulnerabilities of existing DNNs, we advocate for an
+incorporation of symbolic reasoning into perception models to enhance reliability and robustness.
+© 2025 R.S. Hallyburton & M. Pajic.
+HALLYBURTON PAJIC
+In particular, we propose a paradigm shift in sensor fusion from vulnerable pattern-matching
+DNNs to logically-grounded reasoning algorithms that combine neural and symbolic components.
+Transcending black-box algorithms, a neuro-symbolic approach allows for incorporating logical
+constraints and commonsense knowledge – an approach that promises to enhance robustness in
+safety-critical applications such as autonomous driving (AD) and unmanned aerial vehicles (UAVs).
+Our neuro-symbolic approach to sensor fusion commences with a joint detection and graph
+generation step leveraging advancements in scene graph generation (SGG), a promising backbone
+for grounding black-box inference in high level logical relationships. SGG algorithms build graph-
+ical representations of scenes by identifying objects (nodes) and illuminating salient interactions
+between them (edges). Applied to perception, SGG can enrich situational awareness with contextu-
+alized high- and low-level concepts that traditional object detectors are ill-suited to discern.
+To secure single- and multi-sensor fusion with SGG requires the design of specialized integrity
+algorithms for scene-graph-based anomaly detection. We propose a two-stage integrity framework
+where graphs from each sensor are first evaluated against physics-based knowledge bases to ensure
+compliance with commonsense understanding (per-sensor). Graphs from all sensors are then sent
+to a multi-sensor graph consistency evaluator that considers the compatibility of nodes and edges
+across graphs (cross-sensor). Insights from graph-based integrity are used to flag anomalous infer-
+ence results and weight information updates in a downstream graph-informed sensor fusion step.
+In this early work, we present feasibility case studies to illustrate the promising potential of
+neuro-symbolic sensor fusion. We walk through case studies based on both real-world datasets
+(nuScenes, Caesar et al. (2020)) and physics-based simulators (CARLA, Dosovitskiy et al. (2017)).
+In the camera domain, we use a foundation model to predict graphs from RGB camera images. In the
+LiDAR domain, we use a rule-based approach because the data already fully resolve 3D Cartesian
+space. Object detections and graphs are then compared to illuminate any inconsistencies between
+them. We show that even when considering challenging attacks such as the frustum attacks against
+the LiDAR sensor, we can easily identify incompatible scene graphs between the camera and Li-
+DAR. To the best of our knowledge, this is the first single-platform approach demonstrated to detect
+such attacks, and results suggest the potential for neuro-symbolic methods to significantly improve
+security guarantees for perception in CPS. These findings motivate planned future research in de-
+signing full-stack neuro-symbolic perception and integrity.
+Contributions. In summary, the contributions of this work include:
+• Vulnerability analysis: demonstration of the vulnerability of DNN models to stealthy, unde-
+tectable attacks on sensing that alter the semantic structure of the scene.
+• Neuro-symbolic perception: Design of a novel neuro-symbolic paradigm for perception
+jointly performing detection, classification, and graph-building from sensor data.
+• Neuro-symbolic integrity: Architecting of neuro-symbolic integrity to reason over per-
+sensor and cross-sensor consistency against commonsense and physics-informed knowledge.
+• Feasibility study: Case studies in real-world and simulated datasets demonstrating first
+single-platform detection of challenging attacks, previously thought to be stealthy.
+2. Sensor Fusion in Autonomy
+Perception.
+DNNs are the state-of-the-art in object detection. Widely used algorithms/architectures
+for images (img) include convolutional neural networks (CNNs), Faster R-CNN Ren et al. (2016)
+2
+NEURO-SYMBOLIC PARADIGM FOR PERCEPTION
+and YOLO Redmon (2016), while for point clouds (pc) analysis, PointPillars Lang et al. (2019) and
+PV-RCNN Shi et al. (2020) are used. Recent transformer-based detectors, such as DETR Carion
+et al. (2020), offer an end-to-end approach minimizing the use of hand-crafted heuristics.
+Multi-sensor fusion.
+Fusing data improves observability, robustness, and attack resilience. Multi-
+sensor fusion typically occurs at the semantic level Durrant-Whyte and Henderson (2016). Such
+approaches are used in AD Baresi and Tamburri (2023) and UAVs Fei et al. (2023). Appendix A
+formalizes the semantic-level multi-sensor fusion problem.
+3. Vulnerability of Perception & Sensor Fusion
+In this section, we discuss how attacks on perception that alter the semantic structure of a scene are
+indefensible by reactive hardening of algorithms due to the equivariance of DNNs. We illustrate that
+this is of significant concern showing a stealthy frustum attack with high degree of attack success.
+3.1. Equivariance Vulnerability
+In response to DNNs’ vulnerability to out of distribution attacks (e.g., Lp norm), certified robustness
+techniques including sub-sampling/ensembling Jia et al. (2019) were proposed, yielding security
+guarantees. However, despite the effectiveness of certified robustness against Lp attacks, they fail
+to defend many real-world attacks that fundamentally alter the semantic structure of the scene.
+Specifically, point-based (e.g., LiDAR) DNNs are designed so that features derived on a col-
+lection of points are invariant to spatial translations (see Bronstein et al. (2021) on equivariance).
+Thus, no amount of sub-sampling or ensembling can mitigate translation attacks because the orig-
+inal features are retained when points from a legitimate object are (adversarially) moved to a new
+location. Spoofing attacks where points are injected patterning a legitimate object yield similar out-
+comes. While equivariance enhances model accuracy and generalization, it unfortunately introduces
+a vulnerability that adversaries can exploit, rendering certified robustness techniques ineffective.
+3.2. Stealthy Attacks On Sensor Fusion
+Many systems combine dense 2D image data with sparse 3D point clouds. Prior work showed at-
+tacks on 3D data in 2D-3D fusion are stealthy if the attacker retains consistency with unattacked 2D
+data Hallyburton et al. (2023a). We consider an optimal frustum attack Hallyburton et al. (2022)
+(derived in Appendix B.4) that exploits the DNN equivariance property to obtain such a stealthy
+outcome. Fig. 1 shows an adversary shifts a car’s 3D bounding box while being stealthy by preserv-
+ing high overlap with 2D detections. The intersection over union (IoU) threshold determines the
+maximum translation, enabling displacements over 40 m while maintaining IoU > 0.9. Due to the
+retained consistency with unaltered 2D detections, single-frame integrity checks fail, making the
+attack undetectable. Such attacks pose serious risks for path planning, leading to safety incidents.
+4. Neuro-Symbolic AI: A New Paradigm for Perception
+The widespread effectiveness of attacks on perception underscores the limitations of traditional
+algorithms in defending against manipulations to the semantic structure of a scene. Thus, motivated
+to overcome the pattern-matching nature of DNNs, we propose and evaluate a novel neuro-symbolic
+approach to perception that jointly detects objects and reasons over their semantic relationships.
+3
+HALLYBURTON PAJIC
+Figure 1: Attacker can alter the semantic understanding of the scene while being stealthy to multi-
+sensor fusion. Translating existing 3D objects (denoted with white box) backwards or forwards
+(resulting in the detected ’moved’ red boxes) from ego maintains consistency with 2D frustum in
+image plane. Attacker runs optimization to move object as far back as possible while retaining at
+least a minimum IoU (overlap) when projected into 2D image.
+4.1. Overview of Approach
+Unlike DNNs, human perception seamlessly integrates low-level feature recognition with high-level
+reasoning. Humans can infer relationships, identify inconsistencies, and reason about cause-and-
+effect from vision alone. To safeguard the future of AI-driven autonomy, it is imperative to develop
+assured perception algorithms that incorporate enhanced contextual awareness and reasoning.
+One promising approach to neuro-symbolic perception is scene graph generation (SGG). In
+addition to detecting objects, SGG yields inter-object relationships describing scene composition.
+Whereas previous attempts to secure perception relied on hardening DNNs to specific attacks, we
+propose reasoning over semantic scene graphs to evaluate general data integrity. Such graphical
+models are able to hold high-level semantic insights that 2D object detectors alone fail to capture.
+In this section, we discuss graph generation, integrity evaluation, and graph-informed sensor fusion.
+4.2. System Components
+The proposed neuro-symbolic framework consists of the following components, depicted in Fig. 2.
+4.2.1. JOINT PERCEPTION AND GRAPH GENERATION
+Graphs codify the structure of a scene, and SGG explicitly infers objects and their relationships to
+yield high-level context-driven scene understanding, often lifting 3D-like relationships (e.g., rela-
+tive positions) directly from 2D data such as images. Early CNN-based SGG approaches struggled
+to effectively capture relationships due to the inability of CNNs to maintain features between spa-
+tially separated objects Johnson et al. (2015). However, recent transformer-based methods have
+demonstrated superior capabilities in modeling interactions across the input space, significantly ad-
+vancing SGG performance Carion et al. (2020). We describe approaches to SGG below and present
+examples in Figs. 3, 4, and 5. Additional discussion on SGG algorithms is provided in Appendix C.
+4
+NEURO-SYMBOLIC PARADIGM FOR PERCEPTION
+Figure 2: Neuro-symbolic paradigm for perception performs object detection, classification, and
+scene graph generation jointly, enabling context-based reasoning over e.g., spatial relationships from
+multi-modal data. Reasoning over the graphical models is informed by physics-based knowledge
+bases and happens both for each sensor and between sensors before impacting sensor fusion.
+Geometric Functions (Rule-Based).
+Geometric functions over a 3D Cartesian space define spa-
+tial relationships between objects. 3D objects detected from 3D point clouds are passed to manually-
+defined functions to build relationships such as proximity, adjacency, occlusion, and orientation.
+This approach is not effective for 2D image data given a camera’s lack of explicit distance resolu-
+tion. Fig. 3 and Appendix C.3 describe rule-based SGG from 3D inputs.
+Foundation Models.
+Foundation models, including vision-language transformers like CLIP Rad-
+ford et al. (2021) and ViLT Kim et al. (2021), facilitate off-the-shelf SGG by leveraging extensive
+multi-modal knowledge acquired during training. These models naturally bridge visual and linguis-
+tic information, effectively capturing relational semantics, global context, and object interactions.
+Fig. 4 demonstrates SGG using a vision-language foundation model on camera images. To the best
+of our knowledge, foundation models are not yet capable of SGG from point cloud data.
+Specialized SGG Models.
+Transformers excel at modeling complex object relationships and global
+contexts, making them ideal for SGG. Recent specialized models, such as EGTR Im et al. (2024)
+and SGTR Li et al. (2022), integrate object proposals with relationship prediction heads to generate
+comprehensive scene graphs. Fig. 5 illustrates the pipeline and output of a specialized SGG model.
+SGG models are capable of operating on image or point cloud data, if sufficiently trained.
+4.2.2. PER-SENSOR GRAPH-BASED INTEGRITY REASONING
+By structuring perception inference outcomes into graphs, SGG captures spatial, semantic relation-
+ships from real-world sensor data. To evaluate the self-consistency of graph structures to support
+assured decision-making and safety in autonomy, downstream integrity then reasons over the graph
+5
+HALLYBURTON PAJIC
+(a) Bird’s eye view (BEV) of 3D
+box detections on point cloud.
+car, ID: 1
+left_of
+front_of
+left_of
+front_of
+left_of
+bus, ID: 2
+front_of
+front_of
+left_of
+far
+front_of
+left_of
+far
+truck, ID: 4
+front_of
+near
+car, ID: 3
+left_of
+(b) Rule-based scene graph using as
+input 3D box detections.
+Figure 3: Scene pairs with below images. (a) BEV projection of LiDAR point cloud from nuScenes
+dataset shown with box detections. (b) Geometric rules build scene graphs using 3D boxes. Nodes
+(blue) connected via edge relations (red).
+(a) Raw image used to jointly detect
+objects and build graph.
+Red Van
+on
+beside
+Truck
+on
+Buildings
+beside
+Street
+Traffic Lights
+above
+Crosswalk
+on
+Sky
+above
+Scaffolding
+attached to
+Bus
+behind
+(b) Foundation model builds a scene
+graph using raw image as input.
+Figure 4: (a) Raw camera image feeds foundation model that (b) directly builds scene graph. Node
+and edge types differ from rule-based approach because foundation model yields nodes and rela-
+tionships based on large multi-modal training process.
+(a) EGTR specialized SGG model trained to detect nodes and predict edges.
+Figure 5: Joint perception and scene graph generation performed using EGTR model from Im et al.
+(2024). Regressed graph connects nodes with relations in (subject, predicate, object) format.
+6
+NEURO-SYMBOLIC PARADIGM FOR PERCEPTION
+contents. We introduce an approach to reasoning leveraging knowledge graph embeddings (KGEs)
+and constraint satisfaction evaluation (CSE), both concepts highlighted in Dimasi (2023).
+KGEs are structured representations of commonsense information and can enhance the assess-
+ment of scene graph integrity, Chen et al. (2020). Anomaly detectors compare extensive knowledge
+from KGEs with outcomes of SGG to validate real-world observed concepts against generated re-
+lationships. Integrating knowledge graphs allows models to infer and correct potentially erroneous
+scene interpretations based on well-established semantic relationships. This approach enhances the
+robustness and integrity of SGG, leading to more accurate representations of scenes.
+Constraint satisfaction provides an effective means for assessing the integrity of scene graph
+outputs by enforcing logical and semantic requirements on the relationships among detected objects.
+By applying domain-specific constraints, anomaly detectors can either reject unrealistic scene graph
+outputs or guide corrective measures, ultimately ensuring outputs align more closely with real-world
+knowledge and expectations, such as the logical requirements outlined in Giunchiglia et al. (2023).
+4.2.3. CROSS-SENSOR GRAPH-BASED INTEGRITY REASONING
+Classical anomaly detectors such as χ2 innovation tests on state estimators or inter-sensor assign-
+ment between detections from multiple sensors only evaluate consistency at the individual detection
+level. In contrast, our neuro-symbolic cross-sensor integrity function takes into account the full
+graph of detections and their relationships with other detections. This approach to cross-sensor in-
+tegrity is particularly effective in securing perception to attacks that alter the semantic understanding
+of the scene, such as a false positive/negative or translation attack. Even if graphs are self-consistent,
+they may not be consistent across sensors; cross-sensor evaluation enhances security robustness if
+attackers cannot consistently compromise all sensors at once.
+Strategies for cross-sensor graph integrity reasoning include both brute-force and learned-inference
+algorithms. With the brute-force approach, nodes are matched between graphs, and edges travel-
+ing between nodes are then matched based on the node matching. Any edges without a match are
+evaluated to determine if the lack of agreement is a product of noisy sensor data or an attack. A
+complementary approach is to feed scene graphs to graph neural networks (GNNs) to evaluate for
+consistency. The result of graph integrity is a per-node, per-edge classification of (in)consistent.
+Beyond anomaly detection, cross-sensor integrity can be used to hypothesize the exact pertur-
+bations responsible for any observed inconsistencies, such as identifying adversarial manipulations
+affecting spatial relationships. This deeper reasoning and threat identification enhances responsive-
+ness to complex adversarial scenarios and presents first-of-a-kind resilience in autonomy.
+4.2.4. GRAPH-INFORMED SENSOR FUSION
+While traditional sensor fusion algorithms update situational awareness with detections and per-
+object features, providing fusion with relationships from graphs can significantly enhance perfor-
+mance and robustness to challenging natural and adversarial circumstances. Scene graphs illuminate
+high-level semantics that object detectors alone are incapable of providing. Such information can
+help align heterogeneous data (e.g., resolve conflicts in inter-sensor object assignment) and reduce
+ambiguity due to e.g., occlusions. Integrating graphical information into fusion facilitates enhanced
+contextualization of knowledge and ensures consistency across diverse sensor modalities, ultimately
+improving situational awareness and reliability in perception systems.
+7
+HALLYBURTON PAJIC
+5. Feasibility Study
+We present a feasibility study demonstrating how neuro-symbolic methods can detect previously
+stealthy attacks on perception presented in Section 3.2. We employ ground-vehicle datasets from
+both the physics-based simulator CARLA and the real-world nuScenes dataset. While multiple
+scenes were analyzed, due to space limitations, here we present detailed results from one represen-
+tative CARLA scene. Additional analyses and case studies are provided in Appendix D.
+Figs. 6(a) and 6(b) present benign camera and LiDAR data from a scene that includes four
+detected objects: a nearby car, a mid-distance van and bicycle, and a distant truck. Traditional
+camera- and LiDAR-based detectors accurately regress bounding boxes for these objects.
+5.1. Scene Graph Generation
+We employ a foundation model to construct graphs from images through natural language prompts.
+Despite using 2D images, these models can effectively infer 3D spatial relationships between ob-
+jects. Each image is analyzed with the query: "Build a scene graph from this image."
+The foundation model outputs (subject, predicate, object) triplets where subject
+and object are detected instances in the scene and predicate falls within the set of relation-
+ships such as in front of, near, occluding, following. The set of considered relation-
+ships for this work is described in Appendix C. An example is illustrated in Fig. 6(a).
+For LiDAR data, scene graphs are generated by first detecting 3D bounding boxes using classical
+detectors and then passing boxes to rule-based geometric relationship functions. This study focuses
+on proximal relationships (e.g., front of, left of, near/far). Appendix C.3 describes all
+considered rules. Fig. 6(b) illustrates a LiDAR-derived scene graph.
+5.2. Adversary Threat Model
+Section 3 described stealthy attacks exploiting differences in sensor resolution, such as frustum
+attacks, where an object is repositioned in 3D space yet maintains consistency with 2D data, thus
+passing through multi-sensor fusion undetected. Fig. 6(c) demonstrates such an attack where the
+van’s position is significantly translated in LiDAR data. This attack is stealthy to traditional DNN-
+based detectors due to the retained consistency when 3D detections are projected to the image.
+5.3. Integrity Evaluation via Scene Graphs
+The scene graph of the 2D image (Fig.6(a)) aligns with the original, unattacked LiDAR-derived
+graph (Fig.6(b)). In contrast, the graph from compromised LiDAR data (Fig.6(c)) shows clear in-
+consistencies with the image’s graph. Cross-sensor integrity in Fig.6(d) highlights that inconsisten-
+cies in the van-truck relationship across sensors are easily identifiable. Neuro-symbolic perception
+and integrity extracts meaningful semantic information from sensor data, enabling attack detection
+even though the manipulated 3D box remains consistent with the unattacked 2D boxes.
+The neuro-symbolic SGG pipeline offers the first method that secures perception against attacks
+exploiting asymmetric sensor resolutions, such as the frustum attack. While we use this style of
+attack as a case study, perception can benefit broadly from neuro-symbolic reasoning. While DNNs
+detecting objects from images only capture 2D information, SGG lifts relationships from the image
+that contain 3D insights by leveraging context in the scene. The extraction of relational scene graphs
+facilitates a more insightful comparison between data and supports secure and assured autonomy.
+8
+NEURO-SYMBOLIC PARADIGM FOR PERCEPTION
+(a) Detections and scene graph built from
+foundation model on camera input.
+(b) DNN yields detections on benign LiDAR
+data, rules construct scene graph.
+(c) Adversary manipulates Van, translating it
+(red box) away from ego. When projected
+to front-view, Van is still consistent with
+camera.
+(d) Reasoning on subgraphs illuminates in-
+consistencies in semantic concepts be-
+tween image graph and attacked LiDAR
+graph.
+Figure 6: (a) Foundation model jointly detects objects and builds scene graph from image. (b,c)
+Perception yields rule-based scene graph from LiDAR. (c) Attacker translates Van away from the
+ego - attacked box when projected to camera is still consistent with 2D detections, so camera detec-
+tions alone cannot detect the attack. (d) Graph-building lifts purely 2D camera data to relational 3D
+space by inferring positional relationships with context. Inconsistencies identified between camera
+and LiDAR graphs allow for attack detection of previously thought-to-be stealthy attacks.
+9
+HALLYBURTON PAJIC
+6. Challenges to Realizing Neuro-Symbolic Perception
+Real-time constraints.
+Deploying foundation models (e.g., LLMs, vision transformers) in CPS
+is challenging due to high computational demands and cloud latency. To address this, we propose
+training specialized SGG algorithms on autonomy-specific datasets for efficient, real-time SGG.
+Dataset construction.
+Constructing high-quality datasets while handling edge cases (e.g., zero-
+/few-shot) and real-world complexity is a key challenge for neuro-symbolic algorithms Gilpin and
+Ilievski (2021). We employed a dataset generation pipeline using AVstack Hallyburton et al. (2023b)
+and CARLA from Hallyburton and Pajic (2023) to being construction of the first neuro-symbolic
+datasets in autonomy. See Appendix C.4 for details.
+7. Conclusion and Future Research Directions
+To address the lack of security guarantees in existing AI models that operate as simple pattern-
+matchers, we proposed a paradigm shift toward neuro-symbolic perception in safety-critical do-
+mains, integrating logical reasoning and commonsense knowledge with deep neural networks for
+tasks including object detection. By leveraging SGG and foundation models for structured environ-
+ment understanding, our approach bridges the gap between low-level sensor perception and high-
+level reasoning. Through feasibility studies in physics-based simulators and real-world datasets, we
+demonstrated that SGG enhances resilience, interpretability, and security in AI-driven autonomy,
+paving the way for more trustworthy and robust perception in safety-critical applications.
+Future Research Direction
+Advancing neuro-symbolic sensor fusion requires substantial investment. The following are identi-
+fied key areas that will drive the maturation of this technology toward deployment in real systems.
+Temporal Graph Integrity.
+Evaluating the longitudinal consistency of graphs ensures that nodes
+and their relationships evolve consistent with physics. Inexplicable temporal discontinuities will
+draw integrity scrutiny. Algorithms in this area can draw insights from object tracking.
+Knowledge Graphs.
+This work proposed per-sensor integrity that integrates KGEs with SGG.
+While our case study focused on multi-sensor integrity, future research should develop and imple-
+ment graph consistency evaluations coupled with KGEs.
+Multi-Sensor Integrity.
+We used a brute-force evaluation of all subgraphs to detect inconsisten-
+cies in multi-sensor reasoning. Unfortunately, uncertain or incomplete graphs due to noisy data can
+yield inaccurate conclusions. Future effort should be spent designing inference algorithms that are
+robust to noise and capable of probabilistic reasoning over uncertain graphs.
+Specialized SGG.
+Our presented case study relied on foundation models which are computation-
+ally expensive, memory-intensive, prone to latency, and unbounded in output space. Future efforts
+will train specialized SGG models with first-of-a-kind autonomy-related neuro-symbolic datasets.
+LiDAR-Based SGG.
+The current LiDAR-based neuro-symbolic inference pipeline is serialized,
+first detecting objects before building scene graphs with geometric functions. To ensure consis-
+tency with image-based inference and to advance neuro-symbolic capabilities, future research will
+develop models that directly ingest LiDAR data and jointly perform object detection and SGG.
+10
+NEURO-SYMBOLIC PARADIGM FOR PERCEPTION
+Acknowledgments
+This work is sponsored in part by the ONR under agreement N00014-23-1-2206, AFOSR under the
+award number FA9550-19-1-0169, and by the NSF under NAIAD Award 2332744 as well as the
+National AI Institute for Edge Computing Leveraging Next Generation Wireless Networks, Grant
+CNS-2112562.
+References
+Luciano Baresi and Damian A Tamburri. Architecting artificial intelligence for autonomous cars:
+The openpilot framework. In European Conference on Software Architecture, pages 189–204.
+Springer, 2023.
+Michael M Bronstein, Joan Bruna, Taco Cohen, and Petar Veliˇckovi´c. Geometric deep learning:
+Grids, groups, graphs, geodesics, and gauges. arXiv preprint arXiv:2104.13478, 2021.
+Holger Caesar, Varun Bankiti, Alex H Lang, Sourabh Vora, Venice Erin Liong, Qiang Xu, Anush
+Krishnan, Yu Pan, Giancarlo Baldan, and Oscar Beijbom. nuscenes: A multimodal dataset for
+autonomous driving. In Proceedings of the IEEE/CVF conference on computer vision and pattern
+recognition, pages 11621–11631, 2020.
+Yulong Cao, Chaowei Xiao, Benjamin Cyr, Yimeng Zhou, Won Park, Sara Rampazzi, Qi Alfred
+Chen, Kevin Fu, and Z Morley Mao. Adversarial sensor attack on lidar-based perception in
+autonomous driving. In Proceedings of the 2019 ACM SIGSAC conference on computer and
+communications security, pages 2267–2281, 2019.
+Nicolas Carion, Francisco Massa, Gabriel Synnaeve, Nicolas Usunier, Alexander Kirillov, and
+Sergey Zagoruyko. End-to-end object detection with transformers. In European conference on
+computer vision, pages 213–229. Springer, 2020.
+Nicholas Carlini and David Wagner. Adversarial examples are not easily detected: Bypassing ten
+detection methods.
+In Proceedings of the 10th ACM workshop on artificial intelligence and
+security, pages 3–14, 2017.
+Xiaojun Chen, Shengbin Jia, and Yang Xiang. A review: Knowledge reasoning over knowledge
+graph. Expert systems with applications, 141:112948, 2020.
+Paolo Emmanuel Ilario Dimasi.
+Scene Graph Generation in Autonomous Driving: a Neuro-
+symbolic approach. PhD thesis, Politecnico di Torino, 2023.
+Alexey Dosovitskiy, German Ros, Felipe Codevilla, Antonio Lopez, and Vladlen Koltun. Carla: An
+open urban driving simulator. In Conference on robot learning, pages 1–16. PMLR, 2017.
+Hugh Durrant-Whyte and Thomas C Henderson. Multisensor data fusion. Springer handbook of
+robotics, pages 867–896, 2016.
+Kevin Eykholt, Ivan Evtimov, Earlence Fernandes, Bo Li, Amir Rahmati, Chaowei Xiao, Atul
+Prakash, Tadayoshi Kohno, and Dawn Song. Robust physical-world attacks on deep learning
+visual classification. In Proceedings of the IEEE conference on computer vision and pattern
+recognition, pages 1625–1634, 2018.
+11
+HALLYBURTON PAJIC
+Shuaipeng Fei, Muhammad Adeel Hassan, Yonggui Xiao, Xin Su, Zhen Chen, Qian Cheng, Fuyi
+Duan, Riqiang Chen, and Yuntao Ma. Uav-based multi-sensor data fusion and machine learning
+algorithm for yield prediction in wheat. Precision agriculture, 24(1):187–212, 2023.
+Samuel G Finlayson, John D Bowers, Joichi Ito, Jonathan L Zittrain, Andrew L Beam, and Isaac S
+Kohane. Adversarial attacks on medical machine learning. Science, 363(6433):1287–1289, 2019.
+Leilani H Gilpin and Filip Ilievski. Neuro-symbolic reasoning in the traffic domain. J AI Res, 15
+(3):123–145, 2021.
+Eleonora Giunchiglia, Mihaela C˘at˘alina Stoian, Salman Khan, Fabio Cuzzolin, and Thomas
+Lukasiewicz. Road-r: the autonomous driving dataset with logical requirements. Machine Learn-
+ing, 112(9):3261–3291, 2023.
+R Spencer Hallyburton and Miroslav Pajic.
+Datasets, models, and algorithms for multi-sensor,
+multi-agent autonomy using avstack. arXiv preprint arXiv:2312.04970, 2023.
+R Spencer Hallyburton, Yupei Liu, Yulong Cao, Z Morley Mao, and Miroslav Pajic. Security anal-
+ysis of camera-lidar fusion against black-box attacks on autonomous vehicles. In 31st USENIX
+Security Symposium (USENIX Security 22), pages 1903–1920, 2022.
+R Spencer Hallyburton, Qingzhao Zhang, Z Morley Mao, and Miroslav Pajic. Partial-information,
+longitudinal cyber attacks on lidar in autonomous vehicles. arXiv preprint arXiv:2303.03470,
+2023a.
+Robert Spencer Hallyburton, Shucheng Zhang, and Miroslav Pajic. Avstack: An open-source, re-
+configurable platform for autonomous vehicle development. In Proceedings of the ACM/IEEE
+14th International Conference on Cyber-Physical Systems (with CPS-IoT Week 2023), pages
+209–220, 2023b.
+Jinbae Im, JeongYeon Nam, Nokyung Park, Hyungmin Lee, and Seunghyun Park. Egtr: Extracting
+graph from transformer for scene graph generation. In Proceedings of the IEEE/CVF Conference
+on Computer Vision and Pattern Recognition, pages 24229–24238, 2024.
+Jinyuan Jia, Xiaoyu Cao, Binghui Wang, and Neil Zhenqiang Gong.
+Certified robustness for
+top-k predictions against adversarial perturbations via randomized smoothing. arXiv preprint
+arXiv:1912.09899, 2019.
+Justin Johnson, Ranjay Krishna, Michael Stark, Li-Jia Li, David Shamma, Michael Bernstein, and
+Li Fei-Fei. Image retrieval using scene graphs. In Proceedings of the IEEE conference on com-
+puter vision and pattern recognition, pages 3668–3678, 2015.
+Wonjae Kim, Bokyung Son, and Ildoo Kim. Vilt: Vision-and-language transformer without convo-
+lution or region supervision. In International conference on machine learning, pages 5583–5594.
+PMLR, 2021.
+Alex H Lang, Sourabh Vora, Holger Caesar, Lubing Zhou, Jiong Yang, and Oscar Beijbom. Point-
+pillars: Fast encoders for object detection from point clouds. In Proceedings of the IEEE/CVF
+conference on computer vision and pattern recognition, pages 12697–12705, 2019.
+12
+NEURO-SYMBOLIC PARADIGM FOR PERCEPTION
+Rongjie Li, Songyang Zhang, and Xuming He. Sgtr: End-to-end scene graph generation with trans-
+former. In proceedings of the IEEE/CVF conference on computer vision and pattern recognition,
+pages 19486–19496, 2022.
+Cewu Lu, Ranjay Krishna, Michael Bernstein, and Li Fei-Fei. Visual relationship detection with
+language priors. In Computer Vision–ECCV 2016: 14th European Conference, Amsterdam, The
+Netherlands, October 11–14, 2016, Proceedings, Part I 14, pages 852–869. Springer, 2016.
+Nicolas Papernot, Patrick McDaniel, Xi Wu, Somesh Jha, and Ananthram Swami. Distillation as a
+defense to adversarial perturbations against deep neural networks. In 2016 IEEE symposium on
+security and privacy (SP), pages 582–597. IEEE, 2016.
+Jonathan Petit and Steven E Shladover. Potential cyberattacks on automated vehicles. IEEE Trans-
+actions on Intelligent transportation systems, 16(2):546–556, 2014.
+Alec Radford, Jong Wook Kim, Chris Hallacy, Aditya Ramesh, Gabriel Goh, Sandhini Agarwal,
+Girish Sastry, Amanda Askell, Pamela Mishkin, Jack Clark, et al. Learning transferable visual
+models from natural language supervision. In International conference on machine learning,
+pages 8748–8763. PmLR, 2021.
+J Redmon. You only look once: Unified, real-time object detection. In Proceedings of the IEEE
+conference on computer vision and pattern recognition, 2016.
+Shaoqing Ren, Kaiming He, Ross Girshick, and Jian Sun. Faster r-cnn: Towards real-time object
+detection with region proposal networks. IEEE transactions on pattern analysis and machine
+intelligence, 39(6):1137–1149, 2016.
+Ali Shafahi, Mahyar Najibi, Zheng Xu, John Dickerson, Larry S Davis, and Tom Goldstein. Uni-
+versal adversarial training. In Proceedings of the AAAI Conference on Artificial Intelligence,
+volume 34, pages 5636–5643, 2020.
+Shaoshuai Shi, Chaoxu Guo, Li Jiang, Zhe Wang, Jianping Shi, Xiaogang Wang, and Hongsheng
+Li. Pv-rcnn: Point-voxel feature set abstraction for 3d object detection. In Proceedings of the
+IEEE/CVF conference on computer vision and pattern recognition, pages 10529–10538, 2020.
+Kaihua Tang, Yulei Niu, Jianqiang Huang, Jiaxin Shi, and Hanwang Zhang. Unbiased scene graph
+generation from biased training. In Proceedings of the IEEE/CVF conference on computer vision
+and pattern recognition, pages 3716–3725, 2020.
+James Tu, Mengye Ren, Sivabalan Manivasagam, Ming Liang, Bin Yang, Richard Du, Frank Cheng,
+and Raquel Urtasun. Physically realizable adversarial examples for lidar object detection. In
+Proceedings of the IEEE/CVF conference on computer vision and pattern recognition, pages
+13716–13725, 2020.
+Rowan Zellers, Mark Yatskar, Sam Thomson, and Yejin Choi. Neural motifs: Scene graph parsing
+with global context. In Proceedings of the IEEE conference on computer vision and pattern
+recognition, pages 5831–5840, 2018.
+13
+HALLYBURTON PAJIC
+Appendix A. Data Fusion
+One approach to multi-sensor data fusion in autonomy is to obtain detected objects from each sensor
+in parallel, perform an assignment between the objects detected in pairs of sensors, and fuse the
+detection data for each assignment set in a state estimator (e.g., Kalman filter). We briefly review the
+general form of data association (“assignment problem”) as it applies to multi-sensor data fusion.
+We denote detected objects from perception as D2D ←percep(img) and D3D ←percep(pc)
+where percep are algorithms that take in sensor data and return bounding boxes around objects.
+Given two sets, S1, S2, as well as a weighting function C : S1 × S2 →R, the assignment
+problem finds a bijection f : S1 →S2 such that a cost function
+X
+s∈S1
+C (s, f(s))
+is minimized. Even if the weighting function is nonlinear, the problem is viewed as linear because
+the cost is a linear sum. In the case of 2D (e.g., image) and 3D (e.g., LiDAR, radar) detections, sets
+are S1 := D2D and S2 := D3D. With asymmetric sensor resolution (i.e., 2D/3D), most often C is
+the intersection over union (IoU) of the 2D/3D bounding boxes in the image plane, i.e.,
+C(d2D
+i
+, d3D
+j ) = IoU
+ d2D
+i
+, project(d3D
+j )
+
+,
+where project is the operation projecting a 3D box to the 2D image plane and d2D
+i
+, d3D
+j
+are
+individual detections from each set. In practice, the weight function is used to construct a cost
+matrix enumerating over all pairs of detected objects in 2D and 3D as
+A[i, j] ←C(d2D
+i
+, d3D
+j ),
+and a linear sum optimizer is then applied to A to yield the optimal bipartite solution to the as-
+signment problem. Candidate assignment algorithms include the Hungarian and Jonker-Volgenant
+varieties. A threshold is often used so that low affinity pairs (e.g., small overlap) are not accepted.
+Appendix B. Adversary Framework and Optimal Frustum Attack
+While prior works considered Lp norm perturbations, we instead consider a general attacker objec-
+tive. This objective allows modeling physically-realizable attacks such as the introduction of a false
+object while abstracting the implementation details (e.g., spoofing vs. cyber-attack vs. backdoor).
+B.1. Attacker Knowledge & Capability
+We consider a generic adversary that has knowledge of existing objects in a scene. The attacker is
+also able to manipulate any component of existing bounding box detections. A 2D bounding box is
+a tuple of location (u, v) and box size (h, w). A 3D bounding box is a tuple of position (x, y, z), box
+size (h, w, l), and orientation θ. Attacks can be realized by methods that include sensor spoofing
+attacks formalized in Cao et al. (2019), physical adversarial objects such as from Tu et al. (2020),
+and cyber-based attacks that exploit pipeline vulnerabilities including Trojans in Hallyburton et al.
+(2023a); Petit and Shladover (2014). For example, frustum-type attacks lead to translations of
+existing objects as illustrated in Hallyburton et al. (2022).
+14
+NEURO-SYMBOLIC PARADIGM FOR PERCEPTION
+B.2. Attacker Goal: Optimal Frustum Attack
+One particular attack objective is to move the 3D bounding box detections as far as possible from
+their original locations while retaining the same assignment pairs as in the unattacked case so as to
+remain stealthy to detection from any uncompromised 2D data from e.g., image-based detections.
+B.3. Practical Constraints
+Despite an attacker able to manipulate object detections, certain sensible guidelines must be in place
+to prevent attacks from being easily detectable. These include:
+• Box volume. Manipulated object bounding box volume is to be bounded between a [Vmin, Vmax]
+with bounds set from plausible real-world scenarios; e.g., a semi-truck volume is 150 m3.
+• Box dimensions. Any individual dimension of a box is to be bounded consistent with ob-
+served data between [(hmin, wmin, lmin) , (hmax, wmax, lmax)].
+• Vertical position. When tracking ground vehicles, the objects of interest must be on the
+ground. Thus the attacker should not significantly manipulate the vertical position.
+• Orientation. Ground vehicles are constrained to be coplanar with the ground. Thus, only the
+yaw angle, θ, is to be manipulated while pitch and roll are fixed.
+B.4. Optimizing the Frustum Attack
+Many deployed systems combine dense 2D image data with sparse 3D point clouds. Prior work Hally-
+burton et al. (2023a) demonstrated that attacks on such 2D-3D fusion are particularly devastating
+because intelligent attacks on 3D data can hide in a stealthy null space in the unattacked 2D data. A
+powerful attacker can execute an optimal frustum attack as the solution to
+¯D3D = argmax
+D3D
+X
+pj∈D3D
+¯p3D
+j
+−p3D
+j
+
+s.t.,
+IoU
+ d2D
+i
+, project( ¯d3D
+j )
+
+≥ζmin
+and
+Vmin ≤¯hj × ¯lj × ¯wj ≤Vmax,
+(1)
+where pj is the position of detection dj, ¯pj and ¯dj the attacker-manipulated position/detection, ζmin
+a minimum intersection over union (IoU) threshold set to maintain consistency between the attacked
+3D detections and the unaltered 2D data (for stealthiness), and project the operation projecting
+3D data to the 2D image plane.
+Appendix C. Scene Graph Generation
+C.1. Shortcoming of CNNs for SGG
+Scene graph generation (SGG) requires identifying objects, attributes, and relationships within an
+image. While CNNs excel at visual feature extraction, they struggle with relational reasoning,
+spatial precision, and contextual ambiguity. CNNs capture local features but fail to model global
+relationships critical for SGG, necessitating additional mechanisms like graph neural networks, at-
+tention, or transformers. Pooling operations further degrade spatial resolution, making precise ob-
+ject relationships difficult to define. Moreover, CNNs lack the ability to resolve visual ambiguities,
+limiting their effectiveness in complex relational reasoning. These limitations highlight the need for
+alternative architectures to enhance SGG performance Johnson et al. (2015); Lu et al. (2016).
+15
+HALLYBURTON PAJIC
+C.2. Modern Approaches for SGG
+While CNNs serve as a foundational step for object detection and feature extraction, effective scene
+graph generation (SGG) necessitates additional relational modeling techniques. Graph Neural Net-
+works (GNNs) and Transformers have emerged as leading approaches due to their ability to capture
+relational structures and contextual dependencies Zellers et al. (2018); Tang et al. (2020).
+GNNs represent objects as graph nodes and relationships as edges, enabling message passing
+that propagates semantic and spatial information throughout the graph for enhanced relational rea-
+soning. Transformers utilize self-attention mechanisms to dynamically model global relationships
+and contextual interactions without requiring explicit graph construction. By integrating GNNs’
+structured relational representation with Transformers’ flexible contextual modeling, recent meth-
+ods achieve superior accuracy and generalization in SGG Im et al. (2024); Li et al. (2022). This hy-
+brid approach effectively captures complex object interactions that CNN-based architectures strug-
+gle to model, advancing the state-of-the-art in scene graph generation.
+C.3. Hand-Coded Rule-Based Scene Graphs
+To build scene graphs from 3D bounding box detections, we define spatially-oriented relation
+functions.
+Ultimately, these functions aid in building datasets and training SGG inference al-
+gorithms. Each of the functions ingests two objects, O1 (subject) and O2 (object), such that a
+function e.g., front of(O1, O2) would test that “O1 is in front of O2”. “Symmetric” relations
+are those whereby there exists a complement relation such that, e.g., front of(O1, O2)
+⇐⇒
+behind(O2, O1). Note that the complement does not strictly need to be included in the graph
+because it is implied by the former. Therefore, we call a graph “reduced” if it contains only one of
+any complement pairs. The implementations are in the source code that will be released online.
+• front of
+(complement: behind)
+• left of
+(complement: right of)
+• occluding (complement: occluded by)
+• following (complement: followed by)
+• far from
+(complement: self)
+• close to
+(complement: self)
+• next to
+(complement: self)
+C.4. Building Neuro-Symbolic Datasets
+We utilized the CARLA Dosovitskiy et al. (2017) and nuScenes Caesar et al. (2020) datasets, along
+with geometric functions above, to construct the first neuro-symbolic dataset for scene graph gen-
+eration. CARLA, a high-fidelity autonomous driving simulator, provided synthetic yet realistic
+urban driving scenarios, while nuScenes offered large-scale real-world driving data with detailed
+3D annotations. By leveraging these datasets, we extracted object-centric representations, capturing
+spatial, semantic, and kinematic properties of dynamic and static elements within the scene. Using
+geometric functions, we computed precise spatial relationships such as distances, occlusions, and
+patterns between objects, ensuring an explicit and structured encoding of scene interactions. This
+integration of real-world and simulated data, combined with formal geometric reasoning, enabled
+the creation of a neuro-symbolic dataset that bridges visual perception with structured relational
+reasoning, setting a foundation for robust scene graph generation for future research in autonomy.
+16
+NEURO-SYMBOLIC PARADIGM FOR PERCEPTION
+(a) Detections, scene graph built from
+foundation model on camera input.
+(b) DNN yields detections on LiDAR
+data, rules construct scene graph.
+(c) Adversary manipulates pedestrian, translating it away from ego. When pro-
+jected to front-view, pedestrian is still consistent with camera.
+(d) Reasoning on subgraphs illuminates inconsistencies in semantics
+between image and attacked LiDAR graph.
+Figure 7: Case study of using scene graph generation to secure multi-sensor fusion from attacks on
+sensing. Analysis procedure follows that of Figure 6.
+17
+HALLYBURTON PAJIC
+(a) Detections, scene graph built from
+foundation model on camera input.
+(b) DNN yields detections on LiDAR
+data, rules construct scene graph.
+(c) Adversary manipulates pedestrian, translating it away from ego. When pro-
+jected to front-view, pedestrian is still consistent with camera.
+(d) Reasoning on subgraphs illuminates in-
+consistencies in semantics between image
+and attacked LiDAR graph.
+Figure 8: Case study of using scene graph generation to secure multi-sensor fusion from attacks on
+sensing. Analysis procedure follows that of Figure 6.
+18
+NEURO-SYMBOLIC PARADIGM FOR PERCEPTION
+Appendix D. Supplemental Case Studies
+A case study walking through scene graph generation and integrity reasoning from the CARLA
+simulator was presented in Figure 6. We illustrate a case where an attacker translates the detection
+of a pedestrian in a scene from the nuScenes dataset in Figure 7. Similarly, evaluating the graphs
+through an integrity function illuminates inconsistencies between the semantics in the perception
+results. Finally, Figure 8 describes another scene from nuScenes where a van is adversarially trans-
+lated away from the ego vehicle. Scene graph generation and graph-based integrity is able to detect
+inconsistencies in the inference results.
+19

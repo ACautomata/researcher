@@ -1,0 +1,1120 @@
+FunGraph: Functionality Aware 3D Scene Graphs
+for Language-Prompted Scene Interaction
+Dennis Rotondi, Fabio Scaparro, Hermann Blum, Kai O. Arras
+This paper has been accepted for publication at the 2025 International Conference on Intelligent Robots and Systems (IROS).
+Abstract— The concept of 3D scene graphs is increasingly
+recognized as a powerful semantic and hierarchical represen-
+tation of the environment. Current approaches often address
+this at a coarse, object-level resolution. In contrast, our goal
+is to develop a representation that enables robots to directly
+interact with their environment by identifying both the location
+of functional interactive elements and how these can be used.
+To achieve this, we focus on detecting and storing objects at
+a finer resolution, focusing on affordance-relevant parts. The
+primary challenge lies in the scarcity of data that extends
+beyond instance-level detection and the inherent difficulty of
+capturing detailed object features using robotic sensors. We
+leverage currently available 3D resources to generate 2D data
+and train a detector, which is then used to augment the standard
+3D scene graph generation pipeline. Through our experiments,
+we demonstrate that our approach achieves functional element
+segmentation comparable to state-of-the-art 3D models and that
+our augmentation enables task-driven affordance grounding
+with higher accuracy than the current solutions. See our project
+page at https://fungraph.github.io.
+I. INTRODUCTION
+A semantically rich 3D representation of the environment
+is essential for various robotic downstream tasks, including
+task-driven perception, planning, or manipulation. Building
+on the capability of SLAM to learn topometric maps and
+leveraging recent advancements in multimodal foundation
+models, the concept of 3D scene graphs is gaining increasing
+attention. 3D scene graphs (3DSG) [1], [2] are hierarchical
+representations that capture both the geometric and semantic
+structure of a scene, where nodes represent objects or spaces
+at various scales, and edges define their relationships. They
+enable robots to understand and reason about their surround-
+ings, achieving unprecedented levels of open-vocabulary 3D
+scene understanding [3], [4].
+In related work, 3D scene graphs are typically structured
+at the room and object level (e.g., [3]). However, this level
+of granularity may be insufficient for robots that physically
+interact with their environment. For typical tasks in a house-
+hold such as opening a fridge, adjusting a thermostat, or
+operating switches and buttons, a more fine-grained repre-
+sentation is key for context-aware interactions. This should
+D. Rotondi, F. Scaparro and K.O. Arras are with the Socially Intelligent
+Robotics Lab, Institute for Artificial Intelligence, University of Stuttgart,
+Germany. Email: dennis.rotondi@ki.uni-stuttgart.de.
+H. Blum is with the Robot Perception and Learning Lab, LAMARR
+Institute for Machine Learning and Artificial Intelligence, University of
+Bonn, Germany.
+This work is partially supported by the Robotics Institute Germany (RIG)
+funded by BMBF. The authors also thank the International Max Planck
+Research School for Intelligent Systems (IMPRS-IS) for supporting Dennis
+Rotondi.
+Legend
+ Object node
+ Functional element node
+ Inter-object relationship edge
+ Intra-object relationship edge
+Language Query
+Can you grab a frozen pizza?
+Hook Pull
+Fig. 1.
+An example of a generated 3D scene graph and its application. The
+model represents both object and functional element nodes linked through
+intra-object relationships. All purple-colored segments in the left image
+have been correctly detected as functional elements of type “Hook Pull,”
+associated with different kitchen objects. One use of this representation is
+affordance grounding, in which unconstrained language queries produce the
+relation to the functional elements required to fulfill a task (freezer handle
+highlighted in red, right image).
+include objects and functional object parts such as knobs,
+handles or buttons, as well as predictions of possible inter-
+actions with them. In other words, in addition to inter-object
+relationships, the 3D scene graph should be extended by
+intra-object relationships, a problem largely underexplored
+in robotics and the focus of this paper, see Fig. 1.
+One of the key challenges in modeling intra-object re-
+lationships is accurately perceiving functional object parts.
+Such parts are typically small, sparsely sampled in sensory
+data, and underrepresented in public datasets. As a result,
+even state-of-the-art object detectors struggle with low de-
+tection accuracy in both 2D and 3D.
+To address this challenge, we utilize SceneFun3D [5],
+a large-scale dataset that provides sensory data and 3D
+annotations for functional interactive elements in household
+environments. However, this dataset was collected using
+expensive, highly accurate 3D LiDAR sensors, whereas our
+focus is on robotics scenarios that rely on affordable, on-
+board RGB-D sensors. Therefore, our approach involves
+generating 2D data for detector fine-tuning and analyzing
+its impact in 3D. We leverage this result to extend 3D scene
+graphs with intra-object relationships, enabling task-driven
+affordance grounding. Specifically, our contributions are:
+• A method to detect functional interactive elements from
+images, predict their affordances, and assign contextu-
+alized descriptions.
+• A framework, FunGraph, for extending the generation
+arXiv:2503.07909v2  [cs.CV]  10 Aug 2025
+of 3D scene graphs through intra-object relationships,
+representing functional elements and their affordances
+in relation to object nodes.
+• A quantitative and qualitative evaluation of how the
+produced structure allows for 3D functional elements
+segmentation and task-driven affordance grounding.
+The source code and additional materials for FunGraph
+are publicly available at https://fungraph.github.io.
+II. RELATED WORK
+A. 3DSG Generation and Prediction
+3D scene graphs (3DSG) [1], [2], [6] are a spatial data
+representation in the form of a hierarchical graph with nodes
+representing different parts of a scene, such as buildings,
+rooms, and at the most granular level objects. These objects
+can then be connected through various relationships, includ-
+ing spatial (e.g., A “is next to” B), comparative (e.g., A “is
+larger than” B), and support (e.g., A “lays on” B).
+To build 3DSG from observations, different lines of work
+investigated the incremental creation from raw sensor in-
+puts [3], [4], [7], [8], or create scene graphs from existing
+3D scans in post-processing [1], [9], [10], [11], [12], [13].
+The latter is sometimes referred to as 3DSG prediction. All
+these prior works have in common that their lowest layer is
+at the level of objects, and they do not consider object parts
+or their functionality and articulation.
+Among the related works, only CLIO [8] mentions a need
+for different granularity, e.g., to represent that a piano is com-
+posed of keys and other parts. However, they only consider
+object parts and do not group them into objects. They further
+rely on point-grid-prompted SAM [14] to propose object
+segments, which is not reliably capable of detecting small
+interactive elements such as knobs. Another recent work [15]
+uses a 3DSG with object-to-object-part relations, but only in
+a single demo, to retrieve an object from a drawer.
+B. Alternative Queryable Scene Representations
+Implicit representations such as NeRFs [16] are known
+for their rendering accuracy and, if not based on feature
+grids, have no explicitly defined resolution, which is ideal
+for functional interactive elements that are generally small.
+However, semantic variants of NeRFs [17], [18], [19], [20]
+and Gaussian Splatting [21] are evidently limited with regard
+to small objects and sub-parts. These methods rely on pixel-
+aligned semantic features such as DINO [22] or CLIP [23],
+which, however, lack the necessary level of detail for func-
+tional elements.
+Search3D [24] aims to build a hierarchical, open-
+vocabulary 3D scene representation that addresses finer-
+grained scene entities, such as object parts. However, its
+segmentation is purely geometric. Functional elements are
+small and, therefore, require high-resolution scans to be
+geometrically detectable, which has limited practicality. Ad-
+ditionally, the method lacks semantic richness, which is
+heavily dependent on the foundation model employed. It does
+not establish any inter-relationships between entities in the
+scene, making queries such as, “turn off the light above the
+stove” impossible to answer.
+C. Functionality Segmentation & Affordance Understanding
+The PartNet dataset [25] consists of dense annotations on
+3D CAD models, and datasets like 3D AffordanceNet [26]
+and PartAfford [27] have been built upon it, focusing on
+Gibsonian affordances [28], which characterize how humans
+interact with human-made objects and environments. These
+datasets annotate, for example, how a chair can be divided
+into backrest, seat, and legs. Prior works have linked this
+to robotic interaction [29], [30]. Their focus, however, is
+primarily on predicting Gibsonian affordances of already
+isolated objects, rather than on our investigated problem of
+identifying functional interactive elements in a larger scene.
+MultiScan [31] takes a step toward highlighting movable
+object parts in a room scan, such as individual drawers in a
+cabinet. However, it does not provide comprehensive anno-
+tations for interactive components like knobs, handles, and
+other similar elements in the scene. The recent SceneFun3D
+[5] was the first dataset to annotate the functional elements
+themselves in real room-scale scenes. Based on ARKitScenes
+[32], they select nine Gibsonian-inspired affordance labels
+to represent interactions with common elements in indoor
+environments (e.g., Rotate, Hook Pull, etc.) and annotate
+the 3D point cloud directly. Notably, this data annotates
+functional interactive elements in isolation, i.e., it lacks
+information on which knob opens which drawer or whether,
+e.g., two knobs would open the same drawer. To the best of
+our knowledge, no 2D dataset with annotated functionally
+interactive elements currently exist. Therefore, prior 2D
+detectors, for example, leveraged semi-supervised learning
+from human video demonstrations [33] to predict interactive
+elements.
+While predictors trained on large datasets offer important
+priors, it is actually impossible to know how, for example,
+a kitchen cabinet door opens without trying. Therefore,
+researchers have also looked into robotic interactive explo-
+ration [34], [35] as a way to complement predictive priors.
+These works are directly compatible with the scene graph
+framework that we propose, where each interactive element
+prediction can be updated as a robot collects experience in
+an environment. In the same way, our structure supports all
+solutions that learn a policy to interact with objects [36], [37],
+[38] because they can be used as a final step to effectively
+perform the task (see Fig 2).
+III. METHOD
+A. Problem Formulation
+This work aims to extend the classical pipeline of 3D scene
+graph generation for indoor environments by incorporating
+intra-object relationships between scene objects (referred to
+as “objects” in the following) and their 3D functionally
+interactive elements (referred to as “functional elements” in
+the following). For example, we want a cabinet to have a
+direct relationship with its knobs, enhancing the scene graph
+with information about the object’s possible interactions.
+Fig. 2.
+Implementation of our approach on a mobile manipulator using
+RGB-D sensing (3D LiDAR not used). The yellow edges in the left
+picture show intra-object relationships, the blue ones represent inter-object
+relationships, and the red curve is the robot’s camera trajectory. On the right,
+our robot is shown grasping the top handle of the detected drawer cabinet.
+The input to the proposed method consists of a series of
+RGB-D observations, I = {I1, I2, . . . , IN}, and correspond-
+ing camera poses, P = {P 1, P 2, . . . , P N}. Note that, in
+the following, each image Ii is captured from pose P i using
+camera parameters Ki.
+The output of the proposed method is a 3D scene graph,
+specifically a hierarchical graph G = (V, E). That is, the set
+of nodes V can be partitioned into l layers (V = ∪l
+i=1Vi).
+Indeed, by design, introducing intra-object relationships does
+not interfere with the hierarchical properties of the structure:
+single parent, locality, and disjoint children [39], which
+involve nodes V (the collection of objects of the 3D scene)
+and edges E (the relationships between objects) of the graph.
+To ensure the validity of all the theoretical results from
+Hughes et al. [39], care must be taken with the property
+of disjoint children. Assuming that the objects are relatively
+small within the scene, any spatial relationship se ∈E can be
+directly inherited by these smaller objects in the 3D scene
+graph representation without losing any information about
+the scene. For example, if a wardrobe is next to a closet, we
+can also infer that the knobs of the closet are next to the
+wardrobe without the need to add explicit edges between
+the wardrobe and the functional elements of the closet.
+However, this does not hold for comparative relationships.
+For instance, ensuring the disjoint children property prevents
+us from relating functional elements of two different objects.
+In this work, we consider only spatial relationships for
+our graph. That said, it should be noted that incorporating
+non-spatial relationships (e.g., between a light switch and a
+light) may break the hierarchical graph structure.
+B. Generation of 2D Data
+By definition, functional elements are meant for human in-
+teraction. Therefore, common functional interactive elements
+such as door knobs, light switches, or handles are all smaller
+than a regular human hand. To detect these elements, robots
+require sensors with sufficient spatial resolution.
+Because cm-resolution LiDARs are not detailed enough
+and mm-resolution 3D scanners are cost-prohibitive in many
+robotic applications, we assume a collection of registered
+RGB-D observations as input and propose to detect func-
+tional elements from high-resolution RGB.
+To detect functional elements from RGB images, we find
+state-of-the-art open-vocabulary object detectors [40], [41] to
+be insufficient (cf. Table I). Since there are also no other pre-
+trained detectors for this task, our first step is to produce data
+for our own model. In particular, we preprocess the datasets
+listed in II-C to be used as 2D training data.
+The procedure illustrated in this section is applied to
+SceneFun3D [5], as it is the only resource at the time
+of writing containing detailed information about functional
+elements. In any case, this approach is general and can be
+applied to similar data in the future to generate robust 2D
+observations from annotated 3D point clouds.
+For each scene point cloud PCD in the dataset, along
+with 3D functional interactive element annotations A =
+{A1, A2, . . . , AM}, where each annotation represents a sin-
+gle point cloud segment Aj ⊂PCD, and RGB-D observa-
+tions I captured from the scene, the goal is to generate 2D
+annotated images with bounding boxes for performing 2D
+object detection of functional interactive elements.
+For each image Ii, each annotation Aj is projected on the
+2D image plane as aj = (xj yj zj)T = KiP −1
+i Aj Then,
+we mask out all points from aj that are behind (zj < 0),
+or outside of the current camera image. We also remove all
+points where the depth di in Ii differs from the projected
+depth zj by more than a certain threshold θdepth, indicating
+that this annotated element is occluded in the current frame.
+Finally, if the annotation projected onto the image has a
+bounding box area larger than a certain threshold θarea and
+the ratio of pixel points to total points in Aj exceeds a
+threshold θpoints, it is kept; otherwise, it is discarded. At the
+end of the process, each image Ii associated with a scene will
+be left with a subset of projected annotations from A[i] ⊂A,
+whose bounding boxes will contribute to the 2D dataset
+(the collection of all annotated images obtained through this
+process from all scene point clouds) used to train the 2D
+detector for functional elements.
+C. Functionality Aware 3D Scene Graph Generation
+In the past few years, a clear methodology has emerged as
+a framework for generating a 3D scene graph from RGB-D
+observations [3], [4], [7], [42]. The process consists of three
+phases:
+• Detection: Instance segmentation of entities captured in
+the images and feature extraction.
+• Node creation: Multi-view geometric and semantic
+feature merging.
+• Edge creation: Relationship generation.
+Each of these phases requires particular attention when
+dealing with objects the size of functional elements. Fig. 3
+provides an overview of our method.
+Detection. Rather than the class-agnostic 2D segmentation
+of [4], we opt for the approach from ConceptGraphs [3].
+This method detects objects before segmenting them for each
+image Ii, making it straightforward to associate objects with
+their functional elements. The class-agnostic segmentation
+was shown to produce slightly better results in object re-
+trieval, but without clearly defined instances, the association
+Intra-object relationships
+MASK
+Hook Pull
+Pinch Pull
+Rotate
+Rotate
+MASK+FEAT
+3D segments 
+RGB-D Sequence
+Detection
+Inter-object relationships 
+“Describe the spatial 
+relationships between the 
+objects in the image”
+Node Creation
+next to
+Edge Creation
+new
+:
+,
+,
+:
+Pinch Pull → Cabinet Knob
+Rotate →Burner Knob
+Context-based 
+Label Refinement 
+has part
+Burner Knob
+Burner Knob
+Oven Handle
+Object: Functional-elements groups
+Fig. 3.
+Overview of our functionality-aware 3D scene graph generation pipeline, which consists of three stages: (1) Detection, where instance segmentation
+and feature extraction are performed to identify both objects and functional elements; (2) Node Creation, where multi-view geometric and semantic feature
+merging is used to construct graph nodes; and (3) Edge Creation, where inter-object and intra-object relationships are established using spatial reasoning
+and affordance-based associations.
+between objects and functional elements is more complicated
+and potentially less reliable.
+For each Ii ∈I, the q classes and bounding boxes of
+objects and functional elements are detected independently
+using two different models.
+After filtering out detections with confidence below θbbox
+and relative-to-image area ratio lower than θrarea, we prompt
+a general-purpose segmentation model with each remaining
+bounding box. The segments are then reprojected into 3D
+using the depth information of Ii and denoised using DB-
+SCAN clustering, resulting in a set of 3D object segments
+(or point clouds)
+O[i] = {O[i]
+m, O[i]
+a } = {o[i]
+m1, . . . , o[i]
+mp, o[i]
+ap+1, . . . , o[i]
+aq}
+where the subscript m denotes objects and a denotes func-
+tional elements. Each object is associated with a label c[i]
+j
+and semantic features f [i]
+j
+extracted using the CLIP model
+from the bounding-box cropped image. We further discard
+functional elements that do not overlap with any object’s
+bounding box by at least θrel.
+Context-Based Label Refinement. With the detector trained
+using the resource in III-B, functional elements are classified
+into a closed set of Gibsonian-inspired affordances based on
+the SceneFun3D annotations. To ensure the method’s open
+vocabulary ability and obtain more concrete descriptions of
+the functional elements, we prompt a visual language model
+(VLM) for each group of object and its associated functional
+elements. For example, this allows us to obtain the names
+“Refrigerator Handles” and “Freezer Handle” from an image
+of a refrigerator, which is associated with two “Hook Pull”
+functional elements through bounding box overlap. Each
+element in the image prompt is annotated using the bounding
+box and the current label name. Fig. 4 shows an example
+result.
+Node Creation. In the following, we incrementally merge
+the object detections from images to create the graph’s nodes.
+For each image, each o[i]
+mj ∈O[i]
+m is compared to the nodes’
+point cloud in the graph representing objects. To be merged
+(though union), two point clouds u, v need to score over
+θgeo according to a geometric similarity score and over θsem
+according to a semantic similarity score. The geometric
+similarity is [4]:
+S(u, v) = max(overlap(u, v), overlap(v, u))
+(1)
+where overlap(u, v) is the ratio of the points of u withing
+a certain distance from v divided by the total number of
+points of u. For the semantic comparison, cosine similarity
+ϕ(f n, f [i]
+j ) between the features of the node n and the object
+is used. The object segment is merged into the node that
+yields the highest sum of the two similarities in the described
+process. After each successful merge, the point cloud of node
+n is denoised using DBSCAN and downsampled to reduce
+redundancy, and then the semantic features are updated as
+f n ←(f n ∗nn + f [i]
+j )/(nn + 1)
+(2)
+where nn represents the number of times a point cloud has
+been merged into the one of node n. The class c[i]
+j
+is saved
+along with all the other classes merged into node n, and
+only after processing all the images is the most common class
+assigned. If no similarity check is passed, o[i]
+mj is merged with
+an empty, newly initialized node containing a zero-feature
+vector and an empty associated point cloud. Then, for each
+o[i]
+ak associated with o[i]
+mj, which was previously merged into
+node n, we search for the most suitable node among the
+associated functional element nodes of the 3DSG related to
+n to merge it into. Only the metric (1) is employed, but
+with a different threshold θgeo2. The same merging process
+is followed, with two key differences: redundant points are
+removed without downsampling, and the functional element
+segment is merged with all nodes that pass the similarity
+check. This approach is beneficial because, when dealing
+with objects the size of functional elements, they are often
+only partially observed, making it difficult to fill certain gaps
+that could otherwise lead to a final merge at a later stage.
+If no similarity check is passed, the functional element is
+merged into a newly initialized empty node and associated
+Top Drawer Handle
+Third Drawer Handle
+Second Drawer Handle
+Bottom Drawer Handle
+Oven Door Handle
+Hook Pull
+Temperature Control Knob
+Function Selector Knob
+Oven
+Cabinet
+Fig. 4.
+Illustration of our context-based label refinement. The VLM is
+queried to contextualize functional elements with their associated parent
+objects. The handle on the right, labeled “Hook Pull,” is not linked to any
+object, and, as a result, cannot be refined further.
+with node n.
+Periodically, the graph nodes are processed in batches and
+merged with each other, first merging object nodes and then
+functional element nodes related to the merged object nodes
+if they pass the geometric and semantic similarity checks.
+When all images and their corresponding elements have
+been processed, we remove nodes that are not formed by
+at least θnum merged segments from the graph. For the
+remaining functional element nodes, we apply an outlier
+removal procedure using radial and statistical filters. This
+enhances the robustness of the graph creation process by
+preventing noisy reconstructions from being included.
+Edge Creation. Our 3DSG has two types of edges:
+spatial inter-object relationships between the objects in the
+scene and intra-object relationships between objects and their
+functional elements.
+For inter-object relationships, during the node creation
+phase, we track the image sources of all object segments
+that contribute (through merging) to different nodes. We then
+sequentially prompt a VLM with images where all detected
+objects are highlighted to extract binary relationships be-
+tween objects (i, j).
+The most common relationship is added as an edge be-
+tween the nodes of i and j, encoding this spatial knowledge.
+The relationship can be either symmetric (e.g., “next to”) or
+directional (e.g., “on top of”).
+For intra-object relationships, we use the bounding box
+association described in the detection phase to establish a
+“has-part” directed relationship, linking the object to its as-
+sociated functional element. An attribute of this relationship
+is the affordance label extracted by the 2D detector trained
+on our generated dataset, which specifies the purpose of the
+functional element in the context of the object.
+D. Implementation details
+For the 2D dataset generation, we use θdepth = 0.1 [m],
+θdepth = 800 [pixels2], and θpoints = 0.6 as thresholds.
+For the 3D scene graph generation pipeline, we use
+YOLO-WORLDv8.2 for object detection and RT-DETR for
+functional element detections, the best in terms of mAPval
+50:95
+according to Table I. As a general-purpose semantic segmen-
+tation model we use SAM2 [14], and as VLM GPT-4o [43].
+The thresholds in this context are θbbox = 0.4, θrarea = 0.7,
+θrel = 1, θgeo = 0.5, θsem = 0.6, θgeo2 = 0.6 and
+θnum = 3. All computations are performed on a machine
+with an NVIDIA 4090 GPU, 64GB RAM + 64GB SWAP,
+and an AMD Ryzen 9 7950X Processor.
+IV. EXPERIMENTS
+In the following, we conduct experiments to investigate
+the accuracy of our trained 2D models and compare them
+to existing zero-shot detectors. We further validate the scene
+graph generation and 3D lifting against the current SOTA
+3D detectors for functional elements segmentation. Finally,
+we investigate the usefulness of our generated 3DSGs to
+respond to task-driven affordance queries such as “open the
+left window above the radiator.”
+A. Detecting Functional Interactive Elements in Images
+A fundamental assumption of our proposed pipeline is
+that functional elements can be detected at least as well
+from a collection of RGB-D images as from a high-quality
+laser scan. Therefore, we first compare the 2D detection
+performance of our trained models and, in the following
+section, place this into context with existing 3D models.
+Among the nine classes of SceneFun3D, we retained
+only the seven most appropriate for describing functional
+elements, discarding “unplug” and “plug in” along with their
+respective annotations, as they primarily focused on plugs
+(we also do not consider them in possible queries and
+annotations in all the experiments). Taking this into account
+and based on the process described in Section III-B, we
+produce a total of 274 022 annotations across 132 635 images
+with our projection pipeline. We further augmented the data
+with 1% background images (images in which no functional
+element is visible), forming our standard dataset (T). The
+train-validation split of the dataset is 80/20, with the split
+ensuring that train and validation images come from different
+scenes.
+As a baseline, we run YOLO-Worldv8.2 [40] and Ground-
+ing Dino [41] in a zero-shot fashion. We add the names of the
+functional elements (“knob,” “handle,” “button,” “switch,”
+“pedal,” and “general functional interactive element”) to their
+standard prompt set and associate each of their predicted
+labels with the label of the ground truth bounding box that
+has the highest overlap with the predicted one, solely to
+evaluate their detection capabilities.
+Next, we fine-tune YOLOv11 [44] and RT-DETR [45] on
+the standard dataset. Further, we compare these models on
+a variant dataset, which we compute using the slicing-aided
+hyper inference (SAHI) mechanism [46], and refer to it as
+the sliced dataset (ST). This splits the images into 640×640
+patches, which we then use for training and detection. With a
+slice of 20% in both directions, where an annotation covers
+at least 60% of the original area, this process generates a
+total of 335 430 annotated images.
+TABLE I
+Model
+Dataset
+mAPval
+50:95
+mAPval
+50
+YOLO-Wv8.2
+-
+0.0
+0.0
+GroundingDINO
+-
+0.0
+0.7
+YOLOv11
+T
+7.5
+22.4
+RT-DETR
+T
+8.6
+26.7
+YOLOv11
+ST
+13.6
+15.0
+RT-DETR
+ST
+21.0
+26.2
+Fine-tuning results for 2D functional interactive element detection. The
+dataset column indicates the training dataset: T is our standard training
+set and ST is our sliced training set. Pre-trained models are used if no
+dataset is listed. We report the standard COCO [47] metrics.
+As evident from Table I, zero-shot detections are poor.
+This is the main reason why, in prior 3DSG works that
+use such zero-shot models, representing functional elements
+explicitly is not possible. According to our evaluation, RT-
+DETR trained on ST and predicting using SAHI performs
+best across the metrics. This confirms the findings of [46] that
+SAHI is effective for detecting smaller elements. However,
+given the little difference between ST and T training data for
+mAPval
+50, we conclude that ST training does not lead to better
+detections, but to better bounding box accuracy (reflected in
+mAPval
+50:95).
+B. Functional Interactive Elements 3D Segmentation
+The next experiment validates the accuracy of the 3D
+reconstruction and segmentation of the functional element
+detected in 2D and assesses how much information is lost
+in the process of transitioning back and forth between 3D
+and 2D. To this end, we randomly select 10 scenes from the
+validation dataset: 423070, 423306, 423738, 434892,
+435357, 435715, 435724, 442392, 464754, 467330,
+and associate the point cloud of our functional element node
+with the eight nearest points within 5 [mm] from the original
+laser scan, for which the ground truth segmentation has been
+annotated. Note that we retain all functional element detec-
+tions, even without object associations, to avoid penalizing
+scores when parent objects are undetected.
+We then compute the AP metrics as defined in [5]. Per-
+label results are reported in Table II. We note that the exact
+numerical results are difficult to compare, as [5] does not
+release either the model checkpoints or the full train/test
+split. Given that the measured performance on the different
+splits of the same datasets are in a similar range, we carefully
+conclude that our proposed method achieves similar results to
+SOTA approaches that directly predict the class for the points
+in 3D. The main penalized classes are those for which it is
+difficult to generate flawless masks due to background noise.
+Another source of error is not directly related to the method:
+indeed, the poses P provided in the dataset [5] are not
+always accurate, generating artifacts in the merging process
+and penalizing the metrics that require higher precision.
+To further emphasize the correlation between 2D detection
+quality and 3D segmentation performance, we conducted
+an ablation study to relate the metrics from the previous
+experiment to the varying prediction confidence threshold
+TABLE II
+Affordance
+AP
+AP50
+AP25
+AP10
+Foot Push
+0.0
+0.0
+20.0
+46.7
+Tip Push
+10.0
+19.9
+28.4
+28.4
+Rotate
+6.1
+19.9
+25.6
+28.6
+Pinch Pull
+1.7
+6.6
+24.8
+31.5
+Hook Pull
+0.0
+0.0
+10.1
+10.1
+Hook Turn
+9.5
+25.2
+37.7
+59.0
+Key Press
+14.1
+40.4
+65.8
+65.8
+Average
+5.9
+16.0
+30.3
+38.6
+Mask3D-F [5]
+[7.9]
+[18.3]
+[26.6]
+-
+Segmentation results of 3D functional elements by affordance label for
+validation of our 3D lifting approach. The original values of the
+Mask3D-F model are reported for qualitative comparison; its training/test
+data, model, and weights are not yet fully public. Note that our approach
+has to cope with inaccurate poses whereas [5] directly segments on the
+point cloud not affected by these errors.
+TABLE III
+Confidence
+AP
+AP50
+AP25
+AP10
+0.2
+4.4
+8.8
+24.2
+32.3
+0.3
+5.1
+10.4
+27.6
+34.0
+0.4
+5.9
+16.0
+30.3
+38.6
+0.5
+5.0
+10.8
+27.6
+37.2
+0.6
+3.6
+8.0
+22.1
+34.9
+Ablation study on the impact of 2D object detection confidence for 3D
+segmentation performance.
+θbbox of our trained detector. The results are presented in
+Table III.
+C. Affordance Grounding
+In the following experiment, we aim to assess the perfor-
+mance of our method on the task-driven affordance ground-
+ing benchmark in [5]: each query consists of a text-based
+description of the task; the goal is to localize and segment
+the functional interactive elements that an agent needs to
+interact with in order to successfully accomplish the task.
+For example, the expected result of “Open the trash bin” is
+the point cloud of all the trash can pedals in the scene.
+To achieve this, we convert our 3D scene graph represen-
+tation into a JSON format, retaining information about each
+node’s ID, 3D center of mass, 3D bounding box extension,
+label, relationships with the environment, and functionality
+affordance if it is a functional element.
+We then instruct GPT-4o to find in the JSON the ID(s) of
+the node(s) that solve the query. This highlights the general
+advantage of 3DSG representations as they can be easily
+parsed by LLMs. On the same set of scenes, and in the same
+manner discussed in IV-B, we retrieve the closest points to
+our prediction in the original point cloud and compute the
+3D point cloud intersection over union (IoU) between our
+prediction and the ground truth answer elements. We count
+a query as passed if the IoU is at least 25% (AP25).
+In Table IV, we report per-scene results and compare
+them to the SOTA ConceptGraphs [3] that can answer
+unconstrained language queries on the map. As is evident
+from the numbers, ConceptGraphs does not account for the
+TABLE IV
+Scene
+#Queries
+ConceptGraphs
+FunGraph (ours)
+AP25
+AP>0
+AP25
+AP>0
+423070
+8
+0.0
+25.0
+50.0
+50.0
+423306
+3
+0.0
+0.0
+33.3
+66.7
+423738
+21
+0.0
+57.1
+33.3
+85.7
+434892
+5
+0.0
+40.0
+40.0
+40.0
+435357
+10
+0.0
+50.0
+30.0
+60.0
+435715
+12
+0.0
+8.3
+33.3
+75.0
+435724
+10
+0.0
+10.0
+10.0
+20.0
+442392
+8
+0.0
+25.0
+37.5
+37.5
+464754
+18
+0.0
+22.2
+27.8
+44.4
+467330
+4
+0.0
+50.0
+100
+100
+Total
+99
+0.0
+31.3
+33.3
+58.6
+Results for task-driven affordance grounding on randomly selected scenes
+and queries taken from [5]. For each method, the percentage of success
+(IoU at least 25% and > 0%) is shown for the scenes in our validation
+sample. The original number of queries for each scene is reported.
+possibility of providing functional elements as answers to
+queries. Instead, it returns whole object point clouds, which
+results in low IoU with the ground truth. Therefore, we
+further report AP>0, where we count a query as successful
+if there is even a single overlap point between the response
+and the ground truth. The results, however, show that the
+return of ConceptGraphs is still less accurate, indicating that
+the inclusion of functional elements and object-part relations
+in the 3DSG not only improves retrieval localization but also
+generally allows for answering more queries correctly.
+Interestingly, one of the main advantages of storing seg-
+mented functional elements in the 3DSG, is that the scores
+between 3D functional element segmentation and affordance
+grounding do not differ much because all the information
+needed is stored and only needs to be identified. To further
+contextualize the numbers from Table IV, the AP25 of the
+best model in [5] is 17.5. Even considering the above-
+mentioned issues of their unavailable models, the comparison
+indicates that 3DSGs are better representations for answering
+task-driven queries than direct retrieval from the point cloud.
+D. Label Refinement Ablation Study
+As described in Section III-B, the first detection of func-
+tional elements only associates them with their affordance
+label. To obtain also a semantically meaningful label, we
+prompt GPT-4o with each group of object and its associated
+functional elements in the image. We call this approach
+“GPT-Context” to highlight that the model is aware of
+the intra-object relationship. We compared this approach to
+prompting GPT-4o with only the functional element’s bound-
+ing box annotation (approach “GPT-No-Context”) and using
+CLIP features to classify it within a closed vocabulary of
+functional elements. We manually verified 100 detected func-
+tional objects, labeling them as ’C’ (correct), ’W’ (wrong), or
+’P’ (partially correct), where partially correct cases indicate
+predictions like a “cabinet drawer knob” instead of a “cabinet
+door knob.” Results are reported in Table V. CLIP features
+alone perform poorly due to the small size of functional
+TABLE V
+CLIP
+GPT-No-Context
+GPT-Context
+C
+P
+W
+C
+P
+W
+C
+P
+W
+Handle
+32.5
+37.5
+30.0
+77.5
+12.5
+10.0
+82.5
+10.0
+7.5
+Knob
+43.3
+33.3
+23.3
+23.3
+56.7
+20.0
+70.0
+23.3
+6.7
+Button
+10.0
+15.0
+75.0
+55.0
+20.0
+25.0
+85.0
+10.0
+5.0
+Other
+20.0
+0.0
+80.0
+30.0
+20.0
+50.0
+70.0
+30.0
+0.0
+Total
+30.0
+28.0
+42.0
+52.0
+28.0
+20.0
+78.0
+16.0
+6.0
+Ablation study on context-based label refinement. Correct (C), partially
+correct (P), and wrong (W) predictions % are reported. In total, 100
+objects have been studied: 40 handles, 30 knobs, 20 buttons, and 10 other
+functional elements (pedals, touchscreens, etc.).
+elements and their bag-of-words behavior, which generates
+many incorrect results. The best refinements come from the
+GPT-Context solution, supporting our design choice of early
+functional-elements-object grouping.
+V. LIMITATIONS
+Even though our approach shows promising results com-
+pared to the state of the art in 3D scene graph research for
+functional element segmentation and retrieval, there is still
+room for improvement.
+We took advantage of recent developments in resources for
+3D functional elements to demonstrate how this information
+can be incorporated into a 3DSG. However, we emphasize
+that this is only an initial extension of the structure in terms
+of sub-object parts. For example, our method directly relates
+the knob to the cabinet but not to the drawer of the cabinet, an
+intermediate information that may still be valuable to retain.
+Further exploration is needed to better relate functional
+elements that may be shared between multiple objects or
+mounted between two objects. For example, knobs com-
+monly found between an oven and a stove are among the
+most frequent sources of naming and association errors,
+according to our analysis.
+VI. CONCLUSIONS
+In this work, we presented FunGraph, the first 3D scene
+graph framework that models intra-object relationships, fo-
+cusing on functional elements to enable tasks requiring
+interaction with objects in a scene.
+Through our experiments, we demonstrated that our finer-
+grained representation achieves performance comparable to
+state-of-the-art 3D detectors, and we highlight the superiority
+of the method to direct point cloud affordance grounding.
+However, our approach is fundamentally rooted in the 2D
+domain. It does not rely on segmenting a pre-existing high-
+quality point cloud, which makes it also suitable for robotics
+applications with affordable RGB-D sensing. We are able to
+detect and store information about the functional elements
+of objects while extending the general 3DSG generation
+pipeline and preserving the graph’s hierarchical property.
+In the future, we will augment 3D scene graphs with
+even more fine-grained representations by introducing inter-
+mediate object parts before linking the objects themselves
+to functional elements. Moreover, we will integrate all the
+necessary manipulation information into functional element
+nodes, enabling robots to perform motions that interact with
+objects and ultimately providing an end-to-end solution.
+REFERENCES
+[1] I. Armeni, Z.-Y. He, J. Gwak, A. R. Zamir, M. Fischer, J. Malik, and
+S. Savarese, “3d scene graph: A structure for unified semantics, 3d
+space, and camera,” ICCV, 2019.
+[2] U.-H. Kim, J.-M. Park, T.-j. Song, and J.-H. Kim, “3-d scene graph:
+A sparse and semantic representation of physical environments for
+intelligent agents,” IEEE Trans. on Cybernetics, 2020.
+[3] A. Kuwajerwala, Q. Gu, S. Morin, K. M. Jatavallabhula, B. Sen,
+A. Agarwal, C. Rivera, W. Paul, K. Ellis, R. Chellappa, C. Gan,
+C. M. de Melo, J. B. Tenenbaum, A. Torralba, F. Shkurti, and L. Paull,
+“Conceptgraphs: Open-vocabulary 3d scene graphs for perception and
+planning,” ICRA, 2024.
+[4] A. Werby, C. Huang, M. B¨uchner, A. Valada, and W. Burgard,
+“Hierarchical open-vocabulary 3d scene graphs for language-grounded
+robot navigation,” RSS, 2024.
+[5] A. Delitzas, A. Takmaz, F. Tombari, R. Sumner, M. Pollefeys, and
+F. Engelmann, “SceneFun3D: Fine-Grained Functionality and Affor-
+dance Understanding in 3D Scenes,” CVPR, 2024.
+[6] A. Rosinol, A. Gupta, M. Abate, J. Shi, and L. Carlone, “3d dynamic
+scene graphs: Actionable spatial perception with places, objects, and
+humans,” RSS, 2020.
+[7] N. Hughes, Y. Chang, and L. Carlone, “Hydra: A real-time spatial
+perception system for 3d scene graph construction and optimization,”
+RSS, 2022.
+[8] D. Maggio, Y. Chang, N. Hughes, M. Trang, D. Griffith, C. Dougherty,
+E. Cristofalo, L. Schmid, and L. Carlone, “Clio: Real-time task-driven
+open-set 3d scene graphs,” RA-L, 2024.
+[9] J. Wald, H. Dhamo, N. Navab, and F. Tombari, “Learning 3D Semantic
+Scene Graphs from 3D Indoor Reconstructions,” CVPR, 2020.
+[10] S.-C. Wu, J. Wald, K. Tateno, N. Navab, and F. Tombari, “Scenegraph-
+fusion: Incremental 3d scene graph prediction from rgb-d sequences,”
+CVPR, 2021.
+[11] S. Koch, P. Hermosilla, N. Vaskevicius, M. Colosi, and T. Ropinski,
+“Sgrec3d: Self-supervised 3d scene graph learning via object-level
+scene reconstruction,” Winter Conference on Applications of Computer
+Vision (WACV), 2023.
+[12] Z. Wang, B. Cheng, L. Zhao, D. Xu, Y. Tang, and L. Sheng, “Vl-
+sat: Visual-linguistic semantics assisted training for 3d semantic scene
+graph prediction in point cloud,” CVPR, 2023.
+[13] S. Koch, N. Vaskevicius, M. Colosi, P. Hermosilla, and T. Ropinski,
+“Open3dsg: Open-vocabulary 3d scene graphs from point clouds with
+queryable objects and open-set relationships,” CVPR, 2024.
+[14] A. Kirillov, E. Mintun, N. Ravi, H. Mao, C. Rolland, L. Gustafson,
+T. Xiao, S. Whitehead, A. C. Berg, W.-Y. Lo, P. Doll´ar, and R. Gir-
+shick, “Segment anything,” ICCV, 2023.
+[15] T. Behrens, R. Zurbr¨ugg, M. Pollefeys, Z. Bauer, and H. Blum,
+“Lost & found: Tracking changes from egocentric observations in 3d
+dynamic scene graphs,” RA-L, 2025.
+[16] B. Mildenhall, P. P. Srinivasan, M. Tancik, J. T. Barron, R. Ramamoor-
+thi, and R. Ng, “Nerf: Representing scenes as neural radiance fields
+for view synthesis,” ECCV, 2020.
+[17] Y. Siddiqui, L. Porzi, S. R. Bul`o, N. M¨uller, M. Nießner, A. Dai,
+and P. Kontschieder, “Panoptic lifting for 3d scene understanding with
+neural fields,” CVPR, 2023.
+[18] S. Zhi, T. Laidlow, S. Leutenegger, and A. J. Davison, “In-place scene
+labelling and understanding with implicit scene representation,” ICCV,
+2021.
+[19] J. Kerr, C. M. Kim, K. Goldberg, A. Kanazawa, and M. Tancik, “Lerf:
+Language embedded radiance fields,” ICCV, 2023.
+[20] F. Engelmann, F. Manhardt, M. Niemeyer, K. Tateno, M. Pollefeys,
+and F. Tombari, “OpenNeRF: Open Set 3D Neural Scene Segmentation
+with Pixel-Wise Features and Rendered Novel Views,” ICLR, 2024.
+[21] M. Qin, W. Li, J. Zhou, H. Wang, and H. Pfister, “Langsplat: 3d
+language gaussian splatting,” CVPR, 2024.
+[22] M. Caron, H. Touvron, I. Misra, H. J´egou, J. Mairal, P. Bojanowski,
+and A. Joulin, “Emerging properties in self-supervised vision trans-
+formers,” ICCV, 2021.
+[23] A. Radford, J. W. Kim, C. Hallacy, A. Ramesh, G. Goh, S. Agarwal,
+G. Sastry, A. Askell, P. Mishkin, J. Clark, G. Krueger, and I. Sutskever,
+“Learning transferable visual models from natural language supervi-
+sion,” ICML, vol. 139, 2021.
+[24] A. Takmaz, A. Delitzas, R. W. Sumner, F. Engelmann, J. Wald, and
+F. Tombari, “Search3D: Hierarchical Open-Vocabulary 3D Segmenta-
+tion,” RA-L, 2025.
+[25] K. Mo, S. Zhu, A. X. Chang, L. Yi, S. Tripathi, L. J. Guibas, and H. Su,
+“PartNet: A large-scale benchmark for fine-grained and hierarchical
+part-level 3D object understanding,” CVPR, 2019.
+[26] S. Deng, X. Xu, C. Wu, K. Chen, and K. Jia, “3d affordancenet: A
+benchmark for visual object affordance understanding,” CVPR, 2021.
+[27] C. Xu, Y. Chen, H. Wang, S.-C. Zhu, Y. Zhu, and S. Huang,
+“Partafford: Part-level affordance discovery from 3d objects,” arXiv
+preprint arXiv:2202.13519, 2022.
+[28] J. J. Gibson, The Ecological Approach to Visual Perception. Houghton
+Mifflin, 1979.
+[29] C. P. Morlans, C. Chen, Y. Weng, M. Yi, Y. Huang, N. Heppert,
+L. Zhou, L. Guibas, and J. Bohg, “Ao-grasp: Articulated object grasp
+generation,” IROS, 2024.
+[30] G. Schiavi, P. Wulkop, G. Rizzi, L. Ott, R. Siegwart, and J. J. Chung,
+“Learning agent-aware affordances for closed-loop interaction with
+articulated objects,” ICRA, 2023.
+[31] Y. Mao, Y. Zhang, H. Jiang, A. X. Chang, and M. Savva, “Multiscan:
+Scalable rgbd scanning for 3d environments with articulated objects,”
+NeurIPS, 2022.
+[32] G. Baruch, Z. Chen, A. Dehghan, T. Dimry, Y. Feigin, P. Fu,
+T. Gebauer, B. Joffe, D. Kurz, A. Schwartz, and E. Shulman,
+“ARKitscenes - a diverse real-world dataset for 3d indoor scene
+understanding using mobile RGB-d data,” NeurIPS, 2021.
+[33] S. Bahl, R. Mendonca, L. Chen, U. Jain, and D. Pathak, “Affordances
+from human videos as a versatile representation for robotics,” CVPR,
+2023.
+[34] R. Buchanan, A. R¨ofer, J. Moura, A. Valada, and S. Vijayakumar,
+“Online estimation of articulated objects with factor graphs using
+vision and proprioceptive sensing,” ICRA, 2024.
+[35] C. Ning, R. Wu, H. Lu, K. Mo, and H. Dong, “Where2explore: Few-
+shot affordance learning for unseen novel categories of articulated
+objects,” NeurIPS, vol. 36, 2023.
+[36] Y. Wang, X. Zhang, R. Wu, Y. Li, Y. Shen, M. Wu, Z. He, Y. Wang,
+and H. Dong, “Adamanip: Adaptive articulated object manipulation
+environments and policy learning,” ICLR, 2025.
+[37] A. Donat, X. Jia, X. Huang, A. Taranovic, D. Blessing, G. Li, H. Zhou,
+H. Zhang, R. Lioutikov, and G. Neumann, “Towards fusing point
+cloud and visual representations for imitation learning,” arXiv preprint
+arXiv:2502.12320, 2025.
+[38] H. Zhu, Y. Wang, D. Huang, W. Ye, W. Ouyang, and T. He, “Point
+cloud matters: Rethinking the impact of different observation spaces
+on robot learning,” NeurIPS, 2024.
+[39] N. Hughes, Y. Chang, S. Hu, R. Talak, R. Abdulhai, J. Strader,
+and L. Carlone, “Foundations of spatial perception for robotics:
+Hierarchical representations and real-time systems,” The Int. J. of
+Robotics Research, 2024.
+[40] T. Cheng, L. Song, Y. Ge, W. Liu, X. Wang, and Y. Shan, “Yolo-world:
+Real-time open-vocabulary object detection,” CVPR, 2024.
+[41] T. Ren, Q. Jiang, S. Liu, Z. Zeng, W. Liu, H. Gao, H. Huang, Z. Ma,
+X. Jiang, Y. Chen, Y. Xiong, H. Zhang, F. Li, P. Tang, K. Yu, and
+L. Zhang, “Grounding dino 1.5: Advance the ”edge” of open-set object
+detection,” arXiv preprint arXiv:2405.10300, 2024.
+[42] C. Kassab, M. Mattamala, S. Morin, M. B¨uchner, A. Valada, L. Paull,
+and M. Fallon, “The bare necessities: Designing simple, effective
+open-vocabulary scene graphs,” arXiv preprint arXiv:2412.01539,
+2024.
+[43] OpenAI, “GPT-4 technical report,” CoRR, 2023.
+[44] R. Khanam and M. Hussain, “Yolov11: An overview of the key
+architectural enhancements,” arXiv preprint arXiv:2410.17725, 2024.
+[45] Y. Zhao, W. Lv, S. Xu, J. Wei, G. Wang, Q. Dang, Y. Liu, and J. Chen,
+“Detrs beat yolos on real-time object detection,” CVPR, 2024.
+[46] F. C. Akyon, S. O. Altinuc, and A. Temizel, “Slicing aided hyper
+inference and fine-tuning for small object detection,” 2022 IEEE Int.
+Conf. on Image Processing (ICIP), 2022.
+[47] T.-Y. Lin, M. Maire, S. Belongie, J. Hays, P. Perona, D. Ramanan,
+P. Doll´ar, and C. L. Zitnick, “Microsoft coco: Common objects in
+context,” ECCV, 2014.
