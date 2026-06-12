@@ -242,7 +242,7 @@ data = json.loads(p.read_text(encoding="utf-8"))
 prov = data.setdefault("models", {}).setdefault("providers", {}).setdefault("minimax", {})
 prov["apiKey"] = {"source": "env", "provider": "default", "id": "MINIMAX_API_KEY"}
 custom_base = os.environ.get("MINIMAX_BASE_URL", "")
-default_base = "https://api.minimaxi.com/anthropic"
+default_base = "https://api.minimaxi.com"
 if custom_base and custom_base != default_base:
     prov["baseUrl"] = custom_base
     print(f"patched models.providers.minimax.baseUrl -> {custom_base}")
