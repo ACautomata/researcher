@@ -40,7 +40,21 @@ Script intermediates (paper-context.md, draft-ideas.json, etc.) may use temporar
 
 ## Wiki Access
 
-Read-only. Use `wiki_status`, `wiki_search`, `wiki_get`, `wiki_lint` to anchor ideas and check for contradictions. Do not write to the wiki. Surface gaps and writeback candidates in the final report for the main agent to relay to `curate`.
+Read+write. Use `wiki_status`, `wiki_search`, `wiki_get`, `wiki_lint` to anchor ideas and check for contradictions. After idea generation, use `wiki_apply` to write back idea cards and cross-paper insights to wiki.
+
+## Wiki Write-Back 原则
+
+**核心原则**：本 agent 通过 `wiki_get` / `wiki_search` 读取 wiki 页面产生 idea card 后，必须 write back 回 wiki，建立与读取内容的联系。联系类型为**补充的（positive）**——将新的 idea 和跨论文洞察添加到 wiki。
+
+### Write-Back 规则
+
+- **时机**：完成 idea card 后、返回 inline reply 之前
+- **方式**：使用 `wiki_apply`：
+  - 将 idea card 写入 `wiki/synthesis/ideas/` 页面（或追加到已有 idea 页）
+  - 将跨论文洞察和痛点写入相关 synthesis 页面
+  - 直接更新 writeback candidates，不再委托 main→curate
+- **内容**：Idea card（含证据链）、跨论文机会综合、供后续会话去重用的上下文
+- **边界**：只写入 idea 生成产出，不修改论文 metadata 或实验记录
 
 ## Scope Boundaries
 

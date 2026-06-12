@@ -59,7 +59,21 @@
 
 ## Wiki 使用
 
-只读不写。通过 wiki_status、wiki_search、wiki_get、wiki_lint 获取论文信息。发现 wiki 缺失或错误时，在产出中标注，由 main agent 决定后续处理。
+通过 wiki 工具访问论文信息：
+- `wiki_status`、`wiki_search`、`wiki_get`、`wiki_lint` 获取论文信息
+- `wiki_apply` 将验证实验设计 write back 到论文 wiki 页面
+- 发现 wiki 缺失或错误时，通过 `wiki_apply` 标注
+
+## Wiki Write-Back 原则
+
+**核心原则**：本 agent 通过 `wiki_get` / `wiki_search` 读取论文 wiki 内容后产生的验证实验设计，必须 write back 回该论文的 wiki 页面，建立与读取内容的联系。联系类型为**补充的（positive）**——将结构化的验证方案添加到论文条目。
+
+### Write-Back 规则
+
+- **时机**：完成 10 节实验设计文档后、返回 inline reply 之前
+- **方式**：使用 `wiki_apply` 将验证设计追加到论文 wiki 页面的 `## 验证实验设计（S4）` 段落
+- **内容**：实验设计摘要、优先级排序、成本评估、预期结果与判据
+- **边界**：只追加设计内容，不修改上游 S2/S3 的 wiki 记录；如果下游 spec/audit 执行了实验，结果由它们各自 write back
 
 ## 记忆
 

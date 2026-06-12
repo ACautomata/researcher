@@ -10,14 +10,15 @@
 
 - `paper-experiment-deep-extractor`（S2：实验深度提取）
 
-## Wiki 工具（memory-wiki，isolated 模式，只读）
+## Wiki 工具（memory-wiki，read+write）
 
-- `wiki_status` — 确认 vault 在线且 isolated 模式下可读
+- `wiki_status` — 确认 vault 在线且可读
 - `wiki_search` — 搜既有论文条目 / 相关 claim / 已记录的实验设计
 - `wiki_get` — 按 id/path 拉单页详情，作为实验提取的输入
-- `wiki_lint` — 引用 wiki 内容前跑一次确认没有 contradiction
+- `wiki_lint` — 引用 wiki 内容前跑一次确认没有 contradiction；`wiki_apply` 写入后跑一次验证质量
+- `wiki_apply` — 完成提取后，将 12 节实验提取文档的关键产出 write back 到论文 wiki 页面
 
-> 本 agent **不调用** `wiki_apply`（写入由 ingest/curate 负责）。
+> **Write-Back 原则**：读取 wiki 后产生的产出必须 write back，建立与读取内容的联系。
 
 ## 文件操作
 
@@ -27,4 +28,3 @@
 ## 不使用的工具
 
 - `sessions_spawn` — 本 agent **不**派生子 agent，不做跨 agent 编排
-- `wiki_apply` — 本 agent **不**修改 wiki

@@ -33,7 +33,18 @@ sessions_spawn(
 
 **做：** 提取实验目标、数据集、任务划分、baseline、评价指标、主结果、消融、敏感性、效率、鲁棒性；提炼 3–6 个现象（只描述不批判）；整理证据充分性。
 
-**不做：** 问题分析（S3）、验证设计（S4）、Codex 提示词（S5）、Wiki 维护（ingest/curate）、跨 agent 编排、不调用 `sessions_spawn`。
+**不做：** 问题分析（S3）、验证设计（S4）、Codex 提示词（S5）、跨 agent 编排、不调用 `sessions_spawn`。
+
+## Wiki Write-Back 原则
+
+**核心原则**：本 agent 通过 `wiki_get` / `wiki_search` 读取论文 wiki 页面后产生的 12 节实验提取文档，必须 write back 回该论文的 wiki 页面，建立与读取内容的联系。联系类型为**补充的（positive）**——将结构化的实验细节添加到论文条目。
+
+### Write-Back 规则
+
+- **时机**：完成 12 节提取文档后、返回 inline reply 之前
+- **方式**：使用 `wiki_apply` 将提取文档追加到论文 wiki 页面的 `## 实验提取（S2）` 段落
+- **内容**：完整的 12 节 Markdown 文档（## 0–## 11），标注来源论文和提取时间
+- **边界**：只追加，不覆盖论文 wiki 页面的已有内容（metadata、摘要等由 ingest 写入的部分保持不变）
 
 ## 原则
 

@@ -5,4 +5,4 @@
 - 输入：Wiki 条目 + S2 实验提取文档
 - 输出：结构化问题分析文档（inline reply，§0–§7 模板）
 - 不做实验设计、不提新方法、不下最终结论
-- Wiki 只读，缺口报告给 main agent
+- Wiki 读写：读取 wiki 做分析后，通过 wiki_apply 将问题分析 write-back 到论文 wiki 页面。发现缺口时直接通过 wiki_apply 标注（详见 AGENTS.md Wiki Write-Back 原则）

@@ -43,8 +43,21 @@
 
 - Wiki 整理（`paper-wiki-entry-organizer`）由 `ingest` / `curate` 子 agent 负责。
 - S2–S5 的具体执行由 `extract` / `critic` / `design` / `spec` 子 agent 负责。
-- 我只读 wiki（read-only），不写入；不调用 `wiki_apply`。
+- 我读取 wiki 评估上游产出，审计完成后通过 `wiki_apply` 将审计结论 write back 到论文 wiki 页面。
 - 我对上游产物做评估，不对论文本身做评价。
+
+## Wiki Write-Back 原则
+
+**核心原则**：本 agent 通过 `wiki_get` / `wiki_search` 读取 wiki 内容比对上游产出后产生的审计结论，必须 write back 回该论文的 wiki 页面，建立与读取内容的联系。联系类型为**双重**：positive（质量认证记录）和 negative（发现的问题和修复建议）。
+
+### Write-Back 规则
+
+- **时机**：完成审计报告后、返回 inline reply 之前
+- **方式**：使用 `wiki_apply` 将以下内容追加到论文 wiki 页面：
+  - `## 审计记录（S6）`：审计结论（总评、通过/需修复）、关键发现
+  - 发现的 wiki 缺条目或需更新之处，直接通过 `wiki_apply` 标注
+- **内容**：审计总评、必须修复项、建议改进项、跨阶段一致性问题
+- **边界**：只追加审计结论和标注，不修改上游 S2–S5 的 wiki 记录内容
 
 ## 关键约定
 

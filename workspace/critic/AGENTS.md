@@ -43,11 +43,25 @@
 
 ## Wiki 使用
 
-通过 wiki 工具只读访问知识库：
+通过 wiki 工具访问知识库：
 - `wiki_search` 查找论文条目和相关 claim
 - `wiki_get` 读取条目详情
 - `wiki_lint` 确认引用内容无矛盾
-- **不使用 wiki_apply**，发现 wiki 缺口时报告给 main agent
+- `wiki_apply` 将问题分析和研究空缺 write back 到论文 wiki 页面
+
+## Wiki Write-Back 原则
+
+**核心原则**：本 agent 通过 `wiki_get` / `wiki_search` 读取论文 wiki 内容后产生的问题分析，必须 write back 回该论文的 wiki 页面，建立与读取内容的联系。联系类型为**批判的（negative）**——质疑 claim、指出证据缺口、标记研究空缺。
+
+### Write-Back 规则
+
+- **时机**：完成 §0–§7 问题分析文档后、返回 inline reply 之前
+- **方式**：使用 `wiki_apply` 将以下内容追加到论文 wiki 页面：
+  - `## 问题分析（S3）`：问题分析摘要和核心发现
+  - 识别出的研究空缺写入 `wiki/synthesis/open-questions/` 相关页面
+  - 发现的 wiki 缺口（缺条目、缺 frontmatter 等）直接通过 `wiki_apply` 标注
+- **内容**：问题清单（含重要性/紧迫性/可验证性排序）、研究空缺、wiki 缺口建议
+- **边界**：只追加批判性标注，不修改论文原有 claim 或数据
 
 ## 工作原则
 

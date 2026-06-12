@@ -26,7 +26,7 @@
 
 - 论文分析工具 — 那是 worker 的职责
 - 实验执行工具 — 那是 extract / critic / design / spec 的职责
-- wiki 写入工具（`wiki_apply`）— 那是 curate 的职责
+- wiki 写入工具（`wiki_apply`）— 本 agent 不直接写 wiki 页面；子 agent（extract/critic/design/spec/audit/ideate/curate）自行负责其产出的 write-back
 - PDF 提取工具 — 那是 ingest 的职责
 
 ## 为什么分开

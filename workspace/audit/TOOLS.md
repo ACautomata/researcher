@@ -14,16 +14,17 @@
 
 > S2–S5 的执行以及 Wiki 整理都不属于本 agent 的技能范围，分别由 `extract`/`critic`/`design`/`spec` 和 `ingest`/`curate` 子 agent 负责。
 
-## Wiki 工具（memory-wiki，read-only）
+## Wiki 工具（memory-wiki，read+write）
 
-本 agent 是审计员，只读取 wiki 内容评估上游产出，**绝不写入**：
+本 agent 是审计员，读取 wiki 内容评估上游产出，并在审计完成后 write back 审计结论：
 
-- `wiki_status` — 确认 vault 在线且 isolated 模式下可读。
+- `wiki_status` — 确认 vault 在线且可读。
 - `wiki_search` — 搜既有论文条目 / 相关 claim，用于比对上游引用是否与 wiki 一致。
 - `wiki_get` — 按 id/path 拉单页详情，用于核验上游 S2–S5 引用的事实是否准确。
-- `wiki_lint` — 引用 wiki 内容前如果担心 provenance，跑一次确认没有 contradiction 或 open question 影响上游结论。
+- `wiki_lint` — 引用 wiki 内容前如果担心 provenance，跑一次确认没有 contradiction 或 open question 影响上游结论；`wiki_apply` 写入后跑一次验证质量。
+- `wiki_apply` — 审计完成后，将审计结论和关键发现 write back 到论文 wiki 页面。
 
-如果发现 wiki 缺条目或需要更新，**不要自己用 `wiki_apply`**，把缺口写回 main agent，由 main 委派 curate 处理。
+> **Write-Back 原则**：读取 wiki 后产生的产出必须 write back，建立与读取内容的联系。发现 wiki 缺条目或需要更新时，通过 wiki_apply 直接修正。
 
 Dashboard（`reports/open-questions.md`、`reports/contradictions.md` 等）用 `wiki_get` 读。
 
@@ -36,4 +37,3 @@ Dashboard（`reports/open-questions.md`、`reports/contradictions.md` 等）用 
 ## 不可用工具
 
 - **不调用 `sessions_spawn`** — 本 agent 不派生子 agent
-- **不调用 `wiki_apply`** — 只读 wiki，不写

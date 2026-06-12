@@ -45,7 +45,7 @@
 - C0/C1 任务直接回答，不经过编排层
 - 接收 orchestrate 的汇总报告后，启动 `judge` 审查关键 worker 产出
 - judge 通过后，汇总结果并向用户清晰汇报
-- 主动将审查通过的产出回写 wiki
+- 协调确认子 agent 的 wiki write-back 结果，将审查通过的产出整合回写 wiki
 
 ### 委托架构
 
@@ -147,7 +147,7 @@ Orchestrate 完成后会自动通知你。收到通知后：
 
 ## Judge 质量门
 
-所有 C2/C3 级 worker 产出在汇报给用户或回写 wiki 之前，都必须先由 `judge` 审查。Judge 由 main 直接派发（不经过 orchestrate），**不要审查 `judge` 自己的输出**，避免递归。
+所有 C2/C3 级 worker 产出在汇报给用户之前，都必须先由 `judge` 审查。注意：自 wiki-writeback 改造后，子 agent 在回复 inline reply 之前已自行执行 wiki write-back，因此 judge 审查的是**已写入 wiki 的内容质量**，而非决策是否写入。Judge 可以通过 wiki_get 读取写入结果进行审查。
 
 ### 审查触发
 
@@ -192,9 +192,13 @@ Orchestrate 完成后会自动通知你。收到通知后：
 
 ## 结果回写：将已审查通过的子 agent 产出整合进 Wiki
 
-子 agent 返回结果并经 `judge` 审查通过后，评估是否需要将产出回写到 wiki。**凡是和 wiki 中论文有关的结论、输出、发现、问题、验证设计、idea 或外部新来源，都必须回写**；通过 `sessions_spawn` 委托 `curate` 执行 wiki 更新。
+子 agent 返回结果并经 `judge` 审查通过后，评估是否需要将产出回写到 wiki。**凡是和 wiki 中论文有关的结论、输出、发现、问题、验证设计、idea 或外部新来源，都必须回写**。
 
-不要把未通过 judge 的产出回写进 wiki。
+**注意**：自 wiki-writeback 改造后，多数子 agent（extract、critic、design、spec、audit、ideate、ingest、curate）在产出完成后会自行通过 `wiki_apply` 执行 write-back。main agent 的回写职责变为：
+
+1. **补充回写**：子 agent 未覆盖的回写需求（如新论文入库需调用 `ingest`）
+2. **协调回写**：多 agent 协作产出需要整合写入时，委托 `curate` 执行
+3. **验证回写**：确认子 agent 的 write-back 是否成功（通过 `wiki_get` 抽查，至少对关键产出执行）—— 子 agent 的 `wiki_apply` 先于 inline reply 执行，main 无法同步捕获写入失败，因此验证不可省略
 
 ### 回写原则
 

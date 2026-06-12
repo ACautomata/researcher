@@ -1,15 +1,16 @@
 # TOOLS.md - 本地说明
 
-## Wiki 工具（只读）
+## Wiki 工具（read+write）
 
-本 agent 通过 memory-wiki 工具只读访问知识库：
+本 agent 通过 memory-wiki 工具访问知识库：
 
 - `wiki_status` — 确认 vault 在线且可读
 - `wiki_search` — 搜索论文条目、相关 claim、已记录的实验设计
 - `wiki_get` — 按 id/path 读取单页详情
-- `wiki_lint` — 引用前确认无矛盾
+- `wiki_lint` — 引用前确认无矛盾；`wiki_apply` 写入后跑一次验证质量
+- `wiki_apply` — 完成问题分析后，将关键发现 write back 到论文 wiki 页面
 
-**不使用 `wiki_apply`。** 发现 wiki 缺口时报告给 main agent。
+> **Write-Back 原则**：读取 wiki 后产生的产出必须 write back，建立与读取内容的联系。
 
 ## 文件操作
 
@@ -19,4 +20,3 @@
 
 - 无 `sessions_spawn` — 本 agent 不生成子 agent
 - 不编排其他 agent
-- 不修改 wiki 知识库

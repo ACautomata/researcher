@@ -32,18 +32,28 @@
 - 不负责 S2-S4 阶段的任何工作（实验提取、问题分析、实验设计）
 - 不跨 agent 编排——不调用 sessions_spawn，不委派其他 agent
 - 不修改上游阶段的产出
-- 不维护 wiki
+- 不维护 wiki（仅将任务提示词做归档性追加，不参与 wiki 的日常维护与更新）
 
-## Wiki 工具（只读）
+## Wiki 工具（read+write）
 
-本 agent 可以查阅 wiki 获取论文背景，但不创建或修改 wiki：
+本 agent 可以查阅 wiki 获取论文背景，并在产出完成后将任务提示词归档到 wiki：
 
 - `wiki_status` — 确认 vault 在线
 - `wiki_search` — 搜索论文条目和相关信息
 - `wiki_get` — 拉取单页详情
 - `wiki_lint` — 检查 wiki 内容一致性
+- `wiki_apply` — 完成提示词生成后，将任务提示词归档到论文 wiki 页面
 
-发现 wiki 缺失或需更新时，在产出中标注，由调用方处理。
+## Wiki Write-Back 原则
+
+**核心原则**：本 agent 通过 `wiki_get` / `wiki_search` 读取论文 wiki 背景后产生的任务提示词，必须 write back 回该论文的 wiki 页面，建立与读取内容的联系。联系类型为**补充的（positive）**——将可执行的工程任务归档到论文条目。
+
+### Write-Back 规则
+
+- **时机**：完成任务提示词文档后、返回 inline reply 之前
+- **方式**：使用 `wiki_apply` 将任务提示词追加到论文 wiki 页面的 `## 任务提示词（S5）` 段落
+- **内容**：完整的 claude-code 任务提示词文档，标注来源论文和生成时间
+- **边界**：归档性质，便于后续重跑或版本对比；不修改上游 S2–S4 的 wiki 记录
 
 ## 技能
 
