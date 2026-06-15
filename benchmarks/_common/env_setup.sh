@@ -242,15 +242,16 @@ bench_reapply_setup() {
 import json, os, pathlib
 p = pathlib.Path("/home/node/.openclaw/openclaw.json")
 data = json.loads(p.read_text(encoding="utf-8"))
-# Resolve target provider + model id from LLM_MODEL. Following the
-# `provider/model` convention used by ~/.openclaw/openclaw.json, the prefix
-# "AA" of "AA/BB" becomes models.providers.AA and "BB" becomes the model id.
-# A bare LLM_MODEL with no slash falls back to the minimax provider.
+# Resolve target provider + model id from LLM_MODEL, following the
+# `provider/model` convention used by ~/.openclaw/openclaw.json: the prefix
+# "AA" of "AA/BB" becomes models.providers.AA and "BB" the model id.
+# LLM_MODEL must contain a slash; a bare model name is rejected.
 llm_model = os.environ.get("LLM_MODEL", "")
-if llm_model and "/" in llm_model:
-    _provider, _model_id = llm_model.split("/", 1)
-else:
-    _provider, _model_id = "minimax", llm_model
+if "/" not in llm_model:
+    raise SystemExit(
+        "LLM_MODEL must be in 'provider/model' form (e.g. minimax/MiniMax-M2.7), got: %r" % llm_model
+    )
+_provider, _model_id = llm_model.split("/", 1)
 prov = data.setdefault("models", {}).setdefault("providers", {}).setdefault(_provider, {})
 prov["apiKey"] = {"source": "env", "provider": "default", "id": "LLM_API_KEY"}
 custom_base = os.environ.get("LLM_BASE_URL", "")
@@ -263,17 +264,16 @@ if default_prov is not None:
     print("removed models.providers.default overlay (not needed for bench)")
 # Repoint the provider model list to LLM_MODEL so the bench is not pinned
 # to MiniMax-M2.7.
-if _model_id:
-    _template = prov.get("models", [{}])[0] if prov.get("models") else {}
-    _new_model = dict(_template)
-    _new_model["id"] = _model_id
-    _new_model["name"] = _model_id
-    prov["models"] = [_new_model]
-    data.setdefault("agents", {}).setdefault("defaults", {})["model"] = {
-        "primary": f"{_provider}/{_model_id}", "fallbacks": []
-    }
-    print(f"patched models.providers.{_provider}.models -> [{_model_id}]")
-    print(f"patched agents.defaults.model.primary -> {_provider}/{_model_id}")
+_template = prov.get("models", [{}])[0] if prov.get("models") else {}
+_new_model = dict(_template)
+_new_model["id"] = _model_id
+_new_model["name"] = _model_id
+prov["models"] = [_new_model]
+data.setdefault("agents", {}).setdefault("defaults", {})["model"] = {
+    "primary": f"{_provider}/{_model_id}", "fallbacks": []
+}
+print(f"patched models.providers.{_provider}.models -> [{_model_id}]")
+print(f"patched agents.defaults.model.primary -> {_provider}/{_model_id}")
 # Sandbox mode requires Docker-in-Docker which is not available in CI/local bench containers.
 agents = data.setdefault("agents", {})
 defaults = agents.setdefault("defaults", {})
