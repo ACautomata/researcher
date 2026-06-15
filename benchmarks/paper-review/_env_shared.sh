@@ -46,10 +46,26 @@ fi
 # QA prompts reference wiki files via this vault path.
 WIKI_VAULT="${BENCH_MOUNT}/wiki/main"
 MATERIALS_SRC="${MATERIALS_ROOT}/materials"
+CONTAINER_MATERIALS="${BENCH_MOUNT}/benchmarks/paper-review/materials"
 
-if [[ -d "${MATERIALS_SRC}" ]]; then
-  log "staging wiki materials -> ${WIKI_VAULT}"
-  bench_container_cli exec "${BENCH_CONTAINER}" mkdir -p "${WIKI_VAULT}"
+log "staging wiki materials -> ${WIKI_VAULT}"
+bench_container_cli exec "${BENCH_CONTAINER}" mkdir -p "${WIKI_VAULT}"
+
+if bench_container_cli exec "${BENCH_CONTAINER}" test -d "${CONTAINER_MATERIALS}"; then
+  # CI recreates the container in the matrix job. Copy from the repo snapshot
+  # already reapplied inside the container so vault staging does not depend on
+  # host docker cp paths or permissions after bench_force_recreate.
+  bench_container_cli exec "${BENCH_CONTAINER}" bash -lc \
+    "set -e
+     if [ -d '${CONTAINER_MATERIALS}/wiki' ]; then
+       cp -a '${CONTAINER_MATERIALS}/wiki/.' '${WIKI_VAULT}/'
+     fi
+     find '${CONTAINER_MATERIALS}' -maxdepth 1 -type f -exec cp {} '${WIKI_VAULT}/' \\;
+     count=\$(find '${WIKI_VAULT}' -maxdepth 1 -type f | wc -l | tr -d ' ')
+     test \"\${count}\" -gt 0
+     echo \"staged \${count} wiki vault files\""
+elif [[ -d "${MATERIALS_SRC}" ]]; then
+  log "container materials missing; falling back to host copy"
 
   # Wiki entries
   if [[ -d "${MATERIALS_SRC}/wiki" ]]; then
@@ -64,9 +80,10 @@ if [[ -d "${MATERIALS_SRC}" ]]; then
     [[ -f "$f" ]] || continue
     bench_container_cli cp "$f" "${BENCH_CONTAINER}:${WIKI_VAULT}/$(basename "$f")"
   done
-
-  log "staged materials into wiki vault"
+else
+  log "WARNING: materials dir not found; wiki vault may be empty"
 fi
+log "staged materials into wiki vault"
 
 # ── 2. Link/copy benchmark materials into workspace ─────────────────
 # Most agents should read the staged wiki vault (~/.openclaw/wiki/main).
