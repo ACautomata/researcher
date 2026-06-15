@@ -27,28 +27,6 @@ def normalize_material_text(text: str) -> str:
     )
 
 
-def add_sync_instruction(question: str) -> str:
-    question = question or ""
-    sync_instruction = (
-        "\n\n【Benchmark 同步执行约束】这是本地 benchmark 的单次同步调用。"
-        "请在当前 main agent 回复中直接完成，不要调用 sessions_spawn、sessions_yield，"
-        "不要启动 orchestrate/extract/critic/design/spec/audit/judge 等子会话，"
-        "不要另行启动质量门，不要写入文件后只返回路径或状态摘要。"
-        "只能使用题目给出的本地 Wiki/全文材料路径，不要调用 web_fetch/web_search 或访问外网；"
-        "最终答案必须作为完整 Markdown 正文"
-        "直接出现在本次回复中。"
-    )
-    if "Benchmark 同步执行约束" not in question:
-        question += sync_instruction
-    if "直接返回" not in question and "直接在回复" not in question:
-        question += (
-            "\n\n重要：完成分析后必须将完整 Markdown 正文直接返回在回复中。"
-            "不得只回复文件路径、'已保存到' 或 '任务完成' 等状态摘要。"
-            "回复的第一行就应该是 Markdown 正文的标题。"
-        )
-    return question
-
-
 def convert(item: dict) -> dict:
     sa = item.get("standard_answer") or item.get("gold_answer") or {}
     must = sa.get("must_contain") or []
@@ -65,7 +43,7 @@ def convert(item: dict) -> dict:
     if must_not:
         ga["must_not_contain"] = must_not
         ga.setdefault("violation_penalty", 1)
-    question = add_sync_instruction(item.get("question", ""))
+    question = item.get("question", "")
     qa_id = item.get("id") or item.get("qa_id")
     if not qa_id:
         raise ValueError(f"QA item missing id/qa_id: {item!r}")
@@ -117,7 +95,6 @@ def load_fle_items() -> list[dict]:
         item.setdefault("pass_threshold", 0.5)
         item.setdefault("weight", 1.0)
         item["input_material"] = normalize_material_text(item.get("input_material", ""))
-        item["question"] = add_sync_instruction(item.get("question", ""))
         validated.append(item)
 
     print(f"[build_qa] Loaded {len(validated)} Focus-Level Eval QA items from {FLE_SRC}")
