@@ -238,7 +238,7 @@ bench_reapply_setup() {
   echo "[bench_reapply_setup] chown /home/node/.openclaw -> 1000:1000"
   bench_container_cli exec "${container}" chown -R 1000:1000 /home/node/.openclaw || true
   echo "[bench_reapply_setup] patching openclaw.json (SecretRef)"
-  bench_container_cli exec "${container}" python3 -c '
+  bench_container_cli exec -e LLM_MODEL "${container}" python3 -c '
 import json, os, pathlib
 p = pathlib.Path("/home/node/.openclaw/openclaw.json")
 data = json.loads(p.read_text(encoding="utf-8"))
@@ -252,6 +252,22 @@ if custom_base and custom_base != default_base:
 default_prov = data.get("models", {}).get("providers", {}).pop("default", None)
 if default_prov is not None:
     print("removed models.providers.default overlay (not needed for bench)")
+# Repoint the minimax provider model list to LLM_MODEL so the bench is not
+# pinned to MiniMax-M2.7. LLM_MODEL may be "provider/model" or a bare "model"
+# (treated as belonging to the minimax provider, which we repointed above).
+llm_model = os.environ.get("LLM_MODEL", "")
+if llm_model:
+    _model_id = llm_model.split("/", 1)[1] if "/" in llm_model else llm_model
+    _template = prov.get("models", [{}])[0] if prov.get("models") else {}
+    _new_model = dict(_template)
+    _new_model["id"] = _model_id
+    _new_model["name"] = _model_id
+    prov["models"] = [_new_model]
+    data.setdefault("agents", {}).setdefault("defaults", {})["model"] = {
+        "primary": "minimax/" + _model_id, "fallbacks": []
+    }
+    print(f"patched models.providers.minimax.models -> [{_model_id}]")
+    print(f"patched agents.defaults.model.primary -> minimax/{_model_id}")
 # Sandbox mode requires Docker-in-Docker which is not available in CI/local bench containers.
 agents = data.setdefault("agents", {})
 defaults = agents.setdefault("defaults", {})

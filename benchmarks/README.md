@@ -14,6 +14,7 @@ benchmarks/
 │   ├── env_setup.sh                   # Unified env: boot container, health check (docker + container CLI)
 │   ├── run_bench.py                   # Generic driver; all metrics.py shim to this
 │   ├── run_local_benchmark.sh         # Local single-benchmark runner (docker or Apple container CLI)
+│   ├── bake_wiki.sh                  # Pre-bake a benchmark wiki from raw materials (ingest → snapshot → patch env.sh)
 │   ├── judge.py                       # Reusable rule/agent judges
 │   └── report_pr.py                   # Aggregator + PR comment via `gh api`
 ├── idea-generate/                     # Benchmarks — each must have env.sh + metrics.py + qa.jsonl
@@ -86,6 +87,39 @@ bash benchmarks/idea-generate-1/env.sh
 python3 benchmarks/idea-generate-1/metrics.py
 cat benchmarks/idea-generate-1/bench-report.json | jq
 ```
+
+## Pre-baking a benchmark wiki from raw materials (`bake_wiki.sh`)
+
+Some benchmarks ground their QAs in a research wiki rather than (or in addition
+to) inline `input_material`. Instead of asking the agent to ingest raw papers at
+benchmark runtime (slow and flaky), pre-bake the wiki once and commit the
+resulting vault as a fixture:
+
+```bash
+# 1) Put raw papers in benchmarks/<bench>/materials/ (any .md / .pdf / .txt).
+#    Or point at any folder with --materials DIR.
+
+# 2) Bake: boot the CI container, ingest every file into the wiki via the main
+#    agent (paper-ingest: ingest → curate), export the vault, and patch env.sh
+#    so the benchmark docker-cp's it in at run time.
+benchmarks/_common/bake_wiki.sh idea-generate-1
+
+# Re-baking replaces the managed env.sh block and the wiki/main/ snapshot.
+benchmarks/_common/bake_wiki.sh --materials ../some/papers --runtime container idea-generate-1
+```
+
+What it produces, under `benchmarks/<bench>/`:
+
+- `wiki/main/` — the baked Obsidian vault (paper pages + auto-generated reports).
+- `env.sh` gains a managed `bake_wiki: stage baked wiki/main` block that
+  `docker cp`s the vault into the container at benchmark time. The block is
+  delimited by literal markers and replaced wholesale on every re-bake.
+- `.bake-debug/` — the ingestion prompt and raw agent stdout/stderr (gitignored
+  via `benchmarks/**/results/`-style hygiene; add to `.gitignore` if you commit
+  a bake).
+
+Credentials use the same precedence as `run_local_benchmark.sh`:
+`--api-key/--base-url/--model` flags → `docker/.env.bench` → `LLM_*` env vars.
 
 ## Legacy notes
 
