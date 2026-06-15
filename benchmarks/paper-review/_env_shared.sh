@@ -22,11 +22,16 @@ log() { printf '\n[paper-review.env] %s\n' "$*"; }
 
 # CI: the setup job tears down its container; each bench matrix job
 # runs on a different runner and MUST recreate the container.
-# Local: BENCH_ENV_FILE is unset; container already exists from env_setup.sh.
-if [[ -n "${BENCH_ENV_FILE:-}" && -f "${BENCH_ENV_FILE}" ]]; then
+# Local: container already exists from env_setup.sh; skip recreate.
+if [[ -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}" ]]; then
+  if [[ -n "${BENCH_ENV_FILE:-}" && -f "${BENCH_ENV_FILE}" ]]; then
+    # shellcheck disable=SC1090
+    . "${BENCH_ENV_FILE}"
+    bench_force_recreate
+  fi
+elif [[ -n "${BENCH_ENV_FILE:-}" && -f "${BENCH_ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
   . "${BENCH_ENV_FILE}"
-  bench_force_recreate
 fi
 if ! declare -F bench_container_cli >/dev/null; then
   bench_container_cli() {
@@ -59,25 +64,28 @@ if [[ -d "${MATERIALS_SRC}" ]]; then
     [[ -f "$f" ]] || continue
     bench_container_cli cp "$f" "${BENCH_CONTAINER}:${WIKI_VAULT}/$(basename "$f")"
   done
+
   log "staged materials into wiki vault"
 fi
 
-# ── 2. Link benchmarks/ into workspace for agent path resolution ───
-# QA prompts reference benchmarks/paper-review/materials/* paths.
-# OpenClaw tools resolve relative paths from the workspace root.
-log "linking repo benchmarks into workspace"
+# ── 2. Link/copy benchmark materials into workspace ─────────────────
+# Most agents should read the staged wiki vault (~/.openclaw/wiki/main).
+# Some file tools resolve user-mentioned benchmark paths from workspace/main,
+# so copy paper-review materials there as a sandbox-safe fallback.
+log "staging benchmark materials into workspace"
 
-# 2a. Symlink benchmarks/ into all workspace dirs (lightweight path access)
+# Symlink benchmarks/ into worker workspaces where symlinks are accepted.
+# Do not symlink inside workspace/main: the agent sandbox may reject links that
+# resolve outside its root. workspace/main gets a real materials copy below.
 bench_container_cli exec "${BENCH_CONTAINER}" bash -lc \
-  "for ws in workspace workspace/main workspace/extract workspace/critic workspace/design workspace/spec workspace/audit; do
+  "for ws in workspace workspace/extract workspace/critic workspace/design workspace/spec workspace/audit; do
      mkdir -p '${BENCH_MOUNT}/\${ws}'
      rm -f '${BENCH_MOUNT}/\${ws}/benchmarks'
      ln -s '${BENCH_MOUNT}/benchmarks' '${BENCH_MOUNT}/\${ws}/benchmarks'
    done" || log "WARNING: symlink step failed (non-fatal)"
 
-# 2b. For workspace/main, replace symlink with real material copies.
-# Symlinks trigger "escapes sandbox root" errors in the agent sandbox,
-# so we rm the symlink and copy the materials directory in full.
+# For workspace/main, use real material copies. This avoids "symlink escapes
+# sandbox root" errors while preserving compatibility with file-path prompts.
 bench_container_cli exec "${BENCH_CONTAINER}" bash -lc \
   "rm -rf '${BENCH_MOUNT}/workspace/main/benchmarks' '${BENCH_MOUNT}/workspace/main/wiki/benchmarks'
    mkdir -p '${BENCH_MOUNT}/workspace/main/benchmarks/paper-review' '${BENCH_MOUNT}/workspace/main/wiki/benchmarks/paper-review'
