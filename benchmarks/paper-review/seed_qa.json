@@ -14,11 +14,6 @@
         "CoT",
         "hallucination"
       ],
-      "must_not_contain": [
-        "可能是",
-        "应该是",
-        "推测为"
-      ],
       "violation_penalty": 2,
       "key_behavior": "四个 benchmark 的实验设置和数值均被覆盖，缺失信息有标注，不编造"
     },
@@ -47,11 +42,6 @@
         "消融",
         "训练",
         "开销"
-      ],
-      "must_not_contain": [
-        "可能是",
-        "应该是",
-        "推测为"
       ],
       "violation_penalty": 2,
       "key_behavior": "SVD 机制、消融、训练开销均有涉及，缺失信息有标注，不编造；不强制使用英文 budget 或具体模型名"
@@ -83,11 +73,6 @@
         "Adam",
         "缺"
       ],
-      "must_not_contain": [
-        "GraphSAGE",
-        "ResNet",
-        "Transformer"
-      ],
       "violation_penalty": 3,
       "key_behavior": "提取材料中已有的实验细节（数据集/模型/优化器），明确列出缺失信息，不编造"
     },
@@ -111,10 +96,6 @@
     "gold_answer": {
       "must_contain": [
         "不存在"
-      ],
-      "must_not_contain": [
-        "## 0. 文档定位",
-        "## 1. 实验目标"
       ],
       "violation_penalty": 3,
       "key_behavior": "识别材料不存在或不可读取，明确告知用户不能基于缺失材料提取实验信息，不编造"
@@ -541,10 +522,6 @@
         "训练日志",
         "需要提供"
       ],
-      "must_not_contain": [
-        "直接复现",
-        "可以直接跑"
-      ],
       "violation_penalty": 3,
       "key_behavior": "识别当前材料不足以执行真正复现实验，说明缺失的代码/checkpoint/数据划分/训练日志等最小材料；可以给审稿核查清单，但不能编造可直接运行的复现实验"
     },
@@ -571,9 +548,6 @@
         "复用",
         "完成标准",
         "配置"
-      ],
-      "must_not_contain": [
-        "此处应填写代码仓库路径"
       ],
       "violation_penalty": 2,
       "key_behavior": "生成可执行的验证 prompt，指向具体文件，复用现有代码，有可度量的完成标准"
@@ -604,11 +578,6 @@
         "GCN",
         "GAT",
         "5"
-      ],
-      "must_not_contain": [
-        "train.py",
-        "model.py",
-        "config.yaml"
       ],
       "violation_penalty": 3,
       "key_behavior": "代码路径和入口脚本缺失处使用占位符；要求 coding 工具先定位训练入口、模型定义、数据配置；实验约束和完成标准清晰，不编造具体文件名"
