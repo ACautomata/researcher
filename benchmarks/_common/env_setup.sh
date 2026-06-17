@@ -271,11 +271,17 @@ defaults = data.setdefault("agents", {}).setdefault("defaults", {})
 defaults["sandbox"] = {"mode": "off"}
 defaults["elevatedDefault"] = "full"
 data.setdefault("tools", {}).setdefault("exec", {})["mode"] = "full"
+# Disable the file-tool workspace confinement so spawned sub-agents can write
+# scratch/output files outside their own workspace root (e.g. when a sub-agent
+# writes into the controller's workspace). The benchmark container is isolated
+# (loopback, no channels, disposable), so this is safe here.
+data.setdefault("tools", {}).setdefault("fs", {})["workspaceOnly"] = False
 p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 print(f"patched models.providers.{_provider}.apiKey -> SecretRef(LLM_API_KEY)")
 print("patched agents.defaults.sandbox.mode -> off")
 print("patched agents.defaults.elevatedDefault -> full")
 print("patched tools.exec.mode -> full (no-approval)")
+print("patched tools.fs.workspaceOnly -> false")
 PY
 }
 
@@ -386,10 +392,14 @@ defaults["sandbox"] = {"mode": "off"}
 defaults["elevatedDefault"] = "full"
 tools = data.setdefault("tools", {})
 tools.setdefault("exec", {})["mode"] = "full"
+# Disable file-tool workspace confinement so sub-agents can write outside their
+# own workspace root (see docker-branch patch for rationale).
+tools.setdefault("fs", {})["workspaceOnly"] = False
 p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 print(f"patched models.providers.{_provider}.apiKey -> SecretRef(LLM_API_KEY)")
 print("patched agents.defaults.sandbox.mode -> off")
 print("patched agents.defaults.elevatedDefault -> full")
+print("patched tools.fs.workspaceOnly -> false")
 print("patched tools.exec.mode -> full (no-approval)")
 '
   bench_container_cli exec "${container}" chown 1000:1000 /home/node/.openclaw/openclaw.json
