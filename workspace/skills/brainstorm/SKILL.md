@@ -7,8 +7,6 @@ description: Generate evidence-grounded research ideas (curate → ideate). Trig
 
 基于 wiki 证据生成研究 idea；每个 idea 锚定到命名痛点，非空想。
 
-**触发词**: "brainstorm ideas", "research ideas", "generate ideas", "research directions", "find research gaps", "科研 idea", "研究思路", "头脑风暴"
-
 ## 编排
 
 1. **`curate`** — 跨论文比较 + lint，为 idea 生成准备精选上下文（每个 claim 引用 `page_id`）。

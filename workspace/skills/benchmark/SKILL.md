@@ -7,8 +7,6 @@ description: Run a QA benchmark and score it — main runs each QA itself, spawn
 
 执行 QA benchmark 并评分。main 自己跑每条 QA，spawn `judge`（本系统唯一 spawn 的子 agent）做独立质量门评分。
 
-**触发词**: "run benchmark", "run eval", "跑 benchmark", "评估", "benchmark 评测", "QA 测评"
-
 ## 流程
 
 1. **加载 benchmark 规格** — 读 `benchmarks/<name>/qa.jsonl`。每条含 `question`、`gold_answer`/`must_contain`/`rubric`/`pass_threshold`（可选）。

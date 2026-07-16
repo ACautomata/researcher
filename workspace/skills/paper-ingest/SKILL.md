@@ -7,8 +7,6 @@ description: Ingest a paper into the wiki and verify quality (ingest → curate)
 
 入库一篇论文到 wiki 并做质量校验。
 
-**触发词**: "入库", "add to wiki", "文献笔记", "整理这篇论文"
-
 ## 编排
 
 1. **`ingest`** — PDF → 结构化 wiki 论文页面（证据可追溯），产出写回 wiki。

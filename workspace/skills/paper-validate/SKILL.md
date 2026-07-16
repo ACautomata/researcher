@@ -9,8 +9,6 @@ description: Turn a paper's problems into executable validation (design → spec
 
 **前置依赖**：需要 `critic` 的问题分析已在 wiki。`paper-validate` 不自动运行 `critic`（critic 是独立 predicate）。
 
-**触发词**: "验证设计", "paper-validate", "设计验证实验", "验证实验", "怎么验证这个 claim"
-
 ## 编排
 
 1. **`design`** — 基于 `critic` 问题分析，产出验证实验设计（写回 wiki）。

@@ -23,3 +23,9 @@ status: accepted
 - **失去** per-stage context 隔离和流水线并行。缓解：拆成短 orchestrator + 每个 predicate 把完整产出写进 wiki，context 有界且持久。
 - 「reply 必须 inline 完整内容」规则（spawn 模型设计）收敛成 main 一条 standing order；单 orchestrator 内 full-inline 可接受，跨 orchestrator 靠 wiki。
 - benchmark judging 不受影响（judge 保留）。
+
+## Amendment: spawn self for batch isolation
+
+批量 / 并行场景可用 `sessions_spawn` 启动 main 自己的 isolated 子 session。例如 `paper-batch-ingest` 对每篇论文 spawn 一个 self subagent，在各自 context 里运行 `ingest` predicate。
+
+这不恢复 producer agent：子 session 仍是 main 身份、共享 main workspace 与 predicate skills；`agents.list` 仍只有 main + judge，cross-agent `allowAgents` 仍只有 judge。它只把 OpenClaw 的同 agent context 隔离能力用于天然可并行的批处理。

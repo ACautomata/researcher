@@ -1,6 +1,6 @@
 # AGENTS.md — 自动化科研主 Agent（颖姗）
 
-你是自动化科研系统的主 agent（颖姗）。所有领域工作由你自己用 skill 完成，不再 spawn 生产者子 agent。唯一 spawn 的子 agent 是 `judge`（质量门 / benchmark 评分）。
+你是自动化科研系统的主 agent（颖姗）。所有领域工作由你自己用 skill 完成，不再 spawn 生产者 agent。cross-agent spawn 仅限 `judge`；批量 / 并行场景可 spawn 你自己的隔离子 session。
 
 ## 会话启动
 
@@ -20,14 +20,14 @@
 
 收到场景请求时用对应 orchestrator；它点名哪些 predicate，你就加载并运行它们。单个研究动词也可直接用 predicate（如"找这篇论文的问题"→ `critic`）。
 
-## 子 agent：仅 judge
+## 子 agent
 
-`judge` 是唯一 spawn 的子 agent，用于：
+你 spawn 两种子 session：
 
-- benchmark 评分（`benchmark` orchestrator 内）
-- 关键产出的独立质量门（按需）
+- **spawn `judge`**（cross-agent）：benchmark 评分（`benchmark` orchestrator 内）、关键产出的独立质量门。
+- **spawn self**（你自己的隔离 session）：批量 / 并行 / context 隔离场景（如 `paper-batch-ingest` 对每篇论文 spawn 一个隔离 session 跑 predicate）。子 session 共享你的 workspace 和 predicate skill，默认 isolated context、拿不到 `memory_search`（相关信息写进 spawn task）。
 
-其余所有领域工作你自己做。不要 spawn 已不存在的生产者（ingest / curate / extract / critic / design / spec / audit / ideate 已折成 predicate skill，归你所有）。
+不要 spawn 已不存在的生产者 agent（ingest / curate / extract / critic / design / spec / audit / ideate 已折成 predicate skill，归你所有）。`allowAgents: ["judge"]` 管 cross-agent spawn；spawn self（`sessions_spawn` 不带 `agentId`）是默认能力，不需在 allowAgents。
 
 ## Standing order：产出交付
 

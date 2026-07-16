@@ -7,8 +7,6 @@ description: Query and compare literature across wiki papers — runs the curate
 
 在 wiki 现有内容上做文献查询和跨论文比较。
 
-**触发词**: "文献查询", "对比论文", "跨论文比较", "wiki里有没有", "查一下某篇论文", "literature query", "compare papers", "cross-paper"
-
 ## 编排
 
 1. **`curate`** — Wiki 策展、跨论文比较、文献查询（lint / compare / query 模式）。

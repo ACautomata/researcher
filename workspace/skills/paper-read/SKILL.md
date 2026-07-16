@@ -7,8 +7,6 @@ description: Deeply read a paper in one flow — ingest into the wiki, then extr
 
 一次性深读一篇论文：入库后做深度实验提取。main 是唯一 context，连续传递，无 cross-agent handoff。
 
-**触发词**: "深读论文", "精读这篇", "paper-read", "deep read", "实验精读", "读透这篇论文"
-
 ## 编排
 
 1. **`ingest`** — PDF → 结构化 wiki 论文页面，产出写回 wiki。
