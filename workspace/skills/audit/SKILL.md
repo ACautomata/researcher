@@ -27,7 +27,7 @@ description: Audit the quality of analysis-chain outputs (extract/critic/design/
 
 ### 结构完整性参照
 
-- `ingest` 论文页: 16 节（## 0 ~ ## 15）
+- `ingest` 论文页: 11 节（## Citation / ## One-Sentence Contribution / ## Problem Setting / ## Method / ## Experiments / ## Results / ## Limitations / ## Reusable Claims / ## Connections / ## Open Questions / ## Provenance）
 - `extract` 实验提取: 12 节（## 0–## 11）
 - `critic` 问题分析: §0–§7
 - `design` 验证设计: 10 节（## 0–## 9）

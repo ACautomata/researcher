@@ -1,11 +1,11 @@
 # Benchmark: Idea Generation
 
-**Skill:** idea-generate (main agent skill)
+**Skill:** ideate (main agent predicate skill)
 **Capability:** Research idea generation from paper evidence
 
 ## Purpose
 
-Evaluate the idea-generate skill's ability to produce structured, evidence-grounded research ideas from a set of input papers.
+Evaluate the ideate skill's ability to produce structured, evidence-grounded research ideas from a set of input papers.
 
 ## Inputs
 
@@ -15,18 +15,12 @@ Evaluate the idea-generate skill's ability to produce structured, evidence-groun
 ## Procedure
 
 1. Place papers in a test `paper/` directory.
-2. Run the idea-generate skill (full demo workflow or core workflow).
-3. Evaluate the output artifacts in the generated run directory.
+2. Run the ideate skill (full demo workflow or core workflow).
+3. Evaluate the output idea cards returned inline in the agent's reply.
 
-## Output Artifacts
+## Output
 
-Expected files in the run directory:
-
-- `paper-context.md` — extracted paper context
-- `paper-context.json` — structured context data
-- `paper-analysis.md` — cross-paper analysis
-- `ideas.dedup.json` — deduplicated idea cards
-- `recommended-ideas.md` — final output
+The ideate skill returns structured idea cards inline in the agent's reply. Each card includes target_problem, metric, risk, validation experiment, and evidence grounding fields (see ideate SKILL.md Hard Rules). No files are written to the workspace or wiki — all output is inline.
 
 ## Evaluation Criteria
 

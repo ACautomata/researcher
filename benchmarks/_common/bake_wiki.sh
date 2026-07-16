@@ -265,7 +265,7 @@ ${CONTAINER_MATERIALS}/
 
 ## 要求
 1. 列出该目录（含子目录）下所有论文文件（.md / .pdf / .txt）。每个文件代表一篇论文的全文或摘要；文件名即论文标题来源，若正文内有更准确标题则以正文为准。
-2. 对每个文件按 paper-ingest 流程入库：自己运行 ingest skill 创建结构化 wiki paper page（11 节模板与 frontmatter 规范），再运行 curate skill 做质量 lint。这些能力现在是你的 skill——不要 spawn 子 agent，自己加载并运行。
+2. 对每个文件按 paper-ingest 流程入库：自己运行 ingest skill 创建结构化 wiki paper page（11 节模板与 frontmatter 规范），再运行 curate skill 做质量 lint。这些能力现在是你的 predicate skill。对于论文数量较多的情况，可对每篇论文 spawn 一个 self subagent（paper-batch-ingest 的隔离 session）各自完成 ingest，避免单 context 堆积；小批量可直接自己逐篇处理。
 3. 逐篇完成，不要遗漏；不要做 extract/critic/design/spec 等其他阶段的分析。
 4. wiki 页面默认用中文撰写，保留论文原文标题、作者、DOI/arXiv/代码链接。
 
