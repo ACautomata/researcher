@@ -43,17 +43,17 @@ CLAWPROBENCH_REPO="${CLAWPROBENCH_REPO:-https://github.com/ACautomata/ClawResear
 RESULTS_DIR="${ROOT}/results"
 mkdir -p "${RESULTS_DIR}"
 
-# --- 0. fail-fast on the model pin (CI secret / local must both be M3) ---
-if [[ -z "${LLM_API_KEY:-}" ]]; then
-  echo "::error::LLM_API_KEY is not set." >&2; exit 1
-fi
-
-# --- 1. model anti-clobber: load creds from docker/.env.bench, THEN pin M3,
-#        THEN block env_setup from re-sourcing docker/.env.bench (which
-#        hardcodes M2.7 and would silently overwrite the pin). ---
+# --- 0. load local creds (docker/.env.bench) FIRST, then fail-fast, then pin M3.
+#        Order matters: the fail-fast must run AFTER sourcing docker/.env.bench
+#        (local runs get LLM_API_KEY from there; CI has it in the secret env and
+#        docker/.env.bench is absent). Then block env_setup from re-sourcing
+#        docker/.env.bench (which would re-clobber LLM_MODEL) via /dev/null. ---
 if [[ -f "${ROOT}/docker/.env.bench" ]]; then
   # shellcheck disable=SC1091
   set -a; . "${ROOT}/docker/.env.bench"; set +a
+fi
+if [[ -z "${LLM_API_KEY:-}" ]]; then
+  echo "::error::LLM_API_KEY is not set (export it or put it in docker/.env.bench)." >&2; exit 1
 fi
 export LLM_MODEL="minimax/MiniMax-M3"
 export LLM_BASE_URL="${LLM_BASE_URL:-https://api.minimaxi.com/anthropic}"
@@ -76,6 +76,31 @@ trap '${BENCH_KEEP_CONTAINER:+:} bench_teardown' EXIT
 # --- 5. health self-check (gateway status, NOT openclaw health) ---
 bench_container_cli exec "$BENCH_CONTAINER" openclaw gateway status >/dev/null
 
+# --- 5b. swap context engine to built-in `legacy` for the bench run.
+#        颖姗's production config pins plugins.slots.contextEngine=lossless-claw,
+#        but the bench image does NOT ship the lossless-claw extension
+#        (OPENCLAW_PLUGINS_ENABLED=false + installPath absent). At runtime the
+#        context engine fails to resolve -> "not registered" -> session error,
+#        aborting every trial in ~11s. We swap the in-container openclaw.json
+#        copy (host config is never touched) to the built-in `legacy` engine
+#        and disable the stale lossless-claw entry. This changes which context
+#        engine 颍姗 runs under in CI (not its skills/persona), so CI does not
+#        exercise lossless-claw - an accepted trade-off (see CLAUDE.md). ---
+bench_container_cli exec "$BENCH_CONTAINER" python3 -c '
+import json, pathlib
+p = pathlib.Path("/home/node/.openclaw/openclaw.json")
+d = json.loads(p.read_text(encoding="utf-8"))
+slots = d.setdefault("plugins", {}).setdefault("slots", {})
+prev = slots.get("contextEngine")
+slots["contextEngine"] = "legacy"
+entries = d["plugins"].setdefault("entries", {})
+lc = entries.get("lossless-claw")
+if isinstance(lc, dict):
+    lc["enabled"] = False
+p.write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+print(f"[clawprobench] contextEngine: {prev!r} -> legacy (lossless-claw disabled in bench)")
+'
+
 # --- 6. post-patch hard assert: primary must be M3 (fail loud, not silent M2.7) ---
 bench_container_cli exec "$BENCH_CONTAINER" python3 -c '
 import json, pathlib
@@ -86,9 +111,19 @@ print(f"[clawprobench] model primary OK: {primary}")
 '
 
 # --- 7. clone the fork into mktemp (NEVER inside the repo) + cp into container ---
+# --- 7. clone the fork into mktemp (NEVER inside the repo) + cp into container.
+#        --filter=blob:none (partial clone) lets us checkout an arbitrary pinned
+#        commit SHA without fetching the full history; GitHub rejects shallow
+#        fetch-by-SHA for non-HEAD commits. The pin defaults to 5b368ea (PR #7
+#        merge = current fork main HEAD); override only via a base-branch
+#        Variable (CLAWPROBENCH_PIN), never PR-controllable input. ---
 FORK_SRC="$(mktemp -d)/clawprobench"
-git clone --depth 1 "${CLAWPROBENCH_REPO}" "${FORK_SRC}" >/dev/null 2>&1
-git -C "${FORK_SRC}" fetch --depth 1 origin "${CLAWPROBENCH_PIN}" >/dev/null 2>&1
+# --filter=blob:none: partial clone (no history blobs) that still lets us
+# checkout any reachable pinned commit. GitHub rejects shallow fetch-by-SHA
+# for non-HEAD commits, so --depth 1 is the wrong tool here. The fetch of the
+# default ref brings in the commit graph; checkout then resolves the SHA.
+git clone --quiet --filter=blob:none --no-checkout "${CLAWPROBENCH_REPO}" "${FORK_SRC}"
+git -C "${FORK_SRC}" fetch --quiet origin
 git -C "${FORK_SRC}" checkout -q "${CLAWPROBENCH_PIN}"
 echo "[clawprobench] fork pinned at ${CLAWPROBENCH_PIN}"
 bench_container_cli cp "${FORK_SRC}" "${BENCH_CONTAINER}:/home/node/.openclaw/clawprobench"
@@ -106,7 +141,13 @@ bench_container_cli exec "$BENCH_CONTAINER" bash -lc '
 bench_container_cli exec "$BENCH_CONTAINER" openclaw gateway status >/dev/null \
   && echo "[clawprobench] openclaw runtime healthy after venv install"
 
-# --- 9. run the fork's run.py: --agent main, explicit --model M3, explicit --results-dir ---
+# --- 9. run the fork's run.py: --agent main, explicit --model M3, explicit --results-dir.
+#        --local-agent: make the fork pass --local to `openclaw agent` (embedded
+#        mode). Without it, fork runs gateway mode but passes a self-generated
+#        --session-id that clashes with the gateway's own session bookkeeping,
+#        surfacing as "session file changed while embedded prompt lock was
+#        released" and aborting every trial in ~15s. Embedded mode has the fork
+#        own the session file, matching how the legacy benchmarks invoked main. ---
 echo "[clawprobench] run.py --scenario ${SCENARIO} --trials ${TRIALS}"
 bench_container_cli exec -i \
   -e LLM_API_KEY -e LLM_BASE_URL \
@@ -116,6 +157,7 @@ bench_container_cli exec -i \
     /tmp/crb-venv/bin/python clawprobench/run.py run \
       --agent main \
       --model minimax/MiniMax-M3 \
+      --local-agent \
       --scenario "'"${SCENARIO}"'" \
       --trials "'"${TRIALS}"'" \
       --execution-mode live \
