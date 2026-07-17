@@ -1,0 +1,189 @@
+name: ClawProBench
+
+# Gates main/颖姗 on a curated research scenario subset via the ClawProBench
+# fork (ClawResearchBench:fork/target-main, pinned commit). The fork targets
+# the existing main agent and reuses its workspace (see ADR-0002).
+#
+# ⚠️ Introduction gotcha: pull_request_target reads this workflow YAML from the
+# BASE branch (main). Until this file lands on main, the pull_request_target
+# trigger will NOT fire on the introducing PR. Validate THIS PR by dispatching
+# the workflow on the PR branch (workflow_dispatch uses the branch's YAML).
+# After merge, pull_request_target works for subsequent PRs.
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      scenario:
+        description: "Single scenario id to run (default: the curated 12)"
+        type: string
+        required: false
+        default: ""
+      trials:
+        description: "Trials per scenario (default 3 for pass@3/pass^3 semantics)"
+        type: string
+        required: false
+        default: "3"
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+# Cancel a stale in-flight run when a new push lands. The matrix is serial
+# (~4-4.5h); without this, rapid PR pushes stack overlapping runs and burn
+# LLM quota.
+concurrency:
+  group: clawprobench-${{ github.event.pull_request.number || github.ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  # Fork pin. Default hard-coded; override ONLY via a base-branch repo Variable
+  # (never from PR-controllable input — run.py runs inside the container with
+  # LLM_API_KEY in scope, so the fork commit must be trusted-by-pin).
+  CLAWPROBENCH_PIN: ${{ vars.CLAWPROBENCH_PIN || '5b368ea' }}
+  BENCH_RESULTS_DIR: bench-results
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  setup:
+    name: "Verify secrets (fail-fast gate)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: "Verify required secrets"
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+        run: |
+          if [ -z "${LLM_API_KEY:-}" ]; then
+            echo "::error::LLM_API_KEY secret is not configured. Add it under Settings → Secrets → Actions." >&2
+            exit 1
+          fi
+          echo "LLM_API_KEY present."
+          echo "fork pin: ${CLAWPROBENCH_PIN}"
+
+  bench:
+    name: "Bench: ${{ matrix.scenario }}"
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ matrix.timeout }}
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        # 1 scenario per job (fork --scenario is single-valued and matches the
+        # YAML `id` field, NOT the filename stem — research scenarios are
+        # `research_<stem>`, and idea_generate drops its descriptive suffix in
+        # the id, e.g. idea_generate_qa_001_paper_only.yaml -> research_idea_generate_qa_001).
+        # Each job boots its own container (runners are separate VMs — a container
+        # cannot be shared across jobs). Per-job BENCH_RUN_ID isolates compose
+        # project / container name / data dir as defense-in-depth on top of max-parallel:1.
+        include:
+          - { scenario: research_paper_review_s2_reflexion,            timeout: 60 }
+          - { scenario: research_paper_review_s2_nonstandard,          timeout: 60 }
+          - { scenario: research_paper_review_s3_competing,            timeout: 60 }
+          - { scenario: research_paper_review_s3_negative,             timeout: 60 }
+          - { scenario: research_paper_review_s4_budget,               timeout: 60 }
+          - { scenario: research_paper_review_s5_largerepo,            timeout: 75 }
+          - { scenario: research_paper_review_s6_cross_priority,       timeout: 75 }
+          - { scenario: research_idea_generate_qa_001,                 timeout: 60 }
+          - { scenario: research_idea_generate_qa_002,                 timeout: 60 }
+          - { scenario: research_idea_generate_qa_005,                 timeout: 60 }
+          - { scenario: research_idea_generate_qa_010,                 timeout: 60 }
+          - { scenario: research_idea_generate_qa_018,                 timeout: 60 }
+    env:
+      BENCH_RUN_ID: ${{ github.run_id }}-${{ matrix.scenario }}
+      BENCH_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+      BENCH_REPO: ${{ github.repository }}
+      BENCH_PR_NUMBER: ${{ github.event.pull_request.number }}
+      LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+      LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+    steps:
+      - name: "Resolve scenario/trials (workflow_dispatch override)"
+        id: sel
+        env:
+          # workflow_dispatch inputs are admin-trusted, but route through env
+          # rather than interpolating into run: (defense-in-depth).
+          INPUT_SCENARIO: ${{ inputs.scenario }}
+          INPUT_TRIALS: ${{ inputs.trials }}
+          MATRIX_SCENARIO: ${{ matrix.scenario }}
+        run: |
+          trials="${INPUT_TRIALS:-3}"
+          if [ -n "${INPUT_SCENARIO}" ] && [ "${INPUT_SCENARIO}" != "${MATRIX_SCENARIO}" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipping ${MATRIX_SCENARIO} (dispatch singled out ${INPUT_SCENARIO})"
+          else
+            echo "trials=${trials}" >> "$GITHUB_OUTPUT"
+          fi
+      - name: "Checkout PR head"
+        if: steps.sel.outputs.skip != 'true'
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - name: "Set up Docker Buildx"
+        if: steps.sel.outputs.skip != 'true'
+        uses: docker/setup-buildx-action@v3
+      - name: "Run ClawProBench (one scenario)"
+        if: steps.sel.outputs.skip != 'true'
+        run: |
+          bash .github/bench/run_clawprobench.sh \
+            --scenario "${{ matrix.scenario }}" \
+            --trials "${{ steps.sel.outputs.trials }}"
+      - name: "Upload result"
+        if: always() && steps.sel.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          # Per-scenario artifact name (the file is already result_<scenario>.json),
+          # so the aggregate's merge-multiple cannot collide.
+          name: result-${{ matrix.scenario }}
+          path: results/result_${{ matrix.scenario }}.json
+          if-no-files-found: error
+
+  aggregate:
+    name: "Aggregate + PR comment"
+    needs: [setup, bench]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      BENCH_REPO: ${{ github.repository }}
+      BENCH_PR_NUMBER: ${{ github.event.pull_request.number }}
+      BENCH_RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
+      BENCH_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+      BENCH_RESULTS_DIR: bench-results
+      BENCH_BASE_SUMMARY: ${{ secrets.BENCH_BASE_RESULTS_JSON }}
+      BENCH_EXPECTED_SCENARIOS: "research_paper_review_s2_reflexion,research_paper_review_s2_nonstandard,research_paper_review_s3_competing,research_paper_review_s3_negative,research_paper_review_s4_budget,research_paper_review_s5_largerepo,research_paper_review_s6_cross_priority,research_idea_generate_qa_001,research_idea_generate_qa_002,research_idea_generate_qa_005,research_idea_generate_qa_010,research_idea_generate_qa_018"
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: "Set up Python"
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: "Download all results"
+        uses: actions/download-artifact@v4
+        with:
+          pattern: result-*
+          path: bench-results
+          merge-multiple: true
+      - name: "Render + post PR comment"
+        run: |
+          ls -la bench-results/ || true
+          python3 .github/bench/report_clawprobench.py
+      - name: "Upload merged results"
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: clawprobench-results-${{ github.run_id }}
+          path: bench-results/
+          if-no-files-found: warn

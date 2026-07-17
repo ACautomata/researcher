@@ -192,7 +192,7 @@ trap cleanup EXIT
 # repo, waits healthy). env_setup.sh exports BENCH_ENV_FILE pointing at a
 # sourceable file with the bench_* helpers.
 log "booting CI bench container (runtime=${RUNTIME}, run_id=${BENCH_RUN_ID})"
-bash "${ROOT}/benchmarks/_common/env_setup.sh"
+bash "${ROOT}/.github/bench/env_setup.sh"
 ENV_FILE="${ROOT}/.bench-runtime/bench-runtime-env.sh"
 [[ -f "${ENV_FILE}" ]] || die "env_setup.sh did not produce ${ENV_FILE}"
 # shellcheck disable=SC1090

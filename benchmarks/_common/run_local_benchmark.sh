@@ -162,7 +162,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "[local-bench] benchmark=${BENCH} runtime=${RUNTIME} run_id=${BENCH_RUN_ID}"
-bash "${ROOT}/benchmarks/_common/env_setup.sh"
+bash "${ROOT}/.github/bench/env_setup.sh"
 
 # Load the runtime contract and helper functions for this shell. env.sh also
 # sources the same file before calling bench_force_recreate.

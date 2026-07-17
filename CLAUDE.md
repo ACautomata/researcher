@@ -130,6 +130,19 @@ GitHub 仓库必须配置以下 secret（你最后手动加）：
 | `LLM_MODEL` | 否 | 默认 `minimax/MiniMax-M2.7` |
 | `BENCH_BASE_RESULTS_JSON` | 否 | 上次 main 跑出的 summary（base64 字符串），用于 PR 评论做 delta 对比 |
 
+### ClawProBench fork CI（active — 颖姗 research 能力门）
+
+CI 实际门控走 **ClawProBench fork**（`ACautomata/ClawResearchBench:fork/target-main`，CI `git clone` 钉定 commit，不进本仓库 git 树），门控 `main`/颖姗跑精选 research 场景，确定性 `custom_check` grading。控制代码全在 `.github/bench/`（`env_setup.sh` + `run_clawprobench.sh` + `report_clawprobench.py`）+ `.github/workflows/clawprobench.yml`。决策见 [ADR-0002](./docs/adr/0002-clawprobench-fork-target-main.md)。
+
+上方「Benchmark CI 流程」8 条是**旧自搓 harness**（`benchmarks/_common/run_bench.py` 等）的规则，随 `benchmarks/` 退役（清理 PR 删除）。ClawProBench fork 路径的对应豁免：
+
+- 规则 1（env.sh+metrics.py）/ 规则 2（qa.jsonl+qa_schema）/ 规则 5（metrics 复用 run_bench.py）：**不适用**。fork 用自己的 `run.py` + scenario YAML + `custom_checks/*.py`，无 env.sh/metrics.py/qa.jsonl。
+- 规则 3（强制 main agent 路由）：fork 以 `--agent main` 门控颖姗（ADR-0002 核心）。bootstrap 显式 `--model minimax/MiniMax-M3` + post-patch 断言 primary==M3（env_setup 默认 M2.7，必须 pin）。
+- 规则 6（PR 评论字段）：fork 路径 PR 评论汇总 `pass@3-rate`/`pass^3-rate`/`avg_score`，读 `result_main_<ts>.json` 的 `scenarios[]` 重聚合（见 `report_clawprobench.py`）。
+- 规则 7（本地复现）：`bash .github/bench/run_clawprobench.sh --scenario <id> --trials 1 --keep-container`（先 1 场景×1 trial 冒烟，验证 main 真写出 custom_check 能读到的产物）。
+- 旧 `.github/workflows/benchmark.yml` 已改 dispatch-only，清理 PR 删除。
+- 安全：fork commit pin（默认 `5b368ea`）只经 base-branch repo Variable `CLAWPROBENCH_PIN` 覆盖，**绝不**从 PR-controllable 字段取（run.py 在容器内带 `LLM_API_KEY` 执行）。
+
 ### Adding New Skills
 
 The system has exactly two agents (`main`, `judge`). New capabilities are **skills**, not agents:
@@ -142,7 +155,7 @@ The system has exactly two agents (`main`, `judge`). New capabilities are **skil
 ## PR Rules
 
 - **Do not open upstream PRs before required verification.** 严禁在没有完成本地测试、或 forked repo 的 GitHub Actions benchmark CI 尚未通过时，向上游仓库开 PR。
-- **Benchmark results required.** When a PR touches `benchmarks/` or any skill/agent that has benchmark coverage, first run the relevant benchmark locally with `benchmarks/_common/run_local_benchmark.sh <name>`, then run the forked-repo `Benchmark` GitHub Actions workflow and wait for it to pass. Paste both local and forked-repo CI benchmark results into the PR description or a PR comment. Do not open a PR without them.
+- **Benchmark results required.** When a PR touches `benchmarks/`, `.github/bench/`, `.github/workflows/clawprobench.yml`, or any skill/agent that has benchmark coverage, first run the relevant benchmark locally — ClawProBench fork path: `bash .github/bench/run_clawprobench.sh --scenario <id> --trials 1` (smoke one scenario first); legacy `benchmarks/` path: `bash benchmarks/_common/run_local_benchmark.sh <name>`. Then run the forked-repo `ClawProBench` GitHub Actions workflow (`.github/workflows/clawprobench.yml`; on the introducing PR use `workflow_dispatch` since `pull_request_target` reads the workflow from base `main`) and wait for it to pass. Paste both local and forked-repo CI benchmark results into the PR description or a PR comment. Do not open a PR without them.
 - **Test new features before PR.** Every new feature (skill, agent, workflow, config change) must be tested via OpenClaw — actually trigger the agent in conversation and verify it works end-to-end. Do not open the PR without doing this.
 
 ## Gitignore Strategy

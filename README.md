@@ -154,79 +154,27 @@ feishu 用 WebSocket 模式：`streaming` 必须是 boolean（不是字符串）
 
 ## 进阶：Benchmark 与 CI
 
-### 前置（benchmark 专用，与试用 agent 不同）
+活跃的 benchmark CI 使用 **ClawProBench fork**，而非已退役的 `benchmarks/_common/` harness。控制代码位于 `.github/bench/`（`env_setup.sh`、`run_clawprobench.sh`、`report_clawprobench.py`）和 `.github/workflows/clawprobench.yml`；设计决策见 [ADR-0002](docs/adr/0002-clawprobench-fork-target-main.md)。
 
-- **容器运行时**：Docker Desktop（macOS 也可用 Apple `container` CLI；`run_local_benchmark.sh --runtime auto` 自动选择，默认优先 Docker）。
-- **Python 3.11+**：`metrics.py` 会用到。
-- **`LLM_API_KEY`**：本地和 CI benchmark 都需要。
+### 本地运行
 
-### 本地 env
-
-复制模板（KEY=value 语法，与根 `.env` 不同）：
+准备 benchmark 专用环境（`KEY=value` 语法，与根 `.env` 的 shell export 语法不同）：
 
 ```bash
 cp docker/.env.bench.example docker/.env.bench
+# 编辑 docker/.env.bench，填入 LLM_API_KEY
+
+# 先运行一个场景、一个独立 trial 的 smoke test
+bash .github/bench/run_clawprobench.sh --scenario <scenario-id> --trials 1 --keep-container
 ```
 
-填入 `LLM_API_KEY`，其余按需。`docker/.env.bench.example` 是 benchmark LLM 配置的**单一真相源**，默认模型 `minimax/MiniMax-M2.7`（避免与 agent 运行时模型 `MiniMax-M3` 混用）。
+场景 ID 来自 fork 的 `scenarios/research/*.yaml` 顶层 `id:`。CI 默认每个场景运行 3 个 trial，并由 fork 以原始 trial outcome 聚合 `pass@3`（至少一次通过）和 `pass^3`（全部通过）。已 pin 的 fork commit 会在每个 trial 后恢复 target workspace 与 `memory-wiki` vault，避免后续 trial 复用前序 `wiki_apply` 产物。
 
-| 变量 | 必填 | 说明 |
-| --- | --- | --- |
-| `LLM_API_KEY` | 是 | LLM provider 的 API Key，本地 benchmark 没有它会直接失败。 |
-| `LLM_BASE_URL` | 否 | LLM provider 的 Anthropic-compatible 地址，默认 `https://api.minimaxi.com/anthropic`。 |
-| `LLM_MODEL` | 否 | benchmark 使用的模型，默认见 `docker/.env.bench.example`。 |
+### CI、secrets 与 pin
 
-### 一键跑
-
-```bash
-# idea-generate-1 是真实 benchmark 名；用 ls benchmarks/ 查看全部可用 benchmark
-benchmarks/_common/run_local_benchmark.sh idea-generate-1
-```
-
-脚本自动完成：读 `docker/.env.bench` -> 选容器运行时 -> 起容器 -> 等就绪 -> 跑 `env.sh` 写 fixture -> 跑 `metrics.py` -> 输出 `bench-report.json` 路径。
-
-常用 flag与 LLM 配置优先级：
-
-```bash
-benchmarks/_common/run_local_benchmark.sh --runtime docker idea-generate-1     # 强制 Docker
-benchmarks/_common/run_local_benchmark.sh --keep-container idea-generate-1     # 保留容器排查
-benchmarks/_common/run_local_benchmark.sh --debug idea-generate-1              # 开 debug artifact
-# 命令行临时传 LLM 配置（优先级最高）
-benchmarks/_common/run_local_benchmark.sh --api-key "你的_key" --base-url "https://api.minimaxi.com/anthropic" --model "minimax/MiniMax-M2.7" idea-generate-1
-```
-
-**LLM 配置优先级**：命令行 flag > `docker/.env.bench` > shell 环境变量。手动三步等价 CI（仅用于调试基建）：`bash benchmarks/_common/env_setup.sh && bash benchmarks/<name>/env.sh && python3 benchmarks/<name>/metrics.py`。
-
-### 预烘焙 wiki fixture
-
-benchmark 需要先把论文材料入库到 wiki 时，用统一工具把 `materials/` 预烘焙成 `wiki/main/` fixture，避免每次运行重复 ingest：
-
-```bash
-benchmarks/_common/bake_wiki.sh idea-generate-1  # 默认读 benchmarks/<name>/materials/（.md/.pdf/.txt），导出到 wiki/main/
-```
-
-flag（`--materials <dir>`、`--runtime docker --keep-container`、`--dry-run`、`--no-patch-envsh`）见 `bake_wiki.sh --help`；烘焙后建议提交 `materials/`、`wiki/main/`、`env.sh` 中的 staging block。
-
-### fork CI secrets
-
-在你 fork 的仓库里配置 GitHub Actions secrets：**Settings -> Secrets and variables -> Actions -> New repository secret**。
-
-| Secret | 必填 | 示例 / 默认值 | 用途 |
-| --- | --- | --- | --- |
-| `LLM_API_KEY` | 是 | 你的 LLM API Key | main agent 和 LLM judge 都会用它，未配置时 workflow fail-fast。 |
-| `LLM_BASE_URL` | 否 | `https://api.minimaxi.com/anthropic` | LLM provider API 地址，不填则用 CI 默认值。 |
-| `LLM_MODEL` | 否 | 见 `docker/.env.bench.example` | benchmark 使用的模型，不填则用 CI 默认值。 |
-| `BENCH_BASE_RESULTS_JSON` | 否 | 上次 main 跑出的 summary 的 base64 字符串 | 用于 PR 评论展示 delta，没有也能跑。 |
-
-配置完成后：进入 fork 仓库的 **Actions** 页面确认 workflow 未被禁用 -> 从 fork 开 / 更新一个 PR -> 等 `Benchmark` workflow 跑完 -> 确认所有 benchmark job 通过 -> 再向上游开 PR。
-
-### 强制规则与演进
-
-- CI 只调 `openclaw agent --agent main`，不允许在 `metrics.py` / qa.jsonl / prompt 里直接指定其他任务 agent id。
-- 新增 benchmark 必须能在 `bench-report.json` 顶层输出 `pass_rate` 与 `avg_score`，否则不会出现在 PR 评论里。
-- 细节（`env.sh` / `metrics.py` 两入口、qa schema、judge 路由）见 `CLAUDE.md`「Benchmark CI 流程」与 `benchmarks/_common/`。
-
-> **演进**：ADR-0002（status: accepted）计划用 ClawProBench fork + 确定性 `custom_check` 替换当前 `benchmarks/_common/` harness 并退役 `judge`（fork 跑通后删除 judge + 删旧 `_common/`）。当前仍以 `_common/` + judge 为准，详见 `docs/adr/0002-clawprobench-fork-target-main.md`。
+- `LLM_API_KEY` 是本地与 CI 的必填 secret；`LLM_BASE_URL` 和 `BENCH_BASE_RESULTS_JSON` 可选。
+- 来自外部 fork 的 PR 不会收到 repository secrets，workflow 会中性跳过；维护者可用 `workflow_dispatch` 在可信分支运行。
+- `run_clawprobench.sh` 仅接受仓库 base-side 配置的 immutable `CLAWPROBENCH_PIN`，不允许 PR 输入控制 fork revision。该 pin 的修改必须附带 fork 的隔离回归测试和 benchmark 验证结果。
 
 ## 贡献与 PR 规则
 

@@ -13,11 +13,9 @@ on:
   # runs. Direct pushes to main and the post-merge rerun use the normal
   # (non-DEBUG) path. workflow_dispatch also defaults to normal mode; pass
   # the `debug` input explicitly to force DEBUG on a manual main-branch run.
-  pull_request_target:
-    types: [opened, synchronize, reopened, ready_for_review]
-    branches: [main]
-  push:
-    branches: [main]
+  # Retired auto-triggers (pull_request_target / push) — superseded by
+  # clawprobench.yml. Kept workflow_dispatch-only until the cleanup PR deletes
+  # this file along with benchmarks/.
   workflow_dispatch:
     inputs:
       debug:
@@ -144,7 +142,7 @@ jobs:
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
         run: |
-          bash benchmarks/_common/env_setup.sh
+          bash .github/bench/env_setup.sh
 
       - name: "Sanity check container is running"
         run: |

@@ -1,5 +1,13 @@
 # Benchmarks
 
+> **⚠️ Legacy harness — being retired.** The active benchmark CI is the **ClawProBench fork**
+> under [`.github/bench/`](../.github/bench/) (`run_clawprobench.sh` + `report_clawprobench.py`
+> + `env_setup.sh`) + [`.github/workflows/clawprobench.yml`](../.github/workflows/clawprobench.yml),
+> which gates `main`/颖姗 on a curated research scenario subset (see [ADR-0002](../docs/adr/0002-clawprobench-fork-target-main.md)).
+> This self-rolled `benchmarks/_common/` harness + `.github/workflows/benchmark.yml` (now
+> `workflow_dispatch`-only) are scheduled for deletion in a follow-up cleanup PR. The
+> `env_setup.sh` container bringup has already moved to `.github/bench/` and is reused by the fork.
+
 Evaluation benchmarks for testing agent capabilities in this multi-agent research system.
 The CI workflow (`.github/workflows/benchmark.yml`) runs every benchmark in a dockerized
 OpenClaw environment and posts the results as a PR comment.
