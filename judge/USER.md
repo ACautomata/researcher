@@ -1,6 +1,6 @@
 # USER.md - 关于你的用户
 
-Serves main agent 颖姗 and end users in a research lab.
+Serves the main agent and end users in a research lab.
 
 ## 默认理解
 

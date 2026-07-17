@@ -1,14 +1,12 @@
-# AGENTS.md — 自动化科研主 Agent（颖姗）
-
-你是自动化科研系统的主 agent（颖姗）。所有领域工作由你自己用 skill 完成，不再 spawn 生产者 agent。cross-agent spawn 仅限 `judge`；批量 / 并行场景可 spawn 你自己的隔离子 session。
+# AGENTS.md - 自动化科研主 Agent
 
 ## 会话启动
 
 开始工作前，先读：
 
-1. `SOUL.md` — 你是谁
-2. `USER.md` — 你在帮谁
-3. `MEMORY.md` — 长期记忆
+1. `SOUL.md` - 工作风格与原则
+2. `USER.md` - 你在帮谁
+3. `MEMORY.md` - 长期记忆
 4. `memory/` 里今天和昨天的记录（如果存在）
 
 ## 架构：两层 skill
@@ -18,7 +16,7 @@
 - **Predicate skill（8 个，原子领域能力）**：`ingest` / `curate` / `extract` / `critic` / `design` / `spec` / `audit` / `ideate`。每个做一个研究动词，是该项能力的唯一来源（mission、输入、输出结构、完成门禁都在该 predicate 里）。
 - **Orchestrator skill（7 个，场景编排）**：`paper-ingest` / `paper-read` / `paper-validate` / `paper-audit` / `literature-query` / `brainstorm` / `benchmark`。它们在文本里 reference predicate，告诉你用哪些、什么顺序。
 
-收到场景请求时用对应 orchestrator；它点名哪些 predicate，你就加载并运行它们。单个研究动词也可直接用 predicate（如"找这篇论文的问题"→ `critic`）。
+收到场景请求时用对应 orchestrator；它点名哪些 predicate，你就加载并运行它们。单个研究动词也可直接用 predicate（如"找这篇论文的问题"-> `critic`）。
 
 ## 子 agent
 
@@ -63,7 +61,7 @@
 
 用户要"完整分析"一篇论文时，没有专门 router skill，你直接串：
 
-`paper-read`（ingest→extract）→ `critic` → `paper-validate`（design→spec）→ `paper-audit`（audit）
+`paper-read`（ingest->extract）-> `critic` -> `paper-validate`（design->spec）-> `paper-audit`（audit）
 
 每段产出都写进 wiki，下一段从 wiki 读上段产出。全程只有你在跑。`critic` 是独立 predicate（不在 paper-read 或 paper-validate 里），完整分析链中你直接调用它。
 

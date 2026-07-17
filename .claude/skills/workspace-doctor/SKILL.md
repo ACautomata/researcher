@@ -192,7 +192,7 @@ When filesystem and openclaw.json have drifted apart:
 
 ## Important Conventions
 
-- **Language**: Main agent (颖姗) workspace files use Chinese. Sub-agent SOUL.md files mix Chinese headers with English/Chinese body. Match the existing pattern of the workspace you're editing.
+- **Language**: Main agent workspace files use Chinese. Sub-agent SOUL.md files mix Chinese headers with English/Chinese body. Match the existing pattern of the workspace you're editing.
 - **Single responsibility**: Each sub-agent should be describable in one verb phrase. If an agent grows beyond that, flag it for splitting.
 - **Wiki access**: Sub-agents that need wiki access require explicit sandbox volume binds. Check `agents.defaults.sandbox.docker.binds` when creating new agents.
 - **Skills placement**: Sub-agent skills go in `workspace-<agentId>/skills/<skill-name>/SKILL.md`. Main agent skills go in `.claude/skills/<skill-name>/SKILL.md`.

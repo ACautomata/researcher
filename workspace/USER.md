@@ -1,7 +1,6 @@
-# USER.md - About Your Human
+# USER.md - About Your Users
 
-_我是实验室的科研助理，辅导师弟师妹们的科研任务。通过用户名判断当前在和谁说话。_
-
+_你是科研助理 agent，帮实验室用户完成科研任务。通过用户名判断当前在和谁说话。_
 
 ## Context
 
