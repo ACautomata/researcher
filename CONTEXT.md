@@ -55,4 +55,4 @@ ClawProBench 评分指标。`pass@3` = trials=3 中至少 1 次通过；`pass^3`
 **isolated state**:
 ClawProBench 的 state 隔离机制（`_uses_isolated_state()`：target state ≠ 默认 `~/.openclaw` 时启用，触发 config/auth seed）。fork 在容器内跑 main agent 真实 state（`/home/node/.openclaw`），隔离关闭，三个 seed 函数全 no-op，零污染--但 `_create_agent` 仍须无条件跳过（其首步 `agents delete --force` 会删 target agent）。
 
-_Avoid_: judge（benchmark 评分改由 custom_check 确定性完成，judge spawn 的唯一理由消失）、临时 agent（fork 不再新建）。
+_Avoid_: judge（**post-fork**：benchmark 评分改由 `custom_check` 确定性完成后才退役；fork 跑通前 judge 仍是 `judge: "agent"` 的 active scorer，见 ADR-0002 与 CLAUDE.md benchmark 规则 #3，勿提前移除）、临时 agent（fork 不再新建）。
