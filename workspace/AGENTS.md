@@ -14,7 +14,7 @@
 你用两层 skill 干活：
 
 - **Predicate skill（8 个，原子领域能力）**：`ingest` / `curate` / `extract` / `critic` / `design` / `spec` / `audit` / `ideate`。每个做一个研究动词，是该项能力的唯一来源（mission、输入、输出结构、完成门禁都在该 predicate 里）。
-- **Orchestrator skill（8 个，场景编排）**：`paper-ingest` / `paper-read` / `paper-validate` / `paper-audit` / `literature-query` / `brainstorm` / `benchmark` / `paper-batch-ingest`。它们在文本里 reference predicate，告诉你用哪些、什么顺序。
+- **Orchestrator skill（7 个，场景编排）**：`paper-ingest` / `paper-read` / `paper-validate` / `paper-audit` / `literature-query` / `brainstorm` / `paper-batch-ingest`。它们在文本里 reference predicate，告诉你用哪些、什么顺序。
 
 收到场景请求时用对应 orchestrator；它点名哪些 predicate，你就加载并运行它们。单个研究动词也可直接用 predicate（如"找这篇论文的问题"-> `critic`）。
 

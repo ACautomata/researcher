@@ -573,9 +573,8 @@ OPENCLAW_PLUGINS_ENABLED=${OPENCLAW_PLUGINS_ENABLED:-false}
 # LLM provider creds for the gateway process. LLM_BASE_URL is written here for
 # compose's ${LLM_BASE_URL} interpolation (docker-compose.bench.yml:38); it has
 # a public default and is not secret. LLM_API_KEY is deliberately NOT written to
-# this file: the legacy benchmark.yml uploads .bench-runtime/.env.bench as an
-# Actions artifact (.github/workflows/benchmark.yml:193-209), so baking the key
-# here would publish it. compose still resolves ${LLM_API_KEY}
+# this file: workflow artifacts may contain .bench-runtime/.env.bench, so
+# baking the key here would publish it. compose still resolves ${LLM_API_KEY}
 # (docker-compose.bench.yml:37) from the shell env (CI step env / sourced
 # docker/.env.bench), and bench_runtime_up passes --env LLM_API_KEY directly
 # (see below). The SecretRef in openclaw.json reads LLM_API_KEY from the process
@@ -644,7 +643,7 @@ export BENCH_ENV_FILE="${ENV_DIR}/bench-runtime-env.sh"
 EXPORT_FILE="${BENCH_ENV_FILE}"
 {
   cat <<EOF
-# Auto-sourced by .github/workflows/benchmark.yml, local runners, and benchmark env.sh files.
+# Auto-sourced by local runners and ClawProBench bootstrap steps.
 export BENCH_ROOT='${BENCH_ROOT}'
 export BENCH_CONTAINER='${CONTAINER}'
 export BENCH_CONTAINER_NAME='${BENCH_CONTAINER_NAME}'
