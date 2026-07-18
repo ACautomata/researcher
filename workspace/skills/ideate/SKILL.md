@@ -1,89 +1,45 @@
 ---
 name: ideate
-description: Generate evidence-grounded research idea cards; each anchors to a named pain point. Triggers: 生成 idea, brainstorm ideas, research ideas, 研究思路, 研究方向, idea 生成.
+description: Generate or persist evidence-grounded research idea cards anchored to named pain points. Use for research ideas, research directions, or a brainstorm workflow that needs candidate cards or reviewed-card persistence.
 ---
 
 # ideate — 研究 idea 生成
 
 ## Mission
 
-将论文、wiki 上下文、实验记录和项目约束转化为有证据支撑、结构化、可比较、可验证的研究 idea card。
+将论文、wiki 上下文、实验记录和项目约束转化为有证据支撑、可比较、可验证的 Idea Card。每张 card 必须锚定具体论文/wiki 页面，或暴露同一痛点的 2–4 篇论文集群。
 
-每个 idea 必须锚定到一篇具体论文 / wiki 页面，或一个 2–4 篇同类论文组成的、暴露具体痛点的集群。没有命名痛点的宽泛方向标签不是有效的 idea card。
+Card schema 见 `references/idea-card-template.md`；完整输出格式见 `references/output-spec.md`；可选的机会桶策略见 `references/generation-strategies.md`。
 
-## When to use
+## 模式
 
-- 用户请求"brainstorm ideas""生成研究 idea""找研究方向"
-- 需要从已有论文 / wiki 证据生成可验证的研究机会
+| 输入 | 行为 | 写入 |
+| --- | --- | --- |
+| 默认 brief 或 `candidate_only: true` | 标准化 brief → 构建证据上下文 → 生成、去重、校验 card | 默认：写入；`candidate_only`：仅内联返回 |
+| `reviewed_cards` | 验证上游已审查的 card，原样持久化 | 仅整批校验通过后写入 |
 
-不要用于：wiki 查询 / 比较（`curate`）、论文问题分析（`critic`）。
+predicate 不自行裁定最终赢家：它要么生成候选，要么持久化调用方提供的 `survived` 集合。
 
-## 核心工作流
+## 生成路径
 
-1. 将请求标准化为 Idea Generation Brief（参考 `references/brief-template.md`）
-2. 从 wiki 页面、论文、实验记录构建上下文摘要
-3. 提取每篇论文的上下文和局限性 / 未来工作信号
-4. 将跨论文发现综合为机会桶
-5. 生成 5–10 张候选 idea card
-6. 去重，保留每个集群中最强的变体
-7. 验证每张 card 的必填字段和证据链
-8. 在 reply 中内联返回完整 idea card
-9. 收到用户反馈后，产出版本化的跟进
+1. 标准化 Idea Generation Brief（`references/brief-template.md`）；至少需要研究主题和一项论文、wiki 或实验材料。
+2. 提取命名痛点、局限性/未来工作信号，按机会桶生成并去重 card。
+3. 每张 card 遵循模板，证据可追溯，含具体 `target_problem`、最小实验、预期指标、风险；弱支撑标记 `low-confidence`。不把输入没有说明的论文事实当作证据。
+4. 默认模式生成 5–10 张高信号 card；`candidate_only` 只为分配视角生成 1–3 张完整 card，并在 reply 内联返回，不写 wiki。
+5. 默认模式在本会话首次写入前运行 `wiki_status`，然后通过 `wiki_apply` 写入完整输出、更新必要索引，并在 reply 内联返回 card 与写入位置。
 
-## 输入（Idea Generation Brief）
+## 已审查 Card 持久化
 
-- `research_topic`（必需，可从论文标题或用户上下文推断）
-- `target_task`、`current_baseline`、`available_data`、`available_code`
-- `available_compute`、`preferred_metrics`、`hard_constraints`
-- `known_failures`、`desired_risk_level`
+当调用方提供 `reviewed_cards` 时：
 
-缺失字段保守推断并标注为假设。仅当没有研究主题、没有证据材料或硬约束无法解决时才追问。
-
-生成前确认上下文充分性：至少有论文材料、wiki 页面或实验记录之一可用。否则向调用者报告证据不足，不强行生成空洞的通用 idea。
-
-## 生成策略
-
-使用 `references/generation-strategies.md`：gap-driven, contradiction-driven, transfer-driven, failure-driven, ablation-driven, metric-driven, constraint-driven。
-
-## Hard Rules
-
-1. 每个 idea 以证据为基础
-2. 每个 idea 锚定到一篇具体论文 / wiki 页面或 2–4 篇同类论文集群；显式命名来源
-3. `target_problem` 必须是具体痛点，不是宽泛研究领域或方法族标签
-4. 每个 idea 包含最小验证实验
-5. 每个 idea 命名至少一个预期变化的指标
-6. 每个 idea 标识一个风险或失败模式
-7. 弱支撑 idea 标记为 `low-confidence`
-8. 优先 5–10 个高信号 idea，而非冗长嘈杂列表
-9. 不声称论文说了什么除非出现在来源中
-10. 准备 idea 供人工审查或下游评估；不在 skill 内宣布最终赢家
-
-## 输出结构
-
-最终 reply 中内联返回完整 recommended-ideas.md（详见 `references/output-spec.md`，paper demo 场景见 `references/paper-demo-output-spec.md`），附简短摘要：处理论文数、推荐 idea 数、wiki writeback candidates。
-
-每张 Idea Card 遵循 `references/idea-card-template.md`：
-
-```text
-idea_id:
-title:
-one_sentence_hypothesis:
-anchor_sources:
-target_problem:
-mechanism:
-paper_insight_or_limitation:
-evidence_chain:
-minimum_experiment:
-expected_metric_change:
-implementation_scope:
-risks:
-confidence:
-recommendation_reason:
-wiki_writeback:
-```
+1. 先全量验证：每张 card 符合模板、证据可追溯，且有 `challenge`、`verdict: survived`、`verdict_reason`。
+2. 任一 card 不合格时，返回完整问题清单；**整个批次不得调用 `wiki_apply`**。空集合同样不写入。
+3. 全部通过后，原样写入该批 cards；不生成、去重、合并、补充或改写任何 card/审计记录。优先写入调用方指定的 wiki path；未指定时遵循现有 wiki convention。
+4. 写入前运行 `wiki_status`，写入后运行 `wiki_lint`。仅修复本次造成的页面容器、索引、链接或 metadata 问题；不得修改 card 正文、`challenge`、`verdict` 或 `verdict_reason`。修复后再次 lint。
+5. 在 reply 内联返回完整持久化 cards、写入位置和 lint 结果。
 
 ## 完成门禁
 
-- 5–10 张 idea card，每张锚定到命名痛点、含最小验证实验 + 预期指标 + 风险
-- 去重后保留每个集群最强变体
-- 弱支撑 idea 标记 `low-confidence`
+- 生成路径：每张 card 满足模板的证据、痛点、实验、指标和风险要求；去重后每个集群只有最强变体。
+- 候选路径：1–3 张完整 card，且没有 wiki 写入。
+- 已审查持久化：整批都已验证为 `survived`，或整批拒绝写入；成功写入后 lint 通过。
