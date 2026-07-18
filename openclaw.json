@@ -83,14 +83,7 @@
     {
       "agentId": "main",
       "match": {
-        "channel": "feishu",
-        "accountId": "main"
-      }
-    },
-    {
-      "agentId": "main",
-      "match": {
-        "channel": "discord"
+        "channel": "feishu"
       }
     }
   ],
@@ -145,36 +138,12 @@
       "enabled": true,
       "domain": "feishu",
       "connectionMode": "websocket",
-      "defaultAccount": "main",
-      "accounts": {
-        "main": {
-          "appId": "${FEISHU_APP_ID}",
-          "appSecret": "${FEISHU_APP_SECRET}",
-          "name": "Research Assistant",
-          "enabled": true
-        },
-        "default": {
-          "dmPolicy": "pairing",
-          "groupPolicy": "allowlist"
-        }
-      },
+      "defaultAccount": "default",
+      "appId": "${FEISHU_APP_ID}",
+      "appSecret": "${FEISHU_APP_SECRET}",
+      "dmPolicy": "pairing",
+      "groupPolicy": "allowlist",
       "requireMention": true
-    },
-    "discord": {
-      "enabled": true,
-      "token": {
-        "source": "env",
-        "provider": "default",
-        "id": "DISCORD_BOT_TOKEN"
-      },
-      "groupPolicy": "open",
-      "streaming": {
-        "mode": "progress"
-      },
-      "threadBindings": {
-        "enabled": true,
-        "spawnSessions": true
-      }
     }
   },
   "plugins": {
