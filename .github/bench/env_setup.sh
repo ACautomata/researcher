@@ -254,12 +254,19 @@ if isinstance(channels, dict):
     for ch_name, ch_cfg in channels.items():
         if not isinstance(ch_cfg, dict):
             continue
+        # Disable the channel top-level (discord has no `accounts` block; its
+        # token SecretRef sits at channel top level, so disabling only account-
+        # level `enabled` leaves discord.enabled=true and the gateway still
+        # requires DISCORD_BOT_TOKEN). feishu has both top-level and account-
+        # level enabled — disable both.
+        if ch_cfg.get("enabled") is not None:
+            ch_cfg["enabled"] = False
+            ch_disabled += 1
         accs = ch_cfg.get("accounts", {})
         if isinstance(accs, dict):
             for acc_name, acc in accs.items():
                 if isinstance(acc, dict) and acc.get("enabled") is not None:
                     acc["enabled"] = False
-                    ch_disabled += 1
 if "/" not in llm_model:
     raise SystemExit(
         "LLM_MODEL must be in 'provider/model' form (e.g. minimax/MiniMax-M2.7), got: %r" % llm_model
@@ -389,11 +396,13 @@ if isinstance(channels, dict):
         if not isinstance(ch_cfg, dict):
             continue
         accs = ch_cfg.get("accounts", {})
+        if ch_cfg.get("enabled") is not None:
+            ch_cfg["enabled"] = False
+            ch_disabled2 += 1
         if isinstance(accs, dict):
             for acc_name, acc in accs.items():
                 if isinstance(acc, dict) and acc.get("enabled") is not None:
                     acc["enabled"] = False
-                    ch_disabled2 += 1
 
 # Resolve target provider + model id from LLM_MODEL, following the
 # `provider/model` convention used by ~/.openclaw/openclaw.json: the prefix

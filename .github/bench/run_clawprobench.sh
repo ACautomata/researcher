@@ -121,6 +121,9 @@ if isinstance(channels, dict):
     for ch_name, ch_cfg in channels.items():
         if not isinstance(ch_cfg, dict):
             continue
+        if ch_cfg.get("enabled") is not None:
+            ch_cfg["enabled"] = False
+            disabled.append(f"{ch_name} (top)")
         accs = ch_cfg.get("accounts", {})
         if isinstance(accs, dict):
             for acc_name, acc in accs.items():
