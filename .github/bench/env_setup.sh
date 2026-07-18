@@ -302,7 +302,19 @@ data.setdefault("tools", {}).setdefault("exec", {})["mode"] = "full"
 # writes into the controller's workspace). The benchmark container is isolated
 # (loopback, no channels, disposable), so this is safe here.
 data.setdefault("tools", {}).setdefault("fs", {})["workspaceOnly"] = False
+# Apply plugin compatibility before the gateway starts. The bench image lacks
+# lossless-claw but research scenarios require memory-wiki's wiki_apply/search.
+plugins = data.setdefault("plugins", {})
+plugins.setdefault("slots", {})["contextEngine"] = "legacy"
+entries = plugins.setdefault("entries", {})
+lossless = entries.get("lossless-claw")
+if isinstance(lossless, dict):
+    lossless["enabled"] = False
+memory_wiki = entries.setdefault("memory-wiki", {})
+if isinstance(memory_wiki, dict):
+    memory_wiki["enabled"] = True
 p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+print("patched plugins: contextEngine -> legacy, lossless-claw disabled, memory-wiki enabled")
 print(f"patched models.providers.{_provider}.apiKey -> SecretRef(LLM_API_KEY)")
 print("patched agents.defaults.sandbox.mode -> off")
 print("patched agents.defaults.elevatedDefault -> full")
