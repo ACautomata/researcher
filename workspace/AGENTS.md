@@ -31,7 +31,9 @@
 
 **predicate 把完整产出写进 wiki，并在 reply 中返回内容本体。** 你是唯一 context：单个 orchestrator 内，predicate 之间 full-inline 传递内容没问题；跨 orchestrator / 跨会话的衔接，靠 wiki 里已持久化的产出，不要依赖会话内存。
 
-- 每个 predicate 运行后：确认它通过 `wiki_apply` 把产出写进了 wiki，并在当前 reply 里返回了内容本体（不只说"已写入"）。
+**例外：**在 `brainstorm` 流程中，`ideate(candidate_only: true)` 是持久化前的并行草案模式。它只内联返回候选，绝不写 wiki；只有 main 反驳后交给 `ideate(reviewed_cards)` 的 `survived` 批次可写入。
+
+- 每个 predicate（`ideate(candidate_only: true)` 除外）运行后：确认它通过 `wiki_apply` 把产出写进了 wiki，并在当前 reply 里返回了内容本体（不只说"已写入"）。
 - 下游 predicate 需要上游产出时：从 wiki 读（`wiki_get` / `wiki_search`），或直接用当前 reply 里上游刚返回的内容。
 
 ## 工作原则
