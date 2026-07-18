@@ -53,8 +53,13 @@ services:
       # never use this token (the CLI runs --local embedded), so a stable
       # dummy value is enough.
       GATEWAY_TOKEN: ${GATEWAY_TOKEN:-bench-only-not-a-real-token}
-      # Sandbox enabled for agent workspace isolation
-      OPENCLAW_PLUGINS_ENABLED: "false"
+      # Sandbox enabled for agent workspace isolation. Plugin loading is gated
+      # by this env var (default false for the legacy Benchmark workflow, which
+      # runs only `openclaw agent` and does not need plugin-backed tools). The
+      # ClawProBench bootstrap overrides it to true so the memory-wiki plugin
+      # (wiki_apply/wiki_search) loads for the research scenarios (ADR-0002);
+      # see .github/bench/run_clawprobench.sh.
+      OPENCLAW_PLUGINS_ENABLED: ${OPENCLAW_PLUGINS_ENABLED:-false}
     volumes:
       - ${OPENCLAW_DATA_DIR}:/home/node/.openclaw
     ports:

@@ -564,12 +564,22 @@ DM_POLICY=disabled
 GROUP_POLICY=disabled
 ALLOW_FROM=
 OPENCLAW_WORKSPACE_ROOT=/home/node/.openclaw
-OPENCLAW_PLUGINS_ENABLED=false
-# LLM provider creds for the gateway process (OpenClaw 2026.7.1 reads these
-# via compose's ${LLM_API_KEY}/${LLM_BASE_URL} interpolation; without them the
-# gateway starts with an empty provider key and every agent call 401s). The
-# SecretRef in openclaw.json resolves LLM_API_KEY from the process env at runtime.
-LLM_API_KEY=${LLM_API_KEY}
+# Plugin loading gate. Default false (legacy Benchmark workflow runs only
+# `openclaw agent` and needs no plugin-backed tools). The ClawProBench bootstrap
+# exports OPENCLAW_PLUGINS_ENABLED=true before invoking env_setup so the
+# memory-wiki plugin (wiki_apply/wiki_search) loads for research scenarios
+# (ADR-0002); docker-compose.bench.yml resolves this via interpolation.
+OPENCLAW_PLUGINS_ENABLED=${OPENCLAW_PLUGINS_ENABLED:-false}
+# LLM provider creds for the gateway process. LLM_BASE_URL is written here for
+# compose's ${LLM_BASE_URL} interpolation (docker-compose.bench.yml:38); it has
+# a public default and is not secret. LLM_API_KEY is deliberately NOT written to
+# this file: the legacy benchmark.yml uploads .bench-runtime/.env.bench as an
+# Actions artifact (.github/workflows/benchmark.yml:193-209), so baking the key
+# here would publish it. compose still resolves ${LLM_API_KEY}
+# (docker-compose.bench.yml:37) from the shell env (CI step env / sourced
+# docker/.env.bench), and bench_runtime_up passes --env LLM_API_KEY directly
+# (see below). The SecretRef in openclaw.json reads LLM_API_KEY from the process
+# env at runtime.
 LLM_BASE_URL=${LLM_BASE_URL}
 EOF
 mkdir -p "${BENCH_DATA_DIR}"

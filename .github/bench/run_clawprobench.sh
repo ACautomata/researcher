@@ -57,7 +57,16 @@ if [[ -z "${LLM_API_KEY:-}" ]]; then
 fi
 export LLM_MODEL="minimax/MiniMax-M3"
 export LLM_BASE_URL="${LLM_BASE_URL:-https://api.minimaxi.com/anthropic}"
-export BENCH_LOCAL_ENV_FILE="/dev/null"   # /dev/null is not a regular file → env_setup skips sourcing
+# Enable plugin loading: main's research skills (ingest/design/paper-validate/
+# audit) call the plugin-backed wiki_apply/wiki_search tools (workspace/TOOLS.md,
+# ADR-0002). The bench image ships memory-wiki as a stock extension, but
+# OPENCLAW_PLUGINS_ENABLED gates whether it loads; env_setup interpolates this
+# into the compose env (docker-compose.bench.yml), so it must be exported BEFORE
+# env_setup brings the container up. lossless-claw is NOT shipped (its installPath
+# resolves to a seed cache only) and is disabled by the config patch below; the
+# other enabled entries (minimax/browser/memory-core/memory-wiki) are all stock.
+export OPENCLAW_PLUGINS_ENABLED=true
+export BENCH_LOCAL_ENV_FILE="/dev/null"   # not a regular file, so env_setup skips sourcing it
 
 # --- 2. bring up the container + sync repo + patch openclaw.json + wait ready.
 #        FIRST, delete any residual state/openclaw.sqlite from a prior run:
@@ -85,16 +94,23 @@ trap '${BENCH_KEEP_CONTAINER:+:} bench_teardown' EXIT
 bench_container_cli exec "$BENCH_CONTAINER" openclaw gateway status >/dev/null
 
 # --- 5b. bench-container config patches (in-container openclaw.json copy;
-#        host config is never touched). Two patches, both required for 2026.7.1:
+#        host config is never touched). Three patches, all required for 2026.7.1:
 #
 #        (a) context engine: 颖姗 pins plugins.slots.contextEngine=lossless-claw,
 #            but the bench image does NOT ship the lossless-claw extension
-#            (OPENCLAW_PLUGINS_ENABLED=false + installPath absent). At runtime
-#            the context engine fails "not registered" -> session error. Swap
-#            to the built-in `legacy` engine + disable the stale entry. CI does
-#            not exercise lossless-claw (accepted trade-off, see CLAUDE.md).
+#            (only a seed cache; OPENCLAW_PLUGINS_ENABLED=true now loads stock
+#            plugins). At runtime the context engine fails "not registered" ->
+#            session error. Swap to the built-in `legacy` engine + disable the
+#            stale entry. CI does not exercise lossless-claw (accepted trade-off,
+#            see CLAUDE.md).
 #
-#        (b) channels: OpenClaw 2026.7.1 doctor auto-installs the feishu/discord
+#        (b) memory-wiki: ensure enabled. The stock extension ships in the image
+#            and OPENCLAW_PLUGINS_ENABLED=true (exported above) lets it load,
+#            but defensively flip the entry on in case env_setup's config sync
+#            reset it. wiki_apply/wiki_search are required by the research
+#            scenarios' workspace_live custom_checks (ADR-0002).
+#
+#        (c) channels: OpenClaw 2026.7.1 doctor auto-installs the feishu/discord
 #            plugins, after which a channel with enabled:true requires its
 #            SecretRef (FEISHU_APP_SECRET etc.) -> gateway fails to start with
 #            "required secrets are unavailable" in a bench container that has
@@ -114,7 +130,13 @@ lc = entries.get("lossless-claw")
 if isinstance(lc, dict):
     lc["enabled"] = False
 
-# (b) disable all channel accounts
+# (b) memory-wiki -> enabled (stock extension; wiki_apply/wiki_search)
+mw = entries.setdefault("memory-wiki", {})
+if isinstance(mw, dict):
+    mw_prev = mw.get("enabled")
+    mw["enabled"] = True
+
+# (c) disable all channel accounts
 disabled = []
 channels = d.get("channels", {})
 if isinstance(channels, dict):
@@ -133,17 +155,26 @@ if isinstance(channels, dict):
 
 p.write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 print(f"[clawprobench] contextEngine: {prev_ce!r} -> legacy (lossless-claw disabled)")
+mw_now = mw.get("enabled") if isinstance(mw, dict) else None
+print(f"[clawprobench] memory-wiki: enabled={mw_now} (was {mw_prev!r})")
 _ch_summary = ", ".join(disabled) if disabled else "none present"
 print(f"[clawprobench] channels disabled: {_ch_summary}")
 '
 
-# --- 6. post-patch hard assert: primary must be M3 (fail loud, not silent M2.7) ---
+# --- 6. post-patch hard assert: primary must be M3 (fail loud, not silent M2.7)
+#        and memory-wiki must be enabled (research skills need wiki_apply/
+#        wiki_search; a silent false here means env_setup's config sync reset it
+#        and every workspace_live scenario would score 0). ---
 bench_container_cli exec "$BENCH_CONTAINER" python3 -c '
 import json, pathlib
 d = json.loads(pathlib.Path("/home/node/.openclaw/openclaw.json").read_text())
 primary = d.get("agents", {}).get("defaults", {}).get("model", {}).get("primary", "")
 assert primary == "minimax/MiniMax-M3", f"primary is {primary!r}, expected minimax/MiniMax-M3 (env_setup clobbered by docker/.env.bench?)"
 print(f"[clawprobench] model primary OK: {primary}")
+mw = d.get("plugins", {}).get("entries", {}).get("memory-wiki", {})
+mw_enabled = mw.get("enabled") if isinstance(mw, dict) else None
+assert mw_enabled is True, f"memory-wiki enabled is {mw_enabled!r}, expected True (without it wiki_apply/wiki_search are unavailable)"
+print(f"[clawprobench] memory-wiki enabled OK: {mw_enabled}")
 '
 
 # --- 7. clone the fork into mktemp (NEVER inside the repo) + cp into container ---
@@ -183,8 +214,13 @@ bench_container_cli exec "$BENCH_CONTAINER" openclaw gateway status >/dev/null \
 #        --session-id that clashes with the gateway's own session bookkeeping,
 #        surfacing as "session file changed while embedded prompt lock was
 #        released" and aborting every trial in ~15s. Embedded mode has the fork
-#        own the session file, matching how the legacy benchmarks invoked main. ---
-echo "[clawprobench] run.py --scenario ${SCENARIO} --trials ${TRIALS}"
+#        own the session file, matching how the legacy benchmarks invoked main.
+#        --benchmark-status all: research scenarios are benchmark_status=incubating
+#        (ADR-0002); the fork's default `core` profile filters to status=active
+#        and select_scenarios drops non-matching ids EVEN when --scenario names
+#        one explicitly (harness/loader.py:269), so every research_* matrix job
+#        would resolve zero scenarios without this override. ---
+echo "[clawprobench] run.py --scenario ${SCENARIO} --trials ${TRIALS} --benchmark-status all"
 bench_container_cli exec -i \
   -e LLM_API_KEY -e LLM_BASE_URL \
   "$BENCH_CONTAINER" bash -lc '
@@ -196,6 +232,7 @@ bench_container_cli exec -i \
       --local-agent \
       --scenario "'"${SCENARIO}"'" \
       --trials "'"${TRIALS}"'" \
+      --benchmark-status all \
       --execution-mode live \
       --results-dir /home/node/.openclaw/results
   '

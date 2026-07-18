@@ -62,12 +62,32 @@ jobs:
     name: "Verify secrets (fail-fast gate)"
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    outputs:
+      # "true" when the run must skip neutrally (fork PR: pull_request sandboxes
+      # secrets, so LLM_API_KEY is intentionally absent). Downstream jobs gate on
+      # this so fork PRs get a neutral check instead of a permanent failure.
+      skip: ${{ steps.verify.outputs.skip }}
     steps:
       - name: "Verify required secrets"
+        id: verify
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          # Route PR-controlled context through env (not ${{ }} interpolation
+          # into run:) so a fork-controlled repo name cannot re-parse as shell.
+          # Empty for non-pull_request events.
+          EVENT_NAME: ${{ github.event_name }}
+          PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         run: |
           if [ -z "${LLM_API_KEY:-}" ]; then
+            # `pull_request` does not expose repo secrets to forks, so an empty
+            # key here is expected for fork PRs - skip neutrally (no permanently
+            # failing check). Same-repo PRs without the secret are a real
+            # misconfiguration and still fail fast.
+            if [ "${EVENT_NAME}" = "pull_request" ] && [ -n "${PR_HEAD_REPO}" ] && [ "${PR_HEAD_REPO}" != "${GITHUB_REPOSITORY}" ]; then
+              echo "::notice::Fork PR without secrets - skipping ClawProBench (pull_request does not expose LLM_API_KEY to forks). Validate via workflow_dispatch on the branch."
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             echo "::error::LLM_API_KEY secret is not configured. Add it under Settings → Secrets → Actions." >&2
             exit 1
           fi
@@ -77,6 +97,9 @@ jobs:
   discover:
     name: "Discover research scenarios"
     needs: setup
+    # Skip on fork PRs without secrets (setup sets skip=true). `always()` is not
+    # needed: setup exits 0 on both real-success and fork-skip paths.
+    if: needs.setup.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -135,8 +158,8 @@ jobs:
     name: "Bench: ${{ matrix.scenario }}"
     needs: [setup, discover]
     # Empty matrix (pin moved and research/ vanished) would otherwise spawn a
-    # no-op job; skip the whole bench fan-out instead.
-    if: needs.discover.outputs.count != '0'
+    # no-op job; skip the whole bench fan-out instead. Also skip on fork-no-secret.
+    if: needs.setup.outputs.skip != 'true' && needs.discover.outputs.count != '0'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     strategy:
@@ -209,7 +232,10 @@ jobs:
   aggregate:
     name: "Aggregate + PR comment"
     needs: [setup, discover, bench]
-    if: always()
+    # `always()` keeps the renderer running when individual bench jobs fail (to
+    # post a partial-results comment), but skip entirely on fork-no-secret so
+    # no misleading "0 results" comment lands on a fork PR.
+    if: always() && needs.setup.outputs.skip != 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:

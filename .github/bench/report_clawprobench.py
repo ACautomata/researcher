@@ -183,8 +183,16 @@ def _load_base() -> dict | None:
     raw = os.environ.get("BENCH_BASE_SUMMARY")
     if not raw:
         return None
-    if Path(raw).exists():
-        return _load(Path(raw))
+    # Path.exists() raises OSError(ENAMETOOLONG) on Linux when `raw` is a long
+    # base64 blob (the secret form easily exceeds NAME_MAX), instead of
+    # returning False. Guard the probe so the aggregate step falls through to
+    # the base64 branch instead of crashing. (os.path.exists swallows this;
+    # pathlib.Path.exists does not.)
+    try:
+        if Path(raw).exists():
+            return _load(Path(raw))
+    except OSError:
+        pass
     # Treat as base64-encoded JSON (the secret form).
     try:
         import base64
