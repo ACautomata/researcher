@@ -55,7 +55,7 @@ description: Audit the quality of analysis-chain outputs (extract/critic/design/
 
 ## 输出结构
 
-通过 `wiki_apply` write back 审计结论到论文 wiki 页面：
+输出为一份完整 md，先写到 `raw/sources/<slug>.md`，然后调用 `ingest`（传入该 md 文件路径）统一写入 wiki；**不直接调用 `wiki_apply` 建页**：
 
 ```markdown
 # 论文审稿流水线质量评估报告
@@ -73,3 +73,4 @@ description: Audit the quality of analysis-chain outputs (extract/critic/design/
 
 - 覆盖全部 6 个审计维度
 - blocking issues 可操作（带具体位置和修复方向）
+- 产出 md 已经 `ingest` 写入 wiki（含 wiki 路径），且本 skill 未直接调 `wiki_apply` 建页

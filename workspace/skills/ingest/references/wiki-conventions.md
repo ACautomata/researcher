@@ -80,7 +80,7 @@ Log 是追加式的，不要重写历史条目（除非用户要求）。
 - 页面过期时，在下一个相关的 ingest 或 query 时刷新
 - 页面放错位置时，优先在 domains 子树内用 wiki 工具移动而非复制
 - 迁移期间保留旧的 sources/ 链接，直到对应的 papers/ 页面存在且入站链接已更新
-- 迁移期间，旧的 `wiki_apply` 建页与新的 compile 建页共存；不一次性硬切所有旧页，旧页按本规则惰性迁移
+- 迁移期间，旧的 `wiki_apply` 建页与新的经 `ingest` compile 建页共存；不一次性硬切所有旧页，旧页按本规则惰性迁移
 
 ## 矛盾与不确定性
 
@@ -93,6 +93,6 @@ Log 是追加式的，不要重写历史条目（除非用户要求）。
 
 ## 注意事项
 
-- Ingest 一律 spawn 隔离 subagent 执行——单篇入库也 spawn（spawn self，isolated context），PDF 全文不进 main context
-- 页面经官方流水线建立：`openclaw wiki ingest` + `openclaw wiki compile` 建页；`wiki_apply` 仅用于对已有页面的窄更新（synthesis/metadata）；`wiki_lint` 在每次实质变更后校验
-- 每篇论文由各自的隔离 subagent 处理，互不共享 context
+- Ingest 一律 spawn 隔离 subagent 执行——所有写入分支都隔离（PDF 入库与 md 写入），PDF 全文与 md 内容不进 main context；每次写入 spawn 一个隔离 subagent，不批量复用
+- **所有整页写入（论文页 / 分析页 / 比较页 / idea card）统一经 `ingest` 的官方流水线**：`openclaw wiki ingest` + `openclaw wiki compile` 建页；下游 predicate（`extract`/`critic`/`design`/`spec`/`audit`/`ideate`/`curate`）备好 md 交 `ingest` 写入，不直接 `wiki_apply` 建整页；`wiki_apply` 仅用于对已有页面的窄更新（synthesis/metadata）与 index/log 更新；`wiki_lint` 在每次实质变更后校验
+- 每篇论文 / 每份 md 由各自的隔离 subagent 处理，互不共享 context

@@ -31,11 +31,13 @@ description: Curate the research wiki — lint, compare papers, answer literatur
 **做：**
 
 - 跑 wiki lint 并整理 dashboard
-- 通过 `wiki_apply` 修复 metadata 缺失、补全 `evidence_level`、修正 frontmatter
+- 通过 `wiki_apply` 修复 metadata 缺失、补全 `evidence_level`、修正 frontmatter（**已有页面的窄更新**）
 - 跨论文方法 / 数据集 / 基准比较，生成对比表
 - 文献查询：基于 wiki 现有内容回答问题，标注引用
 - 识别孤立页面、孤儿节点、过时 superseded 页面
 - 建议页面合并、拆分、重命名（不直接执行破坏性操作）
+
+**新建持久页面**：当 compare / query 产出**新的持久比较页或分析页**时，不用 `wiki_apply` 建整页——备好该页 md 写到 `raw/sources/<slug>.md`，交 `ingest` 统一写入。
 
 **不做：**
 

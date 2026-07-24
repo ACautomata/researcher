@@ -11,8 +11,8 @@ description: Turn a paper's problems into executable validation (design → spec
 
 ## 编排
 
-1. **`design`** — 基于 `critic` 问题分析，产出验证实验设计（写回 wiki）。
-2. **`spec`** — 基于 `design`，生成 claude-code 任务提示词（写回 wiki）。
+1. **`design`** — 基于 `critic` 问题分析，产出验证实验设计（备好 md 经 `ingest` 写入 wiki）。
+2. **`spec`** — 基于 `design`，生成 claude-code 任务提示词（备好 md 经 `ingest` 写入 wiki）。
 
 ### Pre-check
 
