@@ -45,7 +45,7 @@ description: Design small, controllable validation experiments for a paper's ide
 
 ## 输出结构
 
-严格按 10 节输出，并通过 `wiki_apply` write back 到论文 wiki 页面：
+严格按 10 节输出为一份完整 md，先写到 `raw/sources/<slug>.md`，然后调用 `ingest`（传入该 md 文件路径）统一写入 wiki；**不直接调用 `wiki_apply` 建页**：
 
 ```markdown
 # {{论文标题}}：验证实验设计
@@ -66,3 +66,4 @@ description: Design small, controllable validation experiments for a paper's ide
 
 - Reply 包含全部 10 节
 - 每个实验映射到一个 `critic` 问题并有预期结果
+- 产出 md 已经 `ingest` 写入 wiki（含 wiki 路径），且本 skill 未直接调 `wiki_apply` 建页

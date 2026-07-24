@@ -9,8 +9,8 @@ description: Deeply read a paper in one flow — ingest into the wiki, then extr
 
 ## 编排
 
-1. **`ingest`** — PDF → 结构化 wiki 论文页面，产出写回 wiki。
-2. **`extract`** — 基于 wiki 页面 + 论文原文，产出实验提取文档（写回 wiki）。
+1. **`ingest`** — PDF → 结构化 wiki 论文页面，经 `ingest` 统一写入 wiki。
+2. **`extract`** — 基于 wiki 页面 + 论文原文，产出实验提取文档（备好 md 经 `ingest` 写入 wiki）。
 
 ### Pre-check
 

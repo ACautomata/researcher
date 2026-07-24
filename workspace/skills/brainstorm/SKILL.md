@@ -14,7 +14,7 @@ description: Run parallel, evidence-grounded research ideation with main-agent r
 3. main 去重并逐卡反驳，写入审计记录。
 4. 将全部 `survived` cards 作为一个 `reviewed_cards` 批次交给 `ideate` 持久化。
 
-`ideate` 是 Idea Card schema、字段校验和 wiki 持久化的唯一来源；本 skill 不重述其 schema 或写入细节。
+`ideate` 是 Idea Card schema、字段校验和 wiki 持久化的唯一来源（持久化备好 md 经 `ingest` 统一写入）；本 skill 不重述其 schema 或写入细节。
 
 ## Pre-flight
 
@@ -55,7 +55,7 @@ verdict_reason: <反驳成立或未成立的理由>
 ## 交付与完成门禁
 
 - 没有 `survived` cards 时，不调用 `reviewed_cards` 模式，也不写 wiki；回复所有淘汰原因。
-- 有 survivor 时，将**全部** survivor 一次性作为 `reviewed_cards` 交给 `ideate`。该模式负责原子校验、写入、lint 和返回写入位置。
+- 有 survivor 时，将**全部** survivor 一次性作为 `reviewed_cards` 交给 `ideate`。该模式负责原子校验，并备好 md 经 `ingest` 统一写入、lint 和返回写入位置。
 - 最终回复包含：子 session 终态、survived cards 及审计记录、rejected 卡片和反驳、`ideate` 返回的 wiki/lint 结果。
 
 完成条件：至少启动五个 self session；每张合并候选只有一个 verdict；只有 `survived` cards 进入 `reviewed_cards`；持久化批次成功通过 `ideate` 的校验与 lint。

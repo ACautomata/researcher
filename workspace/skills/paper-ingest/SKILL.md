@@ -9,7 +9,7 @@ description: Ingest a paper into the wiki and verify quality (ingest → curate)
 
 ## 编排
 
-1. **`ingest`** — PDF → 结构化 wiki 论文页面（证据可追溯），产出写回 wiki。
+1. **`ingest`** — PDF → 结构化 wiki 论文页面（证据可追溯），经 `ingest` 统一写入 wiki。
 2. **`curate`**（lint 模式）— 对新页面做质量检查：frontmatter、`evidence_level`、Results 具体数字、孤立链接、矛盾、index。
 
 ### Pre-check

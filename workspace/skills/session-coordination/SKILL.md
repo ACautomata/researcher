@@ -13,7 +13,7 @@ description: Coordinate inter-session communication — when and why to send mes
 | --- | --- | --- |
 | 创建独立工作 | `sessions_spawn` | caller 创建；self-spawn 省略 `agentId`。 |
 | 回传发现或协调既有会话 | `sessions_send` | 格式细节见 `send`；只向 task 中明确给出的目标发送。 |
-| 持久化领域产出 | `wiki_apply` + inline reply | 不用 session key 或文件路径充当产物交接。 |
+| 持久化领域产出 | 备好 md 经 `ingest` 写入 + inline reply | 不用 session key 或文件路径充当产物交接。 |
 
 `timeoutSeconds: 0` 表示非阻塞投递，适合 callee 的即时回传。caller 需要在当前步骤取得回复时，才设置正的 `timeoutSeconds`。
 
@@ -54,7 +54,7 @@ description: Coordinate inter-session communication — when and why to send mes
    - 关键阶段完成，且 caller 可以据此安排后续工作。
 3. 使用 `send` predicate 定义的消息格式调用 `sessions_send`。
 
-4. 最终 reply 仍返回完整交付或明确失败原因；需要持久化的 predicate 产出仍写入 wiki 并内联返回内容本体。
+4. 最终 reply 仍返回完整交付或明确失败原因；需要持久化的 predicate 产出仍备好 md 经 `ingest` 写入 wiki 并内联返回内容本体。
 
 ## 回传门禁
 

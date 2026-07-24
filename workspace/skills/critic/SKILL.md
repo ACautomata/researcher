@@ -42,7 +42,7 @@ description: Analyze a paper from a reviewer's perspective — find problems, we
 
 ## 输出结构
 
-严格按 §0–§7 输出，并通过 `wiki_apply` write back 到论文 wiki 页面：
+严格按 §0–§7 输出为一份完整 md，先写到 `raw/sources/<slug>.md`，然后调用 `ingest`（传入该 md 文件路径）统一写入 wiki；**不直接调用 `wiki_apply` 建页**：
 
 ```markdown
 # {{论文标题}}：审稿式现有方法问题分析
@@ -63,3 +63,4 @@ description: Analyze a paper from a reviewer's perspective — find problems, we
 
 - >= 1 个有证据可追溯性的具体问题
 - 区分三类证据强度
+- 产出 md 已经 `ingest` 写入 wiki（含 wiki 路径），且本 skill 未直接调 `wiki_apply` 建页

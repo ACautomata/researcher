@@ -32,13 +32,13 @@ callee 形成 blocker、需 caller 决策、已验证的关键发现或可安排
 
 ## Standing order：产出交付
 
-**predicate 把完整产出写进 wiki，并在 reply 中返回内容本体。** 你是唯一 context：单个 orchestrator 内，predicate 之间 full-inline 传递内容没问题；跨 orchestrator / 跨会话的衔接，靠 wiki 里已持久化的产出，不要依赖会话内存。
+**predicate 备好完整产出 md，经 `ingest` 统一写入 wiki，并在 reply 中返回内容本体。** 你是唯一 context：单个 orchestrator 内，predicate 之间 full-inline 传递内容没问题；跨 orchestrator / 跨会话的衔接，靠 wiki 里已持久化的产出，不要依赖会话内存。所有**整页写入**统一经 `ingest`（隔离 subagent + 官方流水线），predicate 不直接调 `wiki_apply` 建页；`wiki_apply` 仅用于已有页面的窄更新、index、log。
 
 **例外：**在 `brainstorm` 流程中，`ideate(candidate_only: true)` 是持久化前的并行草案模式。它只内联返回候选，绝不写 wiki；只有 main 反驳后交给 `ideate(reviewed_cards)` 的 `survived` 批次可写入。
 
-**例外：**`send` 是纯传输 predicate，无研究产出；它不应调用 `wiki_apply`。
+**例外：**`send` 是纯传输 predicate，无研究产出；它不写 wiki。
 
-- 每个 predicate（`ideate(candidate_only: true)`、`send` 除外）运行后：确认它通过 `wiki_apply` 把产出写进了 wiki，并在当前 reply 里返回了内容本体（不只说"已写入"）。
+- 每个 predicate（`ideate(candidate_only: true)`、`send` 除外）运行后：确认它备好 md 经 `ingest` 把产出写进了 wiki，并在当前 reply 里返回了内容本体（不只说"已写入"）。
 - 下游 predicate 需要上游产出时：从 wiki 读（`wiki_get` / `wiki_search`），或直接用当前 reply 里上游刚返回的内容。
 
 ## 工作原则
@@ -51,7 +51,7 @@ callee 形成 blocker、需 caller 决策、已验证的关键发现或可安排
 **信息不丢失**
 
 - 把用户原始输入完整带进 predicate。
-- 依赖链中，上游 predicate 的产出写进 wiki，下游从 wiki 读或用当前 reply 内容。
+- 依赖链中，上游 predicate 的产出经 `ingest` 写进 wiki，下游从 wiki 读或用当前 reply 内容。
 - 不确定的信息标注"不确定"，不编造。
 
 **Wiki 优先检索**
@@ -70,7 +70,7 @@ callee 形成 blocker、需 caller 决策、已验证的关键发现或可安排
 
 `paper-read`（ingest->extract）-> `critic` -> `paper-validate`（design->spec）-> `paper-audit`（audit）
 
-每段产出都写进 wiki，下一段从 wiki 读上段产出。全程只有你在跑。`critic` 是独立 predicate（不在 paper-read 或 paper-validate 里），完整分析链中你直接调用它。
+每段产出都经 `ingest` 写进 wiki，下一段从 wiki 读上段产出。全程只有你在跑。`critic` 是独立 predicate（不在 paper-read 或 paper-validate 里），完整分析链中你直接调用它。
 
 ## 记忆
 

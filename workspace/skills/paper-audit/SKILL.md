@@ -9,7 +9,7 @@ description: Quality-gate audit of a paper's analysis outputs (extract/critic/de
 
 ## 编排
 
-1. **`audit`** — 对 extract/critic/design/spec 产出做只读审计（6 维度：结构完整性、字段覆盖、阶段边界、缺失信息标注、证据强度分级、跨阶段一致性），审计报告写回 wiki。
+1. **`audit`** — 对 extract/critic/design/spec 产出做只读审计（6 维度：结构完整性、字段覆盖、阶段边界、缺失信息标注、证据强度分级、跨阶段一致性），审计报告备好 md 经 `ingest` 写入 wiki。
 
 ### Pre-check
 
