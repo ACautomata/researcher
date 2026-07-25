@@ -1,6 +1,6 @@
 ---
 name: send
-description: Send a structured inter-session message via sessions_send — single source of truth for the call format, XML message wrapping, and field spec.
+description: Send a structured inter-session message via sessions_send — single source of truth for the call format, XML message wrapping, and field spec. Triggers: 发送会话消息, 回传结果, 发给上游, sessions_send, 报告 blocker.
 ---
 
 # send — 会话消息发送
@@ -11,9 +11,9 @@ description: Send a structured inter-session message via sessions_send — singl
 
 ## When to use
 
-- 需要构造并执行 `sessions_send` 调用时
-- 作为 callee 向 caller 回传一条结构化消息
-- 接收方需要知道消息的精确字段格式和允许值
+- 当前会话是某个 spawn 出来的子会话（callee），主任务完成或遇到 blocker，需要回传结果给 spawn 它的 caller
+- 当前会话是 orchestrator，某个 `paper-batch-ingest` 子流程返回结果，需要把中间状态传给下一个 step 的 callee
+- 跨 session handoff 后，新会话需要把 wiki 写入结果或决策需求回报给原会话
 
 不要用于：决定何时发送消息（那是 `session-coordination`）、会话 spawn、会话列举/历史读取。
 

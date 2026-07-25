@@ -70,3 +70,9 @@ Wiki 不足时可用 browser 补充（arXiv、Scholar），但标注来源与 `e
 
 - 每条结论引用 `page_id` 或路径，标注 `evidence_level`
 - 矛盾点明确标出，不擦除旧 claim
+
+按分支的可验证标准：
+
+- `lint`：输出 dashboard，列出每类问题的数量和修复优先级；未修复项必须附 reason
+- `compare`：表格每行必须包含 method / dataset / metric / result 四列；矛盾单元格标红；未覆盖维度注明 absence
+- `query`：回答必须包含 cited `page_id` 列表 + `evidence_level` 分布摘要；明确列举 1–3 个已识别缺口（哪怕结论是"无缺口"）

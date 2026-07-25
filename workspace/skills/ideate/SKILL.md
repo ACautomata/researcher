@@ -9,7 +9,7 @@ description: Generate or persist evidence-grounded research idea cards anchored 
 
 将论文、wiki 上下文、实验记录和项目约束转化为有证据支撑、可比较、可验证的 Idea Card。每张 card 必须锚定具体论文/wiki 页面，或暴露同一痛点的 2–4 篇论文集群。
 
-Card schema 见 `references/idea-card-template.md`；完整输出格式见 `references/output-spec.md`；可选的机会桶策略见 `references/generation-strategies.md`。
+Card schema 见 `references/idea-card-template.md`；当调用方要求返回标准化 6 字段输出（含 wiki writeback candidates / human feedback prompt 等）时，读 `references/output-spec.md`；可选的机会桶策略见 `references/generation-strategies.md`。
 
 ## 模式
 
@@ -29,6 +29,8 @@ predicate 不自行裁定最终赢家：它要么生成候选，要么持久化�
 5. 默认模式在本会话首次写入前运行 `wiki_status`，然后备好完整输出的 md 写到 `raw/sources/<slug>.md`，调用 `ingest`（传入该 md 文件路径）统一写入 wiki 并更新必要索引，最后在 reply 内联返回 card 与写入位置；**不直接调用 `wiki_apply` 建页**。
 
 ## 已审查 Card 持久化
+
+调用方（如 `brainstorm` orchestrator）在每张 reviewed card 上附加 `challenge`、`verdict: survived` 和 `verdict_reason`，其中 `survived` 表示上游对该卡的致命反驳未成立。`ideate` 不重新裁定，仅校验字段存在和整批一致性；本路径不是 `ideate` 的唯一合法调用方。
 
 当调用方提供 `reviewed_cards` 时：
 
