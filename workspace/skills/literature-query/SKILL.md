@@ -36,3 +36,5 @@ description: Query and compare literature across wiki papers — runs the curate
 - **query**：结构化回答，带引用、证据等级、缺口
 - **compare**：对齐表格，每行带 `evidence_level`，矛盾标记
 - **lint**：Wiki 质量问题 dashboard，按类型分组，带修复建议
+
+各模式的产出结构以 `curate` predicate 的 `## 查询模式` table 为单一权威来源；若此处的表述与 curate 不一致，以 curate 为准。

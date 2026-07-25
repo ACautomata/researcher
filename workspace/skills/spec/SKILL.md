@@ -1,6 +1,6 @@
 ---
 name: spec
-description: Translate validation designs (from design's output) into a claude-code task prompt. Triggers: 生成任务提示词, spec, codex 提示词, claude-code task, 实现规格.
+description: spec — Translate validation designs (from design's output) into a claude-code task prompt. Triggers: 生成任务提示词, spec, codex 提示词, claude-code task, 实现规格.
 ---
 
 # spec — claude-code 验证任务提示词生成
@@ -33,7 +33,7 @@ description: Translate validation designs (from design's output) into a claude-c
 
 1. 面向 claude-code，语言直接、工程化，不输出论文总结。
 2. 把科研目标翻译成编码任务（配置开关、实验 runner、对照入口、消融逻辑、结果保存、批量脚本）。
-3. 强调最小侵入：优先复用现有代码，不重构，不扩大实验范围。
+3. 强调最小侵入：只做验证所需的最小改动，优先复用现有代码结构，配置化控制变量，结果可保存。
 4. 论文描述、实验设计和代码实现不一致时，要求 claude-code 在最终汇报中指出。
 5. 路径或文件名未提供时使用占位符，不臆造。
 

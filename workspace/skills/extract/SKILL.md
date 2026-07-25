@@ -1,6 +1,6 @@
 ---
 name: extract
-description: Deeply extract a paper's experiments for downstream critique and validation design. Triggers: 实验提取, 深度提取, extract experiments, deep extraction.
+description: Deeply extract a paper's experiments for downstream critique and validation design. Triggers: 实验提取, 深度提取, deep extraction.
 ---
 
 # extract — 论文实验深度提取

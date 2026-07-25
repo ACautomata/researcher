@@ -1,6 +1,6 @@
 ---
 name: paper-validate
-description: Turn a paper's problems into executable validation (design → spec). Requires critic's analysis already in the wiki. Triggers: 验证设计, paper-validate, 设计验证实验, 验证实验, 怎么验证这个 claim.
+description: Turn a paper's problems into executable validation (design → spec). Requires critic's analysis already in the wiki. Triggers: 验证设计, paper-validate, 验证实验, 怎么验证这个 claim.
 ---
 
 # paper-validate — 验证实验设计 + 实现规格
@@ -16,7 +16,7 @@ description: Turn a paper's problems into executable validation (design → spec
 
 ### Pre-check
 
-用 `wiki_search` 检查 `critic` 问题分析是否已在 wiki。**缺失则不自动运行 `critic`**——先运行 `critic`（或完整分析链的 read→critic），再回来 `paper-validate`。
+用 `wiki_search` 检查 `critic` 问题分析是否已在 wiki。若未找到，**先运行 `critic`**（或完整分析链的 read→critic），再回来执行 `paper-validate`。
 
 ### 完成后
 

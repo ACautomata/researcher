@@ -1,6 +1,6 @@
 ---
 name: ingest
-description: Unified wiki write entry — ingest a paper PDF into an evidence-traceable paper page, OR write an already-prepared markdown file into the wiki, always inside an isolated subagent via the official memory-wiki pipeline (wiki ingest → wiki compile → wiki_lint). Triggers: 入库, ingest paper, add to wiki, 文献笔记, 整理这篇论文, 写入 wiki, 把这份文档入库, 存进 wiki.
+description: Unified wiki write entry — ingest a paper PDF into an evidence-traceable paper page, OR write an already-prepared markdown file into the wiki. Triggers: 入库, ingest paper, add to wiki, 写入 wiki, 把这份文档入库, 存进 wiki.
 argument-hint: <pdf-path-or-url> | <md-file-path>
 ---
 
@@ -32,14 +32,11 @@ argument-hint: <pdf-path-or-url> | <md-file-path>
 
 - Raw sources 不可变；不修改 `raw/` 下原始文件
 - Wiki 受证据约束，不发明不存在的知识；每条持久 claim 追溯到论文页章节和原始来源
-- 区分证据等级：`abstract-only` / `skimmed` / `full-paper` / `reproduced`
 - 走官方 memory-wiki 流水线建页，不做 freeform page surgery
 
 ## 语言
 
-- Wiki 内容默认中文
-- 保留原始论文标题、作者、DOI、arXiv、代码链接的原文
-- Raw sources 保持原文不变
+- Wiki 正文中文；论文元数据（标题/作者/DOI/arXiv/代码链接）保留原文。
 
 ## 职责边界
 
@@ -101,7 +98,9 @@ argument-hint: <pdf-path-or-url> | <md-file-path>
 ### 共用：Ingest（官方流水线建页）
 `openclaw wiki ingest raw/sources/<slug>.md` 然后 `openclaw wiki compile`，使新页面对 `wiki_search` / `wiki_get` 可见。**这是唯一建页路径**；不经 `wiki_apply` 建页。
 
-> **重入库分支（更新已存在页面）**：若 `wiki_search` 发现该页已存在，改为对该页做窄更新（synthesis/metadata），经 `wiki_apply`，**不建重复页**。仅在此分支使用 `wiki_apply`。
+### 重入库分支（更新已存在页面）
+
+若 `wiki_search` 发现该页已存在，改为对该页做窄更新（synthesis/metadata），经 `wiki_apply`，**不建重复页**。仅在此分支使用 `wiki_apply`。
 
 ### 共用：Verify
 跑 `wiki_lint`（结构、provenance gaps、矛盾、open questions）。成功后**删除 staged md**（`raw/sources/<slug>.md`）——wiki 是页面唯一持久副本；PDF 与提取文本按不可变 raw 原则保留（md 写入分支无 PDF，staged md 删除即可）。PDF 分支返回 wiki 路径 + `evidence_level`；md 分支返回 wiki 路径；失败返回具体原因（PDF 不可读、提取失败、frontmatter 缺失、lint 阻塞等）。
@@ -115,7 +114,7 @@ argument-hint: <pdf-path-or-url> | <md-file-path>
 
 - 一个 raw source（PDF）已捕获且不可变保留；一份全文已提取（仅作工作材料）
 - 一个论文页已经官方流水线入库（`wiki ingest` + `wiki compile`），对 `wiki_search`/`wiki_get` 可见
-- 页面符合论文模板（**>= 100 行**、有 `evidence_level`、Results 有具体数字）
+- 页面符合论文模板（**>= 100 行**、有 `evidence_level`、Results 为每个 main claim 包含具体数字，无"显著优于 baseline"类定性表述）
 - `wiki_lint` 通过；staged md 已删除
 - 重入库走 `wiki_apply` 窄更新，未产生重复页
 - Wiki 索引和日志已更新

@@ -1,6 +1,6 @@
 ---
 name: paper-read
-description: Deeply read a paper in one flow — ingest into the wiki, then extract its experiments (ingest → extract). Triggers: 深读论文, 精读这篇, paper-read, deep read, 实验精读, 读透这篇论文.
+description: Deeply read a paper in one flow — ingest into the wiki, then extract its experiments (ingest → extract). Triggers: 深读论文, 精读这篇, paper-read, deep read.
 ---
 
 # paper-read — 论文深读（入库 + 实验提取）
@@ -10,7 +10,7 @@ description: Deeply read a paper in one flow — ingest into the wiki, then extr
 ## 编排
 
 1. **`ingest`** — PDF → 结构化 wiki 论文页面，经 `ingest` 统一写入 wiki。
-2. **`extract`** — 基于 wiki 页面 + 论文原文，产出实验提取文档（备好 md 经 `ingest` 写入 wiki）。
+2. **`extract`** — 基于 wiki 页面 + 论文原文，产出实验提取文档（备好 md 经 `ingest` 写入 wiki）。文档覆盖主结果、消融、现象、证据充分性四个维度的关键发现，未提供信息一律标注。
 
 ### Pre-check
 
