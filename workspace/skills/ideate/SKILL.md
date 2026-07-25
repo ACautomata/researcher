@@ -11,6 +11,8 @@ description: Generate or persist evidence-grounded research idea cards anchored 
 
 Card schema 见 `references/idea-card-template.md`；当调用方要求返回标准化 6 字段输出（含 wiki writeback candidates / human feedback prompt 等）时，读 `references/output-spec.md`；可选的机会桶策略见 `references/generation-strategies.md`。
 
+完整输出 md 以 `# Idea Generation Brief: ...` 为唯一 H1 标题；标题下方空一行固定写入 `` `category: idea` ``（inline code）作为可机读类别标识，供外部统计脚本（grep / 正则）直接提取；该行之后再接 brief / evidence summary / candidate cards / wiki writeback candidates / open questions / follow-up feedback 等 sections。
+
 ## 模式
 
 | 输入 | 行为 | 写入 |
@@ -46,3 +48,4 @@ predicate 不自行裁定最终赢家：它要么生成候选，要么持久化�
 - 候选路径：1–3 张完整 card，且没有 wiki 写入。
 - 已审查持久化：整批都已验证为 `survived`，或整批拒绝写入；成功写入后 lint 通过。
 - 所有 wiki 写入均备好 md 经 `ingest` 统一写入（含 wiki 路径），本 skill 未直接调 `wiki_apply` 建页。
+- 产出 md 在 `# Title` 下空一行包含 `` `category: idea` ``（作为可机读类别标识，供外部统计脚本提取）。
