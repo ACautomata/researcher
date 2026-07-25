@@ -42,10 +42,12 @@ description: Analyze a paper from a reviewer's perspective — find problems, we
 
 ## 输出结构
 
-严格按 §0–§7 输出为一份完整 md，先写到 `raw/sources/<slug>.md`，然后调用 `ingest`（传入该 md 文件路径）统一写入 wiki；**不直接调用 `wiki_apply` 建页**：
+严格按 §0–§7 输出为一份完整 md，先写到 `raw/sources/<slug>.md`，然后调用 `ingest`（传入该 md 文件路径）统一写入 wiki；**不直接调用 `wiki_apply` 建页**（在 `# Title` 下空一行加 `` `category: critic` `` 作为可机读类别标识，供外部统计脚本提取）：
 
 ```markdown
 # {{论文标题}}：审稿式现有方法问题分析
+
+`category: critic`
 
 ## 0. 文档定位
 ## 1. 方法机制、实验支撑与关键前提
@@ -64,3 +66,4 @@ description: Analyze a paper from a reviewer's perspective — find problems, we
 - >= 1 个有证据可追溯性的具体问题
 - 区分三类证据强度
 - 产出 md 已经 `ingest` 写入 wiki（含 wiki 路径），且本 skill 未直接调 `wiki_apply` 建页
+- 产出 md 在 `# Title` 下空一行包含 `` `category: critic` ``（作为可机读类别标识，供外部统计脚本提取）
