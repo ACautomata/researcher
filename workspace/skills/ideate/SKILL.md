@@ -28,7 +28,7 @@ predicate 不自行裁定最终赢家：它要么生成候选，要么持久化�
 2. 提取命名痛点、局限性/未来工作信号，按机会桶生成并去重 card。
 3. 每张 card 遵循模板，证据可追溯，含具体 `target_problem`、最小实验、预期指标、风险；弱支撑标记 `low-confidence`。不把输入没有说明的论文事实当作证据。
 4. 默认模式生成 5–10 张高信号 card；`candidate_only` 只为分配视角生成 1–3 张完整 card，并在 reply 内联返回，不写 wiki。
-5. 默认模式在本会话首次写入前运行 `wiki_status`，然后备好完整输出的 md 写到 `raw/sources/<slug>.md`，调用 `ingest`（传入该 md 文件路径）统一写入 wiki 并更新必要索引，最后在 reply 内联返回 card 与写入位置；**不直接调用 `wiki_apply` 建页**。
+5. 默认模式在本会话首次写入前运行 `wiki_status`，然后备好完整输出的 md 写到 `raw/sources/<slug>.md`，调用 `ingest`（传入该 md 文件路径，`page_type: idea-card`）统一写入 wiki 并更新必要索引，最后在 reply 内联返回 card 与写入位置；**不直接调用 `wiki_apply` 建页**。
 
 ## 已审查 Card 持久化
 
@@ -38,7 +38,7 @@ predicate 不自行裁定最终赢家：它要么生成候选，要么持久化�
 
 1. 先全量验证：每张 card 符合模板、证据可追溯，且有 `challenge`、`verdict: survived`、`verdict_reason`。
 2. 任一 card 不合格时，返回完整问题清单；**整个批次不得进入写入流程**（不备好 md、不调 `ingest`）。空集合同样不写入。
-3. 全部通过后，原样备好该批 cards 的 md（写到 `raw/sources/<slug>.md`），交 `ingest` 统一写入；不生成、去重、合并、补充或改写任何 card/审计记录。优先写入调用方指定的 wiki path；未指定时遵循现有 wiki convention。
+3. 全部通过后，原样备好该批 cards 的 md（写到 `raw/sources/<slug>.md`），交 `ingest`（`page_type: idea-card`）统一写入；不生成、去重、合并、补充或改写任何 card/审计记录。优先写入调用方指定的 wiki path；未指定时遵循现有 wiki convention。
 4. 写入前运行 `wiki_status`；`ingest` 写入后由其跑 `wiki_lint`。仅修复本次造成的页面容器、索引、链接或 metadata 问题；不得修改 card 正文、`challenge`、`verdict` 或 `verdict_reason`。修复后再次 lint。
 5. 在 reply 内联返回完整持久化 cards、写入位置和 lint 结果。
 

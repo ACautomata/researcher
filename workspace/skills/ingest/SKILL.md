@@ -71,7 +71,7 @@ argument-hint: <pdf-path-or-url> | <md-file-path>
 |-------|----------|-------------|
 | `pdf_path` | PDF 分支必填 | 源 PDF 路径（`raw/inbox/` 或 `raw/sources/`）或可访问 URL |
 | `md_path` | md 分支必填 | 已备好的 md 文件路径（调用方 staged 到 `raw/sources/<slug>.md`） |
-| `page_type` | md 分支必填 | 页面类型（`paper` / `analysis` / `comparison` / `idea-card` 等），决定 frontmatter 与模板校验 |
+| `page_type` | md 分支必填 | 页面类型（`paper` / `analysis` / `comparison` / `idea-card`），对应 `references/page-templates.md` 的同名页面结构，决定 frontmatter 与模板校验；由产出该 md 的 predicate 指定 |
 | `target_domain` | 推荐 | 论文/页面所属领域子树 |
 | `evidence_level` | 否（PDF 分支） | 基于 PDF 访问程度（全文提取成功默认 `full-paper`）|
 

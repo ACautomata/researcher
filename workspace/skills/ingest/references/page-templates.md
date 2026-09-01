@@ -7,7 +7,7 @@ Wiki 中各类型页面的推荐结构。
 每条持久 wiki 页面使用 YAML frontmatter，包含以下字段：
 
 - **title** — 页面标题
-- **type** — 页面类型（paper / method / dataset / task / metric / concept / entity / topic / comparison / analysis / reading-note）
+- **type** — 页面类型（paper / method / dataset / task / metric / concept / entity / topic / comparison / analysis / reading-note / idea-card）
 - **domain** — 所属领域（必填）
 - **status** — seed / active / stable / superseded
 - **created** / **updated** — YYYY-MM-DD 格式
@@ -162,6 +162,12 @@ Wiki 中各类型页面的推荐结构。
 3. **Evidence** — 证据
 4. **Implications** — 含义
 5. **Follow-up** — 后续
+
+分析链 predicate（`extract` / `critic` / `design` / `spec` / `audit`）产出的深度分析页也归入本类型：章节结构以各 predicate 的「输出结构」节为权威来源，上述 5 节是通用分析页的骨架。
+
+## Idea Card 页结构
+
+由 `ideate` 产出的研究 idea 卡片页，frontmatter 使用通用字段（`type: idea-card`）。Card 正文逐字段展开 `ideate/references/idea-card-template.md` 的 schema（该文件为单一权威来源）；经 `brainstorm` 审查持久化的卡片额外附 `challenge` / `verdict` / `verdict_reason`。
 
 ## Atomic Claims
 

@@ -23,7 +23,7 @@ description: Run parallel, evidence-grounded research ideation with main-agent r
 
 ## 并行候选
 
-固定启动五个 self subagent：`gap`、`contradiction`、`failure`、`transfer`、`constraint`。仅在 Context Pack 有额外且独立的机会桶时，加入 `ablation`、`metric`、`assumption-challenge`，最多到 `subagents.maxConcurrent`（当前为 8）。
+固定启动五个 self subagent：`gap`、`contradiction`、`failure`、`transfer`、`constraint`。仅在 Context Pack 有额外且独立的机会桶时，加入 `ablation`、`metric`、`assumption-challenge`，最多到 `subagents.maxConcurrent`（以 `openclaw.json` 为准）。
 
 遵循 `paper-batch-ingest` 的 self-spawn 协议：每个视角连续调用 `sessions_spawn`，省略 `agentId`，使用 `context="isolated"`、`mode="run"` 和合适的 `runTimeoutSeconds`。全部发出后调用一次 `sessions_yield` 等待 completion events；不轮询 session 工具。每个 session 必须进入成功、失败或超时之一的终态后才能汇总。
 

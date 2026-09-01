@@ -7,7 +7,7 @@ description: Design small, controllable validation experiments for a paper's ide
 
 ## Mission
 
-将问题分析（`critic` 产出）中的潜在问题转化为小规模、可控、可执行的验证实验设计，产出完整 10 节 Markdown 文档（## 0–## 9）。
+将问题分析（`critic` 产出）中的潜在问题转化为小规模、可控、可执行的验证实验设计，产出完整 9 节 Markdown 文档（## 0–## 8）。
 
 ## When to use
 
@@ -43,7 +43,7 @@ description: Design small, controllable validation experiments for a paper's ide
 
 ## 输出结构
 
-严格按 10 节输出为一份完整 md，先写到 `raw/sources/<slug>.md`，然后调用 `ingest`（传入该 md 文件路径）统一写入 wiki；**不直接调用 `wiki_apply` 建页**（在 `# Title` 下空一行加 `` `category: design` `` 作为可机读类别标识，供外部统计脚本提取）：
+严格按 9 节输出为一份完整 md，先写到 `raw/sources/<slug>.md`，然后调用 `ingest`（传入该 md 文件路径，`page_type: analysis`）统一写入 wiki；**不直接调用 `wiki_apply` 建页**（在 `# Title` 下空一行加 `` `category: design` `` 作为可机读类别标识，供外部统计脚本提取）：
 
 ```markdown
 # {{论文标题}}：验证实验设计
@@ -59,12 +59,11 @@ description: Design small, controllable validation experiments for a paper's ide
 ## 6. 最值得优先执行的 3 个实验
 ## 7. 这些实验可能支撑的后续研究方向
 ## 8. 简短总结（100–150 字）
-## 9. 输出要求说明
 ```
 
 ## 完成门禁
 
-- Reply 包含全部 10 节
+- Reply 包含全部 9 节
 - 每个实验映射到一个 `critic` 问题并有预期结果
 - 产出 md 已经 `ingest` 写入 wiki（含 wiki 路径），且本 skill 未直接调 `wiki_apply` 建页
 - 产出 md 在 `# Title` 下空一行包含 `` `category: design` ``（作为可机读类别标识，供外部统计脚本提取）

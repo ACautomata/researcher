@@ -38,10 +38,12 @@ description: Deeply extract a paper's experiments for downstream critique and va
 
 ## 输出结构
 
-严格按以下 12 节输出为一份完整 md，先写到 `raw/sources/<slug>.md`，然后调用 `ingest`（传入该 md 文件路径）统一写入 wiki；**不直接调用 `wiki_apply` 建页**：
+严格按以下 12 节输出为一份完整 md，先写到 `raw/sources/<slug>.md`，然后调用 `ingest`（传入该 md 文件路径，`page_type: analysis`）统一写入 wiki；**不直接调用 `wiki_apply` 建页**：
 
 ```markdown
 # {{论文标题}}：实验结果深化提取
+
+`category: extract`
 
 ## 0. 文档定位
 ## 1. 实验目标与作者想验证的核心结论
@@ -70,3 +72,4 @@ description: Deeply extract a paper's experiments for downstream critique and va
 - Reply 包含全部 12 节
 - 未提供信息一律标注"论文中未明确说明"，不编造
 - 产出 md 已经 `ingest` 写入 wiki（含 wiki 路径），且本 skill 未直接调 `wiki_apply` 建页
+- 产出 md 在 `# Title` 下空一行包含 `` `category: extract` ``（作为可机读类别标识，供外部统计脚本提取）

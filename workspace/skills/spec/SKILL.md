@@ -1,6 +1,6 @@
 ---
 name: spec
-description: spec — Translate validation designs (from design's output) into a claude-code task prompt. Triggers: 生成任务提示词, spec, codex 提示词, claude-code task, 实现规格.
+description: spec — Translate validation designs (from design's output) into a claude-code task prompt. Triggers: 生成任务提示词, spec, claude-code task, claude-code 提示词, 实现规格.
 ---
 
 # spec — claude-code 验证任务提示词生成
@@ -48,7 +48,7 @@ description: spec — Translate validation designs (from design's output) into a
 
 ## 输出结构
 
-先输出为一份完整 md，写到 `raw/sources/<slug>.md`，然后调用 `ingest`（传入该 md 文件路径）统一写入 wiki；**不直接调用 `wiki_apply` 建页**。标题必须为 `# 发给 claude-code 的完整任务提示词`，包含：
+先输出为一份完整 md，写到 `raw/sources/<slug>.md`，然后调用 `ingest`（传入该 md 文件路径，`page_type: analysis`）统一写入 wiki；**不直接调用 `wiki_apply` 建页**。标题必须为 `# 发给 claude-code 的完整任务提示词`，标题下空一行写入 `` `category: spec` ``（作为可机读类别标识，供外部统计脚本提取），包含：
 
 1. 任务背景
 2. 可用输入材料
@@ -65,3 +65,4 @@ description: spec — Translate validation designs (from design's output) into a
 - 文件级别具体，无未填充的占位符（除非确实缺失）
 - 聚焦实现任务，不含论文总结正文
 - 产出 md 已经 `ingest` 写入 wiki（含 wiki 路径），且本 skill 未直接调 `wiki_apply` 建页
+- 产出 md 在 `# Title` 下空一行包含 `` `category: spec` ``（作为可机读类别标识，供外部统计脚本提取）

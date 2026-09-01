@@ -81,7 +81,7 @@ The system uses a **single main agent + two-layer skills** model. Main does all 
    - `curate` — Wiki linting, cross-paper comparison, literature queries.
    - `extract` — Deep experiment extraction (12-section).
    - `critic` — Reviewer-perspective problem analysis (standalone, no orchestrator wraps it).
-   - `design` — Validation experiment design (10-section).
+   - `design` — Validation experiment design (9-section).
    - `spec` — claude-code task prompt generation.
    - `audit` — Analysis-chain quality audit.
    - `ideate` — Research idea card generation.
