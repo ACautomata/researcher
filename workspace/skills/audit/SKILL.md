@@ -30,8 +30,10 @@ description: Audit the quality of analysis-chain outputs (extract/critic/design/
 - `ingest` 论文页: 11 节（## Citation / ## One-Sentence Contribution / ## Problem Setting / ## Method / ## Experiments / ## Results / ## Limitations / ## Reusable Claims / ## Connections / ## Open Questions / ## Provenance）
 - `extract` 实验提取: 12 节（## 0–## 11）
 - `critic` 问题分析: §0–§7
-- `design` 验证设计: 10 节（## 0–## 9）
+- `design` 验证设计: 9 节（## 0–## 8）
 - `spec` claude-code 提示词: 标题必须为 `# 发给 claude-code 的完整任务提示词`
+
+> 以上节数与章节名为当前快照；各 skill 的「输出结构」节是权威来源，冲突时以源为准。
 
 ### 阶段边界检查
 
@@ -55,10 +57,12 @@ description: Audit the quality of analysis-chain outputs (extract/critic/design/
 
 ## 输出结构
 
-输出为一份完整 md，先写到 `raw/sources/<slug>.md`，然后调用 `ingest`（传入该 md 文件路径）统一写入 wiki；**不直接调用 `wiki_apply` 建页**：
+输出为一份完整 md，先写到 `raw/sources/<slug>.md`，然后调用 `ingest`（传入该 md 文件路径，`page_type: analysis`）统一写入 wiki；**不直接调用 `wiki_apply` 建页**：
 
 ```markdown
 # 论文审稿流水线质量评估报告
+
+`category: audit`
 
 ## 0. 评估元信息
 ## 1. 总览（各阶段 × 各维度表格）
@@ -74,3 +78,4 @@ description: Audit the quality of analysis-chain outputs (extract/critic/design/
 - 覆盖全部 6 个审计维度
 - blocking issues 可操作（带具体位置和修复方向）
 - 产出 md 已经 `ingest` 写入 wiki（含 wiki 路径），且本 skill 未直接调 `wiki_apply` 建页
+- 产出 md 在 `# Title` 下空一行包含 `` `category: audit` ``（作为可机读类别标识，供外部统计脚本提取）

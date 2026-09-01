@@ -7,7 +7,7 @@ description: Turn a paper's problems into executable validation (design → spec
 
 把论文已识别的问题转成可执行的验证。
 
-**前置依赖**：需要 `critic` 的问题分析已在 wiki。`paper-validate` 不自动运行 `critic`（critic 是独立 predicate）。
+**前置依赖**：需要 `critic` 的问题分析已在 wiki。critic 是独立 predicate，本 skill 的编排止于 design→spec；前置缺失由下方 Pre-check 处理。
 
 ## 编排
 
@@ -16,7 +16,7 @@ description: Turn a paper's problems into executable validation (design → spec
 
 ### Pre-check
 
-用 `wiki_search` 检查 `critic` 问题分析是否已在 wiki。若未找到，**先运行 `critic`**（或完整分析链的 read→critic），再回来执行 `paper-validate`。
+用 `wiki_search` 检查 `critic` 问题分析是否已在 wiki。未找到时停下，提示先运行 `critic`（或完整分析链的 read→critic）；critic 产出确认已入 wiki 后，继续本 skill 的编排。
 
 ### 完成后
 
